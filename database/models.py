@@ -1,5 +1,18 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Date
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Index,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    Boolean,
+    JSON,
+    ForeignKey,
+    Date,
+    Text,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database.connection import Base
@@ -17,31 +30,50 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     full_name = Column(String, nullable=True)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)
     role = Column(String, default="trader")  # Options: Admin, Trader, Analyst
     isVerified = Column(Boolean, default=False)
     country_code = Column(String, nullable=True)
-    phone_number = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True, index=True, unique=True)
+    phone_verified = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     failed_login_attempts = Column(Integer, default=0)
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+    google_id = Column(String, nullable=True, unique=True)
+    avatar_url = Column(String, nullable=True)
+    auth_provider = Column(String, default="email")  # email, google
+    email_verified = Column(Boolean, default=False)
+    profile_picture = Column(String, nullable=True)
 
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete")
-    broker_configs = relationship("BrokerConfig", back_populates="user", cascade="all, delete")
-    trading_sessions = relationship("TradingSession", back_populates="user", cascade="all, delete")
+    broker_configs = relationship(
+        "BrokerConfig", back_populates="user", cascade="all, delete"
+    )
+    trading_sessions = relationship(
+        "TradingSession", back_populates="user", cascade="all, delete"
+    )
     trades = relationship("Trade", back_populates="user", cascade="all, delete")
     orders = relationship("Order", back_populates="user", cascade="all, delete")
     ai_models = relationship("AIModel", back_populates="user", cascade="all, delete")
     strategies = relationship("Strategy", back_populates="user", cascade="all, delete")
-    trading_performance = relationship("TradingPerformance", back_populates="user", cascade="all, delete")
-    trade_performance = relationship("TradePerformance", back_populates="user", cascade="all, delete")
-    trading_reports = relationship("TradingReport", back_populates="user", cascade="all, delete")
-    historical_data = relationship("HistoricalData", back_populates="user", cascade="all, delete")
-    user_capital = relationship("UserCapital", back_populates="user", cascade="all, delete")
-    
+    trading_performance = relationship(
+        "TradingPerformance", back_populates="user", cascade="all, delete"
+    )
+    trade_performance = relationship(
+        "TradePerformance", back_populates="user", cascade="all, delete"
+    )
+    trading_reports = relationship(
+        "TradingReport", back_populates="user", cascade="all, delete"
+    )
+    historical_data = relationship(
+        "HistoricalData", back_populates="user", cascade="all, delete"
+    )
+    user_capital = relationship(
+        "UserCapital", back_populates="user", cascade="all, delete"
+    )
 
     # Password Management
     def set_password(self, password):
@@ -78,7 +110,9 @@ class BrokerConfig(Base):
     __tablename__ = "broker_configs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
     client_id = Column(String, nullable=True)
     broker_name = Column(String, index=True)
     api_key = Column(String, nullable=True)
@@ -87,7 +121,9 @@ class BrokerConfig(Base):
     refresh_token = Column(String, nullable=True)
     additional_params = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=False)
-    access_token_expiry = Column(DateTime, nullable=True)  # ✅ Correct type for datetime
+    access_token_expiry = Column(
+        DateTime, nullable=True
+    )  # ✅ Correct type for datetime
     last_error_message = Column(String, nullable=True)  # ✅ Track last error message
     config = Column(JSON, nullable=True)  # ✅ Added `nullable=True`
     created_at = Column(DateTime, default=func.now())  # ✅ Only one `created_at` field
@@ -115,7 +151,9 @@ class AIModel(Base):
 
     # Relationships
     user = relationship("User", back_populates="ai_models")
-    predictions = relationship("AIPredictionLog", back_populates="ai_model", cascade="all, delete")
+    predictions = relationship(
+        "AIPredictionLog", back_populates="ai_model", cascade="all, delete"
+    )
     strategies = relationship("Strategy", back_populates="ai_model")
 
 
@@ -123,7 +161,9 @@ class AIPredictionLog(Base):
     __tablename__ = "ai_prediction_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    model_id = Column(Integer, ForeignKey("ai_models.id", ondelete="CASCADE"), index=True)
+    model_id = Column(
+        Integer, ForeignKey("ai_models.id", ondelete="CASCADE"), index=True
+    )
     symbol = Column(String, nullable=False)
     predicted_price = Column(Float, nullable=False)
     actual_price = Column(Float, nullable=True)
@@ -144,7 +184,9 @@ class Strategy(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(String, nullable=True)
-    ai_model_id = Column(Integer, ForeignKey("ai_models.id", ondelete="SET NULL"), index=True)
+    ai_model_id = Column(
+        Integer, ForeignKey("ai_models.id", ondelete="SET NULL"), index=True
+    )
     parameters = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())
@@ -153,8 +195,12 @@ class Strategy(Base):
     user = relationship("User", back_populates="strategies")
     ai_model = relationship("AIModel", back_populates="strategies")
     trades = relationship("Trade", back_populates="strategy", cascade="all, delete")
-    backtests = relationship("Backtest", back_populates="strategy", cascade="all, delete")
-    paper_trades = relationship("PaperTrade", back_populates="strategy", cascade="all, delete")
+    backtests = relationship(
+        "Backtest", back_populates="strategy", cascade="all, delete"
+    )
+    paper_trades = relationship(
+        "PaperTrade", back_populates="strategy", cascade="all, delete"
+    )
 
 
 # =======================
@@ -165,7 +211,9 @@ class TradingSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    ai_model_id = Column(Integer, ForeignKey("ai_models.id", ondelete="SET NULL"), index=True)
+    ai_model_id = Column(
+        Integer, ForeignKey("ai_models.id", ondelete="SET NULL"), index=True
+    )
     start_time = Column(DateTime, default=func.now())
     end_time = Column(DateTime, nullable=True)
     total_pnl = Column(Float, default=0.0)
@@ -174,8 +222,12 @@ class TradingSession(Base):
     user = relationship("User", back_populates="trading_sessions")
     ai_model = relationship("AIModel")
     trades = relationship("Trade", back_populates="session", cascade="all, delete")
-    trading_performance = relationship("TradingPerformance", back_populates="session", cascade="all, delete")
-    trading_reports = relationship("TradingReport", back_populates="session", cascade="all, delete")
+    trading_performance = relationship(
+        "TradingPerformance", back_populates="session", cascade="all, delete"
+    )
+    trading_reports = relationship(
+        "TradingReport", back_populates="session", cascade="all, delete"
+    )
 
 
 # =======================
@@ -186,9 +238,15 @@ class Trade(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    session_id = Column(Integer, ForeignKey("trading_sessions.id", ondelete="CASCADE"), index=True)
-    strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), index=True)
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    session_id = Column(
+        Integer, ForeignKey("trading_sessions.id", ondelete="CASCADE"), index=True
+    )
+    strategy_id = Column(
+        Integer, ForeignKey("strategies.id", ondelete="CASCADE"), index=True
+    )
+    account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
     symbol = Column(String, nullable=False)
     trade_type = Column(String, nullable=False)  # BUY/SELL
     entry_price = Column(Float, nullable=False)
@@ -215,7 +273,9 @@ class Order(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
     symbol = Column(String, nullable=False)
     order_type = Column(String, nullable=False)  # LIMIT, MARKET, STOP-LOSS
     price = Column(Float)
@@ -236,7 +296,9 @@ class Backtest(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), index=True)
+    strategy_id = Column(
+        Integer, ForeignKey("strategies.id", ondelete="CASCADE"), index=True
+    )
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
     total_pnl = Column(Float, nullable=False)
@@ -256,7 +318,9 @@ class PaperTrade(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    strategy_id = Column(Integer, ForeignKey("strategies.id", ondelete="CASCADE"), index=True)
+    strategy_id = Column(
+        Integer, ForeignKey("strategies.id", ondelete="CASCADE"), index=True
+    )
     symbol = Column(String, nullable=False)
     trade_type = Column(String, nullable=False)  # BUY/SELL
     entry_price = Column(Float, nullable=False)
@@ -279,7 +343,9 @@ class TradingPerformance(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    session_id = Column(Integer, ForeignKey("trading_sessions.id", ondelete="CASCADE"), index=True)
+    session_id = Column(
+        Integer, ForeignKey("trading_sessions.id", ondelete="CASCADE"), index=True
+    )
     total_trades = Column(Integer, nullable=False)
     win_rate = Column(Float, nullable=False)
     total_profit_loss = Column(Float, nullable=False)
@@ -303,7 +369,9 @@ class TradingReport(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    session_id = Column(Integer, ForeignKey("trading_sessions.id", ondelete="CASCADE"), index=True)
+    session_id = Column(
+        Integer, ForeignKey("trading_sessions.id", ondelete="CASCADE"), index=True
+    )
     total_trades = Column(Integer, nullable=False)
     total_profit = Column(Float, nullable=False)
     win_rate = Column(Float, nullable=False)
@@ -322,13 +390,14 @@ class Stock(Base):
     __tablename__ = "stocks"
 
     id = Column(Integer, primary_key=True, index=True)
-    symbol = Column(String(20), unique=True, nullable=False)  # Symbol used for all instruments
+    symbol = Column(
+        String(20), unique=True, nullable=False
+    )  # Symbol used for all instruments
     name = Column(String(100), nullable=False)
     exchange = Column(String(10), nullable=False, default="NSE")  # Default to NSE
 
     # Relationships (if needed)
     stock_trades = relationship("StockTrade", back_populates="stock")
-
 
 
 # =======================
@@ -340,7 +409,9 @@ class StockTrade(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     stock_id = Column(Integer, ForeignKey("stocks.id", ondelete="CASCADE"), index=True)
-    trade_id = Column(Integer, ForeignKey("trades.id", ondelete="CASCADE"), index=True, nullable=True)
+    trade_id = Column(
+        Integer, ForeignKey("trades.id", ondelete="CASCADE"), index=True, nullable=True
+    )
     symbol = Column(String, nullable=False)
     exchange = Column(String, nullable=False)
     trade_date = Column(DateTime, default=func.now())
@@ -359,9 +430,17 @@ class OTP(Base):
     __tablename__ = "otp_codes"
 
     id = Column(Integer, primary_key=True, index=True)
-    phone_number = Column(String, unique=True, nullable=False)
+    phone_number = Column(String, nullable=True)  # Made nullable for email OTP
+    email = Column(String, nullable=True)  # New field for email OTP
     otp_code = Column(String, nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False, default=func.now())  # ✅ Ensure timezone-aware datetime
+    expires_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    verification_method = Column(String, default="sms")  # sms, email, whatsapp
+    is_verified = Column(Boolean, default=False)
+    otp_type = Column(String, nullable=False)  # ADD THIS LINE
+    created_at = Column(DateTime(timezone=True), default=func.now())
+    # Add constraint to ensure either phone or email is provided
+    __table_args__ = (CheckConstraint("phone_number IS NOT NULL OR email IS NOT NULL"),)
+
 
 class HistoricalData(Base):
     __tablename__ = "historical_data"
@@ -377,8 +456,8 @@ class HistoricalData(Base):
     close = Column(Float, nullable=False)
     volume = Column(Float, nullable=False)
 
-    user = relationship("User", back_populates="historical_data")   
-    
+    user = relationship("User", back_populates="historical_data")
+
 
 class UserCapital(Base):
     __tablename__ = "user_capital"
@@ -386,11 +465,11 @@ class UserCapital(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     total_capital = Column(Float, nullable=False)  # User's total capital
-    risk_percentage = Column(Float, nullable=False, default=1)  # Risk per trade (%)  
-    
+    risk_percentage = Column(Float, nullable=False, default=1)  # Risk per trade (%)
+
     user = relationship("User", back_populates="user_capital")
- 
- 
+
+
 class TradeSignal(Base):
     __tablename__ = "trade_signals"
 
@@ -399,8 +478,10 @@ class TradeSignal(Base):
     symbol = Column(String, nullable=False)
     trade_type = Column(String, nullable=False)  # "BUY" or "SELL"
     confidence = Column(Float, nullable=False)  # AI Confidence Score
-    execution_status = Column(String, nullable=False, default="PENDING")  # "PENDING", "EXECUTED", "IGNORED"
-    signal_time =  Column(DateTime(timezone=True), nullable=False, default=func.now())
+    execution_status = Column(
+        String, nullable=False, default="PENDING"
+    )  # "PENDING", "EXECUTED", "IGNORED"
+    signal_time = Column(DateTime(timezone=True), nullable=False, default=func.now())
 
 
 class AITradeJournal(Base):
@@ -414,9 +495,7 @@ class AITradeJournal(Base):
     execution_status = Column(String, nullable=False)  # "EXECUTED" or "IGNORED"
     profit_loss = Column(Float, nullable=True)  # Store P&L once trade closes
     trade_time = Column(DateTime(timezone=True), nullable=False, default=func.now())
-  
-  
-  
+
 
 class TradePerformance(Base):
     __tablename__ = "trade_performance"
@@ -431,8 +510,8 @@ class TradePerformance(Base):
     exit_price = Column(Float, nullable=True)
     profit_loss = Column(Float, nullable=True)
     trade_time = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    status = Column(String, nullable=False, default="OPEN")  # "OPEN" or "CLOSED"  
-    
+    status = Column(String, nullable=False, default="OPEN")  # "OPEN" or "CLOSED"
+
     user = relationship("User", back_populates="trade_performance")
 
 
@@ -443,7 +522,7 @@ class BrokerInstrument(Base):
     broker_name = Column(String, nullable=False, default="Upstox")
     symbol = Column(String, nullable=False)
     name = Column(String, nullable=False)
-    exchange = Column(String, nullable=False, index = True)
+    exchange = Column(String, nullable=False, index=True)
     segment = Column(String, nullable=False)
     instrument_type = Column(String, nullable=False)
     isin = Column(String, nullable=True)
@@ -451,3 +530,26 @@ class BrokerInstrument(Base):
     tick_size = Column(Float, nullable=True)
     instrument_key = Column(String, nullable=False, unique=True)
     security_type = Column(String, nullable=True)
+
+
+class SocialAuth(Base):
+    __tablename__ = "social_auth"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    provider = Column(String, nullable=False)  # google, facebook, etc.
+    provider_id = Column(String, nullable=False)
+    provider_email = Column(String, nullable=True)
+    access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    user = relationship("User", backref="social_auths")
+
+    __table_args__ = (
+        Index("ix_social_auth_provider_id", "provider", "provider_id", unique=True),
+    )

@@ -26,10 +26,23 @@ TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"  # User ID or Group ID
 # ✅ 2. Get Chat ID
 # Search for your bot on Telegram and send a message.
 
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_USERNAME = "your-email@gmail.com"
-EMAIL_PASSWORD = "your-email-password"
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+
+
+# ZeptoMail Configuration
+ZEPTOMAIL_HOST = os.getenv("ZEPTOMAIL_HOST", "smtp.zeptomail.in")
+ZEPTOMAIL_PORT = int(os.getenv("ZEPTOMAIL_PORT", "587"))
+ZEPTOMAIL_USERNAME = os.getenv("ZEPTOMAIL_USERNAME", "emailapikey")
+ZEPTOMAIL_PASSWORD = os.getenv("ZEPTOMAIL_PASSWORD", "")
+ZEPTOMAIL_FROM_EMAIL = os.getenv("ZEPTOMAIL_FROM_EMAIL", "noreply@growthquantix.com")
+
+
+# Legacy Email Configuration (for backward compatibility)
+EMAIL_HOST = ZEPTOMAIL_HOST
+EMAIL_PORT = ZEPTOMAIL_PORT
+EMAIL_USERNAME = ZEPTOMAIL_USERNAME
+EMAIL_PASSWORD = ZEPTOMAIL_PASSWORD
 
 TWILIO_ACCOUNT_SID = "your-twilio-sid"
 TWILIO_AUTH_TOKEN = "your-twilio-auth-token"
