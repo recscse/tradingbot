@@ -74,6 +74,19 @@ class User(Base):
     user_capital = relationship(
         "UserCapital", back_populates="user", cascade="all, delete"
     )
+    notifications = relationship(
+        "Notification", back_populates="user", cascade="all, delete"
+    )
+    social_auths = relationship(
+        "SocialAuth", back_populates="user", cascade="all, delete"
+    )
+
+    auto_trading_sessions = relationship(
+        "AutoTradingSession", back_populates="user", cascade="all, delete"
+    )
+    daily_trading_reports = relationship(
+        "DailyTradingReport", back_populates="user", cascade="all, delete"
+    )
 
     # Password Management
     def set_password(self, password):
@@ -121,12 +134,10 @@ class BrokerConfig(Base):
     refresh_token = Column(String, nullable=True)
     additional_params = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=False)
-    access_token_expiry = Column(
-        DateTime, nullable=True
-    )  # ✅ Correct type for datetime
-    last_error_message = Column(String, nullable=True)  # ✅ Track last error message
-    config = Column(JSON, nullable=True)  # ✅ Added `nullable=True`
-    created_at = Column(DateTime, default=func.now())  # ✅ Only one `created_at` field
+    access_token_expiry = Column(DateTime, nullable=True)
+    last_error_message = Column(String, nullable=True)
+    config = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=func.now())
 
     # Relationships
     user = relationship("User", back_populates="broker_configs")
@@ -142,7 +153,7 @@ class AIModel(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     model_name = Column(String, nullable=False)
     model_version = Column(String, nullable=False)
-    model_type = Column(String, nullable=True)  # e.g., Regression, Classification, RL
+    model_type = Column(String, nullable=True)
     parameters = Column(JSON)
     accuracy = Column(Float, nullable=True)
     training_data_size = Column(Integer, nullable=True)
@@ -390,13 +401,11 @@ class Stock(Base):
     __tablename__ = "stocks"
 
     id = Column(Integer, primary_key=True, index=True)
-    symbol = Column(
-        String(20), unique=True, nullable=False
-    )  # Symbol used for all instruments
+    symbol = Column(String(20), unique=True, nullable=False)
     name = Column(String(100), nullable=False)
-    exchange = Column(String(10), nullable=False, default="NSE")  # Default to NSE
+    exchange = Column(String(10), nullable=False, default="NSE")
 
-    # Relationships (if needed)
+    # Relationships
     stock_trades = relationship("StockTrade", back_populates="stock")
 
 
@@ -430,15 +439,15 @@ class OTP(Base):
     __tablename__ = "otp_codes"
 
     id = Column(Integer, primary_key=True, index=True)
-    phone_number = Column(String, nullable=True)  # Made nullable for email OTP
-    email = Column(String, nullable=True)  # New field for email OTP
+    phone_number = Column(String, nullable=True)
+    email = Column(String, nullable=True)
     otp_code = Column(String, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    verification_method = Column(String, default="sms")  # sms, email, whatsapp
+    verification_method = Column(String, default="sms")
     is_verified = Column(Boolean, default=False)
-    otp_type = Column(String, nullable=False)  # ADD THIS LINE
+    otp_type = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=func.now())
-    # Add constraint to ensure either phone or email is provided
+
     __table_args__ = (CheckConstraint("phone_number IS NOT NULL OR email IS NOT NULL"),)
 
 
@@ -464,8 +473,8 @@ class UserCapital(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    total_capital = Column(Float, nullable=False)  # User's total capital
-    risk_percentage = Column(Float, nullable=False, default=1)  # Risk per trade (%)
+    total_capital = Column(Float, nullable=False)
+    risk_percentage = Column(Float, nullable=False, default=1)
 
     user = relationship("User", back_populates="user_capital")
 
@@ -476,11 +485,9 @@ class TradeSignal(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     symbol = Column(String, nullable=False)
-    trade_type = Column(String, nullable=False)  # "BUY" or "SELL"
-    confidence = Column(Float, nullable=False)  # AI Confidence Score
-    execution_status = Column(
-        String, nullable=False, default="PENDING"
-    )  # "PENDING", "EXECUTED", "IGNORED"
+    trade_type = Column(String, nullable=False)
+    confidence = Column(Float, nullable=False)
+    execution_status = Column(String, nullable=False, default="PENDING")
     signal_time = Column(DateTime(timezone=True), nullable=False, default=func.now())
 
 
@@ -492,25 +499,25 @@ class AITradeJournal(Base):
     symbol = Column(String, nullable=False)
     trade_type = Column(String, nullable=False)
     ai_confidence = Column(Float, nullable=False)
-    execution_status = Column(String, nullable=False)  # "EXECUTED" or "IGNORED"
-    profit_loss = Column(Float, nullable=True)  # Store P&L once trade closes
+    execution_status = Column(String, nullable=False)
+    profit_loss = Column(Float, nullable=True)
     trade_time = Column(DateTime(timezone=True), nullable=False, default=func.now())
 
 
 class TradePerformance(Base):
     __tablename__ = "trade_performance"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)  # ✅ Primary Key
+    id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     symbol = Column(String, nullable=False)
-    trade_type = Column(String, nullable=False)  # "BUY" or "SELL"
+    trade_type = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
     entry_price = Column(Float, nullable=False)
-    trailing_stop_loss = Column(Float, nullable=True)  # ✅ Dynamic Trailing Stop-Loss
+    trailing_stop_loss = Column(Float, nullable=True)
     exit_price = Column(Float, nullable=True)
     profit_loss = Column(Float, nullable=True)
     trade_time = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    status = Column(String, nullable=False, default="OPEN")  # "OPEN" or "CLOSED"
+    status = Column(String, nullable=False, default="OPEN")
 
     user = relationship("User", back_populates="trade_performance")
 
@@ -539,7 +546,7 @@ class SocialAuth(Base):
     user_id = Column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    provider = Column(String, nullable=False)  # google, facebook, etc.
+    provider = Column(String, nullable=False)
     provider_id = Column(String, nullable=False)
     provider_email = Column(String, nullable=True)
     access_token = Column(Text, nullable=True)
@@ -548,8 +555,127 @@ class SocialAuth(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
-    user = relationship("User", backref="social_auths")
+    user = relationship("User", back_populates="social_auths")
 
     __table_args__ = (
         Index("ix_social_auth_provider_id", "provider", "provider_id", unique=True),
     )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    type = Column(
+        String(50), nullable=False
+    )  # trade_executed, price_alert, stop_loss, etc.
+    priority = Column(String(20), default="normal")  # low, normal, high
+    category = Column(String(50), nullable=True)
+    is_read = Column(Boolean, default=False)
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    # Relationships
+    user = relationship("User")
+
+
+class AutoTradingSession(Base):
+    __tablename__ = "auto_trading_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    session_date = Column(Date, nullable=False)
+    selected_stocks = Column(JSON, nullable=False)  # List of selected stocks
+    screening_config = Column(JSON, nullable=True)  # Screening parameters used
+    stocks_screened = Column(Integer, nullable=True)  # Total stocks screened
+    session_type = Column(String, nullable=False)  # AUTO_PAPER_TRADING, MANUAL, etc.
+    status = Column(String, default="ACTIVE")  # ACTIVE, COMPLETED, FAILED
+    total_trades = Column(Integer, default=0)
+    successful_trades = Column(Integer, default=0)
+    failed_trades = Column(Integer, default=0)
+    session_pnl = Column(Float, default=0.0)
+    start_capital = Column(Float, nullable=True)
+    end_capital = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    user = relationship("User", back_populates="auto_trading_sessions")
+    trading_reports = relationship("DailyTradingReport", back_populates="session")
+
+
+class DailyTradingReport(Base):
+    __tablename__ = "daily_trading_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id = Column(
+        Integer,
+        ForeignKey("auto_trading_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    report_date = Column(Date, nullable=False)
+    stocks_selected = Column(JSON, nullable=False)
+    trades_executed = Column(Integer, default=0)
+    daily_pnl = Column(Float, default=0.0)
+    winning_trades = Column(Integer, default=0)
+    losing_trades = Column(Integer, default=0)
+    win_rate = Column(Float, default=0.0)
+    portfolio_value = Column(Float, nullable=True)
+    max_drawdown = Column(Float, nullable=True)
+    best_trade_pnl = Column(Float, nullable=True)
+    worst_trade_pnl = Column(Float, nullable=True)
+    avg_trade_duration = Column(Float, nullable=True)  # in minutes
+    total_commissions = Column(Float, default=0.0)
+    sharpe_ratio = Column(Float, nullable=True)
+    auto_generated = Column(Boolean, default=True)
+    report_data = Column(JSON, nullable=True)  # Additional metrics
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="daily_trading_reports")
+    session = relationship("AutoTradingSession", back_populates="trading_reports")
+
+
+class TradeExecution(Base):
+    __tablename__ = "trade_executions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    session_id = Column(
+        Integer,
+        ForeignKey("auto_trading_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    symbol = Column(String, nullable=False)
+    trade_type = Column(String, nullable=False)  # BUY, SELL
+    entry_price = Column(Float, nullable=False)
+    exit_price = Column(Float, nullable=True)
+    quantity = Column(Integer, nullable=False)
+    entry_time = Column(DateTime, default=func.now())
+    exit_time = Column(DateTime, nullable=True)
+    pnl = Column(Float, nullable=True)
+    pnl_percentage = Column(Float, nullable=True)
+    commission = Column(Float, default=0.0)
+    status = Column(String, default="OPEN")  # OPEN, CLOSED, CANCELLED
+    exit_reason = Column(String, nullable=True)  # STOP_LOSS, TARGET, MANUAL, TIME_BASED
+    confidence_score = Column(Float, nullable=True)  # AI confidence
+    technical_indicators = Column(JSON, nullable=True)
+    execution_notes = Column(Text, nullable=True)
+
+    # Relationships
+    user = relationship("User")
+    session = relationship("AutoTradingSession")
