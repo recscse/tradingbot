@@ -614,4 +614,472 @@ const ProfileSecurity = ({
                   }}
                   sx={{
                     "& .MuiInputBase-root": {
-                      borderRadius
+                      borderRadius: 2,
+                    },
+                  }}
+                />
+
+                {/* Password Match Indicator */}
+                {passwordForm.confirm_password && (
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    spacing={1}
+                    sx={{ mt: 1 }}
+                  >
+                    {passwordsMatch ? (
+                      <>
+                        <CheckIcon
+                          sx={{ color: "success.main", fontSize: 16 }}
+                        />
+                        <Typography variant="caption" color="success.main">
+                          Passwords match
+                        </Typography>
+                      </>
+                    ) : (
+                      <>
+                        <CloseIcon sx={{ color: "error.main", fontSize: 16 }} />
+                        <Typography variant="caption" color="error.main">
+                          Passwords don't match
+                        </Typography>
+                      </>
+                    )}
+                  </Stack>
+                )}
+              </Grid>
+
+              {/* Submit Button */}
+              <Grid item xs={12}>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={
+                    updating ||
+                    !passwordsMatch ||
+                    passwordStrength < 4 ||
+                    !passwordForm.current_password?.trim()
+                  }
+                  startIcon={
+                    updating ? <CircularProgress size={20} /> : <KeyIcon />
+                  }
+                  sx={{
+                    borderRadius: 2,
+                    fontWeight: 600,
+                    px: 4,
+                    boxShadow: `0 8px 24px ${alpha(
+                      theme.palette.primary.main,
+                      0.3
+                    )}`,
+                    "&:hover": {
+                      boxShadow: `0 12px 32px ${alpha(
+                        theme.palette.primary.main,
+                        0.4
+                      )}`,
+                      transform: "translateY(-2px)",
+                    },
+                    transition: "all 0.3s ease",
+                  }}
+                >
+                  {updating ? "Updating..." : "Update Password"}
+                </Button>
+              </Grid>
+            </Grid>
+          </Box>
+        </Card>
+      </Fade>
+
+      {/* Two-Factor Authentication */}
+      <Fade in={true} timeout={700}>
+        <Card
+          sx={{
+            mb: 4,
+            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+            background: alpha(theme.palette.background.paper, 0.8),
+            backdropFilter: "blur(20px)",
+            borderRadius: 3,
+          }}
+          elevation={0}
+        >
+          <Box
+            sx={{
+              p: { xs: 3, sm: 4 },
+              borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <ShieldIcon sx={{ color: "secondary.main" }} />
+            <Typography variant="h6" fontWeight={600}>
+              Two-Factor Authentication
+            </Typography>
+          </Box>
+
+          <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 3,
+                borderRadius: 2,
+                bgcolor: alpha(
+                  profileData?.twoFactorEnabled
+                    ? theme.palette.success.main
+                    : theme.palette.secondary.main,
+                  0.04
+                ),
+                border: `1px solid ${alpha(
+                  profileData?.twoFactorEnabled
+                    ? theme.palette.success.main
+                    : theme.palette.secondary.main,
+                  0.1
+                )}`,
+              }}
+            >
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                alignItems={{ xs: "flex-start", sm: "center" }}
+                justifyContent="space-between"
+                spacing={3}
+              >
+                <Stack direction="row" alignItems="flex-start" spacing={2}>
+                  <Avatar
+                    sx={{
+                      bgcolor: alpha(theme.palette.secondary.main, 0.1),
+                      color: "secondary.main",
+                      width: 48,
+                      height: 48,
+                    }}
+                  >
+                    <SmartphoneIcon />
+                  </Avatar>
+                  <Box>
+                    <Typography
+                      variant="subtitle1"
+                      fontWeight={600}
+                      gutterBottom
+                    >
+                      Authenticator App
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{ maxWidth: 400, mb: 1 }}
+                    >
+                      Use an authenticator app to generate secure codes for
+                      login. Recommended apps: Google Authenticator, Authy, or
+                      Microsoft Authenticator.
+                    </Typography>
+                    {profileData?.twoFactorEnabled && (
+                      <Chip
+                        label="Active"
+                        color="success"
+                        size="small"
+                        icon={<CheckIcon />}
+                        sx={{ fontWeight: 600 }}
+                      />
+                    )}
+                  </Box>
+                </Stack>
+
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Button
+                    variant={
+                      profileData?.twoFactorEnabled ? "outlined" : "contained"
+                    }
+                    color={profileData?.twoFactorEnabled ? "error" : "primary"}
+                    onClick={handleTwoFactorToggle}
+                    disabled={updating}
+                    startIcon={
+                      updating ? (
+                        <CircularProgress size={16} />
+                      ) : profileData?.twoFactorEnabled ? (
+                        <CloseIcon />
+                      ) : (
+                        <ShieldIcon />
+                      )
+                    }
+                    sx={{
+                      borderRadius: 2,
+                      minWidth: 120,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {updating
+                      ? "Processing..."
+                      : profileData?.twoFactorEnabled
+                      ? "Disable"
+                      : "Enable"}
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
+          </CardContent>
+        </Card>
+      </Fade>
+
+      {/* Account Security Status */}
+      <Fade in={true} timeout={900}>
+        <Card
+          sx={{
+            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+            background: alpha(theme.palette.background.paper, 0.8),
+            backdropFilter: "blur(20px)",
+            borderRadius: 3,
+          }}
+          elevation={0}
+        >
+          <Box
+            sx={{
+              p: { xs: 3, sm: 4 },
+              borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <SettingsIcon sx={{ color: "info.main" }} />
+            <Typography variant="h6" fontWeight={600}>
+              Account Security Status
+            </Typography>
+          </Box>
+
+          <List sx={{ p: 0 }}>
+            {securityItems.map((item, index) => (
+              <React.Fragment key={index}>
+                <ListItem
+                  sx={{
+                    py: 3,
+                    px: { xs: 3, sm: 4 },
+                    "&:hover": {
+                      bgcolor: alpha(theme.palette.primary.main, 0.04),
+                    },
+                  }}
+                >
+                  <ListItemIcon>
+                    <Avatar
+                      sx={{
+                        bgcolor: alpha(theme.palette[item.status].main, 0.1),
+                        color: `${item.status}.main`,
+                        width: 40,
+                        height: 40,
+                      }}
+                    >
+                      <item.icon sx={{ fontSize: 20 }} />
+                    </Avatar>
+                  </ListItemIcon>
+
+                  <ListItemText
+                    primary={
+                      <Typography variant="subtitle1" fontWeight={500}>
+                        {item.title}
+                      </Typography>
+                    }
+                    secondary={
+                      <Box>
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ mt: 0.5 }}
+                        >
+                          {item.description}
+                        </Typography>
+                        {item.detail && (
+                          <Typography
+                            variant="caption"
+                            color="text.disabled"
+                            sx={{ display: "block", mt: 0.5 }}
+                          >
+                            {item.detail}
+                          </Typography>
+                        )}
+                      </Box>
+                    }
+                  />
+
+                  <ListItemSecondaryAction>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      {item.badge && (
+                        <Chip
+                          label={item.badge}
+                          color={item.status}
+                          size="small"
+                          sx={{ fontWeight: 500 }}
+                        />
+                      )}
+                      {item.action && (
+                        <Button
+                          size="small"
+                          color={item.status}
+                          sx={{
+                            borderRadius: 1,
+                            fontSize: "0.75rem",
+                            minWidth: "auto",
+                            px: 1.5,
+                          }}
+                        >
+                          {item.action}
+                        </Button>
+                      )}
+                    </Stack>
+                  </ListItemSecondaryAction>
+                </ListItem>
+                {index < securityItems.length - 1 && <Divider sx={{ mx: 3 }} />}
+              </React.Fragment>
+            ))}
+          </List>
+        </Card>
+      </Fade>
+
+      {/* Security Recommendations */}
+      {(!profileData?.twoFactorEnabled ||
+        (profileData?.failed_login_attempts || 0) > 0 ||
+        !verificationStatus.isVerified) && (
+        <Fade in={true} timeout={1100}>
+          <Alert
+            severity="warning"
+            sx={{
+              mt: 3,
+              borderRadius: 2,
+              "& .MuiAlert-message": {
+                width: "100%",
+              },
+            }}
+          >
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+              Security Recommendations
+            </Typography>
+            <Stack spacing={1}>
+              {!profileData?.twoFactorEnabled && (
+                <Typography variant="body2">
+                  • Enable Two-Factor Authentication for enhanced security
+                </Typography>
+              )}
+              {(profileData?.failed_login_attempts || 0) > 0 && (
+                <Typography variant="body2">
+                  • Review recent failed login attempts and consider changing
+                  your password
+                </Typography>
+              )}
+              {!verificationStatus.isVerified && (
+                <Typography variant="body2">
+                  • Verify your email address to improve account security
+                </Typography>
+              )}
+            </Stack>
+          </Alert>
+        </Fade>
+      )}
+
+      {/* Two-Factor Setup Dialog */}
+      <Dialog
+        open={twoFactorDialog}
+        onClose={() => !updating && setTwoFactorDialog(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            background: alpha(theme.palette.background.paper, 0.95),
+            backdropFilter: "blur(20px)",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 2,
+            color: "secondary.main",
+          }}
+        >
+          <QrCodeIcon />
+          Enable Two-Factor Authentication
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={3}>
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              <Typography variant="body2">
+                <strong>Setup Instructions:</strong>
+                <br />
+                1. Download an authenticator app (Google Authenticator, Authy,
+                etc.)
+                <br />
+                2. Scan the QR code or enter the setup key
+                <br />
+                3. Enter the 6-digit code from your app to verify
+              </Typography>
+            </Alert>
+
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 3,
+                textAlign: "center",
+                borderRadius: 2,
+                bgcolor: alpha(theme.palette.secondary.main, 0.04),
+              }}
+            >
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                QR Code will be displayed here
+              </Typography>
+              <Box
+                sx={{
+                  width: 200,
+                  height: 200,
+                  mx: "auto",
+                  bgcolor: alpha(theme.palette.divider, 0.1),
+                  borderRadius: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <QrCodeIcon sx={{ fontSize: 80, color: "text.disabled" }} />
+              </Box>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ mt: 2, display: "block" }}
+              >
+                Setup Key: XXXX-XXXX-XXXX-XXXX
+              </Typography>
+            </Paper>
+
+            <TextField
+              fullWidth
+              label="Verification Code"
+              placeholder="Enter 6-digit code"
+              disabled={updating}
+              sx={{
+                "& .MuiInputBase-root": {
+                  borderRadius: 2,
+                },
+              }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 3, gap: 1 }}>
+          <Button
+            onClick={() => setTwoFactorDialog(false)}
+            disabled={updating}
+            sx={{ borderRadius: 2 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={updating}
+            startIcon={
+              updating ? <CircularProgress size={16} /> : <ShieldIcon />
+            }
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            {updating ? "Enabling..." : "Enable 2FA"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+export default ProfileSecurity;
