@@ -649,63 +649,102 @@ const BrokerManagement = () => {
 
             <Button
               variant="contained"
+              size="large"
               startIcon={<AddIcon />}
               onClick={() => setShowAddBroker(true)}
               sx={{
-                borderRadius: 2,
-                fontWeight: 600,
-                px: 3,
+                borderRadius: 3,
+                px: 4,
+                fontWeight: 700,
+                boxShadow: `0 8px 24px ${alpha(
+                  theme.palette.primary.main,
+                  0.3
+                )}`,
+                "&:hover": {
+                  boxShadow: `0 12px 32px ${alpha(
+                    theme.palette.primary.main,
+                    0.4
+                  )}`,
+                  transform: "translateY(-2px)",
+                },
+                transition: "all 0.3s ease",
               }}
             >
-              Add Broker
+              Connect Broker
             </Button>
           </Stack>
         </Stack>
       </Paper>
 
-      {/* Main Content */}
-      {brokers.length === 0 ? (
-        <Paper
-          elevation={0}
-          sx={{
-            p: 6,
-            textAlign: "center",
-            borderRadius: 3,
-            border: `2px dashed ${alpha(theme.palette.divider, 0.3)}`,
-          }}
-        >
-          <Avatar
-            sx={{
-              width: 80,
-              height: 80,
-              bgcolor: alpha(theme.palette.primary.main, 0.1),
-              color: "primary.main",
-              mx: "auto",
-              mb: 3,
-            }}
-          >
-            <BusinessIcon sx={{ fontSize: 40 }} />
-          </Avatar>
-          <Typography variant="h6" gutterBottom>
-            No Brokers Connected
-          </Typography>
-          <Typography variant="body2" color="text.secondary" mb={3}>
-            Connect your first broker account to start trading
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setShowAddBroker(true)}
-            sx={{ borderRadius: 2, fontWeight: 600 }}
-          >
-            Add Your First Broker
-          </Button>
-        </Paper>
-      ) : (
-        <Grid container spacing={3}>
-          {brokers.map((broker, index) => renderBrokerCard(broker, index))}
-        </Grid>
-      )}
+      {/* Brokers Grid */}
+      <Grid container spacing={3}>
+        {brokers.map(renderBrokerCard)}
+
+        {/* Empty State */}
+        {brokers.length === 0 && !loading && (
+          <Grid item xs={12}>
+            <Fade in={true}>
+              <Paper
+                elevation={0}
+                sx={{
+                  textAlign: "center",
+                  py: 8,
+                  px: 4,
+                  borderRadius: 4,
+                  background: `linear-gradient(135deg, 
+                    ${alpha(theme.palette.primary.main, 0.02)} 0%, 
+                    ${alpha(theme.palette.secondary.main, 0.02)} 100%
+                  )`,
+                  border: `2px dashed ${alpha(
+                    theme.palette.primary.main,
+                    0.2
+                  )}`,
+                }}
+              >
+                <Avatar
+                  sx={{
+                    width: 100,
+                    height: 100,
+                    bgcolor: alpha(theme.palette.primary.main, 0.1),
+                    mx: "auto",
+                    mb: 3,
+                  }}
+                >
+                  <BusinessIcon sx={{ fontSize: 50, color: "primary.main" }} />
+                </Avatar>
+
+                <Typography variant="h4" fontWeight={700} gutterBottom>
+                  No Brokers Connected
+                </Typography>
+                <Typography
+                  variant="body1"
+                  color="text.secondary"
+                  sx={{ mb: 4, maxWidth: 500, mx: "auto" }}
+                >
+                  Connect your first broker to start automated trading and track
+                  your portfolio performance across multiple platforms.
+                </Typography>
+
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<AddIcon />}
+                  onClick={() => setShowAddBroker(true)}
+                  sx={{
+                    borderRadius: 3,
+                    px: 5,
+                    py: 1.5,
+                    fontWeight: 700,
+                    fontSize: "1.1rem",
+                  }}
+                >
+                  Connect Your First Broker
+                </Button>
+              </Paper>
+            </Fade>
+          </Grid>
+        )}
+      </Grid>
 
       {/* Add Broker Dialog */}
       <Dialog
@@ -715,75 +754,88 @@ const BrokerManagement = () => {
         fullWidth
         PaperProps={{
           sx: {
-            borderRadius: 3,
-            maxHeight: "90vh",
+            borderRadius: 4,
+            background: alpha(theme.palette.background.paper, 0.95),
+            backdropFilter: "blur(20px)",
           },
         }}
       >
-        <DialogTitle
-          sx={{
-            pb: 1,
-            borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-          }}
-        >
-          <Stack direction="row" alignItems="center" spacing={2}>
-            <Avatar
-              sx={{
-                bgcolor: alpha(theme.palette.primary.main, 0.1),
-                color: "primary.main",
-                width: 40,
-                height: 40,
-              }}
-            >
-              <AddIcon />
-            </Avatar>
-            <Box>
-              <Typography variant="h6" fontWeight={700}>
+        <DialogTitle>
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+          >
+            <Stack direction="row" alignItems="center" spacing={2}>
+              <Avatar
+                sx={{
+                  bgcolor: alpha(theme.palette.primary.main, 0.1),
+                  color: "primary.main",
+                }}
+              >
+                <AddIcon />
+              </Avatar>
+              <Typography variant="h5" fontWeight={700}>
                 Connect New Broker
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Add your broker credentials to start trading
-              </Typography>
-            </Box>
+            </Stack>
+            <IconButton onClick={() => setShowAddBroker(false)} size="small">
+              <CloseIcon />
+            </IconButton>
           </Stack>
-          <IconButton
-            onClick={() => setShowAddBroker(false)}
-            sx={{ position: "absolute", right: 8, top: 8 }}
-          >
-            <CloseIcon />
-          </IconButton>
         </DialogTitle>
 
-        <DialogContent sx={{ pt: 3 }}>
-          <Stack spacing={3}>
-            <Alert
-              severity="info"
-              icon={<SecurityIcon />}
-              sx={{ borderRadius: 2 }}
-            >
-              Your credentials are encrypted and stored securely. We never share
-              your trading data.
-            </Alert>
-
+        <DialogContent sx={{ px: 3, pb: 2 }}>
+          <Stack spacing={3} sx={{ mt: 2 }}>
             <FormControl fullWidth>
-              <InputLabel>Broker</InputLabel>
+              <InputLabel>Select Broker</InputLabel>
               <Select
                 value={newBroker.broker_name}
-                label="Broker"
                 onChange={(e) =>
                   setNewBroker({ ...newBroker, broker_name: e.target.value })
                 }
-                sx={{ borderRadius: 2 }}
+                label="Select Broker"
               >
-                <MenuItem value="Zerodha">Zerodha</MenuItem>
-                <MenuItem value="Upstox">Upstox</MenuItem>
-                <MenuItem value="Angel One">Angel One</MenuItem>
-                <MenuItem value="Dhan">Dhan</MenuItem>
-                <MenuItem value="Fyers">Fyers</MenuItem>
-                <MenuItem value="IIFL">IIFL</MenuItem>
-                <MenuItem value="5paisa">5paisa</MenuItem>
-                <MenuItem value="Kotak">Kotak Securities</MenuItem>
-                <MenuItem value="ICICI">ICICI Direct</MenuItem>
+                <MenuItem value="">Choose a broker</MenuItem>
+                {[
+                  "Zerodha",
+                  "Upstox",
+                  "Dhan",
+                  "Angel One",
+                  "Fyers",
+                  "IIFL",
+                  "5paisa",
+                  "Kotak",
+                  "ICICI",
+                ].map((name) => {
+                  const config = getBrokerConfig(name);
+                  return (
+                    <MenuItem key={name} value={name}>
+                      <Stack direction="row" alignItems="center" spacing={2}>
+                        <Avatar
+                          sx={{
+                            width: 32,
+                            height: 32,
+                            fontSize: "0.8rem",
+                            bgcolor: config.color,
+                            color: "white",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {config.initials}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="body2" fontWeight={600}>
+                            {name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {config.description}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </MenuItem>
+                  );
+                })}
               </Select>
             </FormControl>
 
@@ -795,35 +847,42 @@ const BrokerManagement = () => {
                 setNewBroker({ ...newBroker, api_key: e.target.value })
               }
               placeholder="Enter your API key"
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: 2,
-                },
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SecurityIcon color="action" />
+                  </InputAdornment>
+                ),
               }}
             />
 
             <TextField
               fullWidth
               label="API Secret"
-              type={showApiSecret.add ? "text" : "password"}
+              type={showApiSecret.new ? "text" : "password"}
               value={newBroker.api_secret}
               onChange={(e) =>
                 setNewBroker({ ...newBroker, api_secret: e.target.value })
               }
               placeholder="Enter your API secret"
               InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SecurityIcon color="action" />
+                  </InputAdornment>
+                ),
                 endAdornment: (
                   <InputAdornment position="end">
                     <IconButton
                       onClick={() =>
                         setShowApiSecret({
                           ...showApiSecret,
-                          add: !showApiSecret.add,
+                          new: !showApiSecret.new,
                         })
                       }
                       edge="end"
                     >
-                      {showApiSecret.add ? (
+                      {showApiSecret.new ? (
                         <VisibilityOffIcon />
                       ) : (
                         <VisibilityIcon />
@@ -832,48 +891,47 @@ const BrokerManagement = () => {
                   </InputAdornment>
                 ),
               }}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: 2,
-                },
-              }}
             />
 
-            {connectionTest[newBroker.broker_name] === "testing" && (
-              <Alert
-                severity="info"
-                icon={<CircularProgress size={16} />}
-                sx={{ borderRadius: 2 }}
-              >
-                Testing connection to {newBroker.broker_name}...
+            {newBroker.broker_name && (
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                <Typography variant="body2">
+                  <strong>
+                    How to get API credentials for {newBroker.broker_name}:
+                  </strong>
+                  <br />
+                  Visit your broker's developer portal and create API
+                  credentials. Make sure to enable trading permissions for
+                  automated strategies.
+                </Typography>
               </Alert>
             )}
           </Stack>
         </DialogContent>
 
-        <DialogActions sx={{ p: 3, pt: 2 }}>
+        <DialogActions sx={{ px: 3, pb: 3, gap: 1 }}>
           <Button
             onClick={() => setShowAddBroker(false)}
-            sx={{ borderRadius: 2 }}
+            sx={{ borderRadius: 2, px: 3 }}
           >
             Cancel
           </Button>
           <Button
             variant="contained"
             onClick={handleAddBroker}
-            disabled={
-              !newBroker.broker_name ||
-              !newBroker.api_key ||
-              !newBroker.api_secret ||
-              connectionTest[newBroker.broker_name] === "testing"
+            disabled={connectionTest[newBroker.broker_name] === "testing"}
+            startIcon={
+              connectionTest[newBroker.broker_name] === "testing" ? (
+                <CircularProgress size={16} />
+              ) : (
+                <AddIcon />
+              )
             }
-            sx={{ borderRadius: 2, fontWeight: 600 }}
+            sx={{ borderRadius: 2, fontWeight: 600, px: 4 }}
           >
-            {connectionTest[newBroker.broker_name] === "testing" ? (
-              <CircularProgress size={20} color="inherit" />
-            ) : (
-              "Connect Broker"
-            )}
+            {connectionTest[newBroker.broker_name] === "testing"
+              ? "Connecting..."
+              : "Connect Broker"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -894,24 +952,23 @@ const BrokerManagement = () => {
               sx={{
                 bgcolor: alpha(theme.palette.error.main, 0.1),
                 color: "error.main",
-                width: 40,
-                height: 40,
               }}
             >
               <WarningIcon />
             </Avatar>
-            <Typography variant="h6" fontWeight={700}>
-              Remove Broker?
+            <Typography variant="h6" fontWeight={600}>
+              Confirm Deletion
             </Typography>
           </Stack>
         </DialogTitle>
         <DialogContent>
-          <Typography color="text.secondary">
-            This action cannot be undone. You'll need to reconnect this broker
-            if you want to use it again.
+          <Typography>
+            Are you sure you want to remove this broker connection? This action
+            cannot be undone and you'll lose access to this account's trading
+            functionality.
           </Typography>
         </DialogContent>
-        <DialogActions sx={{ p: 3, pt: 1 }}>
+        <DialogActions sx={{ p: 3, gap: 1 }}>
           <Button
             onClick={() => setDeleteConfirm({ open: false, brokerId: null })}
             sx={{ borderRadius: 2 }}
@@ -919,12 +976,12 @@ const BrokerManagement = () => {
             Cancel
           </Button>
           <Button
-            variant="contained"
             color="error"
+            variant="contained"
             onClick={() => handleDeleteBroker(deleteConfirm.brokerId)}
             sx={{ borderRadius: 2, fontWeight: 600 }}
           >
-            Remove
+            Delete Broker
           </Button>
         </DialogActions>
       </Dialog>
@@ -932,13 +989,14 @@ const BrokerManagement = () => {
       {/* Snackbar */}
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={6000}
+        autoHideDuration={4000}
         onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
         <Alert
           onClose={handleCloseSnackbar}
           severity={snackbar.severity}
+          variant="filled"
           sx={{ borderRadius: 2 }}
         >
           {snackbar.message}
