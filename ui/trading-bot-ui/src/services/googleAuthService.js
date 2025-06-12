@@ -12,16 +12,9 @@ class GoogleAuthService {
   // Debug method to check environment variables
   debugEnvironment() {
     console.log("🔍 Debugging Environment Variables:");
-    console.log("NODE_ENV:", process.env.NODE_ENV);
     console.log(
       "REACT_APP_GOOGLE_CLIENT_ID exists:",
       !!process.env.REACT_APP_GOOGLE_CLIENT_ID
-    );
-    console.log(
-      "REACT_APP_GOOGLE_CLIENT_ID value (first 20 chars):",
-      process.env.REACT_APP_GOOGLE_CLIENT_ID
-        ? process.env.REACT_APP_GOOGLE_CLIENT_ID.substring(0, 20) + "..."
-        : "undefined"
     );
   }
 
