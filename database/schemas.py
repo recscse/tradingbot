@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
+from enum import Enum
 
 
 # ✅ Signup Schema (Input)
@@ -85,13 +86,94 @@ class OTPResponse(BaseModel):
     message: str
 
 
-class OTPVerification(BaseModel):
-    country_code: str = Field(..., min_length=2, max_length=5, example="+1")
-    phone_number: str = Field(..., min_length=10, max_length=15, example="9876543210")
-    otp: str = Field(..., min_length=6, max_length=6, example="123456")
-
-
 class UserProfileUpdate(BaseModel):
     name: str = Field(..., min_length=3, max_length=50, example="John Doe")
     email: EmailStr = Field(..., example="user@example.com")
     brokerAccounts: str = Field(..., example="Zerodha, Upstox")
+
+
+class UserRole(str, Enum):
+    ADMIN = "admin"
+    TRADER = "trader"
+    ANALYST = "analyst"
+
+
+class BrokerAccountResponse(BaseModel):
+    id: int
+    broker_name: str
+    is_active: bool
+    created_at: datetime
+    last_connected: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserProfileResponse(BaseModel):
+    id: int
+    full_name: str
+    email: EmailStr
+    phone_number: Optional[str]
+    country_code: Optional[str]
+    role: UserRole
+    is_verified: bool
+    created_at: datetime
+    last_login: Optional[datetime]
+    broker_accounts: List[BrokerAccountResponse] = []
+    total_trades: int = 0
+    total_pnl: float = 0.0
+    win_rate: float = 0.0
+
+    class Config:
+        from_attributes = True
+
+
+class UserProfileUpdateExtended(BaseModel):  # Renamed to avoid conflict
+    full_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    phone_number: Optional[str] = Field(
+        None, pattern=r"^\+?[1-9]\d{1,14}$"
+    )  # Fixed: = instead of ==
+    country_code: Optional[str] = Field(None, min_length=1, max_length=5)
+
+    @field_validator("full_name")
+    @classmethod  # This should be inside the class
+    def validate_full_name(cls, v):
+        if v and not v.strip():
+            raise ValueError("Full name cannot be empty")
+        return v.strip() if v else v
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str = Field(..., min_length=8)
+
+    @field_validator("confirm_password")
+    @classmethod
+    def passwords_match(cls, v, info):  # Pydantic v2 uses 'info' instead of 'values'
+        if "new_password" in info.data and v != info.data["new_password"]:
+            raise ValueError("Passwords do not match")
+        return v
+
+
+class UserStatsResponse(BaseModel):
+    total_trades: int
+    successful_trades: int
+    total_pnl: float
+    win_rate: float
+    best_performing_stock: Optional[str]
+    worst_performing_stock: Optional[str]
+    avg_trade_duration: Optional[float]  # in hours
+    last_trade_date: Optional[datetime]
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    message: str
+    type: str
+    read: bool
+    created_at: datetime
+    read_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
