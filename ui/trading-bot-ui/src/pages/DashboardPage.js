@@ -39,6 +39,7 @@ import {
 } from "@mui/icons-material";
 import { useMarket } from "../context/MarketProvider";
 import { motion } from "framer-motion";
+import SelectedStocksPanel from "../components/SelectedStocksPanel";
 
 // Theme Color Constants - Simplified and refined
 const colors = {
@@ -1195,6 +1196,14 @@ const DashboardPage = () => {
             </Tabs>
           </Box>
         )}
+
+        {/* 🎯 NEW: ADD SELECTED STOCKS PANEL HERE */}
+        <Box sx={{ mb: 3 }}>
+          <SelectedStocksPanel
+            isCompact={isMobile}
+            maxVisible={isMobile ? 4 : 8}
+          />
+        </Box>
 
         {/* Market Summary Cards - Responsive with different layouts */}
         {isMobile ? (
