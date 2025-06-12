@@ -56,12 +56,11 @@ import {
   Sms as SmsIcon,
   AccountBalance as AccountIcon,
   Info as InfoIcon,
-  Refresh as RefreshIcon,
   Delete as DeleteIcon,
   CheckCircle as CheckIcon,
   Send as TestIcon,
 } from "@mui/icons-material";
-import { toast } from "react-toastify";
+//import { toast } from "react-toastify";
 
 const ProfileNotifications = ({
   notifications = [],
