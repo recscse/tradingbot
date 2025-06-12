@@ -680,4 +680,113 @@ const TradingProfile = ({
                 onClick={() => handleTabChange("notifications")}
                 sx={{
                   "&:hover": {
-                    backgroundColor: alpha(t
+                    backgroundColor: alpha(theme.palette.primary.main, 0.1),
+                  },
+                }}
+              >
+                <Badge
+                  badgeContent={getUnreadNotificationCount()}
+                  color="error"
+                >
+                  <NotificationsIcon />
+                </Badge>
+              </IconButton>
+            </Tooltip>
+
+            {activeTab === "settings" && (
+              <Button
+                variant={isEditing ? "outlined" : "contained"}
+                color={isEditing ? "inherit" : "primary"}
+                startIcon={isEditing ? <CloseIcon /> : <EditIcon />}
+                onClick={() => setIsEditing(!isEditing)}
+                disabled={updating}
+                sx={{
+                  borderRadius: 2,
+                  fontWeight: 600,
+                  px: { xs: 2, sm: 3 },
+                  fontSize: { xs: "0.75rem", sm: "0.875rem" },
+                }}
+              >
+                {isEditing ? "Cancel" : "Edit"}
+              </Button>
+            )}
+          </Stack>
+        </Toolbar>
+
+        {/* Loading Progress Bar */}
+        {updating && (
+          <LinearProgress
+            sx={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 2,
+            }}
+          />
+        )}
+      </AppBar>
+
+      <Container maxWidth="xl" sx={{ py: { xs: 2, sm: 4 } }}>
+        {/* Profile Header */}
+        <Slide direction="down" in={true} timeout={500}>
+          <Box sx={{ mb: 4 }}>
+            <ProfileHeader
+              profile={profile}
+              editedProfile={editedProfile}
+              setEditedProfile={setEditedProfile}
+              isEditing={isEditing}
+              onSave={handleSaveProfile}
+              onCancel={handleCancelEdit}
+              loading={updating}
+              brokers={brokers}
+              securityAlerts={getSecurityAlerts()}
+            />
+          </Box>
+        </Slide>
+
+        {/* Enhanced Navigation Tabs */}
+        <Slide direction="up" in={true} timeout={700}>
+          <Box sx={{ mb: 4 }}>
+            <ProfileTabs
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              loading={updating}
+              notificationCounts={{ unread: getUnreadNotificationCount() }}
+              securityAlerts={getSecurityAlerts()}
+              brokerCount={brokers.length}
+            />
+          </Box>
+        </Slide>
+
+        {/* Tab Content */}
+        <Fade in={true} timeout={1000}>
+          <Box>{renderTabContent()}</Box>
+        </Fade>
+      </Container>
+
+      {/* Enhanced Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          onClose={handleCloseSnackbar}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{
+            borderRadius: 2,
+            minWidth: 300,
+            boxShadow: theme.shadows[6],
+          }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+export default TradingProfile;
