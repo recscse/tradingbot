@@ -686,4 +686,243 @@ const RecentActivityFeed = ({
                               fontSize: "0.65rem",
                               height: 20,
                               fontWeight: 500,
-      
+                            }}
+                          />
+                        )}
+                      </Stack>
+                    </Stack>
+                  }
+                  secondary={
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      justifyContent="space-between"
+                      mt={0.5}
+                    >
+                      <Tooltip
+                        title={formatTimeDetailed(
+                          activity.timestamp || activity.created_at
+                        )}
+                        placement="bottom-start"
+                      >
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          spacing={0.5}
+                        >
+                          <ClockIcon
+                            sx={{ fontSize: 14, color: "text.disabled" }}
+                          />
+                          <Typography variant="caption" color="text.secondary">
+                            {formatTime(
+                              activity.timestamp || activity.created_at
+                            )}
+                          </Typography>
+                        </Stack>
+                      </Tooltip>
+
+                      <Stack direction="row" spacing={0.5}>
+                        {activity.status && (
+                          <Chip
+                            label={activity.status}
+                            size="small"
+                            variant="outlined"
+                            color={
+                              activity.status === "completed"
+                                ? "success"
+                                : activity.status === "failed"
+                                ? "error"
+                                : "default"
+                            }
+                            sx={{ fontSize: "0.6rem", height: 16 }}
+                          />
+                        )}
+                        {activity.broker && (
+                          <Chip
+                            label={activity.broker}
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontSize: "0.6rem", height: 16 }}
+                          />
+                        )}
+                        {activity.symbol && (
+                          <Chip
+                            label={activity.symbol}
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontSize: "0.6rem", height: 16 }}
+                          />
+                        )}
+                      </Stack>
+                    </Stack>
+                  }
+                />
+              </ListItem>
+            </Fade>
+            {index < filteredActivities.length - 1 && (
+              <Divider sx={{ ml: 8, mr: 2, opacity: 0.5 }} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </List>
+  );
+
+  // Header with filters and controls
+  const ActivityHeader = () => (
+    <Stack
+      direction="row"
+      alignItems="center"
+      justifyContent="space-between"
+      mb={2}
+      flexWrap="wrap"
+      gap={1}
+    >
+      <Stack direction="row" alignItems="center" spacing={2}>
+        <Typography variant="body2" color="text.secondary">
+          {filteredActivities.length} of {activities.length} activit
+          {activities.length === 1 ? "y" : "ies"}
+        </Typography>
+
+        {realTime && filteredActivities.length > 0 && (
+          <Badge
+            color="success"
+            variant="dot"
+            sx={{
+              "& .MuiBadge-badge": {
+                animation: "pulse 2s infinite",
+                "@keyframes pulse": {
+                  "0%": { transform: "scale(1)", opacity: 1 },
+                  "50%": { transform: "scale(1.2)", opacity: 0.7 },
+                  "100%": { transform: "scale(1)", opacity: 1 },
+                },
+              },
+            }}
+          >
+            <Chip
+              label="Live"
+              color="success"
+              size="small"
+              sx={{ fontSize: "0.65rem", height: 20, fontWeight: 600 }}
+            />
+          </Badge>
+        )}
+      </Stack>
+
+      <Stack direction="row" alignItems="center" spacing={1}>
+        {showFilter && availableCategories.length > 2 && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <FilterIcon sx={{ fontSize: 16, color: "text.secondary" }} />
+            <Box sx={{ minWidth: 120 }}>
+              {availableCategories.map((category) => (
+                <Chip
+                  key={category}
+                  label={category.charAt(0).toUpperCase() + category.slice(1)}
+                  size="small"
+                  color={filterType === category ? "primary" : "default"}
+                  onClick={() => setFilterType(category)}
+                  sx={{
+                    mr: 0.5,
+                    mb: 0.5,
+                    fontSize: "0.7rem",
+                    cursor: "pointer",
+                  }}
+                />
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {onRefresh && (
+          <Tooltip title="Refresh activities">
+            <IconButton
+              size="small"
+              onClick={onRefresh}
+              sx={{
+                bgcolor: alpha(theme.palette.primary.main, 0.1),
+                "&:hover": {
+                  bgcolor: alpha(theme.palette.primary.main, 0.2),
+                },
+              }}
+            >
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Stack>
+    </Stack>
+  );
+
+  // Main render logic
+  if (loading) {
+    return <LoadingSkeleton />;
+  }
+
+  if (error) {
+    return <ErrorState />;
+  }
+
+  if (!activities || activities.length === 0) {
+    return <EmptyState />;
+  }
+
+  if (filteredActivities.length === 0) {
+    return <EmptyState />;
+  }
+
+  return (
+    <Box sx={{ width: "100%" }}>
+      <ActivityHeader />
+
+      {/* Activity Feed */}
+      <Box
+        sx={{
+          maxHeight: { xs: 400, sm: 500, md: 600 },
+          overflowY: "auto",
+          overflowX: "hidden",
+          pr: { xs: 0, sm: 1 },
+          "&::-webkit-scrollbar": {
+            width: 6,
+          },
+          "&::-webkit-scrollbar-track": {
+            backgroundColor: alpha(theme.palette.divider, 0.1),
+            borderRadius: 3,
+          },
+          "&::-webkit-scrollbar-thumb": {
+            backgroundColor: alpha(theme.palette.primary.main, 0.3),
+            borderRadius: 3,
+            "&:hover": {
+              backgroundColor: alpha(theme.palette.primary.main, 0.5),
+            },
+          },
+        }}
+      >
+        {isMobile ? (
+          <Stack spacing={0}>
+            {filteredActivities.map((activity, index) => (
+              <MobileActivityCard
+                key={`mobile-${activity.id || index}`}
+                activity={activity}
+                index={index}
+              />
+            ))}
+          </Stack>
+        ) : (
+          <DesktopActivityList />
+        )}
+      </Box>
+
+      {/* Load more indicator if there are more activities */}
+      {activities.length > maxItems && (
+        <Box sx={{ textAlign: "center", mt: 2 }}>
+          <Typography variant="caption" color="text.secondary">
+            Showing {Math.min(filteredActivities.length, maxItems)} of{" "}
+            {activities.length} activities
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+export default RecentActivityFeed;
