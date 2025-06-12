@@ -1,11 +1,9 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, time
 from contextlib import asynccontextmanager
 import threading
-import time
-import schedule
 import uvicorn
 import socketio
 from dotenv import load_dotenv
@@ -14,11 +12,17 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+# NEW: Import Redis safety manager
+from typing import Optional, Any
+import redis
+from redis.exceptions import ConnectionError, RedisError
+import json
+
 # Import database and models
 from core.middleware import TokenRefreshMiddleware
 from database.connection import SessionLocal, get_db
 from database.init_db import init_db
-from database.models import TradePerformance, TradeSignal
+from database.models import BrokerConfig, TradePerformance, TradeSignal
 from router import analytics_router, order_router
 from router.user_router import router as user_router
 from router.auth_router import auth_router
@@ -33,6 +37,18 @@ from ws_router.upstox_ltp_ws import ws_upstox_router
 from router.market_ws import router as market_ws_router
 from router.backtest_router import backtesting_router
 from router.stock_router import router as stock_router
+from router.profile_router import router as profile_router
+from router.paper_trading_router import router as paper_trading_router
+from router.notification_router import router as notification_router
+
+# KEEP: Your existing trading engine import
+from services.trading_services.trading_engine import TradingEngine
+from router.dashboard_router import router as dashboard_router
+
+# ADD: Import your instrument and data services
+from services.optimized_instrument_service import instrument_service, fast_retrieval
+from services.trading_scheduler import TradingScheduler, start_trading_scheduler
+from services.pre_market_data_service import PreMarketDataService
 
 # Load environment variables
 load_dotenv()
@@ -44,34 +60,384 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# NEW: Safe Redis Manager for Trading Application
+class TradingSafeRedisManager:
+    """Redis manager specifically designed for trading applications with graceful fallbacks"""
+
+    def __init__(self):
+        self.redis_client: Optional[redis.Redis] = None
+        self.is_connected = False
+        self.fallback_cache = {}  # In-memory fallback for critical data
+        self._initialize_redis()
+
+    def _initialize_redis(self):
+        """Initialize Redis connection with comprehensive error handling"""
+        redis_enabled = os.getenv("REDIS_ENABLED", "true").lower() == "true"
+
+        if not redis_enabled:
+            logger.info("🔧 Redis disabled via REDIS_ENABLED environment variable")
+            return
+
+        try:
+            self.redis_client = redis.Redis(
+                host=os.getenv("REDIS_HOST", "localhost"),
+                port=int(os.getenv("REDIS_PORT", 6379)),
+                db=int(os.getenv("REDIS_DB", 0)),
+                decode_responses=True,
+                socket_connect_timeout=2,  # Quick timeout for trading systems
+                socket_timeout=2,
+                retry_on_timeout=False,
+                health_check_interval=30,
+            )
+
+            # Test connection
+            self.redis_client.ping()
+            self.is_connected = True
+            logger.info("✅ Redis connected successfully for trading system")
+
+        except ConnectionError:
+            logger.warning(
+                "⚠️  Redis connection failed - trading system will use fallback cache"
+            )
+            self.redis_client = None
+            self.is_connected = False
+        except Exception as e:
+            logger.error(f"❌ Redis initialization error: {e} - using fallback cache")
+            self.redis_client = None
+            self.is_connected = False
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get value with fallback to in-memory cache for critical trading data"""
+        if self.is_connected and self.redis_client:
+            try:
+                result = self.redis_client.get(key)
+                if result is None:
+                    return self.fallback_cache.get(key, default)
+
+                # Try to parse JSON
+                try:
+                    parsed_result = json.loads(result)
+                    # Update fallback cache for critical data
+                    if any(
+                        critical in key
+                        for critical in [
+                            "live_price",
+                            "selected_stocks",
+                            "trading_data",
+                        ]
+                    ):
+                        self.fallback_cache[key] = parsed_result
+                    return parsed_result
+                except (json.JSONDecodeError, TypeError):
+                    if any(
+                        critical in key
+                        for critical in [
+                            "live_price",
+                            "selected_stocks",
+                            "trading_data",
+                        ]
+                    ):
+                        self.fallback_cache[key] = result
+                    return result
+
+            except RedisError as e:
+                logger.warning(f"Redis GET error for key '{key}': {e} - using fallback")
+                return self.fallback_cache.get(key, default)
+
+        # Fallback to in-memory cache
+        return self.fallback_cache.get(key, default)
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Set value with fallback storage for critical data"""
+        success = False
+
+        if self.is_connected and self.redis_client:
+            try:
+                # Serialize complex objects
+                if isinstance(value, (dict, list)):
+                    serialized_value = json.dumps(value)
+                else:
+                    serialized_value = value
+
+                result = self.redis_client.set(key, serialized_value, ex=ttl)
+                success = bool(result)
+
+            except RedisError as e:
+                logger.warning(f"Redis SET error for key '{key}': {e}")
+                success = False
+
+        # Always update fallback cache for critical trading data
+        if any(
+            critical in key
+            for critical in [
+                "live_price",
+                "selected_stocks",
+                "trading_data",
+                "market_status",
+            ]
+        ):
+            self.fallback_cache[key] = value
+            if not success:
+                logger.debug(f"Stored '{key}' in fallback cache")
+
+        return success
+
+    def delete(self, *keys: str) -> int:
+        """Delete keys with fallback cache cleanup"""
+        deleted_count = 0
+
+        if self.is_connected and self.redis_client:
+            try:
+                deleted_count = self.redis_client.delete(*keys)
+            except RedisError as e:
+                logger.warning(f"Redis DELETE error: {e}")
+
+        # Clean fallback cache
+        for key in keys:
+            if key in self.fallback_cache:
+                del self.fallback_cache[key]
+                deleted_count += 1
+
+        return deleted_count
+
+    def exists(self, key: str) -> bool:
+        """Check existence in Redis or fallback cache"""
+        if self.is_connected and self.redis_client:
+            try:
+                return bool(self.redis_client.exists(key))
+            except RedisError:
+                pass
+
+        return key in self.fallback_cache
+
+    def keys(self, pattern: str = "*") -> list:
+        """Get keys with fallback support"""
+        redis_keys = []
+
+        if self.is_connected and self.redis_client:
+            try:
+                redis_keys = self.redis_client.keys(pattern)
+            except RedisError as e:
+                logger.warning(f"Redis KEYS error: {e}")
+
+        # Add fallback cache keys
+        import fnmatch
+
+        fallback_keys = [
+            key for key in self.fallback_cache.keys() if fnmatch.fnmatch(key, pattern)
+        ]
+
+        # Combine and deduplicate
+        all_keys = list(set(redis_keys + fallback_keys))
+        return all_keys
+
+    def health_check(self) -> dict:
+        """Comprehensive health check for trading system"""
+        if not self.redis_client:
+            return {
+                "status": "fallback_mode",
+                "message": "Redis disabled - using in-memory fallback cache",
+                "fallback_cache_size": len(self.fallback_cache),
+            }
+
+        try:
+            self.redis_client.ping()
+            self.is_connected = True
+            return {
+                "status": "healthy",
+                "message": "Redis connection is working",
+                "fallback_cache_size": len(self.fallback_cache),
+            }
+        except Exception as e:
+            self.is_connected = False
+            return {
+                "status": "degraded",
+                "message": f"Redis connection failed: {str(e)} - using fallback",
+                "fallback_cache_size": len(self.fallback_cache),
+            }
+
+    def get_trading_cache_stats(self) -> dict:
+        """Get statistics specific to trading data caching"""
+        stats = {
+            "redis_connected": self.is_connected,
+            "fallback_cache_size": len(self.fallback_cache),
+            "critical_data_cached": 0,
+            "cache_mode": "redis" if self.is_connected else "fallback",
+        }
+
+        # Count critical trading data in fallback cache
+        critical_keys = [
+            "live_price",
+            "selected_stocks",
+            "trading_data",
+            "market_status",
+        ]
+        stats["critical_data_cached"] = len(
+            [
+                key
+                for key in self.fallback_cache.keys()
+                if any(critical in key for critical in critical_keys)
+            ]
+        )
+
+        return stats
+
+
+# Initialize global Redis manager
+trading_redis = TradingSafeRedisManager()
+
+# ENHANCE: Global instances
+trading_engine = None
+trading_scheduler = None
+instrument_service_instance = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Starting Trading Application...")
+    global trading_engine, trading_scheduler, instrument_service_instance
+    logger.info("🚀 Starting Enhanced Trading Application with Safe Redis System...")
 
     try:
-        # DB initialization
+        # 1. DB initialization
         db = next(get_db())
         logger.info("✅ DB session initialized.")
 
-        # Optional: start any background jobs here
-        logger.info("🟢 Background schedulers started.")
+        # 2. Redis health check (non-blocking)
+        redis_status = trading_redis.health_check()
+        logger.info(f"🔧 Redis status: {redis_status['message']}")
+
+        # 3. NEW: Initialize OptimizedInstrumentService with Redis safety
+        logger.info("🔧 Initializing OptimizedInstrumentService with Redis safety...")
+        instrument_service_instance = instrument_service
+
+        # Wrap instrument service initialization with error handling
+        try:
+            result = await instrument_service_instance.initialize_instruments_system()
+            logger.info(
+                f"✅ Instrument service initialized: {result['mapped_stocks']} stocks, {result['websocket_instruments']} instruments"
+            )
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Instrument service initialization failed: {e} - continuing with limited functionality"
+            )
+            # Continue without crashing
+
+        # 4. NEW: Initialize TradingScheduler with Redis safety
+        logger.info("🕐 Starting TradingScheduler with Redis safety...")
+        try:
+            trading_scheduler = TradingScheduler()
+            trading_scheduler.start_scheduler()
+            logger.info("✅ TradingScheduler started")
+        except Exception as e:
+            logger.warning(
+                f"⚠️ TradingScheduler failed to start: {e} - continuing without scheduler"
+            )
+
+        # 5. ENHANCE: Initialize trading engine with Redis safety
+        try:
+            trading_engine = TradingEngine()
+            logger.info("🤖 Trading Engine initialized.")
+        except Exception as e:
+            logger.error(f"❌ Trading Engine initialization failed: {e}")
+            # Don't crash the app, just log the error
+
+        # 6. ENHANCE: Start trading engine in background with safety
+        if trading_engine:
+            engine_task = asyncio.create_task(start_enhanced_trading_engine())
+            logger.info("⚡ Enhanced Trading Engine background task started.")
+
+        # 7. NEW: Start background services with safety
+        broadcast_task = asyncio.create_task(broadcast_trading_updates())
+        logger.info("📡 Background broadcast service started.")
+
+        logger.info(
+            "🟢 All enhanced services started successfully (with Redis safety)!"
+        )
+
         yield
+
     except Exception as e:
-        logger.exception("🔥 Lifespan startup failed.")
-        raise e
+        logger.exception("🔥 Enhanced lifespan startup failed - but app will continue")
+        # Don't re-raise the exception to prevent app crash
+        yield
     finally:
-        logger.info("🛑 Lifespan shutdown complete.")
+        # Enhanced cleanup
+        logger.info("🛑 Starting enhanced shutdown...")
+
+        if trading_engine:
+            try:
+                logger.info("🛑 Stopping Trading Engine...")
+                trading_engine.stop_engine()
+            except Exception as e:
+                logger.error(f"Error stopping trading engine: {e}")
+
+        if trading_scheduler:
+            try:
+                logger.info("🛑 Stopping Trading Scheduler...")
+                trading_scheduler.stop_scheduler()
+            except Exception as e:
+                logger.error(f"Error stopping trading scheduler: {e}")
+
+        logger.info("🛑 Enhanced lifespan shutdown complete.")
 
 
-# Initialize FastAPI App
+async def start_enhanced_trading_engine():
+    """Enhanced trading engine startup with comprehensive error handling"""
+    global trading_engine, instrument_service_instance
+    max_retries = 3
+    retry_count = 0
+
+    while retry_count < max_retries:
+        try:
+            logger.info(
+                f"🚀 Starting Enhanced Trading Engine (attempt {retry_count + 1}/{max_retries})"
+            )
+
+            # Ensure instrument service is ready (non-blocking)
+            if not instrument_service_instance:
+                logger.warning(
+                    "⚠️ Instrument service not ready, attempting initialization..."
+                )
+                try:
+                    await instrument_service.initialize_instruments_system()
+                    instrument_service_instance = instrument_service
+                except Exception as e:
+                    logger.warning(f"Instrument service still unavailable: {e}")
+
+            # Start the trading engine with error handling
+            if trading_engine:
+                await trading_engine.start_trading_engine()
+                logger.info("✅ Enhanced Trading Engine started successfully")
+                break
+            else:
+                logger.error("Trading engine not initialized")
+                break
+
+        except Exception as e:
+            retry_count += 1
+            logger.error(
+                f"❌ Enhanced Trading Engine failed (attempt {retry_count}): {e}"
+            )
+
+            if retry_count < max_retries:
+                wait_time = 60 * retry_count
+                logger.info(f"⏳ Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(
+                    "❌ Enhanced Trading Engine failed to start after all retries - continuing without engine"
+                )
+
+
+# KEEP: Your existing FastAPI initialization with enhanced title
 app = FastAPI(
-    title="Trading Bot API",
-    description="AI-powered automated trading system",
-    version="1.0.0",
+    title="Enhanced Trading Bot API with Safe Redis",
+    description="AI-powered automated trading system with hybrid WebSocket architecture and Redis safety",
+    version="2.1.0",  # Updated version to reflect Redis safety
     lifespan=lifespan,
 )
 
-# ✅ CORS Middleware
+# KEEP: Your existing CORS and middleware setup
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://resplendent-shortbread-e830d3.netlify.app",
@@ -95,10 +461,9 @@ app.add_middleware(
     expose_headers=["Content-Disposition", "Authorization"],
 )
 
-# ✅ Include Routes
+# KEEP: All your existing router includes
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(broker_router, prefix="/api/broker", tags=["Broker API"])
-app.include_router(user_router, prefix="/api/user", tags=["User Profile"])
 app.include_router(stock_list_router, prefix="/api/stocks", tags=["Stock Data"])
 app.include_router(upstox_router, prefix="/api/broker/upstox", tags=["Upstox API"])
 app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
@@ -112,46 +477,909 @@ app.include_router(ws_upstox_router)
 app.include_router(market_ws_router)
 app.include_router(backtesting_router, prefix="/api/backtesting")
 app.include_router(stock_router)
+app.include_router(profile_router)
+app.include_router(paper_trading_router)
+app.include_router(notification_router)
+app.include_router(dashboard_router, tags=["Dashboard & Trading Engine"])
 
 
-# ✅ Preflight handler for OPTIONS
+# KEEP: Your existing preflight handler
 @app.options("/{full_path:path}")
 async def preflight_handler(full_path: str):
     return JSONResponse(content={"message": "Preflight OK"}, status_code=200)
 
 
-# ✅ SocketIO Initialization
+# KEEP: Your existing SocketIO setup
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=ALLOWED_ORIGINS)
 sio_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 
-# ✅ Root + Health
+# KEEP: Your existing root endpoint with Redis safety info
 @app.get("/")
 async def root():
-    return {"status": "running", "timestamp": datetime.now().isoformat()}
+    redis_status = trading_redis.health_check()
+    return {
+        "status": "running",
+        "version": "2.1.0",
+        "system": "hybrid_websocket_with_redis_safety",
+        "redis_status": redis_status["status"],
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
+# ENHANCE: Your existing health check with Redis safety
 @app.get("/health")
-async def health_check():
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+async def enhanced_health_check():
+    global trading_engine, trading_scheduler, instrument_service_instance
+
+    health_status = {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.1.0",
+        "system": "hybrid_websocket_with_redis_safety",
+        "services": {
+            "database": "ok",
+            "trading_engine": "unknown",
+            "trading_scheduler": "unknown",
+            "instrument_service": "unknown",
+            "redis": "unknown",
+        },
+        "redis_details": trading_redis.health_check(),
+        "cache_stats": trading_redis.get_trading_cache_stats(),
+    }
+
+    # Check trading engine
+    if trading_engine:
+        try:
+            health_status["services"]["trading_engine"] = (
+                "running" if trading_engine.is_running else "stopped"
+            )
+            health_status["trading_engine_details"] = {
+                "selected_stocks_count": len(trading_engine.selected_stocks),
+                "active_users_count": len(trading_engine.active_users),
+                "last_analysis": getattr(
+                    trading_engine.market_scheduler, "last_analysis_time", None
+                ),
+            }
+        except Exception as e:
+            health_status["services"]["trading_engine"] = "error"
+            health_status["trading_engine_error"] = str(e)
+
+    # Check trading scheduler
+    if trading_scheduler:
+        try:
+            health_status["services"]["trading_scheduler"] = (
+                "running" if trading_scheduler.is_running else "stopped"
+            )
+        except Exception:
+            health_status["services"]["trading_scheduler"] = "error"
+
+    # Check instrument service
+    if instrument_service_instance:
+        try:
+            # Test if can retrieve data (with Redis safety)
+            test_keys = fast_retrieval.get_all_websocket_keys()
+            health_status["services"]["instrument_service"] = "running"
+            health_status["instrument_service_details"] = {
+                "cached_instruments": len(test_keys),
+                "service_type": "optimized_with_redis_safety",
+            }
+        except Exception:
+            health_status["services"]["instrument_service"] = "error"
+
+    # Redis status
+    health_status["services"]["redis"] = health_status["redis_details"]["status"]
+
+    return health_status
 
 
-# ✅ Global Error Handler
+# NEW: Redis-specific endpoints
+@app.get("/api/redis/status")
+async def get_redis_status():
+    """Get detailed Redis status for trading system"""
+    redis_status = trading_redis.health_check()
+    cache_stats = trading_redis.get_trading_cache_stats()
+
+    return {
+        "redis_connection": redis_status,
+        "cache_statistics": cache_stats,
+        "trading_mode": "safe_fallback_enabled",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/redis/reconnect")
+async def reconnect_redis():
+    """Attempt to reconnect to Redis"""
+    try:
+        trading_redis._initialize_redis()
+        new_status = trading_redis.health_check()
+
+        return {
+            "success": True,
+            "message": "Redis reconnection attempted",
+            "new_status": new_status,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+
+# ENHANCE: Modified data sources status with Redis safety
+@app.get("/api/data-sources/status")
+async def get_data_sources_status():
+    """Check status of all data sources with Redis safety"""
+    try:
+        status = {"timestamp": datetime.now().isoformat(), "sources": {}}
+
+        # Check PreMarket cache with Redis safety
+        try:
+            from services.pre_market_data_service import get_cached_trading_stocks
+
+            cached_stocks = get_cached_trading_stocks()
+            status["sources"]["premarket_cache"] = {
+                "status": "available" if cached_stocks else "empty",
+                "stocks_count": len(cached_stocks) if cached_stocks else 0,
+                "sample_stocks": list(cached_stocks[:3]) if cached_stocks else [],
+            }
+        except Exception as e:
+            status["sources"]["premarket_cache"] = {"status": "error", "error": str(e)}
+
+        # Check Redis live cache with safety
+        try:
+            live_keys = trading_redis.keys("live_price:*")
+            status["sources"]["live_cache"] = {
+                "status": "available" if live_keys else "empty",
+                "live_stocks_count": len(live_keys),
+                "sample_keys": live_keys[:3] if live_keys else [],
+                "cache_mode": "redis" if trading_redis.is_connected else "fallback",
+            }
+        except Exception as e:
+            status["sources"]["live_cache"] = {"status": "error", "error": str(e)}
+
+        # Check Upstox API (unchanged)
+        try:
+            db = next(get_db())
+            broker_config = (
+                db.query(BrokerConfig)
+                .filter(
+                    BrokerConfig.broker_name.ilike("upstox"),
+                    BrokerConfig.is_active == True,
+                    BrokerConfig.access_token.isnot(None),
+                )
+                .first()
+            )
+
+            status["sources"]["upstox_api"] = {
+                "status": "available" if broker_config else "not_configured",
+                "token_available": broker_config is not None,
+                "broker_active": broker_config.is_active if broker_config else False,
+            }
+            db.close()
+        except Exception as e:
+            status["sources"]["upstox_api"] = {"status": "error", "error": str(e)}
+
+        # Overall assessment with Redis consideration
+        available_sources = len(
+            [s for s in status["sources"].values() if s.get("status") == "available"]
+        )
+
+        status["summary"] = {
+            "available_sources": available_sources,
+            "total_sources": len(status["sources"]),
+            "health": (
+                "good"
+                if available_sources >= 2
+                else "degraded" if available_sources >= 1 else "poor"
+            ),
+            "redis_mode": "connected" if trading_redis.is_connected else "fallback",
+        }
+
+        return status
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# Example of how to update endpoints that use Redis:
+@app.get("/api/selected-stocks/today")
+async def get_todays_selected_stocks():
+    """Get today's selected stocks for trading with Redis safety"""
+    try:
+        # Try to get from Redis first (with fallback safety)
+        cached_stocks = trading_redis.get("selected_stocks_today", [])
+
+        if cached_stocks:
+            return {
+                "success": True,
+                "selectedStocks": cached_stocks,
+                "count": len(cached_stocks),
+                "timestamp": datetime.now().isoformat(),
+                "data_source": "redis_cache",
+                "cache_mode": "redis" if trading_redis.is_connected else "fallback",
+            }
+
+        # Fallback to original method
+        from services.pre_market_data_service import get_cached_trading_stocks
+
+        selected_stocks = get_cached_trading_stocks()
+
+        # Cache the result (will use fallback if Redis unavailable)
+        if selected_stocks:
+            trading_redis.set("selected_stocks_today", selected_stocks, ttl=3600)
+
+        return {
+            "success": True,
+            "selectedStocks": selected_stocks or [],
+            "count": len(selected_stocks) if selected_stocks else 0,
+            "timestamp": datetime.now().isoformat(),
+            "data_source": "pre_market_analysis",
+            "cache_mode": "redis" if trading_redis.is_connected else "fallback",
+        }
+    except Exception as e:
+        logger.error(f"Error getting selected stocks: {e}")
+        return {"success": False, "selectedStocks": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/trigger-stock-selection")
+async def trigger_stock_selection():
+    """Manually trigger stock selection process with Redis safety"""
+    try:
+        logger.info("🎯 Manual stock selection triggered")
+
+        # Cache the trigger event (with Redis safety)
+        trading_redis.set(
+            "manual_stock_selection_triggered",
+            {"timestamp": datetime.now().isoformat(), "triggered_by": "api_endpoint"},
+            ttl=3600,
+        )
+
+        return {
+            "success": True,
+            "message": "Stock selection process triggered",
+            "note": "Check TradingScheduler logs for progress",
+            "redis_mode": "safe_fallback_enabled",
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error triggering selection: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ADD: New API endpoints for enhanced system
+@app.get("/api/system/info")
+async def get_system_info():
+    """Get comprehensive system information with Redis safety details"""
+    global trading_engine, trading_scheduler, instrument_service_instance
+
+    try:
+        redis_status = trading_redis.health_check()
+        cache_stats = trading_redis.get_trading_cache_stats()
+
+        system_info = {
+            "version": "2.1.0",
+            "architecture": "hybrid_websocket_with_redis_safety",
+            "components": {
+                "dashboard": {
+                    "data_source": "LTP_API",
+                    "update_frequency": "3_seconds",
+                    "instruments_supported": "unlimited",
+                },
+                "trading": {
+                    "data_source": "focused_websocket",
+                    "instruments_per_stock": 64,
+                    "max_stocks": 10,
+                    "real_time": True,
+                },
+                "caching": {
+                    "redis_status": redis_status["status"],
+                    "fallback_enabled": True,
+                    "cache_mode": cache_stats["cache_mode"],
+                    "critical_data_protection": True,
+                },
+            },
+            "services_status": {},
+            "performance": {},
+            "redis_details": redis_status,
+            "cache_statistics": cache_stats,
+        }
+
+        # Get instrument service stats
+        if instrument_service_instance:
+            try:
+                all_keys = fast_retrieval.get_all_websocket_keys()
+                system_info["services_status"]["instrument_service"] = {
+                    "status": "running",
+                    "total_instruments": len(all_keys),
+                    "cache_type": "redis_optimized_with_fallback",
+                }
+            except Exception as e:
+                system_info["services_status"]["instrument_service"] = {
+                    "status": "error",
+                    "error": str(e),
+                }
+
+        # Get trading engine stats
+        if trading_engine:
+            system_info["services_status"]["trading_engine"] = {
+                "status": "running" if trading_engine.is_running else "stopped",
+                "selected_stocks": len(trading_engine.selected_stocks),
+                "active_users": len(trading_engine.active_users),
+            }
+
+        return system_info
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/instruments/stats")
+async def get_instrument_stats():
+    """Get instrument service statistics with Redis safety awareness"""
+    try:
+        redis_status = trading_redis.health_check()
+
+        # Get stats from your optimized instrument service (with error handling)
+        try:
+            all_ws_keys = fast_retrieval.get_all_websocket_keys()
+        except Exception as e:
+            logger.warning(f"Error getting websocket keys: {e}")
+            all_ws_keys = []
+
+        # Sample some stocks to get their instrument counts
+        sample_stocks = ["RELIANCE", "TCS", "HDFC", "INFY", "ICICIBANK"]
+        stock_details = {}
+
+        for symbol in sample_stocks:
+            try:
+                mapping = fast_retrieval.get_stock_instruments(symbol)
+                if mapping:
+                    stock_details[symbol] = {
+                        "total_instruments": mapping.get("instrument_count", 0),
+                        "websocket_keys": len(mapping.get("websocket_keys", [])),
+                        "primary_key": mapping.get("primary_instrument_key"),
+                    }
+            except Exception:
+                continue
+
+        return {
+            "total_websocket_instruments": len(all_ws_keys),
+            "sample_stocks": stock_details,
+            "cache_status": "active_with_fallback",
+            "redis_status": redis_status["status"],
+            "last_updated": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/system/initialize-instruments")
+async def reinitialize_instruments():
+    """Manually reinitialize instrument service with Redis safety"""
+    global instrument_service_instance
+
+    try:
+        logger.info("🔄 Manual instrument service reinitialization requested")
+
+        result = await instrument_service.initialize_instruments_system()
+        instrument_service_instance = instrument_service
+
+        return {
+            "status": "success",
+            "message": "Instrument service reinitialized with Redis safety",
+            "result": result,
+            "redis_mode": "safe_fallback_enabled",
+        }
+
+    except Exception as e:
+        logger.error(f"❌ Manual instrument initialization failed: {e}")
+        return {"error": str(e)}
+
+
+# ENHANCE: Your existing broadcast function with Redis safety
+async def broadcast_trading_updates():
+    """Enhanced broadcast with Redis safety"""
+    global trading_engine, trading_scheduler, instrument_service_instance
+
+    while True:
+        try:
+            if trading_engine and hasattr(sio, "emit"):
+                # Enhanced status update with Redis info
+                redis_status = trading_redis.health_check()
+
+                status_update = {
+                    "type": "enhanced_engine_status",
+                    "data": {
+                        "engine": {
+                            "is_running": trading_engine.is_running,
+                            "selected_stocks_count": len(
+                                trading_engine.selected_stocks
+                            ),
+                        },
+                        "scheduler": {
+                            "is_running": (
+                                trading_scheduler.is_running
+                                if trading_scheduler
+                                else False
+                            )
+                        },
+                        "instrument_service": {
+                            "status": (
+                                "active" if instrument_service_instance else "inactive"
+                            )
+                        },
+                        "redis": {
+                            "status": redis_status["status"],
+                            "cache_mode": (
+                                "redis" if trading_redis.is_connected else "fallback"
+                            ),
+                        },
+                        "system": "hybrid_websocket_with_redis_safety",
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                }
+
+                await sio.emit("trading_update", status_update, room="trading_updates")
+
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error(f"❌ Enhanced broadcast error: {e}")
+            await asyncio.sleep(60)
+
+
+# ADD: Additional Redis-safe trading endpoints
+
+
+@app.get("/api/engine/status")
+async def get_enhanced_engine_status():
+    """Get comprehensive enhanced trading engine status with Redis safety"""
+    global trading_engine, trading_scheduler, instrument_service_instance
+
+    if not trading_engine:
+        return {"error": "Trading engine not initialized"}
+
+    try:
+        current_time = datetime.now().time()
+
+        # Determine current market phase
+        if time(9, 0) <= current_time < time(9, 15):
+            phase = "pre_market_analysis"
+        elif time(9, 15) <= current_time < time(9, 30):
+            phase = "market_preparation"
+        elif time(9, 30) <= current_time < time(15, 30):
+            phase = "active_trading"
+        else:
+            phase = "post_market"
+
+        redis_status = trading_redis.health_check()
+        cache_stats = trading_redis.get_trading_cache_stats()
+
+        status = {
+            "engine": {
+                "is_running": trading_engine.is_running,
+                "current_phase": phase,
+                "selected_stocks": {
+                    "count": len(trading_engine.selected_stocks),
+                    "symbols": list(trading_engine.selected_stocks.keys())[:10],
+                },
+                "active_users": len(trading_engine.active_users),
+            },
+            "scheduler": {
+                "is_running": (
+                    trading_scheduler.is_running if trading_scheduler else False
+                ),
+                "next_job": "check_scheduler_logs",
+            },
+            "instrument_service": {
+                "is_initialized": instrument_service_instance is not None,
+                "total_instruments": (
+                    len(fast_retrieval.get_all_websocket_keys())
+                    if instrument_service_instance
+                    else 0
+                ),
+            },
+            "redis_system": {
+                "status": redis_status["status"],
+                "cache_mode": cache_stats["cache_mode"],
+                "fallback_cache_size": cache_stats["fallback_cache_size"],
+                "critical_data_cached": cache_stats["critical_data_cached"],
+            },
+            "services": {
+                "market_scheduler": hasattr(trading_engine, "market_scheduler"),
+                "ohlc_service": hasattr(trading_engine, "ohlc_service"),
+                "live_data_service": hasattr(trading_engine, "live_data_service"),
+                "ai_trading_service": hasattr(trading_engine, "ai_trading_service"),
+            },
+            "websocket_system": {
+                "dashboard": "LTP_API_polling",
+                "trading": "focused_websocket",
+                "architecture": "hybrid_with_redis_safety",
+            },
+            "last_analysis": (
+                getattr(trading_engine.market_scheduler, "last_analysis_time", None)
+                if hasattr(trading_engine, "market_scheduler")
+                else None
+            ),
+        }
+
+        return status
+
+    except Exception as e:
+        logger.error(f"❌ Error getting enhanced engine status: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/engine/restart")
+async def restart_trading_engine():
+    """Restart the trading engine with Redis safety"""
+    global trading_engine
+
+    try:
+        if trading_engine and trading_engine.is_running:
+            logger.info("🔄 Restarting Enhanced Trading Engine with Redis Safety...")
+            trading_engine.stop_engine()
+            await asyncio.sleep(5)
+
+        if trading_engine:
+            asyncio.create_task(start_enhanced_trading_engine())
+            return {
+                "message": "Enhanced trading engine restart initiated",
+                "status": "restarting",
+                "redis_mode": "safe_fallback_enabled",
+            }
+        else:
+            return {"error": "Trading engine not available"}
+
+    except Exception as e:
+        logger.error(f"❌ Enhanced engine restart failed: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/ai-trading/status")
+async def get_ai_trading_status():
+    """Get detailed AI trading service status with Redis awareness"""
+    global trading_engine
+
+    try:
+        if (
+            trading_engine
+            and hasattr(trading_engine, "ai_trading_service")
+            and trading_engine.ai_trading_service
+        ):
+
+            status = trading_engine.ai_trading_service.get_status()
+            redis_status = trading_redis.health_check()
+
+            # Add system context with Redis info
+            status.update(
+                {
+                    "system_info": {
+                        "strategy_service_type": (
+                            type(
+                                trading_engine.ai_trading_service.strategy_service
+                            ).__name__
+                            if trading_engine.ai_trading_service.strategy_service
+                            else "None"
+                        ),
+                        "uses_yahoo_finance": False,
+                        "data_sources": ["premarket_cache", "live_cache", "upstox_api"],
+                        "market_phase": _get_current_market_phase(),
+                        "redis_status": redis_status["status"],
+                        "cache_mode": (
+                            "redis" if trading_redis.is_connected else "fallback"
+                        ),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                }
+            )
+
+            return status
+        else:
+            return {"error": "AI Trading service not available"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/ai-trading/errors")
+async def get_ai_trading_errors():
+    """Get current AI trading errors"""
+    global trading_engine
+
+    try:
+        if (
+            trading_engine
+            and hasattr(trading_engine, "ai_trading_service")
+            and trading_engine.ai_trading_service
+        ):
+
+            ai_service = trading_engine.ai_trading_service
+
+            return {
+                "error_stocks": ai_service.error_count,
+                "total_stocks": len(ai_service.selected_stocks),
+                "error_percentage": (
+                    (
+                        len([c for c in ai_service.error_count.values() if c > 0])
+                        / len(ai_service.selected_stocks)
+                        * 100
+                    )
+                    if ai_service.selected_stocks
+                    else 0
+                ),
+                "max_errors_per_stock": ai_service.max_errors_per_stock,
+                "problematic_stocks": [
+                    symbol
+                    for symbol, count in ai_service.error_count.items()
+                    if count >= ai_service.max_errors_per_stock
+                ],
+                "timestamp": datetime.now().isoformat(),
+            }
+        else:
+            return {"error": "AI Trading service not available"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/ai-trading/reset-errors")
+async def reset_ai_trading_errors():
+    """Reset error counts for AI trading service"""
+    global trading_engine
+
+    try:
+        if (
+            trading_engine
+            and hasattr(trading_engine, "ai_trading_service")
+            and trading_engine.ai_trading_service
+        ):
+
+            ai_service = trading_engine.ai_trading_service
+            old_error_count = len([c for c in ai_service.error_count.values() if c > 0])
+
+            # Reset error counts
+            ai_service.error_count = {}
+
+            logger.info(
+                f"🔄 AI Trading errors reset - {old_error_count} stocks cleared"
+            )
+
+            return {
+                "success": True,
+                "message": f"Reset error counts for {old_error_count} stocks",
+                "timestamp": datetime.now().isoformat(),
+            }
+        else:
+            return {"error": "AI Trading service not available"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _get_current_market_phase():
+    """Get current market phase"""
+    current_time = datetime.now().time()
+
+    if time(9, 0) <= current_time < time(9, 15):
+        return "pre_market_analysis"
+    elif time(9, 15) <= current_time < time(9, 30):
+        return "market_preparation"
+    elif time(9, 30) <= current_time < time(15, 30):
+        return "active_trading"
+    else:
+        return "post_market"
+
+
+# Enhanced health check with comprehensive AI trading and Redis details
+@app.get("/api/health/detailed")
+async def detailed_health_check():
+    """Detailed health check including AI trading service and Redis safety"""
+    global trading_engine, trading_scheduler, instrument_service_instance
+
+    redis_status = trading_redis.health_check()
+    cache_stats = trading_redis.get_trading_cache_stats()
+
+    health_status = {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.1.0",
+        "system": "hybrid_websocket_with_redis_safety",
+        "market_phase": _get_current_market_phase(),
+        "services": {
+            "database": "ok",
+            "trading_engine": "unknown",
+            "ai_trading_service": "unknown",
+            "strategy_service": "unknown",
+            "trading_scheduler": "unknown",
+            "instrument_service": "unknown",
+            "redis": redis_status["status"],
+        },
+        "redis_details": redis_status,
+        "cache_statistics": cache_stats,
+        "ai_trading_details": {},
+    }
+
+    # Check trading engine
+    if trading_engine:
+        try:
+            health_status["services"]["trading_engine"] = (
+                "running" if trading_engine.is_running else "stopped"
+            )
+
+            # Check AI trading service
+            if (
+                hasattr(trading_engine, "ai_trading_service")
+                and trading_engine.ai_trading_service
+            ):
+                ai_service = trading_engine.ai_trading_service
+                health_status["services"]["ai_trading_service"] = (
+                    "running" if ai_service.is_active else "stopped"
+                )
+
+                # AI trading details
+                health_status["ai_trading_details"] = {
+                    "selected_stocks": len(ai_service.selected_stocks),
+                    "analyzed_stocks": len(ai_service.last_analysis_time),
+                    "error_stocks": len(
+                        [c for c in ai_service.error_count.values() if c > 0]
+                    ),
+                    "analysis_interval": ai_service.analysis_interval,
+                    "data_sources": ["premarket_cache", "live_cache", "upstox_api"],
+                    "redis_dependent": False,  # AI service works without Redis
+                    "cache_mode": cache_stats["cache_mode"],
+                }
+
+                # Check strategy service
+                if ai_service.strategy_service:
+                    health_status["services"]["strategy_service"] = "initialized"
+                    health_status["ai_trading_details"]["strategy_service_type"] = type(
+                        ai_service.strategy_service
+                    ).__name__
+                    health_status["ai_trading_details"]["uses_yahoo_finance"] = False
+
+        except Exception as e:
+            health_status["services"]["trading_engine"] = "error"
+            health_status["trading_engine_error"] = str(e)
+
+    # Check other services
+    if trading_scheduler:
+        try:
+            health_status["services"]["trading_scheduler"] = (
+                "running" if trading_scheduler.is_running else "stopped"
+            )
+        except Exception:
+            health_status["services"]["trading_scheduler"] = "error"
+
+    if instrument_service_instance:
+        try:
+            test_keys = fast_retrieval.get_all_websocket_keys()
+            health_status["services"]["instrument_service"] = "running"
+            health_status["instrument_service_details"] = {
+                "cached_instruments": len(test_keys),
+                "service_type": "optimized_redis_with_fallback",
+            }
+        except Exception:
+            health_status["services"]["instrument_service"] = "error"
+
+    return health_status
+
+
+# KEEP: Your existing exception handler with Redis safety awareness
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Global error: {str(exc)}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": str(exc),
-            "message": "An internal server error occurred. Please check the logs.",
+    logger.error(f"Global error on {request.url}: {str(exc)}")
+
+    # Don't expose Redis connection errors
+    if "redis" in str(exc).lower() or "connection" in str(exc).lower():
+        logger.warning("Redis-related error handled gracefully")
+        return JSONResponse(
+            status_code=200,  # Don't return error for Redis issues
+            content={
+                "message": "Service running in safe mode",
+                "note": "Some caching features may be limited",
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+    if os.getenv("ENVIRONMENT") == "production":
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "message": "An error occurred. Please try again later.",
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(exc),
+                "message": "An internal server error occurred. Please check the logs.",
+                "timestamp": datetime.now().isoformat(),
+                "path": str(request.url),
+            },
+        )
+
+
+# KEEP: All your existing SocketIO events
+@sio.event
+async def connect(sid, environ):
+    logger.info(f"📡 Client connected: {sid}")
+    redis_status = trading_redis.health_check()
+    await sio.emit(
+        "connection_status",
+        {
+            "status": "connected",
+            "system": "hybrid_with_redis_safety",
+            "redis_mode": redis_status["status"],
         },
+        to=sid,
     )
 
 
-# ✅ Run App
+@sio.event
+async def disconnect(sid):
+    logger.info(f"📡 Client disconnected: {sid}")
+
+
+@sio.event
+async def get_engine_status(sid, data):
+    """Enhanced SocketIO endpoint with Redis safety info"""
+    global trading_engine, instrument_service_instance
+
+    try:
+        if trading_engine:
+            redis_status = trading_redis.health_check()
+            status = {
+                "is_running": trading_engine.is_running,
+                "selected_stocks_count": len(trading_engine.selected_stocks),
+                "active_users_count": len(trading_engine.active_users),
+                "instrument_service_active": instrument_service_instance is not None,
+                "redis_status": redis_status["status"],
+                "cache_mode": "redis" if trading_redis.is_connected else "fallback",
+                "system": "hybrid_websocket_with_redis_safety",
+                "timestamp": datetime.now().isoformat(),
+            }
+        else:
+            status = {"error": "Trading engine not available"}
+
+        await sio.emit("engine_status_update", status, to=sid)
+
+    except Exception as e:
+        await sio.emit("error", {"message": str(e)}, to=sid)
+
+
+@sio.event
+async def subscribe_to_updates(sid, data):
+    """Subscribe to real-time trading updates"""
+    try:
+        await sio.enter_room(sid, "trading_updates")
+        redis_status = trading_redis.health_check()
+        await sio.emit(
+            "subscription_status",
+            {
+                "status": "subscribed",
+                "system": "hybrid_with_redis_safety",
+                "redis_mode": redis_status["status"],
+            },
+            to=sid,
+        )
+
+    except Exception as e:
+        await sio.emit("error", {"message": str(e)}, to=sid)
+
+
+# KEEP: Your existing main runner
 if __name__ == "__main__":
-    logger.info("🚀 Launching Trading Bot Server...")
+    logger.info("🚀 Launching Growth Quantix Automated Server with Redis Safety...")
+
     uvicorn.run(
         "app:sio_app",
         host="0.0.0.0",

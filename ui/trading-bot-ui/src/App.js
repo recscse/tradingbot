@@ -14,13 +14,14 @@ import TradeControlPage from "./pages/TradeControlPage";
 import ConfigPage from "./pages/BrokerConfigPage";
 import { isAuthenticated } from "./services/authService";
 import { CustomThemeProvider } from "./context/ThemeContext";
+import { NotificationProvider } from "./context/NotificationContext";
 import { CssBaseline } from "@mui/material";
 import PrivateRoute from "./routes/PrivateRoute";
 import StockAnalysisPage from "./pages/StockAnalysisPage";
 import ProfilePage from "./pages/ProfilePage";
 import BacktestingPage from "./pages/BacktestingPage";
 import PaperTradingPage from "./pages/PaperTradingPage";
-import { MarketProvider } from "./context/MarketProvider"; // ✅ NEW
+import { MarketProvider } from "./context/MarketProvider";
 import OptionChainPage from "./pages/OptionChainPage";
 import AboutPage from "./pages/AboutPage";
 import ContactPage from "./pages/ContactPage";
@@ -41,46 +42,52 @@ const App = () => {
   return (
     <CustomThemeProvider>
       <CssBaseline />
-      <Router>
-        <TermsModal />
-        <Routes>
-          <Route
-            path="/"
-            element={
-              isLoggedIn ? <Navigate to="/dashboard" /> : <LandingPage />
-            }
-          />
+      <NotificationProvider>
+        {" "}
+        {/* ✅ Wrap entire app with NotificationProvider */}
+        <Router>
+          <TermsModal />
+          <Routes>
+            <Route
+              path="/"
+              element={
+                isLoggedIn ? <Navigate to="/dashboard" /> : <LandingPage />
+              }
+            />
 
-          {/* ✅ Wrap private routes with MarketProvider */}
-          <Route
-            element={
-              <PrivateRoute>
-                <MarketProvider>
-                  <Layout />
-                </MarketProvider>
-              </PrivateRoute>
-            }
-          >
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/option-chain/:symbol" element={<OptionChainPage />} />
+            {/* ✅ Private routes with MarketProvider */}
+            <Route
+              element={
+                <PrivateRoute>
+                  <MarketProvider>
+                    <Layout />
+                  </MarketProvider>
+                </PrivateRoute>
+              }
+            >
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route
+                path="/option-chain/:symbol"
+                element={<OptionChainPage />}
+              />
+              <Route path="/trade-control" element={<TradeControlPage />} />
+              <Route path="/config" element={<ConfigPage />} />
+              <Route path="/backtesting" element={<BacktestingPage />} />
+              <Route path="/papertrading" element={<PaperTradingPage />} />
+              <Route path="/analysis" element={<StockAnalysisPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+            </Route>
 
-            <Route path="/trade-control" element={<TradeControlPage />} />
-            <Route path="/config" element={<ConfigPage />} />
-            <Route path="/backtesting" element={<BacktestingPage />} />
-            <Route path="/papertrading" element={<PaperTradingPage />} />
-            <Route path="/analysis" element={<StockAnalysisPage />} />
-            <Route path="/profile" element={<ProfilePage />} />
-          </Route>
-
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/contact" element={<ContactPage />} />
-          <Route path="/privacy" element={<PrivacyPolicyPage />} />
-          <Route path="/terms" element={<TermsPage />} />
-          <Route path="/about" element={<AboutPage />} />
-          <Route path="/security" element={<SecurityPage />} />
-        </Routes>
-      </Router>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/contact" element={<ContactPage />} />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/security" element={<SecurityPage />} />
+          </Routes>
+        </Router>
+      </NotificationProvider>
     </CustomThemeProvider>
   );
 };
