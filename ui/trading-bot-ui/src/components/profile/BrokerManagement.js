@@ -642,4 +642,310 @@ const BrokerManagement = () => {
                     bgcolor: alpha(theme.palette.primary.main, 0.2),
                   },
                 }}
-      
+              >
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setShowAddBroker(true)}
+              sx={{
+                borderRadius: 2,
+                fontWeight: 600,
+                px: 3,
+              }}
+            >
+              Add Broker
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
+
+      {/* Main Content */}
+      {brokers.length === 0 ? (
+        <Paper
+          elevation={0}
+          sx={{
+            p: 6,
+            textAlign: "center",
+            borderRadius: 3,
+            border: `2px dashed ${alpha(theme.palette.divider, 0.3)}`,
+          }}
+        >
+          <Avatar
+            sx={{
+              width: 80,
+              height: 80,
+              bgcolor: alpha(theme.palette.primary.main, 0.1),
+              color: "primary.main",
+              mx: "auto",
+              mb: 3,
+            }}
+          >
+            <BusinessIcon sx={{ fontSize: 40 }} />
+          </Avatar>
+          <Typography variant="h6" gutterBottom>
+            No Brokers Connected
+          </Typography>
+          <Typography variant="body2" color="text.secondary" mb={3}>
+            Connect your first broker account to start trading
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => setShowAddBroker(true)}
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            Add Your First Broker
+          </Button>
+        </Paper>
+      ) : (
+        <Grid container spacing={3}>
+          {brokers.map((broker, index) => renderBrokerCard(broker, index))}
+        </Grid>
+      )}
+
+      {/* Add Broker Dialog */}
+      <Dialog
+        open={showAddBroker}
+        onClose={() => setShowAddBroker(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            maxHeight: "90vh",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            pb: 1,
+            borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <Avatar
+              sx={{
+                bgcolor: alpha(theme.palette.primary.main, 0.1),
+                color: "primary.main",
+                width: 40,
+                height: 40,
+              }}
+            >
+              <AddIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="h6" fontWeight={700}>
+                Connect New Broker
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Add your broker credentials to start trading
+              </Typography>
+            </Box>
+          </Stack>
+          <IconButton
+            onClick={() => setShowAddBroker(false)}
+            sx={{ position: "absolute", right: 8, top: 8 }}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent sx={{ pt: 3 }}>
+          <Stack spacing={3}>
+            <Alert
+              severity="info"
+              icon={<SecurityIcon />}
+              sx={{ borderRadius: 2 }}
+            >
+              Your credentials are encrypted and stored securely. We never share
+              your trading data.
+            </Alert>
+
+            <FormControl fullWidth>
+              <InputLabel>Broker</InputLabel>
+              <Select
+                value={newBroker.broker_name}
+                label="Broker"
+                onChange={(e) =>
+                  setNewBroker({ ...newBroker, broker_name: e.target.value })
+                }
+                sx={{ borderRadius: 2 }}
+              >
+                <MenuItem value="Zerodha">Zerodha</MenuItem>
+                <MenuItem value="Upstox">Upstox</MenuItem>
+                <MenuItem value="Angel One">Angel One</MenuItem>
+                <MenuItem value="Dhan">Dhan</MenuItem>
+                <MenuItem value="Fyers">Fyers</MenuItem>
+                <MenuItem value="IIFL">IIFL</MenuItem>
+                <MenuItem value="5paisa">5paisa</MenuItem>
+                <MenuItem value="Kotak">Kotak Securities</MenuItem>
+                <MenuItem value="ICICI">ICICI Direct</MenuItem>
+              </Select>
+            </FormControl>
+
+            <TextField
+              fullWidth
+              label="API Key"
+              value={newBroker.api_key}
+              onChange={(e) =>
+                setNewBroker({ ...newBroker, api_key: e.target.value })
+              }
+              placeholder="Enter your API key"
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: 2,
+                },
+              }}
+            />
+
+            <TextField
+              fullWidth
+              label="API Secret"
+              type={showApiSecret.add ? "text" : "password"}
+              value={newBroker.api_secret}
+              onChange={(e) =>
+                setNewBroker({ ...newBroker, api_secret: e.target.value })
+              }
+              placeholder="Enter your API secret"
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      onClick={() =>
+                        setShowApiSecret({
+                          ...showApiSecret,
+                          add: !showApiSecret.add,
+                        })
+                      }
+                      edge="end"
+                    >
+                      {showApiSecret.add ? (
+                        <VisibilityOffIcon />
+                      ) : (
+                        <VisibilityIcon />
+                      )}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  borderRadius: 2,
+                },
+              }}
+            />
+
+            {connectionTest[newBroker.broker_name] === "testing" && (
+              <Alert
+                severity="info"
+                icon={<CircularProgress size={16} />}
+                sx={{ borderRadius: 2 }}
+              >
+                Testing connection to {newBroker.broker_name}...
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 3, pt: 2 }}>
+          <Button
+            onClick={() => setShowAddBroker(false)}
+            sx={{ borderRadius: 2 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleAddBroker}
+            disabled={
+              !newBroker.broker_name ||
+              !newBroker.api_key ||
+              !newBroker.api_secret ||
+              connectionTest[newBroker.broker_name] === "testing"
+            }
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            {connectionTest[newBroker.broker_name] === "testing" ? (
+              <CircularProgress size={20} color="inherit" />
+            ) : (
+              "Connect Broker"
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteConfirm.open}
+        onClose={() => setDeleteConfirm({ open: false, brokerId: null })}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3 },
+        }}
+      >
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <Avatar
+              sx={{
+                bgcolor: alpha(theme.palette.error.main, 0.1),
+                color: "error.main",
+                width: 40,
+                height: 40,
+              }}
+            >
+              <WarningIcon />
+            </Avatar>
+            <Typography variant="h6" fontWeight={700}>
+              Remove Broker?
+            </Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Typography color="text.secondary">
+            This action cannot be undone. You'll need to reconnect this broker
+            if you want to use it again.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 1 }}>
+          <Button
+            onClick={() => setDeleteConfirm({ open: false, brokerId: null })}
+            sx={{ borderRadius: 2 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => handleDeleteBroker(deleteConfirm.brokerId)}
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            Remove
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+      >
+        <Alert
+          onClose={handleCloseSnackbar}
+          severity={snackbar.severity}
+          sx={{ borderRadius: 2 }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+export default BrokerManagement;
