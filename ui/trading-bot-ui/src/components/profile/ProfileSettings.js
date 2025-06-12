@@ -624,4 +624,317 @@ const ProfileSettings = ({
                     >
                       Cancel
                     </Button>
-          
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={updating || !formData.full_name?.trim()}
+                      startIcon={
+                        updating ? <CircularProgress size={20} /> : <SaveIcon />
+                      }
+                      sx={{
+                        borderRadius: 2,
+                        fontWeight: 600,
+                        px: 4,
+                      }}
+                    >
+                      {updating ? "Saving..." : "Save Changes"}
+                    </Button>
+                  </Stack>
+                </Grid>
+              )}
+            </Grid>
+          </Box>
+        </Card>
+      </Fade>
+
+      {/* Account Information */}
+      <Fade in={true} timeout={700}>
+        <Card
+          sx={{
+            mb: 4,
+            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+            background: alpha(theme.palette.background.paper, 0.8),
+            backdropFilter: "blur(20px)",
+            borderRadius: 3,
+          }}
+          elevation={0}
+        >
+          <Box
+            sx={{
+              p: { xs: 3, sm: 4 },
+              borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <AccountIcon sx={{ color: "info.main" }} />
+            <Typography variant="h6" fontWeight={600}>
+              Account Information
+            </Typography>
+          </Box>
+
+          <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+            <Grid container spacing={3}>
+              {/* Account Status */}
+              <Grid item xs={12}>
+                <Typography
+                  variant="subtitle2"
+                  color="text.secondary"
+                  gutterBottom
+                >
+                  Account Status
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip
+                    icon={
+                      profileData?.is_active ? <CheckIcon /> : <CancelIcon />
+                    }
+                    label={profileData?.is_active ? "Active" : "Inactive"}
+                    color={profileData?.is_active ? "success" : "error"}
+                    sx={{ fontWeight: 500 }}
+                  />
+                  {verificationStatus.isVerified && (
+                    <Chip
+                      icon={<VerifiedIcon />}
+                      label="Verified"
+                      color="primary"
+                      sx={{ fontWeight: 500 }}
+                    />
+                  )}
+                  {(profileData?.isPremium || profileData?.is_premium) && (
+                    <Chip
+                      icon={<StarIcon />}
+                      label="Premium"
+                      color="warning"
+                      sx={{ fontWeight: 500 }}
+                    />
+                  )}
+                </Stack>
+              </Grid>
+
+              {/* Account Info Items */}
+              {accountInfo.map((item, index) => (
+                <Grid item xs={12} sm={6} lg={3} key={index}>
+                  <Paper
+                    variant="outlined"
+                    sx={{
+                      p: 2,
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 2,
+                      bgcolor: alpha(theme.palette[item.color].main, 0.04),
+                      border: `1px solid ${alpha(
+                        theme.palette[item.color].main,
+                        0.1
+                      )}`,
+                      borderRadius: 2,
+                    }}
+                  >
+                    <Avatar
+                      sx={{
+                        bgcolor: alpha(theme.palette[item.color].main, 0.1),
+                        color: `${item.color}.main`,
+                        width: 40,
+                        height: 40,
+                      }}
+                    >
+                      <item.icon sx={{ fontSize: 20 }} />
+                    </Avatar>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: "block" }}
+                      >
+                        {item.label}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        fontWeight={500}
+                        sx={{
+                          wordBreak: "break-word",
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {item.value}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+          </CardContent>
+        </Card>
+      </Fade>
+
+      {/* Danger Zone */}
+      <Fade in={true} timeout={900}>
+        <Card
+          sx={{
+            border: `2px solid ${alpha(theme.palette.error.main, 0.2)}`,
+            background: alpha(theme.palette.error.main, 0.02),
+            backdropFilter: "blur(20px)",
+            borderRadius: 3,
+          }}
+          elevation={0}
+        >
+          <Box
+            sx={{
+              p: { xs: 3, sm: 4 },
+              borderBottom: `1px solid ${alpha(theme.palette.error.main, 0.2)}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <AlertIcon sx={{ color: "error.main" }} />
+            <Typography variant="h6" fontWeight={600} color="error.main">
+              Danger Zone
+            </Typography>
+          </Box>
+
+          <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              alignItems="flex-start"
+              spacing={3}
+            >
+              <Avatar
+                sx={{
+                  bgcolor: alpha(theme.palette.error.main, 0.1),
+                  color: "error.main",
+                  width: 48,
+                  height: 48,
+                }}
+              >
+                <DeleteIcon />
+              </Avatar>
+              <Box sx={{ flex: 1 }}>
+                <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+                  Delete Account
+                </Typography>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 3 }}
+                >
+                  Once you delete your account, there is no going back. Please
+                  be certain. All your trading data, broker connections, and
+                  account information will be permanently lost.
+                </Typography>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteIcon />}
+                  onClick={() => setDeleteDialogOpen(true)}
+                  disabled={updating}
+                  sx={{
+                    borderRadius: 2,
+                    "&:hover": {
+                      bgcolor: alpha(theme.palette.error.main, 0.04),
+                    },
+                  }}
+                >
+                  Delete Account
+                </Button>
+              </Box>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Fade>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => !updating && setDeleteDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 3,
+            background: alpha(theme.palette.background.paper, 0.95),
+            backdropFilter: "blur(20px)",
+          },
+        }}
+      >
+        <DialogTitle
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 2,
+            color: "error.main",
+          }}
+        >
+          <AlertIcon />
+          Confirm Account Deletion
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
+            <Typography variant="body2" fontWeight={600}>
+              This action cannot be undone!
+            </Typography>
+          </Alert>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Are you absolutely sure you want to delete your account? This will:
+          </Typography>
+
+          <Box component="ul" sx={{ mt: 2, pl: 2, mb: 3 }}>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Permanently delete all your personal information
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Remove all broker connections and trading data
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Cancel any active subscriptions
+            </Typography>
+            <Typography component="li" variant="body2" color="text.secondary">
+              Make your account unrecoverable
+            </Typography>
+          </Box>
+
+          <TextField
+            fullWidth
+            label="Type 'DELETE' to confirm"
+            value={deleteConfirmText}
+            onChange={(e) => setDeleteConfirmText(e.target.value)}
+            disabled={updating}
+            error={deleteConfirmText !== "" && deleteConfirmText !== "DELETE"}
+            helperText="Type DELETE in capital letters to confirm"
+            sx={{
+              "& .MuiInputBase-root": {
+                borderRadius: 2,
+              },
+            }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 3, gap: 1 }}>
+          <Button
+            onClick={() => setDeleteDialogOpen(false)}
+            disabled={updating}
+            sx={{ borderRadius: 2 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={
+              updating ? <CircularProgress size={16} /> : <DeleteIcon />
+            }
+            onClick={handleDeleteAccount}
+            disabled={updating || deleteConfirmText !== "DELETE"}
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            {updating ? "Deleting..." : "Yes, Delete My Account"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+export default ProfileSettings;
