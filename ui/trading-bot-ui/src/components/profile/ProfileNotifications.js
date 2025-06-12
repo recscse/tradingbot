@@ -1,5 +1,5 @@
 // src/components/profile/ProfileNotifications.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -30,6 +30,14 @@ import {
   Alert,
   CircularProgress,
   Skeleton,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar,
+  FormControlLabel,
+  TextField,
 } from "@mui/material";
 import {
   Notifications as NotificationsIcon,
@@ -49,6 +57,9 @@ import {
   AccountBalance as AccountIcon,
   Info as InfoIcon,
   Refresh as RefreshIcon,
+  Delete as DeleteIcon,
+  CheckCircle as CheckIcon,
+  Send as TestIcon,
 } from "@mui/icons-material";
 import { toast } from "react-toastify";
 
@@ -57,12 +68,13 @@ const ProfileNotifications = ({
   onUpdate,
   onMarkAsRead,
   onDeleteNotification,
+  onTestNotification,
   loading = false,
   error = null,
+  userProfile = {},
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  // const isTablet = useMediaQuery(theme.breakpoints.down("md"));
 
   const [notificationSettings, setNotificationSettings] = useState({
     email_trading_alerts: true,
@@ -73,22 +85,62 @@ const ProfileNotifications = ({
     push_price_alerts: true,
     sms_security_alerts: true,
     sms_trading_alerts: false,
+    frequency_trading: 'instant',
+    frequency_account: 'instant',
+    frequency_marketing: 'weekly',
+    quiet_hours_enabled: false,
+    quiet_hours_start: '22:00',
+    quiet_hours_end: '08:00',
   });
 
   const [filter, setFilter] = useState("all");
   const [updating, setUpdating] = useState(false);
   const [localError, setLocalError] = useState("");
+  const [testDialog, setTestDialog] = useState({ open: false, type: '' });
+  const [bulkAction, setBulkAction] = useState(false);
+  const [selectedNotifications, setSelectedNotifications] = useState(new Set());
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
+  // Memoized notification filtering
+  const filteredNotifications = useMemo(() => {
+    if (!Array.isArray(notifications)) return [];
+    
+    return notifications.filter((notification) => {
+      if (!notification) return false;
+      
+      switch (filter) {
+        case "unread":
+          return !notification.read && !notification.is_read;
+        case "read":
+          return notification.read || notification.is_read;
+        case "security":
+          return notification.type?.toLowerCase() === "security";
+        case "trading":
+          return notification.type?.toLowerCase() === "trading";
+        case "account":
+          return notification.type?.toLowerCase() === "account";
+        default:
+          return true;
+      }
+    });
+  }, [notifications, filter]);
 
   // Load settings from props or localStorage
   useEffect(() => {
     const savedSettings = localStorage.getItem("notificationSettings");
     if (savedSettings) {
       try {
-        setNotificationSettings(JSON.parse(savedSettings));
+        const parsed = JSON.parse(savedSettings);
+        setNotificationSettings(prev => ({ ...prev, ...parsed }));
       } catch (error) {
         console.error("Failed to parse saved notification settings:", error);
       }
     }
+  }, []);
+
+  // Show snackbar
+  const showSnackbar = useCallback((message, severity = 'success') => {
+    setSnackbar({ open: true, message, severity });
   }, []);
 
   const handleSettingChange = async (setting) => {
@@ -102,16 +154,13 @@ const ProfileNotifications = ({
       };
 
       setNotificationSettings(newSettings);
-
-      // Save to localStorage
       localStorage.setItem("notificationSettings", JSON.stringify(newSettings));
 
-      // Call parent update handler if provided
       if (onUpdate) {
         await onUpdate(newSettings);
       }
 
-      toast.success("Notification preferences updated");
+      showSnackbar("Notification preferences updated");
     } catch (error) {
       console.error("Error updating notification settings:", error);
       setLocalError("Failed to update notification settings");
@@ -120,106 +169,93 @@ const ProfileNotifications = ({
         ...prev,
         [setting]: !prev[setting],
       }));
+      showSnackbar("Failed to update preferences", 'error');
     } finally {
       setUpdating(false);
     }
   };
 
-  // Safe notification filtering
-  const filteredNotifications = Array.isArray(notifications)
-    ? notifications.filter((notification) => {
-        if (!notification) return false;
-        if (filter === "unread")
-          return !notification.read && !notification.is_read;
-        if (filter === "read") return notification.read || notification.is_read;
-        return true;
-      })
-    : [];
+  const handleFrequencyChange = async (setting, value) => {
+    try {
+      setUpdating(true);
+      const newSettings = { ...notificationSettings, [setting]: value };
+      setNotificationSettings(newSettings);
+      localStorage.setItem("notificationSettings", JSON.stringify(newSettings));
+      
+      if (onUpdate) {
+        await onUpdate(newSettings);
+      }
+      
+      showSnackbar("Frequency updated");
+    } catch (error) {
+      console.error("Error updating frequency:", error);
+      showSnackbar("Failed to update frequency", 'error');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleTestNotification = async (type) => {
+    if (!onTestNotification) return;
+    
+    try {
+      await onTestNotification(type);
+      setTestDialog({ open: false, type: '' });
+      showSnackbar(`Test ${type} notification sent!`);
+    } catch (error) {
+      console.error("Error sending test notification:", error);
+      showSnackbar("Failed to send test notification", 'error');
+    }
+  };
 
   // Safe notification icon detection
-  const getNotificationIcon = (notification) => {
-    if (!notification || !notification.message) {
+  const getNotificationIcon = useCallback((notification) => {
+    if (!notification?.message) {
       return <NotificationsIcon sx={{ color: "text.secondary" }} />;
     }
 
     const message = notification.message.toLowerCase();
     const type = notification.type?.toLowerCase() || "";
 
-    // Priority: notification type first, then message content
-    if (
-      type === "security" ||
-      message.includes("security") ||
-      message.includes("login")
-    ) {
-      return <SecurityIcon sx={{ color: "error.main" }} />;
-    }
-    if (
-      type === "trading" ||
-      message.includes("trade") ||
-      message.includes("order")
-    ) {
-      return <TrendingUpIcon sx={{ color: "primary.main" }} />;
-    }
-    if (
-      type === "payment" ||
-      message.includes("payment") ||
-      message.includes("revenue") ||
-      message.includes("fund")
-    ) {
-      return <DollarIcon sx={{ color: "success.main" }} />;
-    }
-    if (
-      type === "account" ||
-      message.includes("account") ||
-      message.includes("profile")
-    ) {
-      return <AccountIcon sx={{ color: "info.main" }} />;
-    }
-    if (
-      type === "alert" ||
-      message.includes("alert") ||
-      message.includes("warning")
-    ) {
-      return <AlertIcon sx={{ color: "warning.main" }} />;
-    }
-    if (
-      type === "info" ||
-      message.includes("update") ||
-      message.includes("news")
-    ) {
-      return <InfoIcon sx={{ color: "info.main" }} />;
+    const iconMap = {
+      security: <SecurityIcon sx={{ color: "error.main" }} />,
+      trading: <TrendingUpIcon sx={{ color: "primary.main" }} />,
+      payment: <DollarIcon sx={{ color: "success.main" }} />,
+      account: <AccountIcon sx={{ color: "info.main" }} />,
+      alert: <AlertIcon sx={{ color: "warning.main" }} />,
+      info: <InfoIcon sx={{ color: "info.main" }} />,
+    };
+
+    // Check type first
+    if (iconMap[type]) return iconMap[type];
+
+    // Check message content
+    for (const [key, icon] of Object.entries(iconMap)) {
+      if (message.includes(key)) return icon;
     }
 
     return <NotificationsIcon sx={{ color: "text.secondary" }} />;
-  };
+  }, []);
 
   // Safe notification priority detection
-  const getNotificationPriority = (notification) => {
+  const getNotificationPriority = useCallback((notification) => {
     if (!notification) return "low";
 
     const type = notification.type?.toLowerCase() || "";
     const priority = notification.priority?.toLowerCase() || "";
     const message = notification.message?.toLowerCase() || "";
 
-    if (
-      priority === "high" ||
-      type === "security" ||
-      message.includes("urgent")
-    ) {
+    if (priority === "high" || type === "security" || message.includes("urgent")) {
       return "high";
     }
-    if (
-      priority === "medium" ||
-      type === "trading" ||
-      message.includes("important")
-    ) {
+    if (priority === "medium" || type === "trading" || message.includes("important")) {
       return "medium";
     }
     return "low";
-  };
+  }, []);
 
   // Safe date formatting
-  const formatNotificationTime = (timeString) => {
+  const formatNotificationTime = useCallback((timeString) => {
     if (!timeString) return "Unknown time";
 
     try {
@@ -230,8 +266,7 @@ const ProfileNotifications = ({
       if (diffInMinutes < 1) return "Just now";
       if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
       if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-      if (diffInMinutes < 10080)
-        return `${Math.floor(diffInMinutes / 1440)}d ago`;
+      if (diffInMinutes < 10080) return `${Math.floor(diffInMinutes / 1440)}d ago`;
 
       return date.toLocaleDateString("en-IN", {
         month: "short",
@@ -240,6 +275,48 @@ const ProfileNotifications = ({
       });
     } catch (error) {
       return timeString;
+    }
+  }, []);
+
+  const handleMarkAsRead = async (notificationId) => {
+    if (!onMarkAsRead) return;
+    
+    try {
+      await onMarkAsRead(notificationId);
+      showSnackbar("Notification marked as read");
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+      showSnackbar("Failed to mark notification as read", 'error');
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId) => {
+    if (!onDeleteNotification) return;
+    
+    try {
+      await onDeleteNotification(notificationId);
+      showSnackbar("Notification removed");
+    } catch (error) {
+      console.error("Error deleting notification:", error);
+      showSnackbar("Failed to remove notification", 'error');
+    }
+  };
+
+  const handleBulkAction = async (action) => {
+    if (selectedNotifications.size === 0) return;
+
+    try {
+      const promises = Array.from(selectedNotifications).map(id => {
+        return action === 'read' ? onMarkAsRead(id) : onDeleteNotification(id);
+      });
+
+      await Promise.all(promises);
+      setSelectedNotifications(new Set());
+      setBulkAction(false);
+      showSnackbar(`${selectedNotifications.size} notifications ${action === 'read' ? 'marked as read' : 'deleted'}`);
+    } catch (error) {
+      console.error("Error with bulk action:", error);
+      showSnackbar("Failed to complete bulk action", 'error');
     }
   };
 
@@ -254,18 +331,21 @@ const ProfileNotifications = ({
           title: "Trading Alerts",
           description: "Get notified about trade executions and market changes",
           icon: TrendingUpIcon,
+          frequency: "frequency_trading",
         },
         {
           key: "email_account_updates",
           title: "Account Updates",
           description: "Important account and security notifications",
           icon: SecurityIcon,
+          frequency: "frequency_account",
         },
         {
           key: "email_marketing",
           title: "Marketing Emails",
           description: "Product updates and promotional content",
           icon: MarketingIcon,
+          frequency: "frequency_marketing",
         },
       ],
     },
@@ -315,33 +395,23 @@ const ProfileNotifications = ({
     },
   ];
 
-  const unreadCount = filteredNotifications.filter(
-    (n) => n && !(n.read || n.is_read)
-  ).length;
+  const filterOptions = [
+    { value: "all", label: "All Notifications" },
+    { value: "unread", label: "Unread" },
+    { value: "read", label: "Read" },
+    { value: "security", label: "Security" },
+    { value: "trading", label: "Trading" },
+    { value: "account", label: "Account" },
+  ];
 
-  const handleMarkAsRead = async (notificationId) => {
-    if (onMarkAsRead) {
-      try {
-        await onMarkAsRead(notificationId);
-        toast.success("Notification marked as read");
-      } catch (error) {
-        console.error("Error marking notification as read:", error);
-        toast.error("Failed to mark notification as read");
-      }
-    }
-  };
+  const frequencyOptions = [
+    { value: "instant", label: "Instant" },
+    { value: "hourly", label: "Hourly Digest" },
+    { value: "daily", label: "Daily Digest" },
+    { value: "weekly", label: "Weekly Digest" },
+  ];
 
-  const handleDeleteNotification = async (notificationId) => {
-    if (onDeleteNotification) {
-      try {
-        await onDeleteNotification(notificationId);
-        toast.success("Notification removed");
-      } catch (error) {
-        console.error("Error deleting notification:", error);
-        toast.error("Failed to remove notification");
-      }
-    }
-  };
+  const unreadCount = filteredNotifications.filter(n => n && !(n.read || n.is_read)).length;
 
   const renderSettingItem = (setting, category) => (
     <ListItem
@@ -376,24 +446,55 @@ const ProfileNotifications = ({
           </Typography>
         }
         secondary={
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" } }}
-          >
-            {setting.description}
-          </Typography>
+          <Box>
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ fontSize: { xs: "0.75rem", sm: "0.875rem" }, mb: 1 }}
+            >
+              {setting.description}
+            </Typography>
+            {setting.frequency && notificationSettings[setting.key] && (
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <Select
+                  value={notificationSettings[setting.frequency] || 'instant'}
+                  onChange={(e) => handleFrequencyChange(setting.frequency, e.target.value)}
+                  disabled={updating}
+                  sx={{ fontSize: '0.75rem' }}
+                >
+                  {frequencyOptions.map(option => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </Box>
         }
       />
 
       <ListItemSecondaryAction>
-        <Switch
-          edge="end"
-          checked={notificationSettings[setting.key] || false}
-          onChange={() => handleSettingChange(setting.key)}
-          color={category.color}
-          disabled={updating}
-        />
+        <Stack direction="row" spacing={1} alignItems="center">
+          {onTestNotification && (
+            <Tooltip title="Test notification">
+              <IconButton
+                size="small"
+                onClick={() => setTestDialog({ open: true, type: category.title.toLowerCase() })}
+                sx={{ color: 'text.secondary' }}
+              >
+                <TestIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Switch
+            edge="end"
+            checked={notificationSettings[setting.key] || false}
+            onChange={() => handleSettingChange(setting.key)}
+            color={category.color}
+            disabled={updating}
+          />
+        </Stack>
       </ListItemSecondaryAction>
     </ListItem>
   );
@@ -403,6 +504,7 @@ const ProfileNotifications = ({
 
     const isRead = notification.read || notification.is_read;
     const priority = getNotificationPriority(notification);
+    const isSelected = selectedNotifications.has(notification.id);
 
     return (
       <React.Fragment key={notification.id || index}>
@@ -413,15 +515,29 @@ const ProfileNotifications = ({
             bgcolor: isRead
               ? "transparent"
               : alpha(theme.palette.primary.main, 0.04),
-            border: isRead
+            border: isSelected
+              ? `2px solid ${theme.palette.primary.main}`
+              : isRead
               ? "none"
               : `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
-            borderRadius: isRead ? 0 : 2,
-            mb: isRead ? 0 : 1,
+            borderRadius: 2,
+            mb: 1,
             mx: 1,
             "&:hover": {
               bgcolor: alpha(theme.palette.primary.main, 0.04),
             },
+            cursor: bulkAction ? 'pointer' : 'default',
+          }}
+          onClick={() => {
+            if (bulkAction) {
+              const newSelected = new Set(selectedNotifications);
+              if (isSelected) {
+                newSelected.delete(notification.id);
+              } else {
+                newSelected.add(notification.id);
+              }
+              setSelectedNotifications(newSelected);
+            }
           }}
         >
           <ListItemIcon>
@@ -511,42 +627,44 @@ const ProfileNotifications = ({
             }
           />
 
-          <ListItemSecondaryAction>
-            <Stack direction="row" spacing={1} alignItems="center">
-              {!isRead && (
-                <Chip
-                  label="New"
-                  size="small"
-                  color="primary"
-                  sx={{
-                    fontSize: "0.65rem",
-                    height: 20,
-                    display: { xs: "none", sm: "flex" },
-                  }}
-                />
-              )}
-              {!isRead && (
-                <Tooltip title="Mark as read">
+          {!bulkAction && (
+            <ListItemSecondaryAction>
+              <Stack direction="row" spacing={1} alignItems="center">
+                {!isRead && (
+                  <Chip
+                    label="New"
+                    size="small"
+                    color="primary"
+                    sx={{
+                      fontSize: "0.65rem",
+                      height: 20,
+                      display: { xs: "none", sm: "flex" },
+                    }}
+                  />
+                )}
+                {!isRead && (
+                  <Tooltip title="Mark as read">
+                    <IconButton
+                      size="small"
+                      sx={{ color: "text.secondary" }}
+                      onClick={() => handleMarkAsRead(notification.id)}
+                    >
+                      <ReadIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                <Tooltip title="Remove">
                   <IconButton
                     size="small"
                     sx={{ color: "text.secondary" }}
-                    onClick={() => handleMarkAsRead(notification.id)}
+                    onClick={() => handleDeleteNotification(notification.id)}
                   >
-                    <ReadIcon fontSize="small" />
+                    <CloseIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
-              )}
-              <Tooltip title="Remove">
-                <IconButton
-                  size="small"
-                  sx={{ color: "text.secondary" }}
-                  onClick={() => handleDeleteNotification(notification.id)}
-                >
-                  <CloseIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            </Stack>
-          </ListItemSecondaryAction>
+              </Stack>
+            </ListItemSecondaryAction>
+          )}
         </ListItem>
         {index < filteredNotifications.length - 1 && <Divider sx={{ mx: 2 }} />}
       </React.Fragment>
@@ -556,16 +674,8 @@ const ProfileNotifications = ({
   if (loading) {
     return (
       <Box sx={{ py: { xs: 2, sm: 4 } }}>
-        <Skeleton
-          variant="rectangular"
-          height={120}
-          sx={{ borderRadius: 2, mb: 3 }}
-        />
-        <Skeleton
-          variant="rectangular"
-          height={400}
-          sx={{ borderRadius: 2, mb: 3 }}
-        />
+        <Skeleton variant="rectangular" height={120} sx={{ borderRadius: 2, mb: 3 }} />
+        <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 2, mb: 3 }} />
         <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 2 }} />
       </Box>
     );
@@ -683,4 +793,273 @@ const ProfileNotifications = ({
                     sx={{
                       borderRadius: 3,
                       overflow: "hidden",
-                      he
+                      height: "100%",
+                      background: alpha(theme.palette[category.color].main, 0.02),
+                      border: `1px solid ${alpha(theme.palette[category.color].main, 0.1)}`,
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        p: 2,
+                        bgcolor: alpha(theme.palette[category.color].main, 0.1),
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                      }}
+                    >
+                      <category.icon sx={{ color: `${category.color}.main` }} />
+                      <Typography variant="subtitle1" fontWeight={600}>
+                        {category.title}
+                      </Typography>
+                    </Box>
+                    <List sx={{ py: 0 }}>
+                      {category.settings.map((setting) =>
+                        renderSettingItem(setting, category)
+                      )}
+                    </List>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+
+            {/* Quiet Hours */}
+            <Paper
+              variant="outlined"
+              sx={{
+                mt: 3,
+                p: 3,
+                borderRadius: 3,
+                background: alpha(theme.palette.info.main, 0.02),
+                border: `1px solid ${alpha(theme.palette.info.main, 0.1)}`,
+              }}
+            >
+              <Typography variant="h6" gutterBottom>
+                Quiet Hours
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Disable non-urgent notifications during specified hours
+              </Typography>
+              
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={notificationSettings.quiet_hours_enabled}
+                      onChange={() => handleSettingChange('quiet_hours_enabled')}
+                      color="info"
+                    />
+                  }
+                  label="Enable quiet hours"
+                />
+                
+                {notificationSettings.quiet_hours_enabled && (
+                  <>
+                    <TextField
+                      label="Start time"
+                      type="time"
+                      size="small"
+                      value={notificationSettings.quiet_hours_start}
+                      onChange={(e) => handleFrequencyChange('quiet_hours_start', e.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                    <TextField
+                      label="End time"
+                      type="time"
+                      size="small"
+                      value={notificationSettings.quiet_hours_end}
+                      onChange={(e) => handleFrequencyChange('quiet_hours_end', e.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </>
+                )}
+              </Stack>
+            </Paper>
+          </Box>
+        </Card>
+      </Fade>
+
+      {/* Recent Notifications */}
+      <Fade in={true} timeout={700}>
+        <Card
+          sx={{
+            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+            background: alpha(theme.palette.background.paper, 0.8),
+            backdropFilter: "blur(20px)",
+            borderRadius: 3,
+          }}
+          elevation={0}
+        >
+          <Box
+            sx={{
+              p: { xs: 3, sm: 4 },
+              borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+            }}
+          >
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              flexWrap="wrap"
+              gap={2}
+            >
+              <Stack direction="row" alignItems="center" spacing={2}>
+                <NotificationsIcon sx={{ color: "primary.main" }} />
+                <Typography variant="h6" fontWeight={600}>
+                  Recent Notifications
+                </Typography>
+                {unreadCount > 0 && (
+                  <Chip
+                    label={unreadCount}
+                    size="small"
+                    color="primary"
+                    sx={{ minWidth: 'auto' }}
+                  />
+                )}
+              </Stack>
+
+              <Stack direction="row" spacing={1} alignItems="center">
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <Select
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    startAdornment={<FilterIcon sx={{ mr: 1, fontSize: 16 }} />}
+                  >
+                    {filterOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
+                {filteredNotifications.length > 0 && (
+                  <Button
+                    variant={bulkAction ? "contained" : "outlined"}
+                    size="small"
+                    onClick={() => setBulkAction(!bulkAction)}
+                    startIcon={bulkAction ? <CloseIcon /> : <CheckIcon />}
+                  >
+                    {bulkAction ? "Cancel" : "Select"}
+                  </Button>
+                )}
+
+                {bulkAction && selectedNotifications.size > 0 && (
+                  <>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleBulkAction('read')}
+                      startIcon={<ReadIcon />}
+                      color="primary"
+                    >
+                      Mark Read ({selectedNotifications.size})
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleBulkAction('delete')}
+                      startIcon={<DeleteIcon />}
+                      color="error"
+                    >
+                      Delete ({selectedNotifications.size})
+                    </Button>
+                  </>
+                )}
+              </Stack>
+            </Stack>
+          </Box>
+
+          <Box sx={{ p: { xs: 1, sm: 2 } }}>
+            {filteredNotifications.length > 0 ? (
+              <List sx={{ py: 0 }}>
+                {filteredNotifications.map((notification, index) =>
+                  renderNotificationItem(notification, index)
+                )}
+              </List>
+            ) : (
+              <Box
+                sx={{
+                  textAlign: "center",
+                  py: 6,
+                  color: "text.secondary",
+                }}
+              >
+                <NotificationsIcon
+                  sx={{ fontSize: 48, mb: 2, opacity: 0.5 }}
+                />
+                <Typography variant="h6" gutterBottom>
+                  No notifications found
+                </Typography>
+                <Typography variant="body2">
+                  {filter === "all"
+                    ? "You're all caught up! No notifications to display."
+                    : `No ${filter} notifications found.`}
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </Card>
+      </Fade>
+
+      {/* Test Notification Dialog */}
+      <Dialog
+        open={testDialog.open}
+        onClose={() => setTestDialog({ open: false, type: '' })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Test {testDialog.type} Notification
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This will send a test notification to verify your {testDialog.type} notification settings.
+          </Typography>
+          
+          {testDialog.type === 'sms' && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              SMS will be sent to: {userProfile.phone || 'your registered phone number'}
+            </Alert>
+          )}
+          
+          {testDialog.type === 'email' && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Email will be sent to: {userProfile.email || 'your registered email address'}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTestDialog({ open: false, type: '' })}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => handleTestNotification(testDialog.type)}
+            variant="contained"
+            startIcon={<TestIcon />}
+          >
+            Send Test
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+export default ProfileNotifications;
