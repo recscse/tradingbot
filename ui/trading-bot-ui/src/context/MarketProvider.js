@@ -140,9 +140,9 @@ export const MarketProvider = ({ children }) => {
       setConnectionStatus((prev) => ({ ...prev, auto_detection: "checking" }));
 
       // Check if centralized system is available
-      const healthResponse = await axios.get(
-        `${process.env.REACT_APP_API_URL}/health`
-      );
+    //  const healthResponse = await axios.get(
+     //   `${process.env.REACT_APP_API_URL}////health`
+    //  );
 
       const systemInfo = await axios.get(`${process.env.REACT_APP_API_URL}/`);
 
