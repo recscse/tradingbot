@@ -4,7 +4,10 @@ import json
 import logging
 from datetime import datetime, time
 from typing import Dict, List, Optional, Callable
-from services.optimized_instrument_service import fast_retrieval
+from services.optimized_instrument_service import (
+    get_all_websocket_keys,
+    get_fast_retrieval,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +68,7 @@ class LTPAPIService:
                     continue
 
                 # Get all WebSocket keys from your existing service
-                all_instruments = fast_retrieval.get_all_websocket_keys()
+                all_instruments = get_fast_retrieval()
 
                 if all_instruments:
                     ltp_data = await self._fetch_all_ltp_data(all_instruments)
@@ -131,7 +134,7 @@ class LTPAPIService:
         for instrument_key, data in raw_data.items():
             try:
                 # Use your existing service to get stock info
-                stock_info = fast_retrieval.get_stock_from_instrument_key(
+                stock_info = get_fast_retrieval.get_stock_from_instrument_key(
                     instrument_key
                 )
                 symbol = (
