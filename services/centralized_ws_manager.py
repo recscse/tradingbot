@@ -524,4 +524,292 @@ class CentralizedWebSocketManager:
             self.all_instrument_keys = set()
 
     def _get_total_clients(self) -> int:
-        """Get total numbe
+        """Get total number of connected clients"""
+        return (
+            len(self.dashboard_clients)
+            + len(self.trading_clients)
+            + len(self.legacy_clients)
+        )
+
+    # Client management methods
+    async def add_dashboard_client(self, token: str, websocket: WebSocket):
+        """Add a dashboard client"""
+        self.dashboard_clients[token] = websocket
+        logger.info(
+            f"📊 Dashboard client connected: {token[:8]}... (Total: {len(self.dashboard_clients)})"
+        )
+
+        # Send initial data if available
+        if self.latest_market_data:
+            logger.info(
+                f"📤 Sending cached data to new dashboard client: {len(self.latest_market_data)} instruments"
+            )
+            await self._send_to_client(
+                websocket,
+                {
+                    "type": "dashboard_update",
+                    "data": self.latest_market_data,
+                    "market_open": self.market_status == "open",
+                    "data_source": "CENTRALIZED_WS_CACHE",
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Historical data from cache",
+                    "cached_instruments": len(self.latest_market_data),
+                },
+            )
+        else:
+            logger.info("📝 No cached data available for new dashboard client")
+
+    async def add_trading_client(
+        self, token: str, websocket: WebSocket, instrument_keys: list
+    ):
+        """Add a trading client with specific instrument subscription"""
+        self.trading_clients[token] = websocket
+        self.user_subscriptions[token] = set(instrument_keys)
+
+        logger.info(
+            f"🎯 Trading client connected: {token[:8]}... with {len(instrument_keys)} instruments"
+        )
+
+        # Send relevant cached data
+        relevant_data = {
+            key: value
+            for key, value in self.latest_market_data.items()
+            if key in self.user_subscriptions[token]
+        }
+
+        if relevant_data:
+            logger.info(
+                f"📤 Sending {len(relevant_data)} cached instruments to trading client"
+            )
+            await self._send_to_client(
+                websocket,
+                {
+                    "type": "trading_update",
+                    "data": relevant_data,
+                    "instruments_count": len(instrument_keys),
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Historical data from cache",
+                    "cached_matches": len(relevant_data),
+                },
+            )
+        else:
+            logger.info("📝 No relevant cached data for trading client")
+
+    async def add_legacy_client(self, token: str, websocket: WebSocket):
+        """Add a legacy client for backward compatibility"""
+        self.legacy_clients[token] = websocket
+        logger.info(
+            f"🔄 Legacy client connected: {token[:8]}... (Total: {len(self.legacy_clients)})"
+        )
+
+        # Send market status and any cached data
+        await self._send_to_client(
+            websocket,
+            {
+                "type": "market_info",
+                "marketStatus": self.market_status,
+                "timestamp": datetime.now().isoformat(),
+            },
+        )
+
+        # Send cached data if available
+        if self.latest_market_data:
+            legacy_data = self._parse_legacy_format(self.latest_market_data)
+            await self._send_to_client(
+                websocket,
+                {
+                    "type": "live_feed",
+                    "data": legacy_data,
+                    "market_open": self.market_status == "open",
+                    "timestamp": datetime.now().isoformat(),
+                    "message": "Cached data",
+                },
+            )
+
+    async def remove_client(self, token: str, client_group: dict = None):
+        """Remove a client from the manager"""
+        removed_from = []
+
+        if client_group is None:
+            # Remove from all groups
+            if token in self.dashboard_clients:
+                del self.dashboard_clients[token]
+                removed_from.append("dashboard")
+
+            if token in self.trading_clients:
+                del self.trading_clients[token]
+                removed_from.append("trading")
+
+            if token in self.legacy_clients:
+                del self.legacy_clients[token]
+                removed_from.append("legacy")
+        else:
+            # Remove from specific group
+            if token in client_group:
+                del client_group[token]
+                removed_from.append("specified_group")
+
+        # Clean up subscriptions
+        if token in self.user_subscriptions:
+            del self.user_subscriptions[token]
+
+        if removed_from:
+            logger.info(
+                f"🧹 Client {token[:8]}... removed from: {', '.join(removed_from)}"
+            )
+
+    async def stop(self):
+        """Stop the centralized manager"""
+        logger.info("🛑 Stopping centralized WebSocket manager")
+        self.is_running = False
+
+        if self.ws_client:
+            self.ws_client.stop()
+
+        # Notify all clients
+        await self._send_to_all_clients(
+            {
+                "type": "service_shutdown",
+                "message": "Centralized WebSocket service is shutting down",
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
+        # Clear all clients
+        self.dashboard_clients.clear()
+        self.trading_clients.clear()
+        self.legacy_clients.clear()
+        self.user_subscriptions.clear()
+
+    # Status and monitoring methods
+    def get_status(self) -> dict:
+        """Get current status of the manager"""
+        return {
+            "is_running": self.is_running,
+            "admin_user_id": self.admin_user_id,
+            "ws_connected": (
+                self.ws_client is not None and self.ws_client.is_connected()
+                if self.ws_client
+                else False
+            ),
+            "market_status": self.market_status,
+            "total_instruments": len(self.all_instrument_keys),
+            "clients": {
+                "dashboard": len(self.dashboard_clients),
+                "trading": len(self.trading_clients),
+                "legacy": len(self.legacy_clients),
+                "total": self._get_total_clients(),
+            },
+            "cached_data_points": len(self.latest_market_data),
+            "reconnect_attempts": self.reconnect_attempts,
+            "last_data_received": (
+                self.last_data_received.isoformat() if self.last_data_received else None
+            ),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    async def health_check(self) -> dict:
+        """Perform health check"""
+        status = self.get_status()
+
+        # Add health indicators
+        health_score = 100
+        issues = []
+
+        if not self.is_running:
+            health_score -= 50
+            issues.append("Service not running")
+
+        if not status["ws_connected"]:
+            health_score -= 30
+            issues.append("WebSocket not connected")
+
+        if self.reconnect_attempts > 0:
+            health_score -= 10 * self.reconnect_attempts
+            issues.append(f"Recent reconnection attempts: {self.reconnect_attempts}")
+
+        if not self.latest_market_data:
+            health_score -= 10
+            issues.append("No cached market data")
+
+        # Check if we've received data recently (within last 5 minutes during market hours)
+        if self.last_data_received:
+            time_since_data = (datetime.now() - self.last_data_received).total_seconds()
+            if time_since_data > 300:  # 5 minutes
+                health_score -= 15
+                issues.append(f"No data received for {int(time_since_data/60)} minutes")
+
+        status.update(
+            {
+                "health_score": max(0, health_score),
+                "status": (
+                    "healthy"
+                    if health_score > 70
+                    else "degraded" if health_score > 30 else "unhealthy"
+                ),
+                "issues": issues,
+            }
+        )
+
+        return status
+
+    # Debug methods
+    async def force_test_broadcast(self, test_data: dict = None):
+        """Force a test broadcast to all clients for debugging"""
+        if test_data is None:
+            test_data = {
+                "NSE_EQ|INE002A01018": {  # RELIANCE
+                    "ltp": 2500.0,
+                    "ltq": 100,
+                    "cp": 2475.0,
+                    "timestamp": datetime.now().isoformat(),
+                    "test": True,
+                }
+            }
+
+        logger.info("🧪 Force broadcasting test data")
+        await self._broadcast_live_data(test_data)
+
+    def get_debug_info(self) -> dict:
+        """Get detailed debug information"""
+        return {
+            "manager_status": self.get_status(),
+            "client_details": {
+                "dashboard_tokens": [
+                    token[:8] + "..." for token in self.dashboard_clients.keys()
+                ],
+                "trading_tokens": [
+                    token[:8] + "..." for token in self.trading_clients.keys()
+                ],
+                "legacy_tokens": [
+                    token[:8] + "..." for token in self.legacy_clients.keys()
+                ],
+            },
+            "subscription_summary": {
+                token[:8] + "...": len(instruments)
+                for token, instruments in self.user_subscriptions.items()
+            },
+            "sample_instruments": list(self.all_instrument_keys)[:10],
+            "sample_cached_data": {
+                key: value
+                for i, (key, value) in enumerate(self.latest_market_data.items())
+                if i < 3
+            },
+            "data_flow_stats": {
+                "total_cached_instruments": len(self.latest_market_data),
+                "last_data_time": (
+                    self.last_data_received.isoformat()
+                    if self.last_data_received
+                    else None
+                ),
+                "time_since_last_data": (
+                    (datetime.now() - self.last_data_received).total_seconds()
+                    if self.last_data_received
+                    else None
+                ),
+            },
+        }
+
+
+# Global instance
+centralized_manager = CentralizedWebSocketManager()
