@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from "react";
 import StocksList from "../components/common/StocksList";
-import DebugPanel from "../components/debug/DebugPanel";
+// import DebugPanel from "../components/debug/DebugPanel";
 import { useMarket } from "../hooks/useUnifiedMarketData";
 
 // PERFORMANCE FIX: Memoized components to prevent unnecessary re-renders
@@ -128,7 +128,7 @@ const DashboardPage = () => {
   const [expandedSection, setExpandedSection] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState("ALL");
-  const [showDebug, setShowDebug] = useState(false);
+  // const [showDebug, setShowDebug] = useState(false);
 
   // PERFORMANCE FIX: Memoized market summary
   const marketSummary = useMemo(() => getMarketSummary(), [getMarketSummary]);
@@ -442,10 +442,10 @@ const DashboardPage = () => {
     (sector) => setSelectedSector(sector),
     []
   );
-  const handleDebugToggle = useCallback(
-    () => setShowDebug((prev) => !prev),
-    []
-  );
+  // const handleDebugToggle = useCallback(
+  //   () => setShowDebug((prev) => !prev),
+  //   []
+  // );
 
   // Render function for the header
   const renderHeader = () => (
@@ -481,7 +481,7 @@ const DashboardPage = () => {
         </h1>
 
         <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-          <button
+          {/* <button
             onClick={handleDebugToggle}
             style={{
               background: showDebug ? BLOOMBERG_COLORS.positive : "transparent",
@@ -498,7 +498,7 @@ const DashboardPage = () => {
             }}
           >
             🔧 DEBUG
-          </button>
+          </button> */}
 
           <div
             style={{
@@ -1826,7 +1826,7 @@ const DashboardPage = () => {
         position: "relative",
       }}
     >
-      {showDebug && (
+      {/* {showDebug && (
         <DebugPanel
           isConnected={isConnected}
           connectionStatus={connectionStatus}
@@ -1840,7 +1840,7 @@ const DashboardPage = () => {
           indicesData={indicesData}
           indicesSummary={indicesSummary}
         />
-      )}
+      )} */}
 
       {renderHeader()}
 
