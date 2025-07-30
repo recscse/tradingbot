@@ -31,15 +31,6 @@ const throttle = (func, delay) => {
   };
 };
 
-// Debounce function for expensive operations
-// const debounce = (func, delay) => {
-//   let timeoutId;
-//   return function (...args) {
-//     clearTimeout(timeoutId);
-//     timeoutId = setTimeout(() => func.apply(this, args), delay);
-//   };
-// };
-
 export const useUnifiedMarketData = () => {
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
@@ -150,9 +141,9 @@ export const useUnifiedMarketData = () => {
     }
   }, []);
 
-  // Enhanced message handler with comprehensive data processing
-  const handleMessage = useCallback(
-    throttle((event) => {
+  // Raw message handler (not throttled)
+  const handleMessageRaw = useCallback(
+    (event) => {
       try {
         const data = JSON.parse(event.data);
         messageCount.current++;
@@ -647,8 +638,14 @@ export const useUnifiedMarketData = () => {
           event.data?.substring(0, 200)
         );
       }
-    }, 250), // Increased throttle time to 250ms
+    },
     [processMessageQueue, safeSend]
+  );
+
+  // Enhanced message handler with throttling
+  const handleMessage = useMemo(
+    () => throttle(handleMessageRaw, 250),
+    [handleMessageRaw]
   );
 
   // Enhanced connection setup
