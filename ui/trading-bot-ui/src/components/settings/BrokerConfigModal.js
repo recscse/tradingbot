@@ -21,7 +21,7 @@ const fields = {
   Dhan: ["client_id", "access_token"],
   Zerodha: ["api_key", "api_secret", "request_token"],
   Upstox: ["api_key", "api_secret"],
-  "Angel One": ["api_key", "api_secret", "client_code", "password"],
+  "Angel One": ["api_key", "api_secret"],
   Fyers: ["client_id", "secret_key"],
 };
 
@@ -137,7 +137,7 @@ const BrokerConfigModal = ({
           config: {
             client_id: broker.credentials.client_id,
             secret_key: broker.credentials.secret_key,
-            redirect_uri: "http://127.0.0.1:8000/api/broker/fyers/callback",
+            redirect_uri: `${BASE_URL}/api/broker/fyers/callback`,
           },
         });
 
@@ -162,6 +162,39 @@ const BrokerConfigModal = ({
             ? err.detail
             : err?.detail || "Fyers auth failed"
         );
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (broker.broker_name === "Angel One") {
+      try {
+        const response = await brokerAPI.initAngelAuth({
+          broker: "Angel One",
+          config: {
+            api_key: broker.credentials.api_key,
+            api_secret: broker.credentials.api_secret,
+            redirect_uri: `${BASE_URL}/api/broker/angel/callback`,
+          },
+        });
+
+        const authUrl = response?.auth_url;
+        if (authUrl) {
+          // Reset token expired state on successful auth
+          resetTokenExpired();
+          console.log(
+            " Angel One authentication initiated, token expired state reset"
+          );
+          window.open(authUrl, "_blank");
+          onClose();
+          return;
+        }
+
+        setError("Failed to retrieve Angel One auth URL.");
+      } catch (error) {
+        console.error(error);
+        setError(error.response?.data?.detail || "Angel One auth failed");
       } finally {
         setLoading(false);
       }

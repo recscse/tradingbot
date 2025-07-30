@@ -19,7 +19,6 @@ import {
   Divider,
   Tooltip,
   Button,
-  Container,
   Chip,
   Stack,
   Paper,
@@ -55,12 +54,11 @@ const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Better responsive breakpoints
-  const isXs = useMediaQuery(theme.breakpoints.down("sm")); // < 600px
-  const isSm = useMediaQuery(theme.breakpoints.down("md")); // < 900px
-  const isMd = useMediaQuery(theme.breakpoints.down("lg")); // < 1200px
-  const isLg = useMediaQuery(theme.breakpoints.down("xl")); // < 1536px
-  const isVerySmall = useMediaQuery("(max-width:350px)"); // < 350px
+  const isXs = useMediaQuery(theme.breakpoints.down("sm"));
+  const isSm = useMediaQuery(theme.breakpoints.down("md"));
+  const isMd = useMediaQuery(theme.breakpoints.down("lg"));
+  const isLg = useMediaQuery(theme.breakpoints.down("xl"));
+  const isVerySmall = useMediaQuery("(max-width:350px)");
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +79,6 @@ const Navbar = () => {
   const [marketStatus, setMarketStatus] = useState("loading");
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Load user data
   useEffect(() => {
     const loadUserData = async () => {
       try {
@@ -95,11 +92,9 @@ const Navbar = () => {
         setLoading(false);
       }
     };
-
     loadUserData();
   }, []);
 
-  // Dynamic navigation items
   const navItems = [
     {
       name: "Dashboard",
@@ -145,7 +140,6 @@ const Navbar = () => {
     },
   ];
 
-  // Check market status
   useEffect(() => {
     const checkMarketStatus = () => {
       const now = new Date();
@@ -175,7 +169,6 @@ const Navbar = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Update current time
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -345,334 +338,324 @@ const Navbar = () => {
           backdropFilter: "blur(24px)",
           borderBottom: `1px solid ${theme.palette.divider}`,
           zIndex: theme.zIndex.appBar,
+          width: "100%",
+          left: 0,
+          right: 0,
         }}
       >
-        <Container maxWidth="xl" disableGutters={isXs}>
-          <Toolbar
-            disableGutters
+        <Toolbar
+          disableGutters
+          sx={{
+            height: { xs: 56, sm: 64, md: 72 },
+            justifyContent: "space-between",
+            px: { xs: 1, sm: 2, md: 3 },
+            minHeight: "auto !important",
+            gap: { xs: 0.5, sm: 1 },
+            width: "100%",
+            maxWidth: "none",
+          }}
+        >
+          <Box
+            onClick={() => navigate("/dashboard")}
             sx={{
-              height: { xs: 56, sm: 64, md: 72 },
-              justifyContent: "space-between",
-              px: { xs: 0.5, sm: 1, md: 2 },
-              minHeight: "auto !important",
-              gap: { xs: 0.5, sm: 1 },
+              display: "flex",
+              alignItems: "center",
+              gap: { xs: 0.5, sm: 1, md: 1.5 },
+              cursor: "pointer",
+              userSelect: "none",
+              flex: "0 0 auto",
+              minWidth: 0,
+              "&:hover": {
+                transform: "scale(1.02)",
+                transition: "transform 0.2s ease",
+              },
             }}
           >
-            {/* Enhanced Logo Section */}
             <Box
-              onClick={() => navigate("/dashboard")}
               sx={{
+                width: { xs: 28, sm: 36, md: 44 },
+                height: { xs: 28, sm: 36, md: 44 },
+                borderRadius: "50%",
+                background: `conic-gradient(from 180deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`,
                 display: "flex",
                 alignItems: "center",
-                gap: { xs: 0.5, sm: 1, md: 1.5 },
-                cursor: "pointer",
-                userSelect: "none",
-                flex: "0 0 auto",
-                minWidth: 0,
-                "&:hover": {
-                  transform: "scale(1.02)",
-                  transition: "transform 0.2s ease",
+                justifyContent: "center",
+                boxShadow: `0 4px 16px ${theme.palette.primary.main}30`,
+                position: "relative",
+                "&::before": {
+                  content: '""',
+                  position: "absolute",
+                  inset: 2,
+                  borderRadius: "50%",
+                  background: theme.palette.background.paper,
                 },
               }}
             >
-              <Box
+              <AccountBalance
                 sx={{
-                  width: { xs: 28, sm: 36, md: 44 },
-                  height: { xs: 28, sm: 36, md: 44 },
-                  borderRadius: "50%",
-                  background: `conic-gradient(from 180deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: `0 4px 16px ${theme.palette.primary.main}30`,
-                  position: "relative",
-                  "&::before": {
-                    content: '""',
-                    position: "absolute",
-                    inset: 2,
-                    borderRadius: "50%",
-                    background: theme.palette.background.paper,
-                  },
+                  color: theme.palette.primary.main,
+                  fontSize: { xs: 14, sm: 18, md: 22 },
+                  zIndex: 1,
                 }}
-              >
-                <AccountBalance
-                  sx={{
-                    color: theme.palette.primary.main,
-                    fontSize: { xs: 14, sm: 18, md: 22 },
-                    zIndex: 1,
-                  }}
-                />
-              </Box>
-
-              {!isVerySmall && (
-                <Box sx={{ minWidth: 0, overflow: "hidden" }}>
-                  <Typography
-                    variant="h6"
-                    sx={{
-                      fontWeight: 900,
-                      fontSize: {
-                        xs: "0.85rem",
-                        sm: "1.1rem",
-                        md: "1.3rem",
-                        lg: "1.4rem",
-                      },
-                      background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                      backgroundClip: "text",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      letterSpacing: "-0.02em",
-                      lineHeight: 1.1,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    GrowthQuantix
-                  </Typography>
-                  {!isXs && (
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        color: "text.secondary",
-                        fontSize: { sm: "0.6rem", md: "0.65rem" },
-                        fontWeight: 600,
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                        display: "block",
-                        lineHeight: 1,
-                        mt: -0.2,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Automated Intelligent Trading System
-                    </Typography>
-                  )}
-                </Box>
-              )}
+              />
             </Box>
 
-            {/* Modern Pill Navigation - Best Design */}
-            {!isMd && (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.5,
-                  bgcolor: "transparent",
-                  flex: "1 1 auto",
-                  maxWidth: "800px",
-                  mx: 2,
-                  overflow: "hidden",
-                  justifyContent: "center",
-                }}
-              >
-                {navItems.map((item) => {
-                  const showFullText = !isLg;
-                  const showTooltip = isLg && !isActive(item.path);
+            {!isVerySmall && (
+              <Box sx={{ minWidth: 0, overflow: "hidden" }}>
+                <Typography
+                  variant="h6"
+                  sx={{
+                    fontWeight: 900,
+                    fontSize: {
+                      xs: "0.85rem",
+                      sm: "1.1rem",
+                      md: "1.3rem",
+                      lg: "1.4rem",
+                    },
+                    background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                    backgroundClip: "text",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    letterSpacing: "-0.02em",
+                    lineHeight: 1.1,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  GrowthQuantix
+                </Typography>
+                {!isXs && (
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: "text.secondary",
+                      fontSize: { sm: "0.6rem", md: "0.65rem" },
+                      fontWeight: 600,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      display: "block",
+                      lineHeight: 1,
+                      mt: -0.2,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Automated Intelligent Trading System
+                  </Typography>
+                )}
+              </Box>
+            )}
+          </Box>
 
-                  const pillContent = (
+          {!isMd && (
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                bgcolor: "transparent",
+                flex: "1 1 auto",
+                maxWidth: "800px",
+                mx: 2,
+                overflow: "hidden",
+                justifyContent: "center",
+              }}
+            >
+              {navItems.map((item) => {
+                const showFullText = !isLg;
+                const showTooltip = isLg && !isActive(item.path);
+
+                const pillContent = (
+                  <Box
+                    onClick={() => navigate(item.path)}
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: showFullText ? 1 : 0,
+                      px: showFullText ? 2.5 : 1.5,
+                      py: 1.25,
+                      borderRadius: 25,
+                      cursor: "pointer",
+                      userSelect: "none",
+                      transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                      position: "relative",
+                      overflow: "hidden",
+                      minWidth: showFullText ? "auto" : 40,
+                      justifyContent: "center",
+
+                      bgcolor: isActive(item.path)
+                        ? `${item.color}20`
+                        : "transparent",
+                      color: isActive(item.path) ? item.color : "text.primary",
+                      border: isActive(item.path)
+                        ? `1px solid ${item.color}40`
+                        : "1px solid transparent",
+
+                      "&:hover": {
+                        bgcolor: isActive(item.path)
+                          ? `${item.color}30`
+                          : theme.palette.mode === "dark"
+                          ? "rgba(255, 255, 255, 0.05)"
+                          : "rgba(0, 0, 0, 0.04)",
+                        transform: "translateY(-2px)",
+                        boxShadow: isActive(item.path)
+                          ? `0 8px 25px ${item.color}30`
+                          : `0 4px 20px ${theme.palette.action.hover}`,
+                      },
+
+                      "&:active": {
+                        transform: "translateY(0px)",
+                      },
+
+                      ...(isActive(item.path) && {
+                        "&::before": {
+                          content: '""',
+                          position: "absolute",
+                          inset: 0,
+                          borderRadius: 25,
+                          padding: "1px",
+                          background: `linear-gradient(135deg, ${item.color}60, ${item.color}20)`,
+                          mask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                          maskComposite: "xor",
+                          WebkitMask:
+                            "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
+                          WebkitMaskComposite: "xor",
+                        },
+                      }),
+                    }}
+                  >
                     <Box
-                      onClick={() => navigate(item.path)}
                       sx={{
                         display: "flex",
                         alignItems: "center",
-                        gap: showFullText ? 1 : 0,
-                        px: showFullText ? 2.5 : 1.5,
-                        py: 1.25,
-                        borderRadius: 25,
-                        cursor: "pointer",
-                        userSelect: "none",
-                        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                        position: "relative",
-                        overflow: "hidden",
-                        minWidth: showFullText ? "auto" : 40,
                         justifyContent: "center",
-
-                        // Active state
-                        bgcolor: isActive(item.path)
-                          ? `${item.color}20`
-                          : "transparent",
                         color: isActive(item.path)
                           ? item.color
-                          : "text.primary",
-                        border: isActive(item.path)
-                          ? `1px solid ${item.color}40`
-                          : "1px solid transparent",
-
-                        "&:hover": {
-                          bgcolor: isActive(item.path)
-                            ? `${item.color}30`
-                            : theme.palette.mode === "dark"
-                            ? "rgba(255, 255, 255, 0.05)"
-                            : "rgba(0, 0, 0, 0.04)",
-                          transform: "translateY(-2px)",
-                          boxShadow: isActive(item.path)
-                            ? `0 8px 25px ${item.color}30`
-                            : `0 4px 20px ${theme.palette.action.hover}`,
+                          : "text.secondary",
+                        "& svg": {
+                          fontSize: { lg: 18, xl: 20 },
+                          transition: "all 0.2s ease",
                         },
-
-                        "&:active": {
-                          transform: "translateY(0px)",
-                        },
-
-                        // Glow effect for active item
-                        ...(isActive(item.path) && {
-                          "&::before": {
-                            content: '""',
-                            position: "absolute",
-                            inset: 0,
-                            borderRadius: 25,
-                            padding: "1px",
-                            background: `linear-gradient(135deg, ${item.color}60, ${item.color}20)`,
-                            mask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-                            maskComposite: "xor",
-                            WebkitMask:
-                              "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-                            WebkitMaskComposite: "xor",
-                          },
-                        }),
                       }}
                     >
-                      {/* Icon */}
-                      <Box
+                      {item.icon}
+                    </Box>
+
+                    {showFullText && (
+                      <Typography
+                        variant="body2"
                         sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: isActive(item.path)
-                            ? item.color
-                            : "text.secondary",
-                          "& svg": {
-                            fontSize: { lg: 18, xl: 20 },
-                            transition: "all 0.2s ease",
-                          },
+                          fontWeight: isActive(item.path) ? 700 : 600,
+                          fontSize: { lg: "0.8rem", xl: "0.85rem" },
+                          color: "inherit",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
                         }}
                       >
-                        {item.icon}
-                      </Box>
+                        {isLg ? item.shortName : item.name}
+                      </Typography>
+                    )}
 
-                      {/* Text */}
-                      {showFullText && (
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontWeight: isActive(item.path) ? 700 : 600,
-                            fontSize: { lg: "0.8rem", xl: "0.85rem" },
-                            color: "inherit",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {isLg ? item.shortName : item.name}
-                        </Typography>
-                      )}
-
-                      {/* Active indicator dot */}
-                      {isActive(item.path) && !showFullText && (
-                        <Box
-                          sx={{
-                            position: "absolute",
-                            bottom: -8,
-                            left: "50%",
-                            transform: "translateX(-50%)",
-                            width: 4,
-                            height: 4,
-                            borderRadius: "50%",
-                            bgcolor: item.color,
-                            boxShadow: `0 0 8px ${item.color}`,
-                          }}
-                        />
-                      )}
-                    </Box>
-                  );
-
-                  return showTooltip ? (
-                    <Tooltip
-                      key={item.path}
-                      title={item.name}
-                      arrow
-                      placement="bottom"
-                      enterDelay={200}
-                      leaveDelay={100}
-                      PopperProps={{
-                        sx: {
-                          "& .MuiTooltip-tooltip": {
-                            bgcolor:
-                              theme.palette.mode === "dark"
-                                ? "rgba(255, 255, 255, 0.95)"
-                                : "rgba(0, 0, 0, 0.9)",
-                            color:
-                              theme.palette.mode === "dark" ? "black" : "white",
-                            fontSize: "0.75rem",
-                            fontWeight: 600,
-                            borderRadius: 2,
-                            px: 1.5,
-                            py: 0.75,
-                            backdropFilter: "blur(10px)",
-                            border: `1px solid ${theme.palette.divider}`,
-                          },
-                          "& .MuiTooltip-arrow": {
-                            color:
-                              theme.palette.mode === "dark"
-                                ? "rgba(255, 255, 255, 0.95)"
-                                : "rgba(0, 0, 0, 0.9)",
-                          },
-                        },
-                      }}
-                    >
-                      {pillContent}
-                    </Tooltip>
-                  ) : (
-                    <React.Fragment key={item.path}>
-                      {pillContent}
-                    </React.Fragment>
-                  );
-                })}
-              </Box>
-            )}
-
-            {/* Right Actions */}
-            <Stack
-              direction="row"
-              spacing={{ xs: 0.25, sm: 0.5, md: 1 }}
-              alignItems="center"
-              sx={{
-                flex: "0 0 auto",
-                minWidth: 0,
-              }}
-            >
-              {/* Market Status - Always Visible */}
-              <Chip
-                icon={
-                  <Box sx={{ display: "flex", alignItems: "center" }}>
-                    <span style={{ fontSize: "6px" }}>{statusInfo.icon}</span>
+                    {isActive(item.path) && !showFullText && (
+                      <Box
+                        sx={{
+                          position: "absolute",
+                          bottom: -8,
+                          left: "50%",
+                          transform: "translateX(-50%)",
+                          width: 4,
+                          height: 4,
+                          borderRadius: "50%",
+                          bgcolor: item.color,
+                          boxShadow: `0 0 8px ${item.color}`,
+                        }}
+                      />
+                    )}
                   </Box>
-                }
-                label={statusInfo.label}
-                size="small"
-                sx={{
-                  height: { xs: 22, sm: 26, md: 28 },
-                  color: "white",
-                  fontWeight: 600,
-                  fontSize: { xs: "0.6rem", sm: "0.65rem", md: "0.7rem" },
-                  bgcolor: `${statusInfo.color}.main`,
-                  border: "none",
-                  "& .MuiChip-icon": {
-                    color: "white",
-                    mr: { xs: 0.25, sm: 0.5 },
-                  },
-                  "& .MuiChip-label": {
-                    px: { xs: 0.5, sm: 0.75, md: 1 },
-                  },
-                }}
-              />
+                );
 
-              {/* Action Buttons */}
-              <Stack direction="row" spacing={{ xs: 0.25, sm: 0.5 }}>
-                {/* Refresh Button - Hidden on very small screens */}
-                {!isVerySmall && (
-                  <Tooltip title="Refresh Data" arrow>
+                return showTooltip ? (
+                  <Tooltip
+                    key={item.path}
+                    title={item.name}
+                    arrow
+                    placement="bottom"
+                    enterDelay={200}
+                    leaveDelay={100}
+                    PopperProps={{
+                      sx: {
+                        "& .MuiTooltip-tooltip": {
+                          bgcolor:
+                            theme.palette.mode === "dark"
+                              ? "rgba(255, 255, 255, 0.95)"
+                              : "rgba(0, 0, 0, 0.9)",
+                          color:
+                            theme.palette.mode === "dark" ? "black" : "white",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          borderRadius: 2,
+                          px: 1.5,
+                          py: 0.75,
+                          backdropFilter: "blur(10px)",
+                          border: `1px solid ${theme.palette.divider}`,
+                        },
+                        "& .MuiTooltip-arrow": {
+                          color:
+                            theme.palette.mode === "dark"
+                              ? "rgba(255, 255, 255, 0.95)"
+                              : "rgba(0, 0, 0, 0.9)",
+                        },
+                      },
+                    }}
+                  >
+                    {pillContent}
+                  </Tooltip>
+                ) : (
+                  <React.Fragment key={item.path}>{pillContent}</React.Fragment>
+                );
+              })}
+            </Box>
+          )}
+
+          <Stack
+            direction="row"
+            spacing={{ xs: 0.25, sm: 0.5, md: 1 }}
+            alignItems="center"
+            sx={{
+              flex: "0 0 auto",
+              minWidth: 0,
+            }}
+          >
+            <Chip
+              icon={
+                <Box sx={{ display: "flex", alignItems: "center" }}>
+                  <span style={{ fontSize: "6px" }}>{statusInfo.icon}</span>
+                </Box>
+              }
+              label={statusInfo.label}
+              size="small"
+              sx={{
+                height: { xs: 22, sm: 26, md: 28 },
+                color: "white",
+                fontWeight: 600,
+                fontSize: { xs: "0.6rem", sm: "0.65rem", md: "0.7rem" },
+                bgcolor: `${statusInfo.color}.main`,
+                border: "none",
+                "& .MuiChip-icon": {
+                  color: "white",
+                  mr: { xs: 0.25, sm: 0.5 },
+                },
+                "& .MuiChip-label": {
+                  px: { xs: 0.5, sm: 0.75, md: 1 },
+                },
+              }}
+            />
+
+            <Stack direction="row" spacing={{ xs: 0.25, sm: 0.5 }}>
+              {!isVerySmall && (
+                <Tooltip title="Refresh Data" arrow>
+                  <span>
                     <IconButton
                       size="small"
                       onClick={handleRefresh}
@@ -684,6 +667,10 @@ const Navbar = () => {
                         "&:hover": {
                           bgcolor: "action.selected",
                           transform: "scale(1.05)",
+                        },
+                        "&:disabled": {
+                          bgcolor: "action.hover",
+                          opacity: 0.6,
                         },
                         transition: "all 0.2s ease",
                       }}
@@ -701,108 +688,100 @@ const Navbar = () => {
                         }}
                       />
                     </IconButton>
-                  </Tooltip>
-                )}
-
-                {/* Notifications */}
-                <Tooltip title="Notifications" arrow>
-                  <IconButton
-                    size="small"
-                    onClick={handleNotificationMenuOpen}
-                    sx={{
-                      width: { xs: 32, sm: 36, md: 40 },
-                      height: { xs: 32, sm: 36, md: 40 },
-                      bgcolor: "action.hover",
-                      "&:hover": {
-                        bgcolor: "action.selected",
-                        transform: "scale(1.05)",
-                      },
-                      transition: "all 0.2s ease",
-                    }}
-                  >
-                    <Badge
-                      badgeContent={unreadCount}
-                      color="error"
-                      sx={{
-                        "& .MuiBadge-badge": {
-                          fontSize: "0.6rem",
-                          minWidth: { xs: 14, sm: 16 },
-                          height: { xs: 14, sm: 16 },
-                          fontWeight: 700,
-                        },
-                      }}
-                    >
-                      <Notifications
-                        sx={{ fontSize: { xs: 16, sm: 18, md: 20 } }}
-                      />
-                    </Badge>
-                  </IconButton>
+                  </span>
                 </Tooltip>
+              )}
 
-                {/* Theme Toggle - Hidden on small screens */}
-                {!isSm && (
-                  <Box>
-                    <ThemeToggle />
-                  </Box>
-                )}
-
-                {/* Profile Avatar */}
-                <Tooltip
-                  title={user?.full_name || user?.name || "Profile"}
-                  arrow
+              <Tooltip title="Notifications" arrow>
+                <IconButton
+                  size="small"
+                  onClick={handleNotificationMenuOpen}
+                  sx={{
+                    width: { xs: 32, sm: 36, md: 40 },
+                    height: { xs: 32, sm: 36, md: 40 },
+                    bgcolor: "action.hover",
+                    "&:hover": {
+                      bgcolor: "action.selected",
+                      transform: "scale(1.05)",
+                    },
+                    transition: "all 0.2s ease",
+                  }}
                 >
-                  <IconButton
-                    onClick={(e) => setProfileMenuOpen(e.currentTarget)}
-                    size="small"
+                  <Badge
+                    badgeContent={unreadCount}
+                    color="error"
                     sx={{
-                      "&:hover": {
-                        transform: "scale(1.05)",
-                      },
-                      transition: "all 0.2s ease",
-                    }}
-                  >
-                    <Avatar
-                      sx={{
-                        width: { xs: 28, sm: 32, md: 36 },
-                        height: { xs: 28, sm: 32, md: 36 },
-                        bgcolor: "primary.main",
-                        fontSize: {
-                          xs: "0.7rem",
-                          sm: "0.8rem",
-                          md: "0.875rem",
-                        },
+                      "& .MuiBadge-badge": {
+                        fontSize: "0.6rem",
+                        minWidth: { xs: 14, sm: 16 },
+                        height: { xs: 14, sm: 16 },
                         fontWeight: 700,
-                        border: `2px solid ${theme.palette.divider}`,
-                      }}
-                    >
-                      {getUserInitials()}
-                    </Avatar>
-                  </IconButton>
-                </Tooltip>
-
-                {/* Mobile Menu Button - Always visible on mobile */}
-                {isMd && (
-                  <IconButton
-                    onClick={() => setDrawerOpen(true)}
-                    sx={{
-                      width: { xs: 32, sm: 36, md: 40 },
-                      height: { xs: 32, sm: 36, md: 40 },
-                      bgcolor: "action.hover",
-                      "&:hover": {
-                        bgcolor: "action.selected",
                       },
                     }}
                   >
-                    <MenuIcon sx={{ fontSize: { xs: 16, sm: 18, md: 20 } }} />
-                  </IconButton>
-                )}
-              </Stack>
+                    <Notifications
+                      sx={{ fontSize: { xs: 16, sm: 18, md: 20 } }}
+                    />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+
+              {!isSm && (
+                <Box>
+                  <ThemeToggle />
+                </Box>
+              )}
+
+              <Tooltip title={user?.full_name || user?.name || "Profile"} arrow>
+                <IconButton
+                  onClick={(e) => setProfileMenuOpen(e.currentTarget)}
+                  size="small"
+                  sx={{
+                    "&:hover": {
+                      transform: "scale(1.05)",
+                    },
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <Avatar
+                    sx={{
+                      width: { xs: 28, sm: 32, md: 36 },
+                      height: { xs: 28, sm: 32, md: 36 },
+                      bgcolor: "primary.main",
+                      fontSize: {
+                        xs: "0.7rem",
+                        sm: "0.8rem",
+                        md: "0.875rem",
+                      },
+                      fontWeight: 700,
+                      border: `2px solid ${theme.palette.divider}`,
+                    }}
+                  >
+                    {getUserInitials()}
+                  </Avatar>
+                </IconButton>
+              </Tooltip>
+
+              {isMd && (
+                <IconButton
+                  onClick={() => setDrawerOpen(true)}
+                  sx={{
+                    width: { xs: 32, sm: 36, md: 40 },
+                    height: { xs: 32, sm: 36, md: 40 },
+                    bgcolor: "action.hover",
+                    "&:hover": {
+                      bgcolor: "action.selected",
+                    },
+                  }}
+                >
+                  <MenuIcon sx={{ fontSize: { xs: 16, sm: 18, md: 20 } }} />
+                </IconButton>
+              )}
             </Stack>
-          </Toolbar>
-        </Container>
+          </Stack>
+        </Toolbar>
       </AppBar>
 
-      {/* Profile Menu */}
       <Menu
         anchorEl={profileMenuOpen}
         open={Boolean(profileMenuOpen)}
@@ -911,7 +890,6 @@ const Navbar = () => {
         </MenuItem>
       </Menu>
 
-      {/* Notifications Menu */}
       <Menu
         anchorEl={notificationMenuOpen}
         open={Boolean(notificationMenuOpen)}
@@ -1165,7 +1143,6 @@ const Navbar = () => {
         </Box>
       </Menu>
 
-      {/* Mobile Drawer */}
       <Drawer
         anchor="right"
         open={drawerOpen}
@@ -1211,7 +1188,6 @@ const Navbar = () => {
             </IconButton>
           </Box>
 
-          {/* User Card */}
           <Paper
             elevation={0}
             sx={{
@@ -1295,7 +1271,6 @@ const Navbar = () => {
             </Stack>
           </Paper>
 
-          {/* Navigation */}
           <Box sx={{ flex: 1, overflow: "auto" }}>
             <List sx={{ p: 0 }}>
               {navItems.map((item) => (
@@ -1353,9 +1328,7 @@ const Navbar = () => {
 
             <Divider sx={{ my: 3 }} />
 
-            {/* Additional Menu Items */}
             <List sx={{ p: 0 }}>
-              {/* Theme Toggle in Mobile Menu */}
               <ListItemButton
                 sx={{
                   borderRadius: 3,
@@ -1384,12 +1357,12 @@ const Navbar = () => {
                 </Box>
               </ListItemButton>
 
-              {/* Refresh in Mobile Menu */}
               <ListItemButton
                 onClick={() => {
                   handleRefresh();
                   setDrawerOpen(false);
                 }}
+                disabled={notificationLoading}
                 sx={{
                   borderRadius: 3,
                   py: { xs: 1.5, sm: 2 },
@@ -1398,6 +1371,13 @@ const Navbar = () => {
                   "&:hover": {
                     transform: "translateX(8px)",
                     bgcolor: "action.hover",
+                  },
+                  "&:disabled": {
+                    opacity: 0.6,
+                    "&:hover": {
+                      transform: "none",
+                      bgcolor: "transparent",
+                    },
                   },
                   transition: "all 0.3s ease",
                 }}
@@ -1417,7 +1397,9 @@ const Navbar = () => {
                   />
                 </ListItemIcon>
                 <ListItemText
-                  primary="Refresh Data"
+                  primary={
+                    notificationLoading ? "Refreshing..." : "Refresh Data"
+                  }
                   primaryTypographyProps={{
                     fontWeight: 500,
                     fontSize: { xs: "0.9rem", sm: "1rem" },
@@ -1491,7 +1473,6 @@ const Navbar = () => {
             </List>
           </Box>
 
-          {/* Footer Info */}
           <Box sx={{ mt: 2, textAlign: "center" }}>
             <Typography
               variant="caption"
@@ -1515,7 +1496,6 @@ const Navbar = () => {
         </Box>
       </Drawer>
 
-      {/* Spacer for fixed navbar */}
       <Box sx={{ height: { xs: 56, sm: 64, md: 72 } }} />
     </>
   );

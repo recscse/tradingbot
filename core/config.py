@@ -22,7 +22,6 @@ TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"  # User ID or Group ID
 # Copy the bot token and store it in config.py.
 
 
-
 # ✅ 2. Get Chat ID
 # Search for your bot on Telegram and send a message.
 
@@ -49,7 +48,6 @@ TWILIO_AUTH_TOKEN = "your-twilio-auth-token"
 TWILIO_PHONE_NUMBER = "+123456789"
 
 
-
 # Upstox API Configuration
 
 API_KEY = "your_api_key"
@@ -58,3 +56,4 @@ REDIRECT_URI = "your_redirect_uri"
 ACCESS_TOKEN = "your_access_token"  # You need to generate this
 WS_URL = "wss://api.upstox.com/live/market-data"  # Upstox WebSocket URL
 
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")

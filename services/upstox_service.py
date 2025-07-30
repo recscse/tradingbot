@@ -12,6 +12,10 @@ UPSTOX_TOKEN_URL = "https://api.upstox.com/v2/login/authorization/token"
 UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI")
 
 
+ANGEL_REDIRECT_URI = os.getenv("ANGEL_REDIRECT_URI")
+ANGEL_AUTH_BASE_URL = "https://smartapi.angelone.in/publisher-login"
+
+
 def generate_upstox_auth_url(api_key: str) -> str:
     """Generate Upstox OAuth URL for user redirection."""
     query = {
@@ -55,6 +59,17 @@ def generate_upstox_auth_url(api_key: str, user_id: int) -> str:
         "state": str(user_id),
     }
     return f"{UPSTOX_BASE_URL}/login/authorization/dialog?{urlencode(params)}"
+
+
+def generate_angel_auth_url(api_key: str, user_id: int) -> str:
+    """Generate Angel One OAuth URL for user redirection."""
+    params = {
+        "response_type": "code",
+        "client_id": api_key,
+        "redirect_uri": ANGEL_REDIRECT_URI,
+        "state": str(user_id),
+    }
+    return f"{ANGEL_AUTH_BASE_URL}/login/authorization/dialog?{urlencode(params)}"
 
 
 def exchange_code_for_token(code: str, api_key: str, api_secret: str):

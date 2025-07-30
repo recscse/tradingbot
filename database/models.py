@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Date,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -132,6 +133,7 @@ class BrokerConfig(Base):
     api_secret = Column(String, nullable=True)
     access_token = Column(String, nullable=True)
     refresh_token = Column(String, nullable=True)
+    feed_token = Column(String, nullable=True)
     additional_params = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=False)
     access_token_expiry = Column(DateTime, nullable=True)
@@ -679,3 +681,142 @@ class TradeExecution(Base):
     # Relationships
     user = relationship("User")
     session = relationship("AutoTradingSession")
+
+
+class SelectedStock(Base):
+    """Daily selected stocks for trading - Optimized"""
+
+    __tablename__ = "selected_stocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    instrument_key = Column(String(100), nullable=False)
+    selection_date = Column(Date, nullable=False, index=True)
+
+    # Selection Criteria
+    selection_score = Column(Float, nullable=False)
+    selection_reason = Column(String(100), nullable=False)
+
+    # Price Data at Selection
+    price_at_selection = Column(Float, nullable=False)
+    volume_at_selection = Column(Integer, default=0)
+    change_percent_at_selection = Column(Float, default=0.0)
+
+    # Classification
+    sector = Column(String(50), default="OTHER")
+    score_breakdown = Column(Text)  # JSON string with detailed scoring
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Performance Tracking (optional)
+    max_price_achieved = Column(Float)
+    min_price_achieved = Column(Float)
+    exit_price = Column(Float)
+    exit_reason = Column(String(100))
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_symbol_selection_date", "symbol", "selection_date"),
+        Index("idx_selection_date_active", "selection_date", "is_active"),
+        Index("idx_selection_score", "selection_score"),
+    )
+
+
+class DailyStockSummary(Base):
+    """Daily aggregated stock data - MUCH more efficient than individual ticks"""
+
+    __tablename__ = "daily_stock_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    instrument_key = Column(String(100), nullable=False)
+    trading_date = Column(Date, nullable=False, index=True)
+
+    # OHLC Data
+    open_price = Column(Float, nullable=False)
+    high_price = Column(Float, nullable=False)
+    low_price = Column(Float, nullable=False)
+    close_price = Column(Float, nullable=False)
+
+    # Volume and Trading Data
+    volume = Column(Integer, default=0)
+    total_trades = Column(Integer, default=0)
+    avg_price = Column(Float, nullable=False)
+
+    # Performance Metrics
+    change_percent = Column(Float, default=0.0)
+
+    # Classification
+    sector = Column(String(50), default="OTHER")
+    exchange = Column(String(10), nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Indexes for performance
+    __table_args__ = (
+        Index("idx_symbol_date", "symbol", "trading_date"),
+        Index("idx_date_sector", "trading_date", "sector"),
+        Index("idx_change_percent", "change_percent"),
+    )
+
+
+class MarketSnapshot(Base):
+    """Market snapshots at key times (open, close, significant events)"""
+
+    __tablename__ = "market_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    snapshot_time = Column(DateTime, nullable=False)
+
+    # Summary Statistics
+    total_instruments = Column(Integer, default=0)
+    processed_ticks = Column(Integer, default=0)
+
+    # Market Data (JSON)
+    market_summary = Column(Text)  # JSON with market breadth, sentiment, etc.
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HourlyMarketStats(Base):
+    """Hourly aggregated market statistics"""
+
+    __tablename__ = "hourly_market_stats"
+
+    id = Column(Integer, primary_key=True, index=True)
+    stats_date = Column(Date, nullable=False, index=True)
+    stats_hour = Column(Integer, nullable=False)  # 0-23
+
+    # Market Breadth
+    total_stocks = Column(Integer, default=0)
+    advancing_stocks = Column(Integer, default=0)
+    declining_stocks = Column(Integer, default=0)
+    unchanged_stocks = Column(Integer, default=0)
+
+    # Volume Data
+    total_volume = Column(Integer, default=0)
+    avg_volume = Column(Float, default=0.0)
+
+    # Price Movement
+    avg_change_percent = Column(Float, default=0.0)
+    volatility_index = Column(Float, default=0.0)
+
+    # Sector Performance (JSON)
+    sector_performance = Column(Text)  # JSON with sector-wise data
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Unique constraint
+    __table_args__ = (
+        UniqueConstraint("stats_date", "stats_hour", name="unique_date_hour"),
+    )

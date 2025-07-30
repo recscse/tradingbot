@@ -8,10 +8,10 @@ import redis
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import User, BrokerConfig
-from services.optimized_instrument_service import OptimizedInstrumentService
 from services.stock_analyzer import StockAnalyzer
-from services.instrument_refresh_service import InstrumentRefreshService
-from utils.instrument_key_cache import save_instrument_keys, load_instrument_keys
+from services.instrument_refresh_service import TradingInstrumentService
+
+# Import the optimized service
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +19,15 @@ logger = logging.getLogger(__name__)
 class MarketScheduleService:
     def __init__(self):
         self.ist = pytz.timezone("Asia/Kolkata")
+        self.early_preparation = time(8, 0)  # 8:00 AM
         self.premarket_start = time(9, 0)  # 9:00 AM
         self.market_open = time(9, 15)  # 9:15 AM
         self.trading_start = time(9, 30)  # 9:30 AM
         self.market_close = time(15, 30)  # 3:30 PM
 
         self.stock_analyzer = StockAnalyzer()
-        self.instrument_service = InstrumentRefreshService()
-        self.optimized_service = OptimizedInstrumentService()
+        self.instrument_service = TradingInstrumentService()
+        # Initialize the optimized service
         self.selected_stocks = {}
         self.is_running = False
 
@@ -50,6 +51,13 @@ class MarketScheduleService:
                     logger.info("📅 Weekend - Market closed")
                     await asyncio.sleep(3600)  # Sleep for 1 hour
                     continue
+
+                # Early morning preparation (8:00 AM) - ADD THIS BLOCK
+                if (
+                    current_time >= self.early_preparation
+                    and current_time < self.premarket_start
+                ):
+                    await self._run_early_morning_preparation()
 
                 # Pre-market analysis (9:00 AM)
                 if (
@@ -82,24 +90,115 @@ class MarketScheduleService:
                 logger.error(f"❌ Market scheduler error: {e}")
                 await asyncio.sleep(300)  # Wait 5 minutes on error
 
+    async def _run_early_morning_preparation(self):
+        """Run at 8:00 AM - Build FNO list first, then instruments"""
+        logger.info("🌅 Starting early morning preparation...")
+
+        try:
+            # Step 1: Build FNO stock list FIRST
+            logger.info("🔧 Step 1: Building FNO stock list...")
+            from services.fno_stock_service import (
+                FnoStockListService,
+            )  # Your FNO service from paste-5.txt
+
+            fno_service = FnoStockListService()
+            fno_result = (
+                fno_service.update_fno_list()
+            )  # This saves to data/fno_stock_list.json
+
+            if fno_result["status"] == "success":
+                logger.info(
+                    f"✅ FNO stock list built and saved: {fno_result['total_stocks']} stocks"
+                )
+            else:
+                logger.error(f"❌ FNO stock list failed: {fno_result.get('error')}")
+
+            # Step 2: Build instrument service (reads from data/fno_stock_list.json)
+            logger.info("🔧 Step 2: Building instrument service...")
+            from services.instrument_refresh_service import get_trading_service
+
+            instrument_service = get_trading_service()
+            result = await instrument_service.initialize_service()
+
+            if result.status == "success":
+                logger.info(
+                    f"✅ Instrument service ready with {result.websocket_instruments} keys"
+                )
+            else:
+                logger.error(f"❌ Instrument service failed: {result.error}")
+
+            logger.info("✅ Early morning preparation complete")
+
+        except Exception as e:
+            logger.error(f"❌ Early morning preparation failed: {e}")
+
     async def _run_premarket_analysis(self):
         """Run pre-market analysis from 9:00-9:15 AM"""
         logger.info("📊 Starting pre-market analysis...")
 
         try:
             # 1. Refresh instrument keys
-            await self.instrument_service.refresh_daily_instruments()
-            await self.optimized_service.initialize_instruments_system()
+            # from services.instrument_refresh_service import get_trading_service
 
-            # 2. Analyze market conditions
+            # instrument_service = get_trading_service()
+
+            # Re-initialize the service (this will download fresh data and rebuild everything)
+            # result = await instrument_service.initialize_service()
+
+            # if result.status == "success":
+            #     logger.info(
+            #         f"✅ Instrument service re-initialized successfully with {result.websocket_instruments} WebSocket keys"
+            #     )
+            # else:
+            #     logger.error(
+            #         f"❌ Instrument service re-initialization failed: {result.error}"
+            #     )
+
+            # 2. Initialize instrument registry with new data
+            try:
+                from services.instrument_registry import instrument_registry
+
+                await instrument_registry.initialize_registry()
+
+                registry_stats = instrument_registry.get_stats()
+                logger.info(
+                    f"✅ Instrument registry initialized with {registry_stats['spot_instruments']} spot instruments, "
+                    f"{registry_stats['fno_instruments']} F&O instruments"
+                )
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize instrument registry: {e}")
+
+            # 3. Refresh the centralized WebSocket manager to use the new keys
+            from services.centralized_ws_manager import centralized_manager
+
+            if centralized_manager:
+                # Tell the WebSocket manager to reload instrument keys
+                await centralized_manager.initialize()
+                logger.info("✅ WebSocket manager refreshed with new keys")
+
+            # 4. Analyze market conditions
             market_analysis = await self._analyze_market_conditions()
 
-            # 3. Select top stocks for trading
+            # 5. Select top stocks for trading
             self.selected_stocks = await self._select_trading_stocks(market_analysis)
 
-            # 4. Prepare instrument keys for selected stocks
+            # 6. Prepare instrument keys for selected stocks
             await self._prepare_selected_stock_instruments()
             await self._prepare_selected_stock_instruments_enhanced()
+
+            # 7. Update instrument registry with selected stocks
+            try:
+                from services.instrument_registry import instrument_registry
+
+                # Flag these stocks as selected in the registry
+                for symbol in self.selected_stocks.keys():
+                    instrument_registry.mark_stock_as_selected(symbol)
+
+                logger.info(
+                    f"✅ Updated instrument registry with {len(self.selected_stocks)} selected stocks"
+                )
+            except Exception as e:
+                logger.error(f"❌ Failed to update selected stocks in registry: {e}")
 
             logger.info(
                 f"✅ Pre-market analysis complete. Selected {len(self.selected_stocks)} stocks"
@@ -236,51 +335,68 @@ class MarketScheduleService:
             return {}
 
     async def _prepare_selected_stock_instruments_enhanced(self):
-        """ENHANCED: Use OptimizedInstrumentService for comprehensive instrument keys"""
+        """ENHANCED: Use instrument registry for comprehensive instrument keys"""
         try:
             if not self.selected_stocks:
                 logger.warning("No stocks selected for instrument preparation")
                 return
 
-            from services.optimized_instrument_service import fast_retrieval
+            from services.instrument_registry import instrument_registry
 
             all_trading_instruments = []
 
             for symbol, stock_data in self.selected_stocks.items():
                 try:
-                    stock_mapping = fast_retrieval.get_stock_instruments(symbol)
+                    # Get trading keys from registry
+                    trading_keys = instrument_registry.get_instrument_keys_for_trading(
+                        symbol
+                    )
 
-                    if stock_mapping:
-                        instruments = stock_mapping.get("instruments", {})
-                        primary_key = stock_mapping.get("primary_instrument_key")
-                        if primary_key:
-                            all_trading_instruments.append(primary_key)
-
-                        # Add futures
-                        futures = instruments.get("FUT", [])[:3]
-                        for future in futures:
-                            if future.get("instrument_key"):
-                                all_trading_instruments.append(future["instrument_key"])
-
-                        # Add options
-                        current_price = stock_data.get("analysis", {}).get(
-                            "current_price", 0
+                    if trading_keys:
+                        all_trading_instruments.extend(trading_keys)
+                        logger.info(
+                            f"📋 Added {len(trading_keys)} instruments for {symbol} from registry"
                         )
-                        if current_price > 0:
-                            atm_strike = round(current_price / 50) * 50
-                            min_strike = atm_strike - 1000
-                            max_strike = atm_strike + 1000
+                    else:
+                        # Fallback to fast retrieval if registry doesn't have the data
+                        from services.optimized_instrument_service import fast_retrieval
 
-                            for option_type in ["CE", "PE"]:
-                                for option in instruments.get(option_type, []):
-                                    strike = option.get("strike_price", 0)
-                                    if min_strike <= strike <= max_strike:
-                                        if option.get("instrument_key"):
-                                            all_trading_instruments.append(
-                                                option["instrument_key"]
-                                            )
+                        stock_mapping = fast_retrieval.get_stock_instruments(symbol)
+                        if stock_mapping:
+                            instruments = stock_mapping.get("instruments", {})
+                            primary_key = stock_mapping.get("primary_instrument_key")
+                            if primary_key:
+                                all_trading_instruments.append(primary_key)
 
-                        logger.info(f"📋 Generated instruments for {symbol}")
+                            # Add futures
+                            futures = instruments.get("FUT", [])[:3]
+                            for future in futures:
+                                if future.get("instrument_key"):
+                                    all_trading_instruments.append(
+                                        future["instrument_key"]
+                                    )
+
+                            # Add options
+                            current_price = stock_data.get("analysis", {}).get(
+                                "current_price", 0
+                            )
+                            if current_price > 0:
+                                atm_strike = round(current_price / 50) * 50
+                                min_strike = atm_strike - 1000
+                                max_strike = atm_strike + 1000
+
+                                for option_type in ["CE", "PE"]:
+                                    for option in instruments.get(option_type, []):
+                                        strike = option.get("strike_price", 0)
+                                        if min_strike <= strike <= max_strike:
+                                            if option.get("instrument_key"):
+                                                all_trading_instruments.append(
+                                                    option["instrument_key"]
+                                                )
+
+                            logger.info(
+                                f"📋 Generated instruments for {symbol} from fast retrieval"
+                            )
 
                 except Exception as e:
                     logger.error(f"Error getting instruments for {symbol}: {e}")
@@ -295,48 +411,6 @@ class MarketScheduleService:
 
         except Exception as e:
             logger.error(f"❌ Failed to prepare enhanced trading instruments: {e}")
-
-    async def _cache_trading_instruments(self, instruments: List[str]):
-        """Cache trading instruments for WebSocket and other services"""
-        try:
-            # Cache for WebSocket access
-            self.redis_client.setex(
-                "trading_instruments_cache",
-                3600,
-                json.dumps(
-                    {
-                        "instruments": instruments,
-                        "cached_at": datetime.now().isoformat(),
-                        "count": len(instruments),
-                    }
-                ),
-            )
-
-            # Cache selected stocks data
-            selected_stocks_data = {
-                "selected_stocks": [
-                    {
-                        "symbol": symbol,
-                        "stock_data": data.get("stock_data", {}),
-                        "analysis": data.get("analysis", {}),
-                        "instrument_key": data.get("stock_data", {}).get(
-                            "instrument_key", f"NSE_EQ|{symbol}"
-                        ),
-                    }
-                    for symbol, data in self.selected_stocks.items()
-                ],
-                "cached_at": datetime.now().isoformat(),
-            }
-            self.redis_client.setex(
-                "trading_stocks_cache", 3600, json.dumps(selected_stocks_data)
-            )
-
-            logger.info(
-                f"💾 Cached {len(instruments)} instruments and {len(self.selected_stocks)} selected stocks"
-            )
-
-        except Exception as e:
-            logger.error(f"Error caching trading data: {e}")
 
     # === MISSING METHODS IMPLEMENTATION ===
 
@@ -459,6 +533,16 @@ class MarketScheduleService:
             ]
             for key in cache_keys:
                 self.redis_client.delete(key)
+
+            # Reset selection status in instrument registry
+            try:
+                from services.instrument_registry import instrument_registry
+
+                instrument_registry.clear_selected_stocks()
+                logger.info("✅ Cleared selected stocks in instrument registry")
+            except Exception as e:
+                logger.error(f"Error clearing selected stocks in registry: {e}")
+
             logger.info("🧹 Cleared temporary caches")
         except Exception as e:
             logger.error(f"Error clearing caches: {e}")

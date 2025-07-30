@@ -29,6 +29,18 @@ import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
 import TermsPage from "./pages/TermsPage";
 import SecurityPage from "./pages/SecurityPage";
 import TermsModal from "./components/TermsModal";
+import { UnifiedMarketProvider } from "./hooks/useUnifiedMarketData";
+
+// 🎯 PROTECTED LAYOUT WRAPPER - This ensures all providers are available
+const ProtectedLayout = ({ children }) => (
+  <PrivateRoute>
+    <MarketProvider>
+      <UnifiedMarketProvider>
+        <Layout>{children}</Layout>
+      </UnifiedMarketProvider>
+    </MarketProvider>
+  </PrivateRoute>
+);
 
 const App = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(isAuthenticated());
@@ -43,41 +55,20 @@ const App = () => {
     <CustomThemeProvider>
       <CssBaseline />
       <NotificationProvider>
-        {" "}
-        {/* ✅ Wrap entire app with NotificationProvider */}
         <Router>
           <TermsModal />
           <Routes>
+            {/* ===== PUBLIC ROUTES ===== */}
             <Route
               path="/"
               element={
-                isLoggedIn ? <Navigate to="/dashboard" /> : <LandingPage />
+                isLoggedIn ? (
+                  <Navigate to="/dashboard" replace />
+                ) : (
+                  <LandingPage />
+                )
               }
             />
-
-            {/* ✅ Private routes with MarketProvider */}
-            <Route
-              element={
-                <PrivateRoute>
-                  <MarketProvider>
-                    <Layout />
-                  </MarketProvider>
-                </PrivateRoute>
-              }
-            >
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route
-                path="/option-chain/:symbol"
-                element={<OptionChainPage />}
-              />
-              <Route path="/trade-control" element={<TradeControlPage />} />
-              <Route path="/config" element={<ConfigPage />} />
-              <Route path="/backtesting" element={<BacktestingPage />} />
-              <Route path="/papertrading" element={<PaperTradingPage />} />
-              <Route path="/analysis" element={<StockAnalysisPage />} />
-              <Route path="/profile" element={<ProfilePage />} />
-            </Route>
-
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/contact" element={<ContactPage />} />
@@ -85,6 +76,80 @@ const App = () => {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="/security" element={<SecurityPage />} />
+
+            {/* ===== PROTECTED ROUTES ===== */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedLayout>
+                  <DashboardPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/option-chain/:symbol"
+              element={
+                <ProtectedLayout>
+                  <OptionChainPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/trade-control"
+              element={
+                <ProtectedLayout>
+                  <TradeControlPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/config"
+              element={
+                <ProtectedLayout>
+                  <ConfigPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/backtesting"
+              element={
+                <ProtectedLayout>
+                  <BacktestingPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/papertrading"
+              element={
+                <ProtectedLayout>
+                  <PaperTradingPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/analysis"
+              element={
+                <ProtectedLayout>
+                  <StockAnalysisPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedLayout>
+                  <ProfilePage />
+                </ProtectedLayout>
+              }
+            />
+
+            {/* ===== CATCH ALL ROUTE ===== */}
+            <Route
+              path="*"
+              element={
+                <Navigate to={isLoggedIn ? "/dashboard" : "/"} replace />
+              }
+            />
           </Routes>
         </Router>
       </NotificationProvider>

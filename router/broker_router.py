@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
+from typing import Dict
 from fastapi import APIRouter, Depends, HTTPException, Header
+import pyotp
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import BrokerConfig, Trade, User
@@ -9,6 +11,7 @@ import os
 import requests
 import logging
 from database.models import BrokerConfig
+from services.angel_service import generate_angel_auth_url
 from services.upstox_service import generate_upstox_auth_url, exchange_upstox_token
 
 # ✅ Configure Logging
@@ -109,7 +112,11 @@ def verify_broker_credentials(broker_name: str, credentials: dict):
             }
 
         elif broker_name == "Angel One":
-            response = requests.post(BROKER_API_URLS[broker_name], json=credentials)
+            auth_url = generate_angel_auth_url(credentials["api_key"])
+            return {
+                "auth_url": auth_url,
+                "client_id": credentials["api_key"],
+            }
 
         elif broker_name == "Fyers":
             response = requests.post(BROKER_API_URLS[broker_name], json=credentials)
@@ -196,7 +203,6 @@ def add_broker(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ✅ Get All Brokers API
 @broker_router.get("/list")
 def get_brokers(
     user_id: int = Depends(get_current_user), db: Session = Depends(get_db)
@@ -274,15 +280,13 @@ async def execute_trade(
         }
 
         # ✅ Send WebSocket Update to Frontend
-        await send_trade_update(str(user_id), trade_data)
+        # await send_trade_update(str(user_id), trade_data)
 
         return {"message": "Trade executed successfully", "trade": trade_data}
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
-
 
 
 @broker_router.get("/callback")
@@ -297,9 +301,13 @@ def upstox_callback(code: str, state: str = None, db: Session = Depends(get_db))
             raise HTTPException(status_code=404, detail="User not found")
 
         # Get temp credentials stored before redirect (you can also use Redis, etc.)
-        config = db.query(BrokerConfig).filter(BrokerConfig.client_id == client_id).first()
+        config = (
+            db.query(BrokerConfig).filter(BrokerConfig.client_id == client_id).first()
+        )
         if not config:
-            raise HTTPException(status_code=404, detail="Pending broker config not found")
+            raise HTTPException(
+                status_code=404, detail="Pending broker config not found"
+            )
 
         # Exchange code for token
         tokens = exchange_upstox_token(code, config.client_id, config.api_key)
@@ -307,7 +315,9 @@ def upstox_callback(code: str, state: str = None, db: Session = Depends(get_db))
         # Save access token and expiry
         config.access_token = tokens["access_token"]
         config.refresh_token = tokens.get("refresh_token")
-        config.access_token_expiry = datetime.now() + timedelta(seconds=tokens.get("expires_in", 0))
+        config.access_token_expiry = datetime.now() + timedelta(
+            seconds=tokens.get("expires_in", 0)
+        )
         config.is_active = True
         db.commit()
 

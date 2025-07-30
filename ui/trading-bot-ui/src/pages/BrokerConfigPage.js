@@ -32,7 +32,10 @@ const BrokerConfigPage = () => {
   const [error, setError] = useState("");
 
   const navigate = useNavigate();
-  const { resetTokenExpired } = useMarket();
+  const marketContext = useMarket();
+
+  // Add safety check for resetTokenExpired function
+  const resetTokenExpired = marketContext?.resetTokenExpired;
 
   // Set the flag when we're in the config page
   useEffect(() => {
@@ -88,11 +91,15 @@ const BrokerConfigPage = () => {
     try {
       const res = await brokerAPI.refreshBrokerToken(brokerId);
       if (res.auth_url) {
-        // Only reset token expired when successful
-        resetTokenExpired();
-        console.log(
-          "✅ Token refreshed successfully, token expired state reset"
-        );
+        // Only reset token expired when successful AND function exists
+        if (resetTokenExpired && typeof resetTokenExpired === "function") {
+          resetTokenExpired();
+          console.log(
+            "✅ Token refreshed successfully, token expired state reset"
+          );
+        } else {
+          console.warn("⚠️ resetTokenExpired function not available");
+        }
         window.open(res.auth_url, "_blank");
       } else {
         console.warn("No auth URL returned.");
