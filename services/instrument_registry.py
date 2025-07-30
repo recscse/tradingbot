@@ -390,10 +390,10 @@ class InstrumentRegistry:
             # Identifiers
             "instrument_key": instrument_key,
             "symbol": symbol,
-            "name": metadata.get("name", symbol),
-            "trading_symbol": metadata.get("trading_symbol", symbol),
-            "exchange": metadata.get("exchange", "NSE"),
-            "sector": metadata.get("sector", "OTHER"),
+            "name": price_data.get("name"),
+            "trading_symbol": price_data.get("symbol", symbol),
+            "exchange": price_data.get("exchange"),
+            "sector": price_data.get("sector"),
             "instrument_type": price_data.get("instrument_type", "EQ"),
             # Core price data
             "ltp": price_data.get("ltp"),

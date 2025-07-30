@@ -257,6 +257,10 @@ async def handle_unified_message(
                     "record_movers": complete_dashboard_data.get(
                         "record_movers", {"new_highs": [], "new_lows": []}
                     ),
+                    "indices_data": complete_dashboard_data.get(  # NEW: Added indices data
+                        "indices_data",
+                        {"indices": [], "major_indices": [], "sector_indices": []},
+                    ),
                     # Metadata
                     "generated_at": complete_dashboard_data.get("generated_at"),
                     "processing_time_ms": complete_dashboard_data.get(
@@ -403,6 +407,34 @@ async def handle_unified_message(
                     }
                 )
 
+        elif message_type == "get_indices_data":
+            try:
+                from services.enhanced_market_analytics import enhanced_analytics
+
+                indices_data = enhanced_analytics.get_indices_data()
+
+                await websocket.send_json(
+                    {
+                        "type": "indices_data",
+                        "data": indices_data,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+
+                logger.info(
+                    f"📈 Sent indices data to {client_id}: {indices_data.get('summary', {}).get('total_indices', 0)} indices"
+                )
+
+            except Exception as e:
+                logger.error(f"❌ Error getting indices data: {e}")
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Error getting indices data: {str(e)}",
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+
         elif message_type == "get_sector_data":
             try:
                 from services.instrument_registry import instrument_registry
@@ -523,6 +555,7 @@ async def handle_unified_message(
                         "get_live_prices",
                         "get_options_chain",
                         "get_stock_data",
+                        "get_indices_data",
                         "get_system_status",
                         "ping",
                     ],
@@ -585,6 +618,124 @@ async def emit_test_event(event_data: Dict[str, Any]):
     except Exception as e:
         logger.error(f"❌ Error emitting test event: {e}")
         raise HTTPException(status_code=500, detail=f"Error emitting event: {str(e)}")
+
+
+@router.get("/api/unified/indices")
+async def get_indices_data():
+    """Get current indices data"""
+    try:
+        from services.enhanced_market_analytics import enhanced_analytics
+
+        indices_data = enhanced_analytics.get_indices_data()
+
+        return {
+            "success": True,
+            "data": indices_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting indices data: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting indices data: {str(e)}"
+        )
+
+
+@router.get("/api/unified/indices/{symbol}")
+async def get_specific_index_data(symbol: str):
+    """Get specific index data by symbol"""
+    try:
+        from services.instrument_registry import instrument_registry
+
+        index_data = instrument_registry.get_spot_price(symbol.upper())
+
+        if not index_data:
+            raise HTTPException(status_code=404, detail=f"Index {symbol} not found")
+
+        return {
+            "success": True,
+            "symbol": symbol.upper(),
+            "data": index_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting index data for {symbol}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting index data: {str(e)}"
+        )
+
+
+@router.post("/api/unified/trigger-indices-refresh")
+async def trigger_indices_refresh():
+    """Manually trigger indices data refresh"""
+    try:
+        from services.enhanced_market_analytics import enhanced_analytics
+
+        # Clear indices cache
+        if "indices_data" in enhanced_analytics.cache:
+            del enhanced_analytics.cache["indices_data"]
+        if "indices_data" in enhanced_analytics.last_calculated:
+            del enhanced_analytics.last_calculated["indices_data"]
+
+        # Get fresh indices data
+        indices_data = enhanced_analytics.get_indices_data()
+
+        # Emit the update event
+        unified_manager.emit_event("indices_data_update", indices_data)
+
+        return {
+            "success": True,
+            "message": "Indices data refreshed successfully",
+            "total_indices": indices_data.get("summary", {}).get("total_indices", 0),
+            "major_indices": len(indices_data.get("major_indices", [])),
+            "sector_indices": len(indices_data.get("sector_indices", [])),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error refreshing indices data: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error refreshing indices data: {str(e)}"
+        )
+
+
+@router.get("/api/unified/market-summary")
+async def get_market_summary_with_indices():
+    """Get comprehensive market summary including indices"""
+    try:
+        from services.enhanced_market_analytics import enhanced_analytics
+        from services.instrument_registry import instrument_registry
+
+        # Get analytics data
+        analytics = enhanced_analytics.get_complete_analytics()
+
+        # Get registry market summary
+        try:
+            registry_summary = instrument_registry.get_market_summary()
+        except AttributeError:
+            registry_summary = {}
+
+        # Combine data
+        market_summary = {
+            "indices": analytics.get("indices_data", {}),
+            "market_sentiment": analytics.get("market_sentiment", {}),
+            "market_breadth": registry_summary,
+            "top_movers": analytics.get("top_movers", {}),
+            "sector_performance": analytics.get("sector_heatmap", {}),
+            "volume_analysis": analytics.get("volume_analysis", {}),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        return {
+            "success": True,
+            "data": market_summary,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting market summary: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting market summary: {str(e)}"
+        )
 
 
 @router.get("/api/unified/analytics")

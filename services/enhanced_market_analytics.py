@@ -29,6 +29,7 @@ class EnhancedMarketAnalyticsService:
                 "intraday_stocks": self.get_intraday_stocks(),  # Added alias
                 "performance_summary": self.get_performance_summary(),
                 "record_movers": self.get_record_movers(),  # Added
+                "indices_data": self.get_indices_data(),
                 "generated_at": datetime.now().isoformat(),
                 "processing_time_ms": (datetime.now() - start_time).total_seconds()
                 * 1000,
@@ -381,6 +382,440 @@ class EnhancedMarketAnalyticsService:
             return 0.0
 
         return round((advancing + declining) / total_stocks, 3)
+
+    # Add this method to your EnhancedMarketAnalyticsService class in enhanced_market_analytics_service.py
+
+    def get_indices_data(self) -> Dict[str, Any]:
+        """COMPLETE: Get comprehensive indices data with analytics"""
+        if not self._should_recalculate("indices_data"):
+            return self.cache.get("indices_data", {"indices": [], "summary": {}})
+
+        try:
+            from services.instrument_registry import instrument_registry
+
+            # Define major indices with their possible keys
+            major_indices = {
+                "NIFTY": ["NSE_INDEX|Nifty 50", "NSE_INDEX|NIFTY 50"],
+                "BANKNIFTY": ["NSE_INDEX|Nifty Bank", "NSE_INDEX|BANK NIFTY"],
+                "FINNIFTY": [
+                    "NSE_INDEX|Nifty Fin Service",
+                    "NSE_INDEX|Nifty Financial Services",
+                ],
+                "SENSEX": ["BSE_INDEX|SENSEX"],
+                "MIDCPNIFTY": [
+                    "NSE_INDEX|Nifty Midcap 50",
+                    "NSE_INDEX|NIFTY MID SELECT",
+                ],
+                # "SMALLCAPNIFTY": ["NSE_INDEX|Nifty Smallcap 50"],
+                # "CNXAUTO": ["NSE_INDEX|Nifty Auto"],
+                # "CNXBANK": ["NSE_INDEX|Nifty Bank"],
+                # "CNXIT": ["NSE_INDEX|Nifty IT"],
+                # "CNXPHARMA": ["NSE_INDEX|Nifty Pharma"],
+                # "CNXFMCG": ["NSE_INDEX|Nifty FMCG"],
+                # "CNXMETAL": ["NSE_INDEX|Nifty Metal"],
+                # "CNXREALTY": ["NSE_INDEX|Nifty Realty"],
+                # "CNXENERGY": ["NSE_INDEX|Nifty Energy"],
+                # "CNXPSE": ["NSE_INDEX|Nifty PSE"],
+            }
+
+            indices_data = []
+            sector_indices = []
+            major_market_indices = []
+
+            # Get enriched prices data
+            enriched_data = instrument_registry.get_enriched_prices()
+
+            if not enriched_data:
+                logger.warning("⚠️ No enriched data available for indices")
+                return {
+                    "indices": [],
+                    "major_indices": [],
+                    "sector_indices": [],
+                    "summary": {"total_indices": 0, "major_up": 0, "major_down": 0},
+                    "error": "No enriched data available",
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+            logger.info(
+                f"📊 Processing indices from {len(enriched_data)} enriched instruments"
+            )
+
+            # Process each major index
+            for symbol, possible_keys in major_indices.items():
+                index_data = None
+
+                # Try to find the index using spot price method first
+                try:
+                    spot_data = instrument_registry.get_spot_price(symbol)
+                    if spot_data and spot_data.get("last_price") is not None:
+                        index_data = {
+                            "symbol": symbol,
+                            "name": spot_data.get("trading_symbol", symbol),
+                            "instrument_key": spot_data.get("instrument_key"),
+                            "exchange": spot_data.get(
+                                "exchange",
+                                (
+                                    "NSE"
+                                    if "NSE" in spot_data.get("instrument_key", "")
+                                    else "BSE"
+                                ),
+                            ),
+                            "last_price": spot_data.get("last_price"),
+                            "change": spot_data.get("change"),
+                            "change_percent": spot_data.get("change_percent"),
+                            "high": spot_data.get("high"),
+                            "low": spot_data.get("low"),
+                            "open": spot_data.get("open"),
+                            "close": spot_data.get("close"),
+                            "volume": spot_data.get("volume", 0),
+                            "last_updated": spot_data.get("last_updated"),
+                            "data_source": "registry_spot_price",
+                        }
+                        logger.info(
+                            f"✅ Found {symbol} via spot price: {index_data['last_price']}"
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ Error getting spot price for {symbol}: {e}")
+
+                # If spot price didn't work, try direct lookup in enriched data
+                if not index_data:
+                    for possible_key in possible_keys:
+                        if possible_key in enriched_data:
+                            data = enriched_data[possible_key]
+                            if data.get("ltp") is not None:
+                                index_data = {
+                                    "symbol": symbol,
+                                    "name": data.get("name", symbol),
+                                    "instrument_key": possible_key,
+                                    "exchange": data.get(
+                                        "exchange",
+                                        "NSE" if "NSE" in possible_key else "BSE",
+                                    ),
+                                    "last_price": data.get("ltp"),
+                                    "change": data.get("change"),
+                                    "change_percent": data.get("change_percent"),
+                                    "high": data.get("high"),
+                                    "low": data.get("low"),
+                                    "open": data.get("open"),
+                                    "close": data.get("close") or data.get("cp"),
+                                    "volume": data.get("volume", 0),
+                                    "last_updated": data.get("last_updated")
+                                    or data.get("timestamp"),
+                                    "data_source": "enriched_direct",
+                                }
+                                logger.info(
+                                    f"✅ Found {symbol} via enriched data: {index_data['last_price']}"
+                                )
+                                break
+
+                # If still no data, try fallback search
+                if not index_data:
+                    for instrument_key, data in enriched_data.items():
+                        if "INDEX" in instrument_key and data.get("ltp") is not None:
+                            # Check if this might be our target index
+                            key_upper = instrument_key.upper()
+                            symbol_variations = [
+                                symbol,
+                                symbol.replace("NIFTY", "Nifty"),
+                                symbol.replace("CNX", "Nifty"),
+                            ]
+
+                            for variation in symbol_variations:
+                                if variation.upper() in key_upper or any(
+                                    word in key_upper
+                                    for word in variation.upper().split()
+                                ):
+                                    index_data = {
+                                        "symbol": symbol,
+                                        "name": data.get("name", symbol),
+                                        "instrument_key": instrument_key,
+                                        "exchange": data.get(
+                                            "exchange",
+                                            "NSE" if "NSE" in instrument_key else "BSE",
+                                        ),
+                                        "last_price": data.get("ltp"),
+                                        "change": data.get("change"),
+                                        "change_percent": data.get("change_percent"),
+                                        "high": data.get("high"),
+                                        "low": data.get("low"),
+                                        "open": data.get("open"),
+                                        "close": data.get("close") or data.get("cp"),
+                                        "volume": data.get("volume", 0),
+                                        "last_updated": data.get("last_updated")
+                                        or data.get("timestamp"),
+                                        "data_source": "fallback_search",
+                                    }
+                                    logger.info(
+                                        f"✅ Found {symbol} via fallback search: {index_data['last_price']}"
+                                    )
+                                    break
+                            if index_data:
+                                break
+
+                # Add to appropriate category
+                if index_data:
+                    # Calculate additional metrics
+                    if index_data["last_price"] and index_data["close"]:
+                        if not index_data["change"]:
+                            index_data["change"] = (
+                                index_data["last_price"] - index_data["close"]
+                            )
+                        if (
+                            not index_data["change_percent"]
+                            and index_data["close"] != 0
+                        ):
+                            index_data["change_percent"] = (
+                                index_data["change"] / index_data["close"]
+                            ) * 100
+
+                    # Add trend and performance indicators
+                    change_pct = index_data.get("change_percent", 0)
+                    index_data["trend"] = (
+                        "strong_bullish"
+                        if change_pct > 2
+                        else (
+                            "bullish"
+                            if change_pct > 0.5
+                            else (
+                                "strong_bearish"
+                                if change_pct < -2
+                                else "bearish" if change_pct < -0.5 else "neutral"
+                            )
+                        )
+                    )
+
+                    index_data["performance_category"] = (
+                        "strong_gainer"
+                        if change_pct > 2
+                        else (
+                            "gainer"
+                            if change_pct > 0
+                            else (
+                                "strong_loser"
+                                if change_pct < -2
+                                else "loser" if change_pct < 0 else "unchanged"
+                            )
+                        )
+                    )
+
+                    # Categorize indices
+                    if symbol in [
+                        "NIFTY",
+                        "BANKNIFTY",
+                        "SENSEX",
+                        "MIDCPNIFTY",
+                        "FINNIFTY",
+                        "SMALLCAPNIFTY",
+                    ]:
+                        major_market_indices.append(index_data)
+                    else:
+                        sector_indices.append(index_data)
+
+                    indices_data.append(index_data)
+                else:
+                    logger.warning(f"⚠️ Could not find data for index: {symbol}")
+
+            # Find any additional INDEX instruments that we might have missed
+            additional_indices = []
+            processed_keys = set()
+
+            for index in indices_data:
+                processed_keys.add(index["instrument_key"])
+
+            for instrument_key, data in enriched_data.items():
+                if (
+                    "INDEX" in instrument_key
+                    and instrument_key not in processed_keys
+                    and data.get("ltp") is not None
+                ):
+
+                    # Extract symbol from key
+                    symbol = (
+                        instrument_key.split("|")[-1]
+                        if "|" in instrument_key
+                        else instrument_key
+                    )
+                    symbol = symbol.replace(" ", "").upper()
+
+                    additional_index = {
+                        "symbol": symbol,
+                        "name": data.get("name", symbol),
+                        "instrument_key": instrument_key,
+                        "exchange": data.get(
+                            "exchange", "NSE" if "NSE" in instrument_key else "BSE"
+                        ),
+                        "last_price": data.get("ltp"),
+                        "change": data.get("change"),
+                        "change_percent": data.get("change_percent"),
+                        "high": data.get("high"),
+                        "low": data.get("low"),
+                        "open": data.get("open"),
+                        "close": data.get("close") or data.get("cp"),
+                        "volume": data.get("volume", 0),
+                        "last_updated": data.get("last_updated")
+                        or data.get("timestamp"),
+                        "data_source": "additional_discovery",
+                        "trend": "neutral",
+                        "performance_category": "unknown",
+                    }
+
+                    additional_indices.append(additional_index)
+                    indices_data.append(additional_index)
+
+            # Sort indices by change percentage
+            indices_data.sort(key=lambda x: x.get("change_percent", 0), reverse=True)
+            major_market_indices.sort(
+                key=lambda x: x.get("change_percent", 0), reverse=True
+            )
+            sector_indices.sort(key=lambda x: x.get("change_percent", 0), reverse=True)
+
+            # Calculate summary statistics
+            major_up = len(
+                [
+                    idx
+                    for idx in major_market_indices
+                    if idx.get("change_percent", 0) > 0
+                ]
+            )
+            major_down = len(
+                [
+                    idx
+                    for idx in major_market_indices
+                    if idx.get("change_percent", 0) < 0
+                ]
+            )
+            sector_up = len(
+                [idx for idx in sector_indices if idx.get("change_percent", 0) > 0]
+            )
+            sector_down = len(
+                [idx for idx in sector_indices if idx.get("change_percent", 0) < 0]
+            )
+
+            # Find best and worst performers
+            best_performer = indices_data[0] if indices_data else None
+            worst_performer = indices_data[-1] if indices_data else None
+
+            # Calculate market sentiment from indices
+            if major_market_indices:
+                avg_major_change = sum(
+                    idx.get("change_percent", 0) for idx in major_market_indices
+                ) / len(major_market_indices)
+                market_sentiment_from_indices = (
+                    "very_bullish"
+                    if avg_major_change > 2
+                    else (
+                        "bullish"
+                        if avg_major_change > 0.5
+                        else (
+                            "very_bearish"
+                            if avg_major_change < -2
+                            else "bearish" if avg_major_change < -0.5 else "neutral"
+                        )
+                    )
+                )
+            else:
+                avg_major_change = 0
+                market_sentiment_from_indices = "unknown"
+
+            result = {
+                "indices": indices_data,
+                "major_indices": major_market_indices,
+                "sector_indices": sector_indices,
+                "additional_indices": additional_indices,
+                "summary": {
+                    "total_indices": len(indices_data),
+                    "major_indices_count": len(major_market_indices),
+                    "sector_indices_count": len(sector_indices),
+                    "additional_indices_count": len(additional_indices),
+                    "major_up": major_up,
+                    "major_down": major_down,
+                    "major_unchanged": len(major_market_indices)
+                    - major_up
+                    - major_down,
+                    "sector_up": sector_up,
+                    "sector_down": sector_down,
+                    "sector_unchanged": len(sector_indices) - sector_up - sector_down,
+                    "avg_major_change": round(avg_major_change, 2),
+                    "market_sentiment_from_indices": market_sentiment_from_indices,
+                    "best_performer": {
+                        "symbol": (
+                            best_performer.get("symbol") if best_performer else None
+                        ),
+                        "change_percent": (
+                            best_performer.get("change_percent")
+                            if best_performer
+                            else None
+                        ),
+                    },
+                    "worst_performer": {
+                        "symbol": (
+                            worst_performer.get("symbol") if worst_performer else None
+                        ),
+                        "change_percent": (
+                            worst_performer.get("change_percent")
+                            if worst_performer
+                            else None
+                        ),
+                    },
+                },
+                "timestamp": datetime.now().isoformat(),
+                "debug_info": {
+                    "enriched_data_available": len(enriched_data),
+                    "indices_found_by_method": {
+                        "spot_price": len(
+                            [
+                                idx
+                                for idx in indices_data
+                                if idx.get("data_source") == "registry_spot_price"
+                            ]
+                        ),
+                        "enriched_direct": len(
+                            [
+                                idx
+                                for idx in indices_data
+                                if idx.get("data_source") == "enriched_direct"
+                            ]
+                        ),
+                        "fallback_search": len(
+                            [
+                                idx
+                                for idx in indices_data
+                                if idx.get("data_source") == "fallback_search"
+                            ]
+                        ),
+                        "additional_discovery": len(
+                            [
+                                idx
+                                for idx in indices_data
+                                if idx.get("data_source") == "additional_discovery"
+                            ]
+                        ),
+                    },
+                },
+            }
+
+            # Cache the result
+            self.cache["indices_data"] = result
+            self._mark_calculated("indices_data")
+
+            logger.info(
+                f"✅ Indices data calculated: {len(indices_data)} total indices, {len(major_market_indices)} major, {len(sector_indices)} sectoral"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ Error calculating indices data: {e}")
+            import traceback
+
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return {
+                "indices": [],
+                "major_indices": [],
+                "sector_indices": [],
+                "summary": {"total_indices": 0, "major_up": 0, "major_down": 0},
+                "error": str(e),
+                "timestamp": datetime.now().isoformat(),
+            }
 
     def get_market_sentiment(self) -> Dict[str, Any]:
         """COMPLETE: Market sentiment analysis"""
@@ -1110,6 +1545,7 @@ class EnhancedMarketAnalyticsService:
             "volume_analysis",
             "gap_analysis",
             "breakout_analysis",
+            "indices_data",
         ]
         status = {}
 
