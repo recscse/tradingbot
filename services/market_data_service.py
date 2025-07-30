@@ -16,7 +16,7 @@ def fetch_live_stock_price(user_id: int, symbol: str, db: Session):
             "low": response.get("low", 0),
             "open": response.get("open", 0),
             "close": response.get("close", 0),
-            "volume": response.get("volume", 0)
+            "volume": response.get("volume", 0),
         }
     except Exception as e:
         logging.error(f"Failed to fetch live stock price: {e}")
@@ -70,7 +70,7 @@ def fetch_market_data(user_id: int, security_id: int, db: Session):
             instrument_type="EQUITY",
             expiry_code=0,
             from_date="2024-01-01",
-            to_date="2024-03-19"
+            to_date="2024-03-19",
         )
         logging.info(f"Historical data for {security_id} fetched.")
         return data
@@ -98,7 +98,7 @@ def get_stock_snapshot(user_id: int, symbol: str, db: Session):
             "volume": response.get("volume", 0),
             "target": 0,
             "stopLoss": 0,
-            "amount": 0
+            "amount": 0,
         }
     except Exception as e:
         logging.error(f"Failed to fetch snapshot for {symbol}: {e}")

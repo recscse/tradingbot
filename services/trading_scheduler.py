@@ -140,3 +140,15 @@ async def manual_premarket_job(user_id: int):
         result = await service.initialize_pre_market_data(user_id)
 
     return result
+
+
+@classmethod
+def create_scheduler(cls):
+    """Create and start scheduler instance"""
+    try:
+        scheduler = cls()
+        scheduler.start_scheduler()
+        return scheduler
+    except Exception as e:
+        logger.error(f"Error creating scheduler: {e}")
+        return None

@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from "react";
-import tradingAPI from "../services/tradingAPI";  
+import { tradingApiService } from "../services/tradingApiService";
 import { analyzeSectoralOptions } from "../services/sectorAnalysisAPI";
 import {
-    Container,
-    Paper,
-    Typography,
-    Box,
-    Button,
-    Alert,
-    Autocomplete,
-    TextField,
-    Divider,
-    Select,
-    MenuItem
+  Container,
+  Paper,
+  Typography,
+  Box,
+  Button,
+  Alert,
+  Autocomplete,
+  TextField,
+  Divider,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import { PlayArrow } from "@mui/icons-material";
 
@@ -23,13 +23,13 @@ const StockAnalysisPage = () => {
   const [error, setError] = useState("");
   const [selectedStocks, setSelectedStocks] = useState([]);
   const [tradingStarted, setTradingStarted] = useState(false);
-  const [tradingError, setTradingError] = useState("");  // ✅ Still required
+  const [tradingError, setTradingError] = useState(""); // ✅ Still required
   const [availableStocks, setAvailableStocks] = useState([]);
 
   useEffect(() => {
     const fetchStocks = async () => {
       try {
-        const stocks = await tradingAPI.getAvailableStocks();
+        const stocks = await tradingApiService.getAvailableStocks();
         setAvailableStocks(stocks);
       } catch (err) {
         setError("Failed to fetch available stocks: " + err.message);
@@ -74,10 +74,10 @@ const StockAnalysisPage = () => {
 
     try {
       for (const stock of selectedStocks) {
-        await tradingAPI.startTrading({ symbol: stock });
+        await tradingApiService.startTrading({ symbol: stock });
       }
       setTradingStarted(true);
-      setTradingError("");  // ✅ Reset error if successful
+      setTradingError(""); // ✅ Reset error if successful
     } catch (err) {
       setTradingError("Failed to start trading: " + err.message);
     }
@@ -100,7 +100,11 @@ const StockAnalysisPage = () => {
             getOptionLabel={(option) => `${option.symbol} - ${option.name}`}
             onChange={(event, newValue) => handleStockSelect(newValue?.symbol)}
             renderInput={(params) => (
-              <TextField {...params} label="Search and select stocks" variant="outlined" />
+              <TextField
+                {...params}
+                label="Search and select stocks"
+                variant="outlined"
+              />
             )}
           />
         </Box>
@@ -112,14 +116,20 @@ const StockAnalysisPage = () => {
         </Typography>
         <Box sx={{ display: "flex", gap: 2, alignItems: "center", mt: 2 }}>
           <Select value={sector} onChange={handleSectorChange} displayEmpty>
-            <MenuItem value=""><em>All Sectors</em></MenuItem>
+            <MenuItem value="">
+              <em>All Sectors</em>
+            </MenuItem>
             <MenuItem value="Technology">Technology</MenuItem>
             <MenuItem value="Finance">Finance</MenuItem>
             <MenuItem value="Healthcare">Healthcare</MenuItem>
             <MenuItem value="Consumer">Consumer</MenuItem>
             <MenuItem value="Energy">Energy</MenuItem>
           </Select>
-          <Button variant="contained" onClick={handleAnalyze} disabled={loading}>
+          <Button
+            variant="contained"
+            onClick={handleAnalyze}
+            disabled={loading}
+          >
             {loading ? "Analyzing..." : "Analyze Stocks"}
           </Button>
         </Box>
@@ -150,7 +160,8 @@ const StockAnalysisPage = () => {
             </>
           ) : (
             <Typography color="text.secondary">
-              No stocks selected. Please select stocks manually or from analysis results.
+              No stocks selected. Please select stocks manually or from analysis
+              results.
             </Typography>
           )}
         </Box>

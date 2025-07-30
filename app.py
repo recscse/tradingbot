@@ -1,9 +1,12 @@
+# app.py
+
 import asyncio
 import logging
 import os
 from datetime import datetime, time
 from contextlib import asynccontextmanager
 import threading
+import traceback
 import uvicorn
 import socketio
 from dotenv import load_dotenv
@@ -12,7 +15,76 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-# Import your existing Redis safety manager
+# Load environment variables FIRST
+load_dotenv()
+
+# Configure logging EARLY
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# FIXED: Import enhanced analytics service properly
+try:
+    from services.enhanced_market_analytics import enhanced_analytics
+
+    # Create instance instead of using class methods
+    enhanced_analytics = enhanced_analytics
+    ANALYTICS_SERVICE_AVAILABLE = True
+    logger.info("✅ Enhanced analytics service available")
+except ImportError as e:
+    enhanced_analytics = None
+    ANALYTICS_SERVICE_AVAILABLE = False
+    logger.warning(f"⚠️ Enhanced analytics service not available: {e}")
+
+# FIXED: Import market analytics processor properly
+# ANALYTICS_PROCESSOR_AVAILABLE = False
+# market_analytics_processor = None
+
+# try:
+#     from services.market_analytics_processor import market_analytics_processor
+
+#     market_analytics_processor = market_analytics_processor
+#     ANALYTICS_PROCESSOR_AVAILABLE = True
+#     logger.info("✅ Market analytics processor available")
+# except ImportError as e:
+#     logger.warning(f"⚠️ Market analytics processor not available: {e}")
+
+# FIXED: Single import block for centralized WebSocket system
+try:
+    from services.centralized_ws_manager import centralized_manager
+    from router.market_ws import (
+        router as centralized_market_ws_router,
+        initialize_websocket_system,
+    )
+
+    CENTRALIZED_WS_AVAILABLE = True
+    CENTRALIZED_ROUTES_AVAILABLE = True
+    logger.info("✅ NEW: Centralized WebSocket manager imported successfully")
+    logger.info("✅ NEW: Centralized WebSocket routes imported successfully")
+except ImportError as e:
+    CENTRALIZED_WS_AVAILABLE = False
+    CENTRALIZED_ROUTES_AVAILABLE = False
+    logger.error(f"❌ NEW: Centralized WebSocket manager not available: {e}")
+    logger.error(f"❌ NEW: Centralized WebSocket routes not available: {e}")
+    centralized_manager = None
+    from fastapi import APIRouter
+
+    centralized_market_ws_router = APIRouter()  # Dummy router
+
+# LEGACY: Use the same router for backward compatibility
+if CENTRALIZED_WS_AVAILABLE:
+    legacy_market_ws_router = centralized_market_ws_router
+    LEGACY_MARKET_WS_AVAILABLE = True
+    logger.info(
+        "✅ Legacy market WebSocket routes available for backward compatibility"
+    )
+else:
+    legacy_market_ws_router = centralized_market_ws_router  # Same dummy router
+    LEGACY_MARKET_WS_AVAILABLE = False
+    logger.warning("⚠️ Legacy market WebSocket routes not available")
+
+# Import other services
 from typing import Optional, Any
 import redis
 from redis.exceptions import ConnectionError, RedisError
@@ -24,46 +96,22 @@ from database.connection import SessionLocal, get_db
 from database.init_db import init_db
 from database.models import BrokerConfig, TradePerformance, TradeSignal, User
 
-# Load environment variables FIRST
-load_dotenv()
-
-# Configure logging EARLY
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-# NEW: Add centralized WebSocket system imports
+# SAFE: Import analytics router without circular dependencies
 try:
-    from services.centralized_ws_manager import centralized_manager
+    from router.market_analytics_router import router as market_analytics_router
 
-    CENTRALIZED_WS_AVAILABLE = True
-    logger.info("✅ NEW: Centralized WebSocket manager imported successfully")
+    MARKET_ANALYTICS_ROUTER_AVAILABLE = True
+    logger.info("✅ Market analytics router imported successfully")
 except ImportError as e:
-    CENTRALIZED_WS_AVAILABLE = False
-    logger.error(f"❌ NEW: Centralized WebSocket manager not available: {e}")
+    logger.warning(f"⚠️ Market analytics router not available: {e}")
+    from fastapi import APIRouter
 
-    # Fallback dummy manager
-    class DummyCentralizedManager:
-        def __init__(self):
-            self.is_running = False
+    market_analytics_router = APIRouter()  # Dummy router
+    MARKET_ANALYTICS_ROUTER_AVAILABLE = False
 
-        async def initialize(self):
-            return False
-
-        async def start_connection(self):
-            pass
-
-        async def stop(self):
-            pass
-
-        def get_status(self):
-            return {"status": "not_available"}
-
-        async def health_check(self):
-            return {"status": "not_available"}
-
-    centralized_manager = DummyCentralizedManager()
+# Import other services
+from services.market_data_queue import initialize_queue_service
+from services.auto_stock_selection_service import start_auto_stock_selection
 
 # Import your existing routers
 from router import analytics_router, order_router
@@ -74,93 +122,35 @@ from router.stock_list_router import stock_list_router
 from router.dhan_router import dhan_router
 from router.upstox_router import upstox_router
 from router.fyers_router import fyers_router
-from router.market_data_router import market_data_router
-from services import stop_loss_router
+
 from ws_router.upstox_ltp_ws import ws_upstox_router
 from router.backtest_router import backtesting_router
 from router.stock_router import router as stock_router
 from router.profile_router import router as profile_router
 from router.paper_trading_router import router as paper_trading_router
 from router.notification_router import router as notification_router
+from router.instrument_routes import router as instrument_router
+from services.instrument_registry import instrument_registry
+from router.websocket_routes import router as websocket_router
+from router.debug_routes import router as debug_router
+from router.heatmap_router import router as heatmap_router
+from router.unified_websocket_routes import router as unified_ws_router
+from services.unified_websocket_manager import unified_manager, start_unified_websocket
 
-# NEW: Import centralized WebSocket routes
+# Import from market_analytics_router safely
 try:
-    from router.market_ws import (
-        router as centralized_market_ws_router,
-    )  # FIXED: routes not router
-
-    CENTRALIZED_ROUTES_AVAILABLE = True
-    logger.info("✅ NEW: Centralized WebSocket routes imported successfully")
-except ImportError as e:
-    CENTRALIZED_ROUTES_AVAILABLE = False
-    logger.error(f"❌ NEW: Centralized WebSocket routes not available: {e}")
-    from fastapi import APIRouter
-
-    centralized_market_ws_router = APIRouter()
-
-# LEGACY: Import existing market WebSocket router for backward compatibility
-try:
-    from router.market_ws import router as legacy_market_ws_router
-
-    LEGACY_MARKET_WS_AVAILABLE = True
-    logger.info(
-        "✅ Legacy market WebSocket routes available for backward compatibility"
-    )
+    from router.market_analytics_router import INSTRUMENT_REGISTRY_AVAILABLE
 except ImportError:
-    LEGACY_MARKET_WS_AVAILABLE = False
-    logger.warning("⚠️ Legacy market WebSocket routes not available")
+    INSTRUMENT_REGISTRY_AVAILABLE = False
 
-# KEEP: Your existing trading engine and services
+# Import your existing trading engine and services
 from services.trading_services.trading_engine import TradingEngine
 from router.dashboard_router import router as dashboard_router
-
-# FIXED: Import optimized instrument service correctly
-try:
-    from services.optimized_instrument_service import (
-        get_instrument_service,
-        get_fast_retrieval,
-        initialize_instrument_system,
-        is_initialized as instrument_is_initialized,
-        health_check as instrument_health_check,
-    )
-
-    OPTIMIZED_INSTRUMENTS_AVAILABLE = True
-    logger.info("✅ Optimized instrument service functions imported successfully")
-except ImportError as e:
-    OPTIMIZED_INSTRUMENTS_AVAILABLE = False
-    logger.warning(f"⚠️ Optimized instrument service not available: {e}")
-
-    # Create fallback functions
-    def get_instrument_service():
-        return None
-
-    def get_fast_retrieval():
-        return None
-
-    async def initialize_instrument_system():
-        return type(
-            "Result",
-            (),
-            {
-                "status": "not_available",
-                "mapped_stocks": 0,
-                "websocket_instruments": 0,
-                "message": "Optimized instrument service not available",
-            },
-        )()
-
-    async def instrument_health_check():
-        return {"status": "not_available"}
-
-    def instrument_is_initialized():
-        return False
-
 
 # FIXED: Import trading scheduler correctly
 try:
     from services.trading_scheduler import TradingScheduler
 
-    # Note: start_trading_scheduler might not exist or be used differently
     TRADING_SCHEDULER_AVAILABLE = True
     logger.info("✅ Trading scheduler imported successfully")
 except ImportError as e:
@@ -179,7 +169,7 @@ except ImportError as e:
             self.is_running = False
 
 
-# KEEP: Your existing pre-market service import
+# Import pre-market service
 try:
     from services.pre_market_data_service import (
         PreMarketDataService,
@@ -415,13 +405,12 @@ trading_redis = TradingSafeRedisManager()
 trading_engine = None
 trading_scheduler = None
 instrument_service_instance = None
-fast_retrieval_instance = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Enhanced lifespan with NEW centralized WebSocket system integration"""
-    global trading_engine, trading_scheduler, instrument_service_instance, fast_retrieval_instance
+    global trading_engine, trading_scheduler, instrument_service_instance
 
     logger.info(
         "🚀 Starting Enhanced Trading Application with NEW Centralized WebSocket System..."
@@ -437,12 +426,139 @@ async def lifespan(app: FastAPI):
         redis_status = trading_redis.health_check()
         logger.info(f"🔧 Redis status: {redis_status['message']}")
 
-        # 3. NEW: Initialize Centralized WebSocket System FIRST
+        # 3. Initialize instrument service FIRST
+        logger.info("🔧 Initializing Instrument Service...")
+        from services.instrument_refresh_service import get_trading_service
+
+        instrument_service = get_trading_service()
+        initialization_result = await instrument_service.initialize_service()
+
+        if initialization_result.status == "success":
+            logger.info(
+                f"✅ Instrument service initialized with {initialization_result.mapped_stocks} stocks"
+            )
+            instrument_service_instance = instrument_service
+        else:
+            logger.error(
+                f"❌ Instrument service initialization failed: {initialization_result.error}"
+            )
+
+        # 4. Initialize instrument registry SECOND
+        try:
+            logger.info("🔧 Initializing Instrument Registry...")
+            from services.instrument_registry import instrument_registry
+
+            registry_initialized = await instrument_registry.initialize_registry()
+
+            if registry_initialized:
+                stats = instrument_registry.get_stats()
+                logger.info(
+                    f"✅ Instrument Registry initialized with {stats['spot_instruments']} spot instruments, {stats['fno_instruments']} F&O instruments"
+                )
+            else:
+                logger.error("❌ Instrument registry initialization failed")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Instrument Registry: {e}")
+            import traceback
+
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+        # 5. Start Unified WebSocket System
+        logger.info("🔌 Starting Unified WebSocket System...")
+        await start_unified_websocket()
+
+        # 6. NEW: Initialize Centralized WebSocket System
         if CENTRALIZED_WS_AVAILABLE:
             logger.info("🔌 Initializing NEW Centralized WebSocket System...")
             try:
                 if await centralized_manager.initialize():
                     await centralized_manager.start_connection()
+
+                    # FIXED: Register the WebSocket broadcast function
+                    try:
+                        from router.websocket_routes import broadcast_market_data
+
+                        centralized_manager.register_callback(
+                            "price_update",
+                            lambda data: asyncio.create_task(
+                                broadcast_market_data(data.get("data", {}))
+                            ),
+                        )
+                        logger.info(
+                            "✅ WebSocket broadcast function registered with centralized manager"
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ Failed to register WebSocket broadcast: {e}")
+
+                    # FIXED: Only register processor callbacks if processor is available
+                    if ANALYTICS_PROCESSOR_AVAILABLE and market_analytics_processor:
+                        try:
+                            centralized_manager.register_callback(
+                                "price_update",
+                                lambda data: asyncio.create_task(
+                                    market_analytics_processor._on_price_update(data)
+                                ),
+                            )
+                            centralized_manager.register_callback(
+                                "index_update",
+                                lambda data: asyncio.create_task(
+                                    market_analytics_processor._on_index_update(data)
+                                ),
+                            )
+                            logger.info(
+                                "✅ Market analytics processor connected to centralized manager"
+                            )
+
+                            # FIXED: Only try to connect analytics manager if available
+                            try:
+                                from router.market_analytics_router import (
+                                    analytics_manager,
+                                )
+
+                                if analytics_manager:
+                                    # Register callbacks from processor to analytics manager
+                                    market_analytics_processor.register_callback(
+                                        "analytics_update",
+                                        lambda data: asyncio.create_task(
+                                            analytics_manager.broadcast(
+                                                {
+                                                    "type": "analytics_update",
+                                                    "data": data,
+                                                    "timestamp": datetime.now().isoformat(),
+                                                }
+                                            )
+                                        ),
+                                    )
+
+                                    market_analytics_processor.register_callback(
+                                        "market_sentiment",
+                                        lambda data: asyncio.create_task(
+                                            analytics_manager.broadcast(
+                                                {
+                                                    "type": "sentiment_update",
+                                                    "data": data,
+                                                    "timestamp": datetime.now().isoformat(),
+                                                }
+                                            )
+                                        ),
+                                    )
+
+                                    logger.info(
+                                        "✅ Analytics manager connected to processor"
+                                    )
+                            except Exception as e:
+                                logger.error(
+                                    f"❌ Error connecting analytics manager to processor: {e}"
+                                )
+                        except Exception as e:
+                            logger.error(
+                                f"❌ Error connecting processor to centralized manager: {e}"
+                            )
+                    else:
+                        logger.info(
+                            "⚠️ Analytics processor not available - skipping callback registration"
+                        )
 
                     status = await centralized_manager.health_check()
                     logger.info(
@@ -467,36 +583,7 @@ async def lifespan(app: FastAPI):
                 "⚠️ NEW: Centralized WebSocket system not available - using legacy only"
             )
 
-        # 4. FIXED: Initialize OptimizedInstrumentService correctly
-        logger.info("🔧 Initializing OptimizedInstrumentService...")
-        if OPTIMIZED_INSTRUMENTS_AVAILABLE:
-            try:
-                # Get singleton instances using factory functions
-                instrument_service_instance = get_instrument_service()
-                fast_retrieval_instance = get_fast_retrieval()
-
-                # Initialize the system
-                result = await initialize_instrument_system()
-
-                if result.status == "success":
-                    logger.info(
-                        f"✅ Optimized instrument service initialized: {result.mapped_stocks} stocks, {result.websocket_instruments} instruments"
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ Instrument initialization had issues: {result.error if hasattr(result, 'error') else 'Unknown error'}"
-                    )
-
-            except Exception as e:
-                logger.warning(
-                    f"⚠️ Instrument service initialization failed: {e} - continuing with limited functionality"
-                )
-                instrument_service_instance = None
-                fast_retrieval_instance = None
-        else:
-            logger.warning("⚠️ Optimized instrument service not available")
-
-        # 5. FIXED: Initialize TradingScheduler correctly
+        # 7. FIXED: Initialize TradingScheduler correctly
         logger.info("🕐 Starting TradingScheduler...")
         if TRADING_SCHEDULER_AVAILABLE:
             try:
@@ -510,14 +597,14 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ TradingScheduler not available")
 
-        # 6. Initialize trading engine
+        # 8. Initialize trading engine
         try:
             trading_engine = TradingEngine()
             logger.info("🤖 Trading Engine initialized.")
         except Exception as e:
             logger.error(f"❌ Trading Engine initialization failed: {e}")
 
-        # 7. Start background tasks
+        # 9. Start background tasks
         if trading_engine:
             engine_task = asyncio.create_task(start_enhanced_trading_engine())
             logger.info("⚡ Enhanced Trading Engine background task started.")
@@ -525,9 +612,21 @@ async def lifespan(app: FastAPI):
         broadcast_task = asyncio.create_task(broadcast_trading_updates())
         logger.info("📡 Background broadcast service started.")
 
-        logger.info(
-            "🟢 All services started successfully with NEW Centralized WebSocket + Optimized Architecture!"
-        )
+        # 10. Start analytics processor
+        # analytics_task = asyncio.create_task(start_analytics_processor())
+        # logger.info("📊 Analytics processor started")
+
+        # 11. Start analytics processor background tasks
+        # if ANALYTICS_PROCESSOR_AVAILABLE and market_analytics_processor:
+        #     try:
+        #         await market_analytics_processor.start_background_tasks()
+        #         logger.info("✅ Analytics processor background tasks initialized")
+        #     except Exception as e:
+        #         logger.error(f"❌ Error starting analytics processor tasks: {e}")
+
+        # logger.info(
+        #     "🟢 All services started successfully with NEW Centralized WebSocket + Optimized Architecture!"
+        # )
 
         yield
 
@@ -539,7 +638,7 @@ async def lifespan(app: FastAPI):
         logger.info("🛑 Starting enhanced shutdown...")
 
         # NEW: Stop centralized WebSocket system
-        if CENTRALIZED_WS_AVAILABLE:
+        if CENTRALIZED_WS_AVAILABLE and centralized_manager:
             try:
                 await centralized_manager.stop()
                 logger.info("✅ NEW: Centralized WebSocket system stopped")
@@ -562,6 +661,7 @@ async def lifespan(app: FastAPI):
                 logger.error(f"Error stopping trading scheduler: {e}")
 
         logger.info("🛑 Enhanced lifespan shutdown complete.")
+        await unified_manager.stop()
 
 
 # FIXED: Enhanced trading engine startup function
@@ -576,28 +676,6 @@ async def start_enhanced_trading_engine():
             logger.info(
                 f"🚀 Starting Enhanced Trading Engine (attempt {retry_count + 1}/{max_retries})"
             )
-
-            # Check if instrument service is ready using the correct method
-            if not instrument_service_instance:
-                logger.warning(
-                    "⚠️ Instrument service not ready, attempting initialization..."
-                )
-                if OPTIMIZED_INSTRUMENTS_AVAILABLE:
-                    try:
-                        instrument_service_instance = get_instrument_service()
-                        await initialize_instrument_system()
-                    except Exception as e:
-                        logger.warning(f"Instrument service still unavailable: {e}")
-            elif OPTIMIZED_INSTRUMENTS_AVAILABLE:
-                # Use the correct function to check if initialized
-                if not instrument_is_initialized():
-                    logger.warning(
-                        "⚠️ Instrument service not initialized, attempting initialization..."
-                    )
-                    try:
-                        await initialize_instrument_system()
-                    except Exception as e:
-                        logger.warning(f"Instrument service initialization failed: {e}")
 
             # Start the trading engine
             if trading_engine:
@@ -622,6 +700,52 @@ async def start_enhanced_trading_engine():
                 logger.error(
                     "❌ Enhanced Trading Engine failed to start after all retries - continuing without engine"
                 )
+
+
+# FIXED: Analytics processor startup
+async def start_analytics_processor():
+    """Start the analytics processor for real-time updates"""
+    while True:
+        try:
+            if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+                # FIXED: Use the instance method instead of class method
+                analytics_data = enhanced_analytics.get_complete_analytics()
+
+                # Emit individual events
+                unified_manager.emit_event(
+                    "top_movers_update", analytics_data.get("top_movers", {})
+                )
+                unified_manager.emit_event(
+                    "gap_analysis_update", analytics_data.get("gap_analysis", {})
+                )
+                unified_manager.emit_event(
+                    "breakout_analysis_update",
+                    analytics_data.get("breakout_analysis", {}),
+                )
+                unified_manager.emit_event(
+                    "market_sentiment_update",
+                    analytics_data.get("market_sentiment", {}),
+                )
+                unified_manager.emit_event(
+                    "heatmap_update", analytics_data.get("sector_heatmap", {})
+                )
+                unified_manager.emit_event(
+                    "intraday_stocks_update", analytics_data.get("intraday_stocks", {})
+                )
+                unified_manager.emit_event(
+                    "volume_analysis_update", analytics_data.get("volume_analysis", {})
+                )
+                unified_manager.emit_event(
+                    "record_movers_update", analytics_data.get("record_movers", {})
+                )
+            else:
+                logger.debug("⚠️ Analytics service not available for processing")
+
+            await asyncio.sleep(30)  # Update every 30 seconds
+
+        except Exception as e:
+            logger.error(f"❌ Analytics processor error: {e}")
+            await asyncio.sleep(60)
 
 
 # FastAPI app initialization
@@ -665,10 +789,8 @@ app.include_router(stock_list_router, prefix="/api/stocks", tags=["Stock Data"])
 app.include_router(upstox_router, prefix="/api/broker/upstox", tags=["Upstox API"])
 app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
 app.include_router(dhan_router, prefix="/api/dhan", tags=["Dhan API"])
-app.include_router(market_data_router, tags=["Market Data"])
 app.include_router(analytics_router.router, tags=["Analytics"])
 app.include_router(order_router.router, tags=["Orders"])
-app.include_router(stop_loss_router.router, tags=["Stop Loss"])
 app.include_router(ws_upstox_router, tags=["Legacy WebSocket"])
 app.include_router(backtesting_router, prefix="/api/backtesting", tags=["Backtesting"])
 app.include_router(stock_router, tags=["Stocks"])
@@ -676,6 +798,12 @@ app.include_router(profile_router, tags=["Profile"])
 app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(notification_router, tags=["Notifications"])
 app.include_router(dashboard_router, tags=["Dashboard & Trading Engine"])
+app.include_router(instrument_router, tags=["Instruments"])
+app.include_router(websocket_router, tags=["WebSocket Management"])
+app.include_router(debug_router, tags=["Debug"])
+app.include_router(market_analytics_router, tags=["Market Analytics"])
+app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
+app.include_router(unified_ws_router, tags=["Unified WebSocket"])
 
 # NEW: Add centralized WebSocket routes
 if CENTRALIZED_ROUTES_AVAILABLE:
@@ -717,11 +845,19 @@ async def root():
     try:
         centralized_status = (
             await centralized_manager.health_check()
-            if CENTRALIZED_WS_AVAILABLE
+            if CENTRALIZED_WS_AVAILABLE and centralized_manager
             else {"status": "not_available"}
         )
     except Exception:
         centralized_status = {"status": "error"}
+
+    # NEW: Get instrument registry status
+    try:
+        from services.instrument_registry import instrument_registry
+
+        registry_stats = instrument_registry.get_stats()
+    except Exception:
+        registry_stats = {"status": "error"}
 
     return {
         "status": "running",
@@ -734,6 +870,13 @@ async def root():
             "ws_connected": centralized_status.get("ws_connected", False),
             "total_instruments": centralized_status.get("total_instruments", 0),
             "admin_token_strategy": True,
+        },
+        "instrument_registry": {
+            "status": "active",
+            "spot_instruments": registry_stats.get("spot_instruments", 0),
+            "fno_instruments": registry_stats.get("fno_instruments", 0),
+            "symbols": registry_stats.get("symbols", 0),
+            "live_prices": registry_stats.get("live_prices", 0),
         },
         "existing_systems": {
             "optimized_instrument_service": instrument_service_instance is not None,
@@ -758,10 +901,152 @@ async def root():
         },
         "redis_status": redis_status["status"],
         "timestamp": datetime.now().isoformat(),
+        "market_analytics_system": {
+            "available": ANALYTICS_SERVICE_AVAILABLE,
+            "websocket_endpoint": "/ws/market-analytics",
+            "active_connections": 0,  # Will be updated dynamically
+            "features": [
+                "real_time_market_data",
+                "top_movers",
+                "volume_analysis",
+                "market_sentiment",
+            ],
+            "rest_endpoints": [
+                "/api/analytics/top-movers",
+                "/api/analytics/volume-analysis",
+                "/api/analytics/market-sentiment",
+                "/api/analytics/status",
+                "/api/analytics/quick-data",
+            ],
+        },
     }
 
 
-# Health check endpoint
+# Add these endpoints to your app.py
+@app.get("/api/v1/dashboard/market-data")
+async def get_dashboard_market_data():
+    """Get dashboard market data with live prices"""
+    try:
+        from services.instrument_registry import instrument_registry
+
+        dashboard_data = instrument_registry.get_dashboard_data()
+
+        return {
+            "success": True,
+            "data": dashboard_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting dashboard data: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/trading/{symbol}")
+async def get_trading_data(symbol: str):
+    """Get comprehensive trading data for a symbol"""
+    try:
+        from services.instrument_registry import instrument_registry
+
+        # Get spot price
+        spot_data = instrument_registry.get_spot_price(symbol.upper())
+        if not spot_data:
+            return {
+                "success": False,
+                "error": f"Symbol {symbol} not found",
+            }
+
+        # Get options chain
+        options_chain = instrument_registry.get_options_chain(symbol.upper())
+
+        return {
+            "success": True,
+            "spot": spot_data,
+            "options_chain": options_chain,
+            "updated_at": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting trading data for {symbol}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/websocket-keys/dashboard")
+async def get_dashboard_websocket_keys():
+    """Get instrument keys for dashboard WebSocket subscription"""
+    try:
+        from services.instrument_registry import instrument_registry
+
+        keys = instrument_registry.get_instrument_keys_for_dashboard()
+
+        return {
+            "success": True,
+            "keys": keys,
+            "count": len(keys),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting dashboard WebSocket keys: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/websocket-keys/trading/{symbol}")
+async def get_trading_websocket_keys(symbol: str):
+    """Get instrument keys for trading a specific symbol"""
+    try:
+        from services.instrument_registry import instrument_registry
+
+        keys = instrument_registry.get_instrument_keys_for_trading(symbol.upper())
+
+        return {
+            "success": True,
+            "symbol": symbol.upper(),
+            "keys": keys,
+            "count": len(keys),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting trading WebSocket keys for {symbol}: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/system/refresh-instruments")
+async def refresh_instruments():
+    """Admin endpoint to refresh instrument data"""
+    try:
+        logger.info("🔄 Manual instrument refresh requested")
+
+        # Get trading service instance
+        from services.instrument_refresh_service import get_trading_service
+
+        instrument_service = get_trading_service()
+
+        # Re-initialize the service
+        result = await instrument_service.initialize_service()
+
+        # Refresh centralized WebSocket manager
+        if CENTRALIZED_WS_AVAILABLE and centralized_manager:
+            await centralized_manager.initialize()
+
+        # NEW: Refresh instrument registry
+        await instrument_registry.initialize_registry()
+
+        return {
+            "success": True,
+            "message": "Instrument refresh completed successfully",
+            "refresh_result": {
+                "status": result.status,
+                "websocket_keys": result.websocket_instruments,
+                "dashboard_keys": result.dashboard_instruments,
+                "filtered_instruments": result.filtered_instruments,
+                "processing_time": result.processing_time,
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"❌ Error refreshing instruments: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# FIXED: Health check endpoint
 @app.get("/health")
 async def enhanced_health_check():
     """Enhanced health check with NEW centralized WebSocket system"""
@@ -774,12 +1059,13 @@ async def enhanced_health_check():
     try:
         centralized_health = (
             await centralized_manager.health_check()
-            if CENTRALIZED_WS_AVAILABLE
+            if CENTRALIZED_WS_AVAILABLE and centralized_manager
             else {"status": "not_available"}
         )
     except Exception as e:
         centralized_health = {"status": "error", "error": str(e)}
 
+    # FIXED: Initialize health_status FIRST
     health_status = {
         "status": "ok",
         "timestamp": datetime.now().isoformat(),
@@ -796,7 +1082,20 @@ async def enhanced_health_check():
         "new_centralized_websocket_details": centralized_health,
         "redis_details": redis_status,
         "cache_stats": cache_stats,
+        "market_analytics": ("ok" if ANALYTICS_SERVICE_AVAILABLE else "not_available"),
+        "analytics_processor": (
+            "ok" if ANALYTICS_PROCESSOR_AVAILABLE else "not_available"
+        ),
     }
+
+    # FIXED: Now we can safely access health_status
+    try:
+        registry_stats = instrument_registry.get_stats()
+        health_status["services"]["instrument_registry"] = "ok"
+        health_status["instrument_registry_details"] = registry_stats
+    except Exception as e:
+        health_status["services"]["instrument_registry"] = "error"
+        health_status["instrument_registry_error"] = str(e)
 
     # Check trading engine
     if trading_engine:
@@ -821,67 +1120,462 @@ async def enhanced_health_check():
         except Exception:
             health_status["services"]["trading_scheduler"] = "error"
 
-    # Check instrument service
-    if instrument_service_instance and OPTIMIZED_INSTRUMENTS_AVAILABLE:
-        try:
-            health_status["services"]["instrument_service"] = "running"
-            health_status["instrument_service_details"] = {
-                "service_type": "optimized_redis_with_fallback",
-                "initialized": instrument_is_initialized(),
-            }
-        except Exception:
-            health_status["services"]["instrument_service"] = "error"
-
+    # FIXED: Return the health_status
     return health_status
 
 
-# NEW: Centralized WebSocket system management endpoints
-if CENTRALIZED_WS_AVAILABLE:
+# FIXED: Centralized WebSocket system management endpoints (always available)
+@app.get("/api/v1/system/centralized-status")
+async def get_centralized_system_status():
+    """Get detailed NEW centralized WebSocket system status"""
+    try:
+        if not CENTRALIZED_WS_AVAILABLE or not centralized_manager:
+            return {
+                "success": False,
+                "error": "Centralized WebSocket system not available",
+                "timestamp": datetime.now().isoformat(),
+            }
 
-    @app.get("/api/v1/system/centralized-status")
-    async def get_centralized_system_status():
-        """Get detailed NEW centralized WebSocket system status"""
-        try:
-            status = centralized_manager.get_status()
+        status = centralized_manager.get_status()
+        health = await centralized_manager.health_check()
+
+        return {
+            "success": True,
+            "system": "centralized_single_admin_websocket",
+            "status": status,
+            "health": health,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/admin/restart-centralized-ws")
+async def restart_centralized_websocket():
+    """Admin endpoint to restart NEW centralized WebSocket system"""
+    try:
+        if not CENTRALIZED_WS_AVAILABLE or not centralized_manager:
+            return {
+                "success": False,
+                "error": "Centralized WebSocket system not available",
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        logger.info("🔄 Admin requested NEW centralized WebSocket restart")
+
+        await centralized_manager.stop()
+        await asyncio.sleep(2)
+
+        if await centralized_manager.initialize():
+            await centralized_manager.start_connection()
             health = await centralized_manager.health_check()
-
             return {
                 "success": True,
-                "system": "centralized_single_admin_websocket",
-                "status": status,
+                "message": "NEW centralized WebSocket system restarted successfully",
                 "health": health,
                 "timestamp": datetime.now().isoformat(),
             }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        else:
+            return {
+                "success": False,
+                "message": "Failed to restart NEW centralized WebSocket system",
+                "timestamp": datetime.now().isoformat(),
+            }
+    except Exception as e:
+        logger.error(f"❌ Error restarting NEW centralized WebSocket: {e}")
+        return {"success": False, "error": str(e)}
 
-    @app.post("/api/v1/admin/restart-centralized-ws")
-    async def restart_centralized_websocket():
-        """Admin endpoint to restart NEW centralized WebSocket system"""
+
+@app.get("/api/dashboard/live-data")
+async def get_dashboard_live_data():
+    """Enhanced dashboard data with live market analytics"""
+    try:
+        # Get live market data
+        market_data = {}
+        movers_data = {"gainers": [], "losers": []}
+        sentiment_data = {"sentiment": "neutral"}
+
+        # FIXED: Use analytics service instance
+        if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+            try:
+                analytics_data = enhanced_analytics.get_complete_analytics()
+                movers_data = analytics_data.get(
+                    "top_movers", {"gainers": [], "losers": []}
+                )
+                sentiment_data = analytics_data.get(
+                    "market_sentiment", {"sentiment": "neutral"}
+                )
+            except Exception as e:
+                logger.error(f"Error getting analytics data: {e}")
+
+        # Get market status from your existing centralized manager
+        market_status = "unknown"
+        ws_connected = False
+        total_instruments = 0
+
+        if CENTRALIZED_WS_AVAILABLE and centralized_manager:
+            try:
+                status = centralized_manager.get_status()
+                market_status = centralized_manager.get_market_status()
+                ws_connected = status.get("ws_connected", False)
+                total_instruments = status.get("total_instruments", 0)
+            except Exception as e:
+                logger.error(f"Error getting centralized manager status: {e}")
+
+        # Get instrument registry data if available
+        registry_data = {}
+        if INSTRUMENT_REGISTRY_AVAILABLE and instrument_registry:
+            try:
+                registry_data = instrument_registry.get_dashboard_data()
+            except Exception as e:
+                logger.error(f"Error getting registry data: {e}")
+
+        return {
+            "success": True,
+            "dashboard_data": {
+                "market_status": market_status,
+                "websocket_connected": ws_connected,
+                "total_instruments": total_instruments,
+                "live_data_count": len(market_data),
+                "top_movers": movers_data,
+                "market_sentiment": sentiment_data,
+                "registry_data": registry_data,
+                "market_breadth": {
+                    "total_stocks": len(market_data),
+                    "advancing": sum(
+                        1
+                        for data in market_data.values()
+                        if isinstance(data, dict) and data.get("change_percent", 0) > 0
+                    ),
+                    "declining": sum(
+                        1
+                        for data in market_data.values()
+                        if isinstance(data, dict) and data.get("change_percent", 0) < 0
+                    ),
+                },
+            },
+            "timestamp": datetime.now().isoformat(),
+            "data_source": "enhanced_centralized_websocket_with_analytics",
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting dashboard live data: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/heatmap/live")
+async def get_live_heatmap_data(
+    view_type: str = "sector",
+    size_metric: str = "market_cap",
+    color_metric: str = "change_percent",
+):
+    """Get live heatmap data for TradingView-style visualization"""
+    try:
+        heatmap_data = {"sectors": []}
+
+        # FIXED: Use analytics service instance
+        if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+            try:
+                analytics_data = enhanced_analytics.get_complete_analytics()
+                heatmap_data = analytics_data.get("sector_heatmap", {"sectors": []})
+            except Exception as e:
+                logger.error(f"Error getting heatmap data: {e}")
+
+        return {
+            "success": True,
+            "heatmap_data": heatmap_data,
+            "view_type": view_type,
+            "metrics": {"size_metric": size_metric, "color_metric": color_metric},
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting live heatmap data: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# SocketIO events for analytics
+@sio.event
+async def get_analytics_data(sid, data):
+    """Get market analytics data via SocketIO"""
+    try:
+        analytics_type = data.get("type", "overview")
+        result = {}
+
+        # FIXED: Use analytics service instance
+        if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+            try:
+                complete_analytics = enhanced_analytics.get_complete_analytics()
+
+                if analytics_type == "top_movers":
+                    result = complete_analytics.get(
+                        "top_movers", {"gainers": [], "losers": []}
+                    )
+                elif analytics_type == "volume_analysis":
+                    result = complete_analytics.get(
+                        "volume_analysis", {"volume_leaders": []}
+                    )
+                elif analytics_type == "market_sentiment":
+                    result = complete_analytics.get(
+                        "market_sentiment", {"sentiment": "neutral"}
+                    )
+                elif analytics_type == "sector_heatmap":
+                    result = complete_analytics.get("sector_heatmap", {"sectors": []})
+                else:
+                    # Default overview
+                    result = {
+                        "top_movers": complete_analytics.get("top_movers", {}),
+                        "market_sentiment": complete_analytics.get(
+                            "market_sentiment", {}
+                        ),
+                        "volume_leaders": complete_analytics.get(
+                            "volume_analysis", {}
+                        ).get("volume_leaders", []),
+                    }
+            except Exception as e:
+                logger.error(f"Error getting analytics data: {e}")
+                result = {"error": str(e)}
+
+        await sio.emit(
+            "analytics_data",
+            {
+                "type": analytics_type,
+                "data": result,
+                "timestamp": datetime.now().isoformat(),
+            },
+            to=sid,
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting analytics data: {e}")
+        await sio.emit("analytics_error", {"error": str(e)}, to=sid)
+
+
+@sio.event
+async def subscribe_to_analytics(sid, data):
+    """Subscribe to real-time analytics updates"""
+    try:
+        await sio.enter_room(sid, "analytics_updates")
+
+        # Send confirmation
+        await sio.emit(
+            "analytics_subscription",
+            {
+                "status": "subscribed",
+                "message": "Successfully subscribed to market analytics updates",
+                "timestamp": datetime.now().isoformat(),
+            },
+            to=sid,
+        )
+
+        # Send initial analytics data
+        initial_analytics = {}
+
+        # FIXED: Use analytics service instance
+        if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+            try:
+                complete_analytics = enhanced_analytics.get_complete_analytics()
+                initial_analytics = {
+                    "type": "initial_analytics",
+                    "data": {
+                        "market_overview": {
+                            "top_gainers": complete_analytics.get("top_movers", {}).get(
+                                "gainers", []
+                            )[:5],
+                            "top_losers": complete_analytics.get("top_movers", {}).get(
+                                "losers", []
+                            )[:5],
+                            "market_sentiment": complete_analytics.get(
+                                "market_sentiment", {}
+                            ),
+                        },
+                        "system_status": {
+                            "centralized_ws_connected": (
+                                centralized_manager.get_status().get(
+                                    "ws_connected", False
+                                )
+                                if CENTRALIZED_WS_AVAILABLE and centralized_manager
+                                else False
+                            ),
+                            "data_sources_active": True,
+                            "last_update": datetime.now().isoformat(),
+                        },
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                }
+            except Exception as e:
+                logger.error(f"Error getting initial analytics: {e}")
+                initial_analytics = {
+                    "type": "initial_analytics",
+                    "data": {"error": str(e)},
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+        await sio.emit("analytics_update", initial_analytics, to=sid)
+
+    except Exception as e:
+        logger.error(f"Error subscribing to analytics: {e}")
+        await sio.emit("analytics_error", {"error": str(e)}, to=sid)
+
+
+# Enhanced broadcast function for analytics
+async def broadcast_analytics_updates():
+    """Enhanced broadcast with market analytics data"""
+    while True:
         try:
-            logger.info("🔄 Admin requested NEW centralized WebSocket restart")
+            # Broadcast analytics updates every 60 seconds
+            await asyncio.sleep(60)
 
-            await centralized_manager.stop()
-            await asyncio.sleep(2)
+            analytics_update = {}
 
-            if await centralized_manager.initialize():
-                await centralized_manager.start_connection()
-                health = await centralized_manager.health_check()
-                return {
-                    "success": True,
-                    "message": "NEW centralized WebSocket system restarted successfully",
-                    "health": health,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": "Failed to restart NEW centralized WebSocket system",
-                    "timestamp": datetime.now().isoformat(),
-                }
+            # FIXED: Use analytics service instance
+            if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+                try:
+                    complete_analytics = enhanced_analytics.get_complete_analytics()
+                    top_movers = complete_analytics.get(
+                        "top_movers", {"gainers": [], "losers": []}
+                    )
+
+                    analytics_update = {
+                        "type": "periodic_analytics_update",
+                        "data": {
+                            "market_sentiment": complete_analytics.get(
+                                "market_sentiment", {}
+                            ),
+                            "top_movers_summary": {
+                                "top_gainer": (
+                                    top_movers["gainers"][0]
+                                    if top_movers["gainers"]
+                                    else None
+                                ),
+                                "top_loser": (
+                                    top_movers["losers"][0]
+                                    if top_movers["losers"]
+                                    else None
+                                ),
+                            },
+                            "market_stats": {
+                                "total_instruments_tracked": (
+                                    centralized_manager.get_status().get(
+                                        "total_instruments", 0
+                                    )
+                                    if CENTRALIZED_WS_AVAILABLE and centralized_manager
+                                    else 0
+                                ),
+                                "websocket_health": (
+                                    (await centralized_manager.health_check()).get(
+                                        "health_score", 0
+                                    )
+                                    if CENTRALIZED_WS_AVAILABLE and centralized_manager
+                                    else 0
+                                ),
+                            },
+                        },
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                except Exception as e:
+                    logger.error(f"Error generating analytics update: {e}")
+
+            # Broadcast to all subscribed analytics clients
+            if analytics_update:
+                await sio.emit(
+                    "analytics_update", analytics_update, room="analytics_updates"
+                )
+
         except Exception as e:
-            logger.error(f"❌ Error restarting NEW centralized WebSocket: {e}")
-            return {"success": False, "error": str(e)}
+            logger.error(f"❌ Analytics broadcast error: {e}")
+            await asyncio.sleep(120)  # Wait longer on error
+
+
+# Enhanced health check with analytics
+@app.get("/health/analytics")
+async def analytics_health_check():
+    """Health check specifically for market analytics components"""
+    try:
+        health_status = {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "components": {
+                "analytics_service": "unknown",
+                "analytics_processor": "unknown",
+                "centralized_websocket": "unknown",
+                "instrument_registry": "unknown",
+                "redis_cache": "unknown",
+                "data_pipeline": "unknown",
+            },
+            "performance": {
+                "live_data_points": 0,
+                "last_update": None,
+                "processing_latency_ms": 0,
+            },
+        }
+
+        # Test analytics service
+        if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+            try:
+                test_data = enhanced_analytics.get_complete_analytics()
+                health_status["components"]["analytics_service"] = "ok"
+                health_status["performance"]["live_data_points"] = len(test_data)
+            except Exception as e:
+                health_status["components"]["analytics_service"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+        else:
+            health_status["components"]["analytics_service"] = "not_available"
+
+        # Test analytics processor
+        if ANALYTICS_PROCESSOR_AVAILABLE and market_analytics_processor:
+            try:
+                processor_data = market_analytics_processor.get_all_analytics()
+                health_status["components"]["analytics_processor"] = "ok"
+            except Exception as e:
+                health_status["components"]["analytics_processor"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+        else:
+            health_status["components"]["analytics_processor"] = "not_available"
+
+        # Test centralized WebSocket
+        if CENTRALIZED_WS_AVAILABLE and centralized_manager:
+            try:
+                ws_health = await centralized_manager.health_check()
+                health_status["components"]["centralized_websocket"] = ws_health.get(
+                    "status", "unknown"
+                )
+                health_status["performance"]["last_update"] = ws_health.get("timestamp")
+            except Exception as e:
+                health_status["components"][
+                    "centralized_websocket"
+                ] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+
+        # Test instrument registry
+        if INSTRUMENT_REGISTRY_AVAILABLE and instrument_registry:
+            try:
+                registry_stats = instrument_registry.get_stats()
+                health_status["components"]["instrument_registry"] = "ok"
+                health_status["performance"]["registry_instruments"] = (
+                    registry_stats.get("spot_instruments", 0)
+                )
+            except Exception as e:
+                health_status["components"]["instrument_registry"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+
+        # Test Redis cache
+        try:
+            redis_health = trading_redis.health_check()
+            health_status["components"]["redis_cache"] = redis_health["status"]
+        except Exception as e:
+            health_status["components"]["redis_cache"] = f"error: {str(e)}"
+            health_status["status"] = "degraded"
+
+        return health_status
+
+    except Exception as e:
+        logger.error(f"Error in analytics health check: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+        }
 
 
 # Essential API endpoints
@@ -939,60 +1633,6 @@ async def trigger_stock_selection():
         return {"success": False, "error": str(e)}
 
 
-# FIXED: Instrument stats endpoint
-@app.get("/api/instruments/stats")
-async def get_instrument_stats():
-    """Get instrument service statistics (fixed to work with singleton pattern)"""
-    try:
-        redis_status = trading_redis.health_check()
-
-        # Use the correct way to get WebSocket keys
-        try:
-            if fast_retrieval_instance and OPTIMIZED_INSTRUMENTS_AVAILABLE:
-                all_ws_keys = await fast_retrieval_instance.get_all_websocket_keys()
-            else:
-                all_ws_keys = []
-        except Exception as e:
-            logger.warning(f"Error getting websocket keys: {e}")
-            all_ws_keys = []
-
-        sample_stocks = ["RELIANCE", "TCS", "HDFC", "INFY", "ICICIBANK"]
-        stock_details = {}
-
-        for symbol in sample_stocks:
-            try:
-                if fast_retrieval_instance:
-                    mapping = await fast_retrieval_instance.get_stock_instruments_async(
-                        symbol
-                    )
-                    if mapping:
-                        stock_details[symbol] = {
-                            "total_instruments": mapping.get("instrument_count", 0),
-                            "websocket_keys": len(mapping.get("websocket_keys", [])),
-                            "primary_key": mapping.get("primary_instrument_key"),
-                        }
-            except Exception:
-                continue
-
-        return {
-            "total_websocket_instruments": len(all_ws_keys),
-            "sample_stocks": stock_details,
-            "cache_status": "active_with_fallback",
-            "redis_status": redis_status["status"],
-            "centralized_ws_compatible": CENTRALIZED_WS_AVAILABLE,
-            "service_available": OPTIMIZED_INSTRUMENTS_AVAILABLE,
-            "service_initialized": (
-                instrument_is_initialized()
-                if OPTIMIZED_INSTRUMENTS_AVAILABLE
-                else False
-            ),
-            "last_updated": datetime.now().isoformat(),
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
 # Engine status endpoint
 @app.get("/api/engine/status")
 async def get_enhanced_engine_status():
@@ -1020,11 +1660,13 @@ async def get_enhanced_engine_status():
         # Get centralized system status
         try:
             centralized_status = (
-                centralized_manager.get_status() if CENTRALIZED_WS_AVAILABLE else {}
+                centralized_manager.get_status()
+                if CENTRALIZED_WS_AVAILABLE and centralized_manager
+                else {}
             )
             centralized_health = (
                 await centralized_manager.health_check()
-                if CENTRALIZED_WS_AVAILABLE
+                if CENTRALIZED_WS_AVAILABLE and centralized_manager
                 else {}
             )
         except Exception:
@@ -1053,15 +1695,6 @@ async def get_enhanced_engine_status():
                 "total_instruments": centralized_status.get("total_instruments", 0),
                 "admin_token_strategy": True,
             },
-            "instrument_service": {
-                "is_initialized": instrument_service_instance is not None,
-                "service_available": OPTIMIZED_INSTRUMENTS_AVAILABLE,
-                "initialized": (
-                    instrument_is_initialized()
-                    if OPTIMIZED_INSTRUMENTS_AVAILABLE
-                    else False
-                ),
-            },
             "redis_system": {
                 "status": redis_status["status"],
                 "is_connected": trading_redis.is_connected,
@@ -1074,6 +1707,97 @@ async def get_enhanced_engine_status():
     except Exception as e:
         logger.error(f"❌ Error getting enhanced engine status: {e}")
         return {"error": str(e)}
+
+
+@app.get("/api/analytics/status")
+async def get_analytics_status():
+    """Get analytics WebSocket status"""
+    try:
+        return {
+            "success": True,
+            "analytics_available": ANALYTICS_SERVICE_AVAILABLE,
+            "analytics_processor_available": ANALYTICS_PROCESSOR_AVAILABLE,
+            "websocket_connections": 0,  # Will be updated dynamically
+            "websocket_endpoint": "/ws/market-analytics",
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/analytics/quick-data")
+async def get_quick_analytics():
+    """Get quick analytics data for dashboard"""
+    try:
+        if not ANALYTICS_SERVICE_AVAILABLE or not enhanced_analytics:
+            return {"success": False, "error": "Analytics service not available"}
+
+        complete_data = enhanced_analytics.get_complete_analytics()
+        top_movers = complete_data.get("top_movers", {"gainers": [], "losers": []})
+
+        quick_data = {
+            "market_sentiment": complete_data.get("market_sentiment", {}),
+            "top_gainers": top_movers.get("gainers", [])[:3],
+            "top_losers": top_movers.get("losers", [])[:3],
+            "volume_leaders": complete_data.get("volume_analysis", {}).get(
+                "volume_leaders", []
+            )[:3],
+        }
+
+        return {
+            "success": True,
+            "data": quick_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/unified/status")
+async def get_unified_system_status():
+    """Get unified WebSocket system status"""
+    try:
+        status = unified_manager.get_status()
+        analytics_status = {
+            "last_calculation": datetime.now().isoformat(),
+            "available_features": [
+                "top_movers",
+                "gap_analysis",
+                "breakout_analysis",
+                "market_sentiment",
+                "heatmap",
+                "intraday_stocks",
+                "volume_analysis",
+                "record_movers",
+            ],
+        }
+
+        return {
+            "success": True,
+            "unified_websocket": status,
+            "analytics": analytics_status,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/analytics/complete")
+async def get_complete_analytics():
+    """Get all analytics data in one call"""
+    try:
+        if not ANALYTICS_SERVICE_AVAILABLE or not enhanced_analytics:
+            return {"success": False, "error": "Analytics service not available"}
+
+        analytics_data = enhanced_analytics.get_complete_analytics()
+        return {
+            "success": True,
+            "data": analytics_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/engine/restart")
@@ -1104,7 +1828,7 @@ async def restart_trading_engine():
 
 # Enhanced broadcast function
 async def broadcast_trading_updates():
-    """Enhanced broadcast with NEW centralized WebSocket system awareness"""
+    """Enhanced broadcast with market analytics included"""
     global trading_engine, trading_scheduler, instrument_service_instance
 
     while True:
@@ -1116,20 +1840,48 @@ async def broadcast_trading_updates():
                 try:
                     centralized_status = (
                         centralized_manager.get_status()
-                        if CENTRALIZED_WS_AVAILABLE
+                        if CENTRALIZED_WS_AVAILABLE and centralized_manager
                         else {}
                     )
                     centralized_health = (
                         await centralized_manager.health_check()
-                        if CENTRALIZED_WS_AVAILABLE
+                        if CENTRALIZED_WS_AVAILABLE and centralized_manager
                         else {}
                     )
                 except Exception:
                     centralized_status = {}
                     centralized_health = {}
 
+                # GET analytics data
+                analytics_data = {}
+                try:
+                    if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
+                        complete_data = enhanced_analytics.get_complete_analytics()
+                        sentiment = complete_data.get("market_sentiment", {})
+                        movers = complete_data.get(
+                            "top_movers", {"gainers": [], "losers": []}
+                        )
+                        analytics_data = {
+                            "market_sentiment": sentiment.get("sentiment", "unknown"),
+                            "top_gainer": (
+                                movers["gainers"][0] if movers["gainers"] else None
+                            ),
+                            "top_loser": (
+                                movers["losers"][0] if movers["losers"] else None
+                            ),
+                            "websocket_connections": 0,  # Will be updated dynamically
+                        }
+                except Exception as e:
+                    logger.debug(f"Analytics data not available: {e}")
+
+                # Get instrument registry stats
+                try:
+                    registry_stats = instrument_registry.get_stats()
+                except Exception:
+                    registry_stats = {}
+
                 status_update = {
-                    "type": "enhanced_engine_status_with_NEW_centralized_ws",
+                    "type": "enhanced_engine_status_with_analytics",
                     "data": {
                         "engine": {
                             "is_running": trading_engine.is_running,
@@ -1144,28 +1896,39 @@ async def broadcast_trading_updates():
                                 else False
                             )
                         },
-                        "instrument_service": {
-                            "status": (
-                                "active" if instrument_service_instance else "inactive"
-                            )
-                        },
                         "new_centralized_websocket_system": {
                             "available": CENTRALIZED_WS_AVAILABLE,
                             "health_score": centralized_health.get("health_score", 0),
                             "ws_connected": centralized_status.get(
                                 "ws_connected", False
                             ),
-                            "admin_token_strategy": True,
                         },
-                        "redis": {
-                            "status": redis_status["status"],
+                        "market_analytics": analytics_data,  # ADD THIS
+                        "instrument_registry": {
+                            "status": "active",
+                            "spot_instruments": registry_stats.get(
+                                "spot_instruments", 0
+                            ),
+                            "fno_instruments": registry_stats.get("fno_instruments", 0),
+                            "live_prices": registry_stats.get("live_prices", 0),
                         },
-                        "architecture": "hybrid_optimized_with_NEW_centralized_websocket",
+                        "redis": {"status": redis_status["status"]},
                         "timestamp": datetime.now().isoformat(),
                     },
                 }
 
                 await sio.emit("trading_update", status_update, room="trading_updates")
+
+                # ALSO broadcast to analytics room if we have analytics data
+                if analytics_data and ANALYTICS_SERVICE_AVAILABLE:
+                    analytics_update = {
+                        "type": "analytics_broadcast_update",
+                        "data": analytics_data,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    await sio.emit(
+                        "analytics_update", analytics_update, room="analytics_updates"
+                    )
 
             await asyncio.sleep(30)
 
@@ -1236,7 +1999,9 @@ async def connect(sid, environ):
     # Get centralized system status
     try:
         centralized_status = (
-            centralized_manager.get_status() if CENTRALIZED_WS_AVAILABLE else {}
+            centralized_manager.get_status()
+            if CENTRALIZED_WS_AVAILABLE and centralized_manager
+            else {}
         )
     except Exception:
         centralized_status = {}
@@ -1273,7 +2038,9 @@ async def get_engine_status(sid, data):
             # Get centralized system status
             try:
                 centralized_status = (
-                    centralized_manager.get_status() if CENTRALIZED_WS_AVAILABLE else {}
+                    centralized_manager.get_status()
+                    if CENTRALIZED_WS_AVAILABLE and centralized_manager
+                    else {}
                 )
             except Exception:
                 centralized_status = {}
@@ -1341,11 +2108,14 @@ if __name__ == "__main__":
         f"🔧 Legacy WebSocket: {'Available' if LEGACY_MARKET_WS_AVAILABLE else 'Not Available'}"
     )
     logger.info(
-        f"🔧 Optimized Instruments: {'Available' if OPTIMIZED_INSTRUMENTS_AVAILABLE else 'Not Available'}"
-    )
-    logger.info(
         f"🔧 Trading Scheduler: {'Available' if TRADING_SCHEDULER_AVAILABLE else 'Not Available'}"
     )
+    logger.info(
+        f"🔧 Analytics Service: {'Available' if ANALYTICS_SERVICE_AVAILABLE else 'Not Available'}"
+    )
+    # logger.info(
+    #     f"🔧 Analytics Processor: {'Available' if ANALYTICS_PROCESSOR_AVAILABLE else 'Not Available'}"
+    # )
 
     uvicorn.run(
         "app:sio_app",

@@ -1,15 +1,20 @@
-# ===== YOUR CURRENT ws_client.py IS PERFECT! =====
-# No changes required for basic functionality
-# These are OPTIONAL enhancements for better integration
+# services/upstox/ws_client.py
 
-import asyncio, json, ssl, logging, functools, inspect, requests, websockets
+import asyncio
+import json
+import ssl
+import logging
+import functools
+import inspect
+import requests
+import websockets
+import traceback
+from datetime import datetime
 from websockets.exceptions import InvalidStatus
 from google.protobuf.json_format import MessageToDict
 import services.upstox.MarketDataFeed_pb2 as pb
 
-logger = logging.getLogger("ws_client")
-
-received_ltp = False  # ✅ Flag to track if LTP was received
+logger = logging.getLogger(__name__)
 
 
 def sync_fetch_feed_url(access_token: str):
@@ -28,8 +33,7 @@ class UpstoxWebSocketClient:
         stop_callback=None,
         on_auth_error=None,
         max_retries=5,
-        # OPTIONAL: Add these parameters for better control
-        connection_type="default",  # "dashboard", "trading", "legacy"
+        connection_type="default",  # "dashboard", "trading", "legacy", "centralized_admin"
         subscription_mode="full",  # "full", "ltpc", "quote"
     ):
         self.access_token = access_token
@@ -43,13 +47,15 @@ class UpstoxWebSocketClient:
         self.max_retries = max_retries
         self.auth_error_sent = False
         self.last_ws_url = None
-        self.market_closed = False  # ✅ Flag if market is closed
-        self.received_ltp = False  # ✅ Flag if LTP was received
-
-        # OPTIONAL: Add these for better tracking
+        self.market_closed = False
+        self.received_ltp = False
         self.connection_type = connection_type
         self.subscription_mode = subscription_mode
-        self.connection_id = f"{connection_type}_{id(self)}"  # Unique ID for logging
+        self.connection_id = f"{connection_type}_{id(self)}"
+
+        # Message sequence tracking
+        self.got_market_status = False  # Track if we've received initial market status
+        self.got_snapshot = False  # Track if we've received initial snapshot
 
     async def get_feed_authorized_url(self):
         loop = asyncio.get_event_loop()
@@ -57,6 +63,7 @@ class UpstoxWebSocketClient:
             None, functools.partial(sync_fetch_feed_url, self.access_token)
         )
         logger.info(f"🔐 Feed Auth Response for {self.connection_type}: {result}")
+
         if result.get("status") != "success":
             if self.on_auth_error and not self.auth_error_sent:
                 await self.on_auth_error()
@@ -69,13 +76,21 @@ class UpstoxWebSocketClient:
                 f"⚠️ Reused WebSocket URL detected for {self.connection_type}, skipping."
             )
             raise InvalidStatus(403)
+
         self.last_ws_url = new_url
         return new_url
 
     async def connect_and_stream(self):
+        """Connect to Upstox WebSocket and handle the message sequence properly"""
         logger.info(
             f"🚀 Starting {self.connection_type} WebSocket with {len(self.instrument_keys)} instruments"
         )
+
+        # Apply combined limit (safest approach)
+        max_keys = 1500
+        if len(self.instrument_keys) > max_keys:
+            logger.warning(f"⚠️ Truncating to combined limit: {max_keys} keys")
+            self.instrument_keys = self.instrument_keys[:max_keys]
 
         while self.should_run and self.retry_count <= self.max_retries:
             try:
@@ -84,148 +99,378 @@ class UpstoxWebSocketClient:
                 ssl_context.check_hostname = False
                 ssl_context.verify_mode = ssl.CERT_NONE
 
-                async with websockets.connect(ws_url, ssl=ssl_context) as conn:
+                # Connect with explicit parameters
+                async with websockets.connect(
+                    ws_url,
+                    ssl=ssl_context,
+                    ping_interval=30,
+                    ping_timeout=20,
+                    close_timeout=10,
+                    max_size=None,
+                ) as conn:
                     self.websocket = conn
                     self.retry_count = 0
                     self.auth_error_sent = False
                     self.market_closed = False
                     self.received_ltp = False
+                    self.got_market_status = False
+                    self.got_snapshot = False
 
                     logger.info(
                         f"✅ {self.connection_type.title()} WebSocket connected."
                     )
+
+                    # Add delay before subscription
+                    await asyncio.sleep(1)
                     await self._send_subscription()
 
+                    # Set up connection monitoring
+                    last_activity = datetime.now().timestamp()
+                    message_sequence = 0  # Track message sequence
+
                     while self.should_run:
-                        raw = await conn.recv()
-                        msg = pb.FeedResponse()
-                        msg.ParseFromString(raw)
-                        parsed = MessageToDict(msg)
+                        try:
+                            # Add timeout to detect stalled connections
+                            raw = await asyncio.wait_for(conn.recv(), timeout=60)
+                            last_activity = datetime.now().timestamp()
+                            message_sequence += 1
 
-                        msg_type = parsed.get("type")
-                        # OPTIONAL: More detailed logging
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"📥 {self.connection_type} Tick: {msg_type}")
+                            # Parse binary protobuf message
+                            msg = pb.FeedResponse()
+                            msg.ParseFromString(raw)
+                            parsed = MessageToDict(msg)
 
-                        if msg_type == "market_info":
-                            status = (
-                                parsed.get("marketInfo", {})
-                                .get("segmentStatus", {})
-                                .get("NSE_EQ", "")
-                            )
-                            logger.info(
-                                f"📊 {self.connection_type} Market status: {status}"
-                            )
-                            await self.callback(
-                                {"type": "market_info", "status": status}
-                            )
-                            if (
-                                status in ["NORMAL_CLOSE", "CLOSING_END"]
-                                and self.received_ltp
-                            ):
+                            # Log full parsed data for first few messages to debug
+                            if message_sequence <= 3:
+                                logger.info(f"Parsed data for ws client - {parsed}")
+
+                            # Process message based on type and sequence
+                            msg_type = parsed.get("type")
+
+                            # FIRST MESSAGE: market_info (segment status)
+                            if msg_type == "market_info":
+                                # First tick should be market status information
+                                segment_status = parsed.get("marketInfo", {}).get(
+                                    "segmentStatus", {}
+                                )
                                 logger.info(
-                                    f"📴 {self.connection_type}: Market closed and LTP received. Stopping."
+                                    f"📊 Market segment statuses: {segment_status}"
                                 )
-                                self.market_closed = True
 
-                        elif msg_type == "ltpc":
-                            symbol = parsed.get("symbol") or parsed.get("ltpc", {}).get(
-                                "symbol"
-                            )
-                            if not symbol:
-                                logger.warning(
-                                    f"⚠️ {self.connection_type}: Missing symbol in tick"
+                                # Mark that we've received market status
+                                self.got_market_status = True
+
+                                # Process market phases and determine if market is open/closed
+                                active_segments, all_markets_closed = (
+                                    self._process_market_status(segment_status)
                                 )
-                                continue
 
-                            self.received_ltp = True
-                            # OPTIONAL: Less verbose logging for high-frequency data
-                            if logger.isEnabledFor(logging.DEBUG):
+                                # Send complete data to callback
+                                await self.callback(
+                                    {
+                                        "type": "market_info",
+                                        "marketInfo": {"segmentStatus": segment_status},
+                                        "active_segments": active_segments,
+                                        "all_markets_closed": all_markets_closed,
+                                        "currentTs": parsed.get(
+                                            "currentTs",
+                                            str(int(datetime.now().timestamp() * 1000)),
+                                        ),
+                                    }
+                                )
+
+                                # Check if all markets are closed
+                                if all_markets_closed:
+                                    logger.info(
+                                        f"📴 {self.connection_type}: All markets closed."
+                                    )
+                                    self.market_closed = True
+
+                            # SECOND MESSAGE: feeds data (prices)
+                            elif "feeds" in parsed:
+                                # This is the common format for price data
+                                feeds = parsed.get("feeds", {})
+                                currentTs = parsed.get("currentTs")
+
+                                if not feeds:
+                                    logger.warning(
+                                        f"⚠️ {self.connection_type}: Received feeds data but it's empty."
+                                    )
+                                    continue
+
+                                # Mark that we've received LTP data
+                                self.received_ltp = True
+
+                                # If this is the first data message, it's the initial snapshot
+                                is_snapshot = not self.got_snapshot
+                                if is_snapshot:
+                                    self.got_snapshot = True
+                                    logger.info(
+                                        f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
+                                    )
+
+                                # Log exchange breakdown
+                                self._log_exchange_summary(feeds)
+
+                                # Send data to callback - forward the entire parsed message
+                                # This preserves the exact format expected by centralized manager
+                                await self.callback(parsed)
+
+                                # Check if market is closed and we should stop
+                                if self.market_closed and self.received_ltp:
+                                    logger.info(
+                                        f"📴 {self.connection_type}: Market closed & live data received. Stopping."
+                                    )
+                                    self.should_run = False
+
+                            # ALTERNATIVE: live_feed message type (older format)
+                            elif msg_type == "live_feed":
+                                # This is the old format with explicit type
+                                feeds = parsed.get("data", {})
+                                if not feeds:
+                                    logger.warning(
+                                        f"⚠️ {self.connection_type}: Received 'live_feed' payload but it's empty."
+                                    )
+                                    continue
+
+                                # Mark that we've received LTP data
+                                self.received_ltp = True
+
+                                # If this is the first data message, it's the initial snapshot
+                                is_snapshot = not self.got_snapshot
+                                if is_snapshot:
+                                    self.got_snapshot = True
+                                    logger.info(
+                                        f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
+                                    )
+
+                                # Log exchange breakdown
+                                self._log_exchange_summary(feeds)
+
+                                # Send data to callback
+                                await self.callback(
+                                    {
+                                        "type": "live_feed",
+                                        "data": feeds,
+                                        "is_snapshot": is_snapshot,
+                                        "timestamp": parsed.get(
+                                            "currentTs",
+                                            str(int(datetime.now().timestamp() * 1000)),
+                                        ),
+                                    }
+                                )
+
+                                # Check if market is closed and we should stop
+                                if self.market_closed and self.received_ltp:
+                                    logger.info(
+                                        f"📴 {self.connection_type}: Market closed & live data received. Stopping."
+                                    )
+                                    self.should_run = False
+
+                            # HEARTBEAT: Keep-alive messages
+                            elif msg_type == "heartbeat":
                                 logger.debug(
-                                    f"✅ {self.connection_type}: Processing symbol {symbol}"
+                                    f"💓 {self.connection_type}: Received heartbeat"
                                 )
 
-                            await self.callback(
-                                {"type": "live_feed", "data": {symbol: parsed}}
-                            )
+                            # UNKNOWN: Any other message type
+                            else:
+                                # If we get here, log the message type
+                                if any(key for key in parsed if "|" in key):
+                                    # This looks like direct instrument data (rare format)
+                                    logger.warning(
+                                        f"⚠️ {self.connection_type}: Received direct instrument data format."
+                                    )
+                                    await self.callback(parsed)
+                                else:
+                                    logger.warning(
+                                        f"⚠️ {self.connection_type}: Unknown message type: {msg_type}"
+                                    )
 
-                            if self.market_closed:
-                                logger.info(
-                                    f"📴 {self.connection_type}: Market closed & LTP received. Stopping."
-                                )
-                                self.should_run = False
-
-                        elif "feeds" in parsed:
-                            feeds = parsed.get("feeds", {})
-                            if not feeds:
-                                logger.warning(
-                                    f"⚠️ {self.connection_type}: Received 'feeds' payload but it's empty."
-                                )
-                                continue
-                            self.received_ltp = True
-
-                            # OPTIONAL: Better logging for batch data
-                            logger.info(
-                                f"✅ {self.connection_type}: Processing {len(feeds)} batched instruments"
-                            )
-
-                            await self.callback({"type": "live_feed", "data": feeds})
-
-                            if self.market_closed:
-                                logger.info(
-                                    f"📴 {self.connection_type}: Market closed & batched LTP received. Stopping."
-                                )
-                                self.should_run = False
-                        else:
+                        except asyncio.TimeoutError:
+                            # No data received for 60 seconds - check connection
+                            inactive_time = datetime.now().timestamp() - last_activity
                             logger.warning(
-                                f"⚠️ {self.connection_type}: Unknown message type: {msg_type}"
+                                f"⚠️ No data received for {inactive_time:.1f}s - checking connection"
                             )
+
+                            try:
+                                # Send manual ping to check connection
+                                pong_waiter = await conn.ping()
+                                await asyncio.wait_for(pong_waiter, timeout=10)
+                                logger.info("✅ Connection ping successful")
+                                last_activity = datetime.now().timestamp()
+                            except Exception as ping_err:
+                                logger.error(f"❌ Connection ping failed: {ping_err}")
+                                raise ConnectionError(
+                                    "Connection appears dead - reconnecting"
+                                )
+
+                    # This line will only execute if the websocket closed gracefully
+                    logger.info(
+                        f"🔌 {self.connection_type} WebSocket closed gracefully"
+                    )
 
             except PermissionError:
                 logger.error(
                     f"🔐 {self.connection_type}: Permission error - token expired"
                 )
                 await self.callback({"type": "error", "reason": "token_expired"})
-                self.should_run = False
-                break
 
-            except InvalidStatus as e:
-                logger.error(f"❌ {self.connection_type}: WebSocket rejected: {e}")
-                if getattr(e, "status", None) == 403:
+                # Don't immediately retry on auth errors
+                await asyncio.sleep(5)
+
+                if self.on_auth_error and not self.auth_error_sent:
+                    await self.on_auth_error()
+                    self.auth_error_sent = True
+
+                self.should_run = False
+                break  # Add break to exit the retry loop for permission errors
+
+            except websockets.exceptions.InvalidStatusCode as e:
+                status = getattr(e, "status", None)
+                logger.error(
+                    f"❌ {self.connection_type}: WebSocket rejected: HTTP {status}: {e}"
+                )
+
+                if status == 403:
                     if self.on_auth_error and not self.auth_error_sent:
                         await self.on_auth_error()
                         self.auth_error_sent = True
-                break
+
+                    # For 403 errors, wait longer before retry
+                    await asyncio.sleep(5)
+
+                # Increment retry counter
+                self.retry_count += 1
+
+            except (websockets.exceptions.ConnectionClosed, ConnectionError) as e:
+                # Handle websocket connection closed errors
+                logger.error(f"🔌 {self.connection_type}: Connection closed: {e}")
+                self.retry_count += 1
 
             except Exception as e:
                 logger.error(f"🔥 {self.connection_type}: Unexpected error: {e}")
+                logger.error(
+                    traceback.format_exc()
+                )  # Add stack trace for better debugging
                 self.retry_count += 1
 
-                # OPTIONAL: Exponential backoff for retries
+            # Apply retry backoff only if we're still supposed to run
+            if self.should_run and self.retry_count <= self.max_retries:
+                # More aggressive backoff for repeated failures
                 backoff_delay = min(
-                    3 * (2 ** (self.retry_count - 1)), 30
-                )  # Max 30 seconds
+                    5 * (2 ** (self.retry_count - 1)), 60
+                )  # Max 60 seconds
                 logger.info(
                     f"⏳ {self.connection_type}: Retrying in {backoff_delay}s (attempt {self.retry_count}/{self.max_retries})"
                 )
                 await asyncio.sleep(backoff_delay)
 
+        # After the while loop
         await self._trigger_stop_callback()
 
-    async def _send_subscription(self):
-        if not self.websocket:
-            return
+    def _process_market_status(self, segment_status):
+        """Process market status information and determine if markets are open/closed"""
+        # Define market phases based on status
+        OPEN_STATUSES = ["NORMAL_OPEN", "PRE_OPEN_START", "PRE_OPEN_END"]
+        CLOSING_STATUSES = ["CLOSING_START", "CLOSING_END", "NORMAL_CLOSE"]
 
-        # OPTIONAL: Adjust subscription based on connection type
+        # Check instrument segments
+        has_nse = any("NSE_" in key for key in self.instrument_keys if key)
+        has_bse = any("BSE_" in key for key in self.instrument_keys if key)
+        has_mcx = any("MCX_" in key for key in self.instrument_keys if key)
+
+        # Extract relevant segment statuses
+        nse_eq_status = segment_status.get("NSE_EQ", "")
+        nse_fo_status = segment_status.get("NSE_FO", "")
+        nse_index_status = segment_status.get("NSE_INDEX", "")
+        bse_eq_status = segment_status.get("BSE_EQ", "")
+        mcx_fo_status = segment_status.get("MCX_FO", "")
+        mcx_index_status = segment_status.get("MCX_INDEX", "")
+
+        # Determine market phase for each segment
+        nse_status = (
+            "open"
+            if nse_eq_status in OPEN_STATUSES
+            else ("closed" if nse_eq_status in CLOSING_STATUSES else "unknown")
+        )
+        bse_status = (
+            "open"
+            if bse_eq_status in OPEN_STATUSES
+            else ("closed" if bse_eq_status in CLOSING_STATUSES else "unknown")
+        )
+        mcx_status = (
+            "open"
+            if mcx_fo_status in OPEN_STATUSES
+            else ("closed" if mcx_fo_status in CLOSING_STATUSES else "unknown")
+        )
+
+        # Log market status details
+        logger.info(
+            f"📊 {self.connection_type}: Market Status - "
+            f"NSE: {nse_eq_status} ({nse_status}), "
+            f"BSE: {bse_eq_status} ({bse_status}), "
+            f"MCX: {mcx_fo_status} ({mcx_status})"
+        )
+
+        # Determine active segments and overall market status
+        active_segments = []
+        if has_nse and nse_status == "open":
+            active_segments.append("NSE")
+        if has_bse and bse_status == "open":
+            active_segments.append("BSE")
+        if has_mcx and mcx_status == "open":
+            active_segments.append("MCX")
+
+        # For trading logic - are ALL of our markets closed?
+        all_markets_closed = (
+            (not has_nse or nse_status == "closed")
+            and (not has_bse or bse_status == "closed")
+            and (not has_mcx or mcx_status == "closed")
+        )
+
+        return active_segments, all_markets_closed
+
+    def _log_exchange_summary(self, feeds):
+        """Log a summary of instruments by exchange"""
+        nse_instruments = [k for k in feeds.keys() if k.startswith("NSE_")]
+        bse_instruments = [k for k in feeds.keys() if k.startswith("BSE_")]
+        mcx_instruments = [k for k in feeds.keys() if k.startswith("MCX_")]
+
+        # Prepare exchange summary for logging
+        exchange_summary = []
+        if nse_instruments:
+            exchange_summary.append(f"NSE: {len(nse_instruments)}")
+        if bse_instruments:
+            exchange_summary.append(f"BSE: {len(bse_instruments)}")
+        if mcx_instruments:
+            exchange_summary.append(f"MCX: {len(mcx_instruments)}")
+
+        # Log with segment information
+        logger.info(
+            f"✅ {self.connection_type}: Processing {len(feeds)} instruments ({', '.join(exchange_summary)})"
+        )
+
+    async def _send_subscription(self):
+        """Send subscription request to WebSocket with enhanced error handling"""
+        if not self.websocket:
+            logger.error(
+                f"❌ {self.connection_type}: Cannot send subscription - no active WebSocket"
+            )
+            return False
+
+        # Create unique identifier for this subscription
         guid = f"{self.connection_type}-{self.connection_id}"
 
-        # OPTIONAL: Different modes for different connection types
+        # Determine subscription mode based on connection type
+        mode = self.subscription_mode
         if self.connection_type == "trading":
             mode = "full"  # Full market depth for trading
         elif self.connection_type == "dashboard":
-            mode = "ltpc"  # Just LTP for dashboard (though we use API now)
-        else:
-            mode = self.subscription_mode
+            mode = "ltpc"  # Just LTP for dashboard
+        elif self.connection_type == "centralized_admin":
+            mode = "full"  # Full data for centralized admin
 
         payload = {
             "guid": guid,
@@ -236,12 +481,42 @@ class UpstoxWebSocketClient:
             },
         }
 
-        await self.websocket.send(json.dumps(payload).encode("utf-8"))
-        logger.info(
-            f"📩 {self.connection_type.title()}: Subscription sent for {len(self.instrument_keys[:1500])} instruments in '{mode}' mode"
-        )
+        # Convert to binary data once to avoid repeated encoding
+        encoded_payload = json.dumps(payload).encode("utf-8")
+
+        # Try up to 3 times to send the subscription
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                await self.websocket.send(encoded_payload)
+                logger.info(
+                    f"📩 {self.connection_type.title()}: Subscription sent for {len(self.instrument_keys[:1500])} instruments in '{mode}' mode"
+                )
+                return True
+            except websockets.exceptions.ConnectionClosed:
+                logger.error(
+                    f"❌ {self.connection_type}: WebSocket closed while sending subscription (attempt {attempt+1}/{max_attempts})"
+                )
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1)  # Brief pause before retry
+                    continue
+                else:
+                    raise  # Re-raise on final attempt
+            except Exception as e:
+                logger.error(
+                    f"❌ {self.connection_type}: Failed to send subscription (attempt {attempt+1}/{max_attempts}): {e}"
+                )
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(1)  # Brief pause before retry
+                    continue
+                else:
+                    raise  # Re-raise on final attempt
+
+        logger.error(f"❌ {self.connection_type}: All subscription attempts failed")
+        return False
 
     async def _trigger_stop_callback(self):
+        """Trigger the stop callback if provided"""
         if self.stop_callback:
             if inspect.iscoroutinefunction(self.stop_callback):
                 await self.stop_callback()
@@ -249,15 +524,14 @@ class UpstoxWebSocketClient:
                 self.stop_callback()
 
     def stop(self):
+        """Stop the WebSocket client"""
         logger.info(f"🛑 {self.connection_type.title()}: WebSocket manually stopped.")
         self.should_run = False
 
-    # OPTIONAL: Add health check method
     def is_connected(self):
         """Check if WebSocket is currently connected"""
         return self.websocket is not None and self.websocket.open and self.should_run
 
-    # OPTIONAL: Add status method
     def get_status(self):
         """Get current connection status"""
         return {
@@ -265,85 +539,8 @@ class UpstoxWebSocketClient:
             "is_connected": self.is_connected(),
             "instruments_count": len(self.instrument_keys),
             "received_ltp": self.received_ltp,
+            "got_market_status": self.got_market_status,
+            "got_snapshot": self.got_snapshot,
             "retry_count": self.retry_count,
             "market_closed": self.market_closed,
         }
-
-
-# ===== OPTIONAL: Enhanced Factory Functions =====
-
-
-def create_dashboard_websocket_client(
-    access_token, instrument_keys, callback, **kwargs
-):
-    """
-    OPTIONAL: Factory function for dashboard WebSocket
-    (Though dashboard now uses LTP API, this is for backward compatibility)
-    """
-    return UpstoxWebSocketClient(
-        access_token=access_token,
-        instrument_keys=instrument_keys,
-        callback=callback,
-        connection_type="dashboard",
-        subscription_mode="ltpc",  # Lighter mode for dashboard
-        **kwargs,
-    )
-
-
-def create_trading_websocket_client(access_token, instrument_keys, callback, **kwargs):
-    """
-    OPTIONAL: Factory function for focused trading WebSocket
-    """
-    return UpstoxWebSocketClient(
-        access_token=access_token,
-        instrument_keys=instrument_keys,
-        callback=callback,
-        connection_type="trading",
-        subscription_mode="full",  # Full market depth for trading
-        max_retries=10,  # More retries for critical trading connection
-        **kwargs,
-    )
-
-
-def create_legacy_websocket_client(access_token, instrument_keys, callback, **kwargs):
-    """
-    OPTIONAL: Factory function for legacy WebSocket (backward compatibility)
-    """
-    return UpstoxWebSocketClient(
-        access_token=access_token,
-        instrument_keys=instrument_keys,
-        callback=callback,
-        connection_type="legacy",
-        subscription_mode="full",
-        **kwargs,
-    )
-
-
-# ===== USAGE EXAMPLES IN YOUR market_ws.py =====
-
-"""
-In your market_ws.py, you can now use the enhanced client like this:
-
-# For trading WebSocket (in trading_data_websocket function):
-client = create_trading_websocket_client(
-    access_token=broker.access_token,
-    instrument_keys=trading_instruments,
-    callback=lambda data: asyncio.create_task(send_trading_data(data)),
-    stop_callback=lambda: logger.info("🛑 Trading WS stream stopped."),
-    on_auth_error=lambda: asyncio.create_task(handle_auth_failure_and_close(token)),
-)
-
-# For legacy WebSocket (in market_data_websocket function):
-client = create_legacy_websocket_client(
-    access_token=broker.access_token,
-    instrument_keys=chunk,
-    callback=lambda data: asyncio.create_task(broadcast(token, data)),
-    stop_callback=lambda: logger.info("🛑 One WS stream stopped."),
-    on_auth_error=lambda: asyncio.create_task(handle_auth_failure_and_close(token)),
-)
-
-# You can also check connection status:
-if client.is_connected():
-    status = client.get_status()
-    logger.info(f"Connection status: {status}")
-"""

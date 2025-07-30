@@ -3,14 +3,13 @@ import json
 import logging
 import redis
 from datetime import datetime, time
-from typing import Dict, List
+from typing import Dict, List, Optional, Set, Any, Union
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import User, BrokerConfig
 from services.market_schedule_service import MarketScheduleService
 from services.dashboard_ohlc_service import DashboardOHLCService
 from services.live_data_subscription_service import LiveDataSubscriptionService
-from services.optimized_instrument_service import OptimizedInstrumentService
 from services.trading_services.ai_trading_service import AITradingService
 
 logger = logging.getLogger(__name__)
@@ -20,14 +19,18 @@ class TradingEngine:
     def __init__(self):
         self.market_scheduler = MarketScheduleService()
         self.ohlc_service = DashboardOHLCService()
-        self.live_data_service = LiveDataSubscriptionService()
+        self.live_data_service = (
+            LiveDataSubscriptionService()
+        )  # Keep for backward compatibility
         self.ai_trading_service = AITradingService()
         self.live_trading_engines = {}  # {user_id: LiveTradingEngine}
-        self.optimized_instrument_service = OptimizedInstrumentService()
 
         self.is_running = False
         self.selected_stocks = {}
         self.active_users = set()
+        self.market_status = "unknown"
+        self.price_updates_count = 0
+        self.last_price_update_time = None
 
         # NEW: Add Redis client initialization with error handling
         try:
@@ -39,6 +42,27 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"❌ Redis connection failed in TradingEngine: {e}")
             self.redis_client = None
+
+        # NEW: Connect to centralized WebSocket manager
+        try:
+            from services.centralized_ws_manager import centralized_manager
+
+            self.centralized_manager = centralized_manager
+
+            # Register callbacks for real-time updates
+            self.centralized_manager.register_callback(
+                "price_update", self.on_price_update
+            )
+            self.centralized_manager.register_callback(
+                "market_status", self.on_market_status_change
+            )
+
+            logger.info(
+                "✅ Trading Engine registered with Centralized WebSocket Manager"
+            )
+        except ImportError as e:
+            self.centralized_manager = None
+            logger.warning(f"⚠️ Centralized WebSocket Manager not available: {e}")
 
     async def start_trading_engine(self):
         """Start the complete trading engine"""
@@ -54,6 +78,21 @@ class TradingEngine:
             # Start main engine loop
             engine_task = asyncio.create_task(self._run_main_engine_loop())
 
+            # NEW: Check centralized WebSocket status
+            if self.centralized_manager:
+                status = self.centralized_manager.get_status()
+                self.market_status = status.get("market_status", "unknown")
+                logger.info(
+                    f"📈 Current market status from centralized system: {self.market_status}"
+                )
+
+                # If market is already open, initialize trading immediately
+                if self.market_status == "open":
+                    logger.info(
+                        "🔔 Market already open - initializing trading phase immediately"
+                    )
+                    await self._handle_trading_phase(force_start=True)
+
             # Wait for both tasks
             await asyncio.gather(scheduler_task, engine_task)
 
@@ -65,6 +104,15 @@ class TradingEngine:
         """Main engine loop"""
         while self.is_running:
             try:
+                # NEW: Get market status from centralized manager if available
+                if self.centralized_manager:
+                    new_status = self.centralized_manager.get_market_status()
+                    if new_status != self.market_status:
+                        logger.info(
+                            f"📈 Market status changed: {self.market_status} -> {new_status}"
+                        )
+                        self.market_status = new_status
+
                 current_time = datetime.now().time()
 
                 # Pre-market phase (9:00-9:15)
@@ -88,6 +136,93 @@ class TradingEngine:
             except Exception as e:
                 logger.error(f"❌ Engine loop error: {e}")
                 await asyncio.sleep(300)
+
+    # NEW: Callback for price updates from centralized WebSocket
+    async def on_price_update(self, data):
+        """Handle price updates from centralized WebSocket manager"""
+        try:
+            # Skip if engine is not running
+            if not self.is_running:
+                return
+
+            # Skip if not in trading phase
+            if not hasattr(self, "_trading_started"):
+                return
+
+            # Update stats
+            self.price_updates_count += 1
+            self.last_price_update_time = datetime.now()
+
+            # Only log occasionally to avoid flooding logs
+            if self.price_updates_count % 100 == 0:
+                logger.info(f"📊 Processed {self.price_updates_count} price updates")
+
+            # Process each instrument update
+            for instrument_key, price_data in data.items():
+                # Find corresponding stock
+                stock_symbol = self._get_symbol_from_instrument_key(instrument_key)
+                if not stock_symbol or stock_symbol not in self.selected_stocks:
+                    continue
+
+                # Extract price
+                price = self._extract_price(price_data)
+                if price is None:
+                    continue
+
+                # Update stock data
+                stock_data = self.selected_stocks[stock_symbol]
+                stock_data["last_price"] = price
+                stock_data["last_update"] = datetime.now().isoformat()
+
+                # Send to LiveTradingEngines for user-specific strategies
+                for user_id, engine in self.live_trading_engines.items():
+                    try:
+                        await engine.process_price_update(
+                            stock_symbol, price, price_data
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"❌ Error in LiveTradingEngine for user {user_id}: {e}"
+                        )
+
+                # Send to AI trading service
+                try:
+                    await self.ai_trading_service.process_price_update(
+                        stock_symbol, price, price_data
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Error in AI trading service: {e}")
+
+        except Exception as e:
+            logger.error(f"❌ Error processing price update: {e}")
+
+    # NEW: Callback for market status changes from centralized WebSocket
+    async def on_market_status_change(self, data):
+        """Handle market status changes from centralized WebSocket manager"""
+        try:
+            status = data.get("status")
+            previous_status = self.market_status
+            self.market_status = status
+
+            logger.info(f"📈 Market status changed: {previous_status} -> {status}")
+
+            # Take action based on market status
+            if status == "open" and previous_status != "open":
+                # Market just opened - start active trading if not already started
+                if not hasattr(self, "_trading_started"):
+                    logger.info("🔔 Market opened - initializing trading phase")
+                    await self._handle_trading_phase(force_start=True)
+
+            elif status in ["close", "closed"] and previous_status not in [
+                "close",
+                "closed",
+            ]:
+                # Market just closed - clean up
+                logger.info("🔔 Market closed - cleaning up")
+                await self._handle_postmarket_phase()
+
+        except Exception as e:
+            logger.error(f"❌ Error handling market status change: {e}")
 
     async def _handle_premarket_phase(self):
         """Handle pre-market analysis phase - ENHANCED"""
@@ -113,7 +248,7 @@ class TradingEngine:
             logger.error(f"❌ Pre-market phase error: {e}")
 
     async def _handle_preparation_phase(self):
-        """ENHANCED: Market preparation using optimized instruments"""
+        """ENHANCED: Market preparation using optimized instruments and centralized WebSocket"""
         try:
             logger.info("🔧 Market preparation phase active")
 
@@ -134,7 +269,15 @@ class TradingEngine:
                 # INTEGRATION: Use OptimizedInstrumentService for dashboard
                 await self._prepare_dashboard_instruments()
 
-                # KEEP: Your existing live data preparation
+                # NEW: Ensure centralized WebSocket is ready
+                if self.centralized_manager:
+                    status = self.centralized_manager.get_status()
+                    if status["ws_connected"]:
+                        logger.info("✅ Centralized WebSocket is ready")
+                    else:
+                        logger.warning("⚠️ Centralized WebSocket is not connected")
+
+                # KEEP: Your legacy live data preparation for backward compatibility
                 await self._prepare_live_subscriptions()
 
                 logger.info("✅ Market preparation completed")
@@ -144,10 +287,10 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"❌ Preparation phase error: {e}")
 
-    async def _handle_trading_phase(self):
-        """Handle active trading phase - ENHANCED with better error handling"""
+    async def _handle_trading_phase(self, force_start=False):
+        """Handle active trading phase - ENHANCED with better error handling and centralized WebSocket"""
         try:
-            if not hasattr(self, "_trading_started"):
+            if not hasattr(self, "_trading_started") or force_start:
                 logger.info("⚡ Active trading phase started")
 
                 # Ensure we have stocks selected
@@ -171,10 +314,19 @@ class TradingEngine:
                     f"✅ Starting trading phase with {len(self.selected_stocks)} stocks"
                 )
 
-                # Start live data subscriptions
-                await self._start_live_subscriptions()
+                # NEW: Check centralized WebSocket status
+                if self.centralized_manager:
+                    status = self.centralized_manager.get_status()
+                    if not status["ws_connected"]:
+                        logger.warning(
+                            "⚠️ Centralized WebSocket not connected - using legacy data"
+                        )
 
-                # NEW: Start LiveTradingEngine for each user
+                # LEGACY: Start live data subscriptions for backward compatibility
+                if not self.centralized_manager:
+                    await self._start_live_subscriptions()
+
+                # Start LiveTradingEngine for each user
                 await self._start_live_trading_engines()
 
                 # Start AI trading
@@ -199,7 +351,7 @@ class TradingEngine:
 
                 # Reset for next day
                 del self._trading_started
-                self.selected_stocks = {}
+                # Don't clear selected_stocks here - keep them for reporting
 
         except Exception as e:
             logger.error(f"❌ Post-market phase error: {e}")
@@ -233,7 +385,10 @@ class TradingEngine:
                 db.close()
 
     async def _start_live_subscriptions(self):
-        """Start live data subscriptions - FIXED DB handling"""
+        """
+        Start live data subscriptions - LEGACY METHOD
+        Only used if centralized WebSocket manager is not available
+        """
         db = None  # Initialize db variable
         try:
             if not self.selected_stocks:
@@ -266,7 +421,7 @@ class TradingEngine:
                 await self.live_data_service.subscribe_selected_stocks(
                     self.selected_stocks, broker.access_token
                 )
-                logger.info("✅ Live data subscriptions started")
+                logger.info("✅ LEGACY: Live data subscriptions started")
             else:
                 logger.error("❌ No Upstox token available for live data")
 
@@ -278,12 +433,22 @@ class TradingEngine:
                 db.close()
 
     async def _start_ai_trading(self):
-        """Start AI trading service - ENHANCED"""
+        """Start AI trading service - ENHANCED with centralized data support"""
         try:
             if self.selected_stocks:
-                await self.ai_trading_service.start_trading(
-                    self.selected_stocks, self.live_data_service
-                )
+                # NEW: Pass centralized manager if available
+                if self.centralized_manager:
+                    await self.ai_trading_service.start_trading(
+                        self.selected_stocks,
+                        data_service=self.live_data_service,
+                        centralized_manager=self.centralized_manager,
+                    )
+                else:
+                    # Legacy mode
+                    await self.ai_trading_service.start_trading(
+                        self.selected_stocks, self.live_data_service
+                    )
+
                 logger.info("✅ AI trading service started")
             else:
                 logger.warning("⚠️ Cannot start AI trading without selected stocks")
@@ -310,7 +475,7 @@ class TradingEngine:
             except Exception as e:
                 logger.error(f"Error stopping AI trading service: {e}")
 
-            # NEW: Stop all LiveTradingEngines
+            # Stop all LiveTradingEngines
             for user_id, engine in list(self.live_trading_engines.items()):
                 try:
                     await engine.stop_trading_session()
@@ -325,9 +490,22 @@ class TradingEngine:
             logger.error(f"❌ Service shutdown error: {e}")
 
     def stop_engine(self):
-        """Stop the trading engine"""
+        """Stop the trading engine - ENHANCED with centralized WebSocket callback cleanup"""
         self.is_running = False
         logger.info("🛑 Trading engine stopping...")
+
+        # NEW: Unregister callbacks from centralized manager
+        if hasattr(self, "centralized_manager") and self.centralized_manager:
+            try:
+                self.centralized_manager.unregister_callback(
+                    "price_update", self.on_price_update
+                )
+                self.centralized_manager.unregister_callback(
+                    "market_status", self.on_market_status_change
+                )
+                logger.info("✅ Unregistered callbacks from centralized manager")
+            except Exception as e:
+                logger.error(f"❌ Error unregistering callbacks: {e}")
 
     async def _prepare_trading_instruments(self):
         """Prepare instrument keys for focused trading WebSocket"""
@@ -336,16 +514,20 @@ class TradingEngine:
                 return
 
             # Generate comprehensive instrument keys for selected stocks
-            from services.optimized_instrument_service import instrument_service
+            from services.optimized_instrument_service import get_instrument_service
 
-            # Use your existing instrument service
-            await instrument_service.initialize_instruments_system()
+            instrument_service = get_instrument_service()
+            if not instrument_service:
+                logger.warning("⚠️ Optimized instrument service not available")
+                return
 
             # Cache trading instruments for WebSocket use
             trading_instruments = []
             for symbol, stock_data in self.selected_stocks.items():
                 # Get comprehensive instrument keys for this stock
-                stock_instruments = await self._get_stock_trading_instruments(symbol)
+                stock_instruments = await self._get_stock_trading_instruments(
+                    symbol, instrument_service
+                )
                 trading_instruments.extend(stock_instruments)
 
             # Cache for WebSocket access
@@ -356,8 +538,38 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"❌ Trading instrument preparation failed: {e}")
 
+    async def _get_stock_trading_instruments(self, symbol, instrument_service=None):
+        """Get all trading instruments for a stock - ENHANCED"""
+        try:
+            # Try to get from optimized instrument service first
+            from services.optimized_instrument_service import (
+                get_stock_trading_data_keys,
+                get_instrument_service,
+            )
+
+            if instrument_service is None:
+                instrument_service = get_instrument_service()
+
+            if instrument_service:
+                result = get_stock_trading_data_keys(symbol)
+                if result and "instrument_keys" in result:
+                    return result["instrument_keys"]
+
+            # Fallback: get just the main instrument key from stock data
+            stock_data = self.selected_stocks.get(symbol, {})
+            instrument_key = stock_data.get("stock_data", {}).get("instrument_key")
+
+            if instrument_key:
+                return [instrument_key]
+
+            return []
+
+        except Exception as e:
+            logger.error(f"❌ Error getting trading instruments for {symbol}: {e}")
+            return []
+
     async def _start_live_trading_engines(self):
-        """Start LiveTradingEngine for each active user - ENHANCED"""
+        """Start LiveTradingEngine for each active user - ENHANCED with centralized data support"""
         try:
             if not self.active_users:
                 logger.warning("⚠️ No active users for live trading engines")
@@ -370,7 +582,17 @@ class TradingEngine:
                     try:
                         # Create and start LiveTradingEngine for user
                         engine = LiveTradingEngine(user_id)
-                        result = await engine.start_trading_session()
+
+                        # NEW: Pass centralized manager if available
+                        if (
+                            hasattr(self, "centralized_manager")
+                            and self.centralized_manager
+                        ):
+                            result = await engine.start_trading_session(
+                                centralized_manager=self.centralized_manager
+                            )
+                        else:
+                            result = await engine.start_trading_session()
 
                         if result.get("status") == "success":
                             self.live_trading_engines[user_id] = engine
@@ -392,7 +614,7 @@ class TradingEngine:
             logger.error(f"❌ LiveTradingEngine startup failed: {e}")
 
     async def _cache_trading_instruments(self, instruments):
-        """Cache trading instruments for WebSocket use - ENHANCED"""
+        """Cache trading instruments for WebSocket use"""
         try:
             if not self.redis_client:
                 logger.warning("⚠️ Redis not available, cannot cache instruments")
@@ -413,13 +635,13 @@ class TradingEngine:
             logger.error(f"❌ Error caching instruments: {e}")
 
     async def _prepare_dashboard_instruments(self):
-        """NEW: Prepare dashboard instruments using OptimizedInstrumentService - ENHANCED"""
+        """Prepare dashboard instruments using OptimizedInstrumentService"""
         try:
             # INTEGRATION: Use your optimized service for all dashboard instruments
-            from services.optimized_instrument_service import fast_retrieval
+            from services.optimized_instrument_service import get_dashboard_keys
 
             # Get all WebSocket keys for dashboard (all 233+ stocks)
-            all_dashboard_keys = fast_retrieval.get_all_websocket_keys()
+            all_dashboard_keys = get_dashboard_keys()
 
             # Cache for LTP API use
             if self.redis_client:
@@ -573,9 +795,139 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"❌ Emergency recovery failed: {e}")
 
-    async def get_engine_status(self):
-        """Get current engine status for debugging"""
+    # NEW: Helper methods for centralized WebSocket integration
+
+    def _get_symbol_from_instrument_key(self, instrument_key):
+        """Get stock symbol from instrument key - ADDED FOR CENTRALIZED WS"""
+        if not instrument_key:
+            return None
+
+        # Method 1: Direct lookup in our selected stocks
+        for symbol, data in self.selected_stocks.items():
+            stock_data = data.get("stock_data", {})
+            if stock_data.get("instrument_key") == instrument_key:
+                return symbol
+
+        # Method 2: Try optimized instrument service
         try:
+            from services.optimized_instrument_service import get_instrument_by_key
+
+            instrument_data = get_instrument_by_key(instrument_key)
+            if instrument_data:
+                # Get symbol from instrument data
+                symbol = instrument_data.get("symbol") or instrument_data.get(
+                    "trading_symbol"
+                )
+                if symbol:
+                    return symbol
+        except ImportError:
+            pass
+
+        return None
+
+    def _extract_price(self, price_data):
+        """Extract price from various data formats - ADDED FOR CENTRALIZED WS"""
+        if not price_data:
+            return None
+
+        try:
+            # Direct value
+            if isinstance(price_data, (int, float)):
+                return float(price_data)
+
+            # Dict formats
+            if isinstance(price_data, dict):
+                # Format 1: Direct LTP
+                if "ltp" in price_data:
+                    return float(price_data["ltp"])
+
+                # Format 2: Nested Upstox structure
+                if "fullFeed" in price_data:
+                    feed = price_data.get("fullFeed", {}).get("marketFF", {})
+                    ltpc = feed.get("ltpc", {})
+                    if "ltp" in ltpc:
+                        return float(ltpc["ltp"])
+
+            return None
+
+        except (TypeError, ValueError) as e:
+            logger.warning(f"⚠️ Error extracting price from data: {e}")
+            return None
+
+    def get_latest_price(self, symbol):
+        """Get latest price for a symbol - ADDED FOR CENTRALIZED WS"""
+        # Method 1: Check if we have it in our selected_stocks
+        if (
+            symbol in self.selected_stocks
+            and "last_price" in self.selected_stocks[symbol]
+        ):
+            return self.selected_stocks[symbol]["last_price"]
+
+        # Method 2: Try to get from centralized manager
+        if self.centralized_manager:
+            # Get instrument key for this symbol
+            instrument_key = None
+            if symbol in self.selected_stocks:
+                instrument_key = (
+                    self.selected_stocks[symbol]
+                    .get("stock_data", {})
+                    .get("instrument_key")
+                )
+
+            if instrument_key:
+                return self.centralized_manager.get_latest_price(instrument_key)
+
+        # Method 3: Fallback to legacy service
+        return self.live_data_service.get_latest_price(symbol)
+
+    def get_latest_price_by_instrument_key(self, instrument_key):
+        """Get latest price using instrument key directly - ADDED FOR CENTRALIZED WS"""
+        if not instrument_key:
+            return None
+
+        # Try centralized manager first
+        if self.centralized_manager:
+            return self.centralized_manager.get_latest_price(instrument_key)
+
+        # Fallback: try to convert to symbol and use legacy service
+        symbol = self._get_symbol_from_instrument_key(instrument_key)
+        if symbol:
+            return self.live_data_service.get_latest_price(symbol)
+
+        return None
+
+    async def get_engine_status(self):
+        """Get current engine status for debugging - ENHANCED WITH CENTRALIZED WS"""
+        try:
+            # Get centralized WebSocket status if available
+            centralized_status = {}
+            if hasattr(self, "centralized_manager") and self.centralized_manager:
+                try:
+                    status = self.centralized_manager.get_status()
+                    health = await self.centralized_manager.health_check()
+
+                    centralized_status = {
+                        "available": True,
+                        "connected": status.get("ws_connected", False),
+                        "market_status": status.get("market_status", "unknown"),
+                        "health_score": health.get("health_score", 0),
+                        "last_data_received": status.get("last_data_received"),
+                        "price_updates_count": self.price_updates_count,
+                        "last_price_update": (
+                            self.last_price_update_time.isoformat()
+                            if self.last_price_update_time
+                            else None
+                        ),
+                    }
+                except Exception as e:
+                    centralized_status = {
+                        "available": True,
+                        "error": str(e),
+                        "connected": False,
+                    }
+            else:
+                centralized_status = {"available": False}
+
             return {
                 "is_running": self.is_running,
                 "selected_stocks_count": len(self.selected_stocks),
@@ -583,6 +935,8 @@ class TradingEngine:
                 "live_engines_count": len(self.live_trading_engines),
                 "trading_started": hasattr(self, "_trading_started"),
                 "redis_connected": self.redis_client is not None,
+                "market_status": self.market_status,
+                "centralized_websocket": centralized_status,
                 "selected_stocks": (
                     list(self.selected_stocks.keys()) if self.selected_stocks else []
                 ),
@@ -606,6 +960,27 @@ class TradingEngine:
             # If still no stocks, create emergency selection
             if not self.selected_stocks:
                 await self._create_emergency_stock_selection()
+
+            # NEW: Update initial prices from centralized WebSocket
+            if self.centralized_manager and self.selected_stocks:
+                for symbol, stock_data in self.selected_stocks.items():
+                    instrument_key = stock_data.get("stock_data", {}).get(
+                        "instrument_key"
+                    )
+                    if instrument_key:
+                        price_data = self.centralized_manager.get_latest_data(
+                            instrument_key
+                        )
+                        if price_data:
+                            price = self._extract_price(price_data)
+                            if price:
+                                self.selected_stocks[symbol]["last_price"] = price
+                                self.selected_stocks[symbol][
+                                    "last_update"
+                                ] = datetime.now().isoformat()
+                                logger.info(
+                                    f"💰 Updated initial price for {symbol}: {price}"
+                                )
 
             logger.info(
                 f"✅ Stock refresh complete: {len(self.selected_stocks)} stocks"
