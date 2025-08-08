@@ -501,7 +501,7 @@ class FnoStockListService:
             logger.error(f"❌ Error fixing symbols: {e}")
             return {
                 "status": "error",
-                "error": str(e),
+                "error": "An internal error occurred while fixing missing symbols.",
                 "timestamp": datetime.now().isoformat(),
             }
 

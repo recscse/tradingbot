@@ -126,12 +126,12 @@ def check_upstox_status():
                 f"\n    📋 Broker ID {broker.id} (User {broker.user_id} - {user_role}):"
             )
             print(f"      Status: {active_str}")
-            print(
-                f"      API Key: {api_key_status} {'Valid' if has_api_key else 'Missing/Invalid'}"
-            )
-            print(
-                f"      API Secret: {api_secret_status} {'Valid' if has_api_secret else 'Missing/Invalid'}"
-            )
+            if has_api_key and has_api_secret:
+                print("      API Credentials: Configured")
+            else:
+                print("      API Credentials: Missing or Invalid")
+
+
             print(f"      Token Status: {status}")
             print(f"      Expires: {expiry_str}")
 
