@@ -88,6 +88,10 @@ Each broker has standardized interface in `brokers/base_broker.py`:
   - `REDIS_ENABLED`: Set to "false" to disable Redis (defaults to in-memory caching)
   - `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`: Redis configuration (optional)
   - Broker API credentials: `UPSTOX_API_KEY`, `ANGEL_ONE_API_KEY`, etc.
+  - **Token Automation Requirements**:
+    - `UPSTOX_MOBILE`: Mobile number for automation login
+    - `UPSTOX_PIN`: 6-digit PIN for Upstox account
+    - `UPSTOX_TOTP_KEY`: TOTP secret key for 2FA authentication
 - **Frontend Environment**: 
   - `REACT_APP_API_URL`: Backend API URL (e.g., http://localhost:8000)
 - **Requirements**: Python 3.8+, Node.js 14+, PostgreSQL/SQLite
@@ -135,4 +139,5 @@ Each broker has standardized interface in `brokers/base_broker.py`:
 - **Backend**: Python/FastAPI with SocketIO support, requires environment variables for broker APIs
 - **Frontend**: React SPA deployed via Netlify with automatic builds from repository
 - **Database**: Alembic migrations must be run on deployment (`alembic upgrade head`)
+- **Token Automation**: Playwright browser installed automatically via `start.sh` for token refresh automation
 - **Monitoring**: Comprehensive health endpoints and logging for production monitoring
