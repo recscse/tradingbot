@@ -206,13 +206,13 @@ jobs:
       
     - name: Analyze bug report
       id: bug-analysis
+      env:
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        ISSUE_BODY: ${{ github.event.issue.body }}
       run: |
         echo "🤖 Claude Code Agent - Bug Analysis" > bug_analysis.md
         echo "====================================" >> bug_analysis.md
         echo "" >> bug_analysis.md
-        
-        ISSUE_TITLE="${{ github.event.issue.title }}"
-        ISSUE_BODY="${{ github.event.issue.body }}"
         
         echo "## 📋 Bug Report Analysis" >> bug_analysis.md
         echo "" >> bug_analysis.md
