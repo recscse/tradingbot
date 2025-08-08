@@ -79,30 +79,44 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
     <Card
       elevation={0}
       sx={{
-        borderRadius: 3,
-        border: `1px solid ${theme.palette.divider}`,
+        borderRadius: 4,
+        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
         overflow: "hidden",
         position: "relative",
-        bgcolor: "background.paper",
+        bgcolor: alpha(theme.palette.background.paper, 0.9),
+        backdropFilter: "blur(20px)",
+        boxShadow: `0 8px 32px ${alpha(theme.palette.common.black, 0.1)}`,
       }}
     >
-      {/* Header Section */}
+      {/* Enhanced Header Section with trading theme */}
       <Box
         sx={{
-          height: { xs: 100, sm: 120 },
-          background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
+          height: { xs: 120, sm: 140 },
+          background: `linear-gradient(135deg, 
+            ${theme.palette.primary.main} 0%, 
+            ${theme.palette.primary.dark} 50%, 
+            ${theme.palette.secondary.main} 100%)`,
           position: "relative",
+          "&::before": {
+            content: '""',
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='M20 20c0-11.046-8.954-20-20-20v20h20zM0 20v20h20c0-11.046-8.954-20-20-20z'/%3E%3C/g%3E%3C/svg%3E")`,
+          }
         }}
       />
 
       {/* Main Content */}
-      <Box sx={{ p: { xs: 3, sm: 4 }, bgcolor: "background.paper" }}>
+      <Box sx={{ p: { xs: 4, sm: 5 }, bgcolor: alpha(theme.palette.background.paper, 0.95) }}>
         {/* Profile Info Section */}
         <Stack
           direction={{ xs: "column", sm: "row" }}
-          spacing={{ xs: 3, sm: 4 }}
+          spacing={{ xs: 4, sm: 5 }}
           alignItems={{ xs: "center", sm: "flex-start" }}
-          sx={{ mt: { xs: -6, sm: -7 } }}
+          sx={{ mt: { xs: -7, sm: -8 } }}
         >
           {/* Avatar */}
           <Badge
@@ -152,16 +166,19 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
               src={profileData?.avatar}
               onClick={handleAvatarClick}
               sx={{
-                width: { xs: 110, sm: 130 },
-                height: { xs: 110, sm: 130 },
-                fontSize: { xs: "2.5rem", sm: "3rem" },
+                width: { xs: 120, sm: 140 },
+                height: { xs: 120, sm: 140 },
+                fontSize: { xs: "2.8rem", sm: "3.2rem" },
                 fontWeight: 700,
                 bgcolor: theme.palette.primary.main,
                 cursor: "pointer",
-                border: `5px solid ${theme.palette.background.paper}`,
-                boxShadow: theme.shadows[6],
-                transition: "transform 0.2s ease",
-                "&:hover": { transform: "scale(1.02)" },
+                border: `6px solid ${theme.palette.background.paper}`,
+                boxShadow: `0 8px 24px ${alpha(theme.palette.common.black, 0.2)}`,
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                "&:hover": { 
+                  transform: "scale(1.05) translateY(-4px)",
+                  boxShadow: `0 12px 32px ${alpha(theme.palette.common.black, 0.3)}`
+                },
               }}
             >
               {getInitials(profileData?.full_name)}
@@ -177,20 +194,25 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
               pt: { xs: 0, sm: 2 },
             }}
           >
-            {/* Name */}
+            {/* Name with enhanced styling */}
             <Typography
               variant="h3"
               component="h1"
               sx={{
                 fontWeight: 800,
-                mb: 1,
-                fontSize: { xs: "2rem", sm: "2.5rem" },
+                mb: 1.5,
+                fontSize: { xs: "2.2rem", sm: "2.8rem" },
                 color: "text.primary",
-                lineHeight: 1.2,
+                lineHeight: 1.1,
                 wordBreak: "break-word",
+                background: `linear-gradient(135deg, ${theme.palette.text.primary} 0%, ${theme.palette.primary.main} 100%)`,
+                backgroundClip: "text",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                textShadow: "none",
               }}
             >
-              {profileData?.full_name || <Skeleton width={250} />}
+              {profileData?.full_name || <Skeleton width={280} />}
             </Typography>
 
             {/* Email */}
@@ -255,11 +277,11 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
           </Box>
         </Stack>
 
-        {/* Stats Grid */}
+        {/* Enhanced Stats Grid */}
         <Grid
           container
           spacing={{ xs: 2, sm: 3 }}
-          sx={{ mt: { xs: 4, sm: 5 } }}
+          sx={{ mt: { xs: 5, sm: 6 } }}
         >
           {/* Brokers */}
           <Grid item xs={6} sm={3}>
@@ -267,13 +289,17 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
               variant="outlined"
               sx={{
                 textAlign: "center",
-                p: { xs: 2, sm: 3 },
-                transition: "all 0.3s ease",
-                bgcolor: "background.paper",
+                p: { xs: 2.5, sm: 3 },
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                bgcolor: alpha(theme.palette.background.paper, 0.8),
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                borderRadius: 3,
                 "&:hover": {
-                  transform: "translateY(-4px)",
-                  boxShadow: theme.shadows[8],
-                  borderColor: "primary.main",
+                  transform: "translateY(-6px)",
+                  boxShadow: `0 12px 24px ${alpha(theme.palette.primary.main, 0.2)}`,
+                  borderColor: alpha(theme.palette.primary.main, 0.5),
+                  bgcolor: alpha(theme.palette.primary.main, 0.02),
                 },
               }}
             >
@@ -311,16 +337,32 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
               variant="outlined"
               sx={{
                 textAlign: "center",
-                p: { xs: 2, sm: 3 },
-                transition: "all 0.3s ease",
-                bgcolor: "background.paper",
+                p: { xs: 2.5, sm: 3 },
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                bgcolor: alpha(theme.palette.background.paper, 0.8),
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                borderRadius: 3,
                 "&:hover": {
-                  transform: "translateY(-4px)",
-                  boxShadow: theme.shadows[8],
-                  borderColor:
-                    (profileData?.todayPnl || 0) >= 0
-                      ? "success.main"
-                      : "error.main",
+                  transform: "translateY(-6px)",
+                  boxShadow: `0 12px 24px ${alpha(
+                    (profileData?.todayPnl || 0) >= 0 
+                      ? theme.palette.success.main 
+                      : theme.palette.error.main, 
+                    0.2
+                  )}`,
+                  borderColor: alpha(
+                    (profileData?.todayPnl || 0) >= 0 
+                      ? theme.palette.success.main 
+                      : theme.palette.error.main, 
+                    0.5
+                  ),
+                  bgcolor: alpha(
+                    (profileData?.todayPnl || 0) >= 0 
+                      ? theme.palette.success.main 
+                      : theme.palette.error.main, 
+                    0.02
+                  ),
                 },
               }}
             >
@@ -361,13 +403,17 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
               variant="outlined"
               sx={{
                 textAlign: "center",
-                p: { xs: 2, sm: 3 },
-                transition: "all 0.3s ease",
-                bgcolor: "background.paper",
+                p: { xs: 2.5, sm: 3 },
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                bgcolor: alpha(theme.palette.background.paper, 0.8),
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                borderRadius: 3,
                 "&:hover": {
-                  transform: "translateY(-4px)",
-                  boxShadow: theme.shadows[8],
-                  borderColor: "info.main",
+                  transform: "translateY(-6px)",
+                  boxShadow: `0 12px 24px ${alpha(theme.palette.info.main, 0.2)}`,
+                  borderColor: alpha(theme.palette.info.main, 0.5),
+                  bgcolor: alpha(theme.palette.info.main, 0.02),
                 },
               }}
             >
@@ -405,13 +451,17 @@ const ProfileHeader = ({ profileData, onAvatarUpload }) => {
               variant="outlined"
               sx={{
                 textAlign: "center",
-                p: { xs: 2, sm: 3 },
-                transition: "all 0.3s ease",
-                bgcolor: "background.paper",
+                p: { xs: 2.5, sm: 3 },
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                bgcolor: alpha(theme.palette.background.paper, 0.8),
+                backdropFilter: "blur(10px)",
+                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                borderRadius: 3,
                 "&:hover": {
-                  transform: "translateY(-4px)",
-                  boxShadow: theme.shadows[8],
-                  borderColor: "warning.main",
+                  transform: "translateY(-6px)",
+                  boxShadow: `0 12px 24px ${alpha(theme.palette.warning.main, 0.2)}`,
+                  borderColor: alpha(theme.palette.warning.main, 0.5),
+                  bgcolor: alpha(theme.palette.warning.main, 0.02),
                 },
               }}
             >

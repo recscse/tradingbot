@@ -135,6 +135,7 @@ from router.websocket_routes import router as websocket_router
 from router.debug_routes import router as debug_router
 from router.heatmap_router import router as heatmap_router
 from router.unified_websocket_routes import router as unified_ws_router
+from router.option_routes import option_router
 from services.unified_websocket_manager import unified_manager, start_unified_websocket
 
 # Import from market_analytics_router safely
@@ -404,13 +405,14 @@ trading_redis = TradingSafeRedisManager()
 # Global instances
 trading_engine = None
 trading_scheduler = None
+market_scheduler = None
 instrument_service_instance = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Enhanced lifespan with NEW centralized WebSocket system integration"""
-    global trading_engine, trading_scheduler, instrument_service_instance
+    global trading_engine, trading_scheduler, market_scheduler, instrument_service_instance
 
     logger.info(
         "🚀 Starting Enhanced Trading Application with NEW Centralized WebSocket System..."
@@ -491,66 +493,21 @@ async def lifespan(app: FastAPI):
                     except Exception as e:
                         logger.error(f"❌ Failed to register WebSocket broadcast: {e}")
 
-                    # FIXED: Only register processor callbacks if processor is available
-                    if ANALYTICS_PROCESSOR_AVAILABLE and market_analytics_processor:
+                        # FIXED: Only try to connect analytics manager if available
                         try:
-                            centralized_manager.register_callback(
-                                "price_update",
-                                lambda data: asyncio.create_task(
-                                    market_analytics_processor._on_price_update(data)
-                                ),
-                            )
-                            centralized_manager.register_callback(
-                                "index_update",
-                                lambda data: asyncio.create_task(
-                                    market_analytics_processor._on_index_update(data)
-                                ),
-                            )
-                            logger.info(
-                                "✅ Market analytics processor connected to centralized manager"
+                            from router.market_analytics_router import (
+                                analytics_manager,
                             )
 
-                            # FIXED: Only try to connect analytics manager if available
-                            try:
-                                from router.market_analytics_router import (
-                                    analytics_manager,
+                            if analytics_manager:
+                                # Register callbacks from processor to analytics manager
+                                logger.info(
+                                    "✅ Analytics manager connected to processor"
                                 )
-
-                                if analytics_manager:
-                                    # Register callbacks from processor to analytics manager
-                                    market_analytics_processor.register_callback(
-                                        "analytics_update",
-                                        lambda data: asyncio.create_task(
-                                            analytics_manager.broadcast(
-                                                {
-                                                    "type": "analytics_update",
-                                                    "data": data,
-                                                    "timestamp": datetime.now().isoformat(),
-                                                }
-                                            )
-                                        ),
-                                    )
-
-                                    market_analytics_processor.register_callback(
-                                        "market_sentiment",
-                                        lambda data: asyncio.create_task(
-                                            analytics_manager.broadcast(
-                                                {
-                                                    "type": "sentiment_update",
-                                                    "data": data,
-                                                    "timestamp": datetime.now().isoformat(),
-                                                }
-                                            )
-                                        ),
-                                    )
-
-                                    logger.info(
-                                        "✅ Analytics manager connected to processor"
-                                    )
-                            except Exception as e:
-                                logger.error(
-                                    f"❌ Error connecting analytics manager to processor: {e}"
-                                )
+                        except Exception as e:
+                            logger.error(
+                                f"❌ Error connecting analytics manager to processor: {e}"
+                            )
                         except Exception as e:
                             logger.error(
                                 f"❌ Error connecting processor to centralized manager: {e}"
@@ -596,6 +553,43 @@ async def lifespan(app: FastAPI):
                 )
         else:
             logger.warning("⚠️ TradingScheduler not available")
+
+        # 7.1. Initialize Upstox Token Automation
+        logger.info("🔄 Starting Upstox Token Automation...")
+        try:
+            from services.upstox_automation_service import start_upstox_automation
+
+            upstox_automation = start_upstox_automation()
+            if upstox_automation:
+                logger.info(
+                    "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
+                )
+            else:
+                logger.warning("⚠️ Upstox token automation failed to start")
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Upstox automation error: {e} - continuing without automation"
+            )
+            logger.warning(
+                "💡 Configure UPSTOX_MOBILE, UPSTOX_PIN, and UPSTOX_TOTP_KEY to enable automation"
+            )
+
+        # 7.2. Initialize MarketScheduleService - CRITICAL for FNO and Instrument automation
+        logger.info("📅 Starting MarketScheduleService...")
+        try:
+            from services.market_schedule_service import MarketScheduleService
+            
+            market_scheduler = MarketScheduleService()
+            # Start as background task to avoid blocking startup
+            market_scheduler_task = asyncio.create_task(market_scheduler.start_daily_scheduler())
+            logger.info("✅ MarketScheduleService started - will handle daily FNO refresh, instrument updates, and market timing coordination")
+        except Exception as e:
+            logger.warning(
+                f"⚠️ MarketScheduleService failed to start: {e} - continuing without market scheduling"
+            )
+            logger.warning(
+                "💡 This means FNO stocks and instruments will not auto-refresh. Manual refresh required."
+            )
 
         # 8. Initialize trading engine
         try:
@@ -659,6 +653,23 @@ async def lifespan(app: FastAPI):
                 trading_scheduler.stop_scheduler()
             except Exception as e:
                 logger.error(f"Error stopping trading scheduler: {e}")
+
+        # Stop MarketScheduleService
+        if market_scheduler:
+            try:
+                logger.info("🛑 Stopping Market Scheduler...")
+                market_scheduler.stop_scheduler()
+            except Exception as e:
+                logger.error(f"Error stopping market scheduler: {e}")
+
+        # Stop Upstox automation
+        try:
+            from services.upstox_automation_service import stop_upstox_automation
+
+            stop_upstox_automation()
+            logger.info("✅ Upstox token automation stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Upstox automation: {e}")
 
         logger.info("🛑 Enhanced lifespan shutdown complete.")
         await unified_manager.stop()
@@ -804,6 +815,7 @@ app.include_router(debug_router, tags=["Debug"])
 app.include_router(market_analytics_router, tags=["Market Analytics"])
 app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
 app.include_router(unified_ws_router, tags=["Unified WebSocket"])
+app.include_router(option_router, tags=["Options & Futures"])
 
 # NEW: Add centralized WebSocket routes
 if CENTRALIZED_ROUTES_AVAILABLE:
@@ -1050,7 +1062,7 @@ async def refresh_instruments():
 @app.get("/health")
 async def enhanced_health_check():
     """Enhanced health check with NEW centralized WebSocket system"""
-    global trading_engine, trading_scheduler, instrument_service_instance
+    global trading_engine, trading_scheduler, market_scheduler, instrument_service_instance
 
     redis_status = trading_redis.health_check()
     cache_stats = trading_redis.get_trading_cache_stats()
@@ -1076,6 +1088,7 @@ async def enhanced_health_check():
             "new_centralized_websocket": centralized_health.get("status", "unknown"),
             "trading_engine": "unknown",
             "trading_scheduler": "unknown",
+            "market_scheduler": "unknown",
             "instrument_service": "unknown",
             "redis": redis_status["status"],
         },
@@ -1083,9 +1096,6 @@ async def enhanced_health_check():
         "redis_details": redis_status,
         "cache_stats": cache_stats,
         "market_analytics": ("ok" if ANALYTICS_SERVICE_AVAILABLE else "not_available"),
-        "analytics_processor": (
-            "ok" if ANALYTICS_PROCESSOR_AVAILABLE else "not_available"
-        ),
     }
 
     # FIXED: Now we can safely access health_status
@@ -1119,6 +1129,15 @@ async def enhanced_health_check():
             )
         except Exception:
             health_status["services"]["trading_scheduler"] = "error"
+
+    # Check market scheduler
+    if market_scheduler:
+        try:
+            health_status["services"]["market_scheduler"] = (
+                "running" if market_scheduler.is_running else "stopped"
+            )
+        except Exception:
+            health_status["services"]["market_scheduler"] = "error"
 
     # FIXED: Return the health_status
     return health_status
@@ -1521,18 +1540,6 @@ async def analytics_health_check():
                 health_status["status"] = "degraded"
         else:
             health_status["components"]["analytics_service"] = "not_available"
-
-        # Test analytics processor
-        if ANALYTICS_PROCESSOR_AVAILABLE and market_analytics_processor:
-            try:
-                processor_data = market_analytics_processor.get_all_analytics()
-                health_status["components"]["analytics_processor"] = "ok"
-            except Exception as e:
-                health_status["components"]["analytics_processor"] = f"error: {str(e)}"
-                health_status["status"] = "degraded"
-        else:
-            health_status["components"]["analytics_processor"] = "not_available"
-
         # Test centralized WebSocket
         if CENTRALIZED_WS_AVAILABLE and centralized_manager:
             try:
@@ -1637,7 +1644,7 @@ async def trigger_stock_selection():
 @app.get("/api/engine/status")
 async def get_enhanced_engine_status():
     """Get comprehensive trading engine status"""
-    global trading_engine, trading_scheduler, instrument_service_instance
+    global trading_engine, trading_scheduler, market_scheduler, instrument_service_instance
 
     if not trading_engine:
         return {"error": "Trading engine not initialized"}
@@ -1684,8 +1691,11 @@ async def get_enhanced_engine_status():
                 "active_users": len(trading_engine.active_users),
             },
             "scheduler": {
-                "is_running": (
+                "trading_scheduler_running": (
                     trading_scheduler.is_running if trading_scheduler else False
+                ),
+                "market_scheduler_running": (
+                    market_scheduler.is_running if market_scheduler else False
                 ),
             },
             "new_centralized_websocket_system": {
@@ -1716,7 +1726,6 @@ async def get_analytics_status():
         return {
             "success": True,
             "analytics_available": ANALYTICS_SERVICE_AVAILABLE,
-            "analytics_processor_available": ANALYTICS_PROCESSOR_AVAILABLE,
             "websocket_connections": 0,  # Will be updated dynamically
             "websocket_endpoint": "/ws/market-analytics",
             "timestamp": datetime.now().isoformat(),
@@ -1829,7 +1838,7 @@ async def restart_trading_engine():
 # Enhanced broadcast function
 async def broadcast_trading_updates():
     """Enhanced broadcast with market analytics included"""
-    global trading_engine, trading_scheduler, instrument_service_instance
+    global trading_engine, trading_scheduler, market_scheduler, instrument_service_instance
 
     while True:
         try:
@@ -1890,9 +1899,14 @@ async def broadcast_trading_updates():
                             ),
                         },
                         "scheduler": {
-                            "is_running": (
+                            "trading_scheduler_running": (
                                 trading_scheduler.is_running
                                 if trading_scheduler
+                                else False
+                            ),
+                            "market_scheduler_running": (
+                                market_scheduler.is_running
+                                if market_scheduler
                                 else False
                             )
                         },

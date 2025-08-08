@@ -1,0 +1,202 @@
+/* FORCE DARK THEME FOR OPTION CHAIN - OVERRIDE EVERYTHING */
+
+/* Force entire table container to be dark */
+.option-chain-container {
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+
+.option-chain-container * {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* NUCLEAR OPTION - FORCE ALL MUI COMPONENTS TO DARK */
+.MuiPaper-root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.MuiTable-root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.MuiTableContainer-root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.MuiTableCell-root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border-color: #333333 !important;
+}
+
+.MuiTableHead-root .MuiTableCell-root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+}
+
+.MuiTableBody-root .MuiTableCell-root {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* Force table to be dark */
+.option-chain-table {
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+
+.option-chain-table .MuiTableCell-root {
+  background: #000000 !important;
+  color: #ffffff !important;
+  border: 1px solid #333333 !important;
+  padding: 20px 12px !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+.option-chain-table .MuiTableHead-root {
+  background: #000000 !important;
+}
+
+.option-chain-table .MuiTableBody-root {
+  background: #000000 !important;
+}
+
+.option-chain-table .MuiTableRow-root {
+  background: #000000 !important;
+}
+
+/* HEADER STYLES - MAXIMUM CONTRAST */
+.option-chain-header-call {
+  background: #006600 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.3rem !important;
+  text-shadow: 2px 2px 4px rgba(0,0,0,1) !important;
+  border: 3px solid #00ff00 !important;
+  text-align: center !important;
+  padding: 20px !important;
+}
+
+.option-chain-header-put {
+  background: #cc0000 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.3rem !important;
+  text-shadow: 2px 2px 4px rgba(0,0,0,1) !important;
+  border: 3px solid #ff0000 !important;
+  text-align: center !important;
+  padding: 20px !important;
+}
+
+.option-chain-header-strike {
+  background: #ff6600 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.4rem !important;
+  text-shadow: 2px 2px 4px rgba(0,0,0,1) !important;
+  border: 3px solid #ffaa00 !important;
+  text-align: center !important;
+  padding: 20px !important;
+}
+
+/* DATA CELL STYLES - ULTRA VISIBLE */
+.option-chain-cell-ltp {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.3rem !important;
+  font-family: 'Courier New', monospace !important;
+  text-shadow: 3px 3px 6px rgba(0,0,0,1) !important;
+  background: rgba(255,255,255,0.2) !important;
+  padding: 12px !important;
+  border-radius: 6px !important;
+  display: inline-block !important;
+  min-width: 100px !important;
+  text-align: center !important;
+  border: 2px solid rgba(255,255,255,0.3) !important;
+}
+
+.option-chain-cell-change-positive {
+  color: #00ff00 !important;
+  font-weight: 900 !important;
+  font-size: 1.2rem !important;
+  font-family: 'Courier New', monospace !important;
+  text-shadow: 3px 3px 6px rgba(0,0,0,1) !important;
+  background: rgba(0,255,0,0.2) !important;
+  padding: 10px !important;
+  border-radius: 6px !important;
+  display: inline-block !important;
+  min-width: 80px !important;
+  text-align: center !important;
+  border: 2px solid rgba(0,255,0,0.5) !important;
+}
+
+.option-chain-cell-change-negative {
+  color: #ff0000 !important;
+  font-weight: 900 !important;
+  font-size: 1.2rem !important;
+  font-family: 'Courier New', monospace !important;
+  text-shadow: 3px 3px 6px rgba(0,0,0,1) !important;
+  background: rgba(255,0,0,0.2) !important;
+  padding: 10px !important;
+  border-radius: 6px !important;
+  display: inline-block !important;
+  min-width: 80px !important;
+  text-align: center !important;
+  border: 2px solid rgba(255,0,0,0.5) !important;
+}
+
+.option-chain-cell-neutral {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.1rem !important;
+  font-family: 'Courier New', monospace !important;
+  text-shadow: 2px 2px 4px rgba(0,0,0,1) !important;
+  background: rgba(255,255,255,0.1) !important;
+  padding: 8px !important;
+  border-radius: 4px !important;
+  display: inline-block !important;
+  min-width: 70px !important;
+  text-align: center !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+}
+
+/* ROW BACKGROUNDS */
+.option-chain-row {
+  background: #000000 !important;
+}
+
+.option-chain-row:nth-child(even) {
+  background: #111111 !important;
+}
+
+.option-chain-row:hover {
+  background: #222222 !important;
+  transform: scale(1.01) !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2) !important;
+  z-index: 10 !important;
+}
+
+/* FORCE DARK PAPER BACKGROUND */
+.MuiPaper-root {
+  background: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* STRIKE PRICE SPECIAL STYLING */
+.option-chain-strike-cell {
+  background: #ff6600 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 1.3rem !important;
+  font-family: 'Courier New', monospace !important;
+  text-shadow: 2px 2px 4px rgba(0,0,0,1) !important;
+  border: 2px solid #ffaa00 !important;
+  text-align: center !important;
+  padding: 12px !important;
+}

@@ -16,7 +16,7 @@ ANGEL_REDIRECT_URI = os.getenv("ANGEL_REDIRECT_URI")
 ANGEL_AUTH_BASE_URL = "https://smartapi.angelone.in/publisher-login"
 
 
-def generate_upstox_auth_url(api_key: str) -> str:
+def generate_upstox_auth_url(api_key: str, user_id: int = None) -> str:
     """Generate Upstox OAuth URL for user redirection."""
     query = {
         "client_id": api_key,
@@ -58,6 +58,9 @@ def generate_upstox_auth_url(api_key: str, user_id: int) -> str:
         "redirect_uri": UPSTOX_REDIRECT_URI,
         "state": str(user_id),
     }
+    if user_id:
+        params["state"] = str(user_id)
+
     return f"{UPSTOX_BASE_URL}/login/authorization/dialog?{urlencode(params)}"
 
 
@@ -90,5 +93,12 @@ def exchange_code_for_token(code: str, api_key: str, api_secret: str):
 
 
 def calculate_upstox_expiry():
+    """Calculate Upstox token expiry time (next day 3:30 AM)"""
     now = datetime.now()
     expiry_time = datetime.combine(now.date(), time(hour=3, minute=30))
+
+    # If current time is past 3:30 AM, set expiry for next day
+    if now.time() >= time(hour=3, minute=30):
+        expiry_time += timedelta(days=1)
+
+    return expiry_time

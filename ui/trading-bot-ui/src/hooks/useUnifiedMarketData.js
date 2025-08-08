@@ -3,6 +3,34 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createContext, useContext } from "react";
 
+// Enhanced logging utility for performance
+const DEBUG_ENABLED = process.env.NODE_ENV === 'development';
+const DEBUG_VERBOSE = process.env.REACT_APP_DEBUG_WEBSOCKET === 'true';
+
+const debugLog = (level, message, data) => {
+  if (!DEBUG_ENABLED) return;
+  
+  const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+  const prefix = `[${timestamp}]`;
+  
+  switch (level) {
+    case 'info':
+      if (DEBUG_VERBOSE) console.log(`${prefix} ℹ️ ${message}`, data || '');
+      break;
+    case 'warn':
+      console.warn(`${prefix} ⚠️ ${message}`, data || '');
+      break;
+    case 'error':
+      console.error(`${prefix} ❌ ${message}`, data || '');
+      break;
+    case 'debug':
+      if (DEBUG_VERBOSE) console.debug(`${prefix} 🐛 ${message}`, data || '');
+      break;
+    default:
+      if (DEBUG_VERBOSE) console.log(`${prefix} ${message}`, data || '');
+  }
+};
+
 const WEBSOCKET_URL = process.env.REACT_APP_WS_URL
   ? `${process.env.REACT_APP_WS_URL}/ws/unified`
   : "ws://localhost:8000/ws/unified";
@@ -10,12 +38,63 @@ const WEBSOCKET_URL = process.env.REACT_APP_WS_URL
 const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000, 32000];
 const PING_INTERVAL = 30000;
 const STALE_THRESHOLD = 120000; // 2 minutes
+const MAX_CACHE_SIZE = 10000; // Maximum cached instruments
+const MAX_MESSAGE_QUEUE = 100; // Maximum queued messages
 
-// Optimized throttle function for performance
+// Data validation utilities
+const validatePrice = (price) => {
+  return typeof price === 'number' && price >= 0 && price < 1000000;
+};
+
+const validatePercentage = (percent) => {
+  return typeof percent === 'number' && percent >= -100 && percent <= 1000;
+};
+
+const validateVolume = (volume) => {
+  return typeof volume === 'number' && volume >= 0;
+};
+
+const validateInstrumentData = (data) => {
+  if (!data || typeof data !== 'object') return false;
+  
+  // Basic structure validation
+  if (data.last_price !== undefined && !validatePrice(data.last_price)) return false;
+  if (data.change_percent !== undefined && !validatePercentage(data.change_percent)) return false;
+  if (data.volume !== undefined && !validateVolume(data.volume)) return false;
+  
+  return true;
+};
+
+const sanitizeInstrumentData = (data) => {
+  if (!validateInstrumentData(data)) return null;
+  
+  const sanitized = { ...data };
+  
+  // Ensure numeric fields are properly typed
+  if (sanitized.last_price !== undefined) {
+    sanitized.last_price = Math.max(0, Number(sanitized.last_price) || 0);
+  }
+  if (sanitized.change_percent !== undefined) {
+    sanitized.change_percent = Math.max(-100, Math.min(1000, Number(sanitized.change_percent) || 0));
+  }
+  if (sanitized.volume !== undefined) {
+    sanitized.volume = Math.max(0, Number(sanitized.volume) || 0);
+  }
+  
+  // Add timestamp if missing
+  if (!sanitized.timestamp) {
+    sanitized.timestamp = Date.now();
+  }
+  
+  return sanitized;
+};
+
+// Optimized throttle function for performance with cleanup
 const throttle = (func, delay) => {
   let timeoutId;
   let lastExecTime = 0;
-  return function (...args) {
+  
+  const throttledFunction = function (...args) {
     const currentTime = Date.now();
 
     if (currentTime - lastExecTime > delay) {
@@ -29,10 +108,69 @@ const throttle = (func, delay) => {
       }, delay - (currentTime - lastExecTime));
     }
   };
+  
+  // Add cleanup method
+  throttledFunction.cleanup = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+  
+  return throttledFunction;
+};
+
+// Memory-aware cache with size limits
+const createBoundedCache = (maxSize = MAX_CACHE_SIZE) => {
+  const cache = new Map();
+  const accessTimes = new Map();
+  
+  const cleanup = () => {
+    if (cache.size <= maxSize) return;
+    
+    // Remove oldest 20% of entries based on access time
+    const entries = Array.from(accessTimes.entries())
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, Math.floor(maxSize * 0.2));
+    
+    entries.forEach(([key]) => {
+      cache.delete(key);
+      accessTimes.delete(key);
+    });
+    
+    debugLog('debug', `Cache cleanup: removed ${entries.length} entries, size now: ${cache.size}`);
+  };
+  
+  return {
+    get: (key) => {
+      const value = cache.get(key);
+      if (value !== undefined) {
+        accessTimes.set(key, Date.now());
+      }
+      return value;
+    },
+    set: (key, value) => {
+      cache.set(key, value);
+      accessTimes.set(key, Date.now());
+      if (cache.size > maxSize) {
+        cleanup();
+      }
+    },
+    has: (key) => cache.has(key),
+    delete: (key) => {
+      cache.delete(key);
+      accessTimes.delete(key);
+    },
+    clear: () => {
+      cache.clear();
+      accessTimes.clear();
+    },
+    size: () => cache.size
+  };
 };
 
 export const useUnifiedMarketData = () => {
-  // Connection state
+  // Connection state with optimized initial values
   const [isConnected, setIsConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
   const [lastUpdate, setLastUpdate] = useState(Date.now());
@@ -42,7 +180,9 @@ export const useUnifiedMarketData = () => {
     sector_indices: [],
     summary: null,
   });
-  // Market data state
+  
+  // Market data state with memory management
+  const marketDataCache = useRef(createBoundedCache(MAX_CACHE_SIZE));
   const [marketData, setMarketData] = useState({});
   const [marketStatus, setMarketStatus] = useState("loading");
 
@@ -80,6 +220,9 @@ export const useUnifiedMarketData = () => {
     all_candidates: [],
     high_momentum: [],
     high_volume: [],
+    fno_candidates: [],
+    fno_momentum: [],
+    fno_volume: [],
     summary: null,
   });
   const [recordMovers, setRecordMovers] = useState({
@@ -88,7 +231,7 @@ export const useUnifiedMarketData = () => {
     summary: null,
   });
 
-  // Connection management refs
+  // Connection management refs with cleanup tracking
   const ws = useRef(null);
   const reconnectAttempts = useRef(0);
   const reconnectTimeout = useRef(null);
@@ -96,24 +239,41 @@ export const useUnifiedMarketData = () => {
   const connectionReady = useRef(false);
   const messageQueue = useRef([]);
   const subscriptionConfirmed = useRef(false);
+  const cleanupFunctions = useRef([]);
 
-  // Performance tracking
+  // Performance tracking with throttling
   const messageCount = useRef(0);
   const lastMessageTime = useRef(Date.now());
+  const performanceMetrics = useRef({
+    messagesPerSecond: 0,
+    avgProcessingTime: 0,
+    lastMetricsUpdate: Date.now()
+  });
 
-  // Safe message sending with queue management
+  // Safe message sending with enhanced queue management
   const safeSend = useCallback((message) => {
     if (ws.current?.readyState === WebSocket.OPEN && connectionReady.current) {
       try {
         ws.current.send(JSON.stringify(message));
         return true;
       } catch (error) {
-        console.error("❌ Error sending message:", error);
-        messageQueue.current.push(message);
+        debugLog('error', 'Error sending message', error);
+        
+        // Only queue if under limit
+        if (messageQueue.current.length < MAX_MESSAGE_QUEUE) {
+          messageQueue.current.push(message);
+        } else {
+          debugLog('warn', 'Message queue full, dropping oldest messages');
+          messageQueue.current = messageQueue.current.slice(-MAX_MESSAGE_QUEUE + 1);
+          messageQueue.current.push(message);
+        }
         return false;
       }
     } else {
-      messageQueue.current.push(message);
+      // Only queue if under limit
+      if (messageQueue.current.length < MAX_MESSAGE_QUEUE) {
+        messageQueue.current.push(message);
+      }
       return false;
     }
   }, []);
@@ -121,52 +281,79 @@ export const useUnifiedMarketData = () => {
   // Process queued messages when connection is ready
   const processMessageQueue = useCallback(() => {
     let processed = 0;
+    const maxBatch = 10; // Limit batch size
+    
     while (
       messageQueue.current.length > 0 &&
       ws.current?.readyState === WebSocket.OPEN &&
-      processed < 10 // Limit batch size
+      processed < maxBatch
     ) {
       const message = messageQueue.current.shift();
       try {
         ws.current.send(JSON.stringify(message));
         processed++;
       } catch (error) {
-        console.error("❌ Error processing queued message:", error);
+        debugLog('error', 'Error processing queued message', error);
         messageQueue.current.unshift(message); // Put it back
         break;
       }
     }
     if (processed > 0) {
-      console.log(`📤 Processed ${processed} queued messages`);
+      debugLog('debug', `Processed ${processed} queued messages`);
     }
   }, []);
 
-  // Raw message handler (not throttled)
+  // Optimized message handler with validation and performance tracking
   const handleMessageRaw = useCallback(
     (event) => {
+      const startTime = Date.now();
+      
       try {
         const data = JSON.parse(event.data);
+        
+        // Basic validation
+        if (!data || typeof data !== 'object' || !data.type) {
+          debugLog('warn', 'Invalid message format received', data);
+          return;
+        }
+        
         messageCount.current++;
-        lastMessageTime.current = Date.now();
-        setLastUpdate(Date.now());
-
-        // Log message types for debugging
-        if (messageCount.current % 100 === 0) {
-          console.log(
-            `📨 Processed ${messageCount.current} messages, type: ${data.type}`
+        lastMessageTime.current = startTime;
+        
+        // Update performance metrics (throttled)
+        const now = startTime;
+        const timeSinceLastMetrics = now - performanceMetrics.current.lastMetricsUpdate;
+        if (timeSinceLastMetrics > 5000) { // Update every 5 seconds
+          performanceMetrics.current.messagesPerSecond = 
+            messageCount.current / (timeSinceLastMetrics / 1000);
+          performanceMetrics.current.lastMetricsUpdate = now;
+          
+          debugLog('debug', 
+            `WebSocket metrics: ${performanceMetrics.current.messagesPerSecond.toFixed(1)} msg/s, ` +
+            `total: ${messageCount.current}, queue: ${messageQueue.current.length}`
           );
         }
+        
+        // Log important message types for debugging real-time data flow
+        if (['price_update', 'dashboard_update', 'intraday_stocks_update', 'top_movers_update', 'market_status_update'].includes(data.type)) {
+          debugLog('debug', `Received ${data.type}`, {
+            hasData: !!data.data,
+            dataSize: data.data ? (Array.isArray(data.data) ? data.data.length : Object.keys(data.data).length) : 0
+          });
+        }
+        
+        setLastUpdate(now);
 
         switch (data.type) {
           case "connection_established":
-            console.log("🔌 Connected to unified WebSocket:", data.client_id);
+            debugLog('info', 'Connected to unified WebSocket', data.client_id);
             connectionReady.current = true;
             subscriptionConfirmed.current = false;
             processMessageQueue();
             break;
 
           case "subscription_confirmed":
-            console.log("✅ Subscription confirmed for events:", data.events);
+            debugLog('info', 'Subscription confirmed for events', data.events?.length || 0);
             subscriptionConfirmed.current = true;
 
             // Request initial data after subscription confirmation
@@ -178,132 +365,48 @@ export const useUnifiedMarketData = () => {
             }, 500);
             break;
 
-          // Handle price updates with flexible structure parsing
+          // Handle price updates with validation and memory management
           case "price_update":
             if (data.data) {
-              let priceData = data.data;
-
-              // Handle nested structure from your WebSocket
-              if (data.data.data && typeof data.data.data === "object") {
-                priceData = data.data.data;
+              const priceData = Array.isArray(data.data) ? data.data : [data.data];
+              const validUpdates = {};
+              let validCount = 0;
+              
+              priceData.forEach((instrumentData) => {
+                if (instrumentData && typeof instrumentData === "object") {
+                  const sanitized = sanitizeInstrumentData(instrumentData);
+                  if (sanitized && sanitized.instrument_key) {
+                    validUpdates[sanitized.instrument_key] = sanitized;
+                    marketDataCache.current.set(sanitized.instrument_key, sanitized);
+                    validCount++;
+                  }
+                }
+              });
+              
+              if (validCount > 0) {
+                setMarketData((prev) => ({ ...prev, ...validUpdates }));
+                debugLog('debug', `Price update: ${validCount} instruments updated`);
               }
+            }
+            break;
 
-              if (Object.keys(priceData).length > 0) {
-                setMarketData((prev) => {
-                  const updated = { ...prev };
-
-                  Object.entries(priceData).forEach(([key, instrumentData]) => {
-                    if (instrumentData && typeof instrumentData === "object") {
-                      // Handle nested data structure
-                      const finalData = instrumentData.data || instrumentData;
-
-                      // Extract symbol with multiple fallbacks
-                      const symbol =
-                        finalData.symbol ||
-                        finalData.trading_symbol ||
-                        key.split("|").pop() ||
-                        key;
-
-                      // Process the instrument data
-                      updated[key] = {
-                        // Identifiers
-                        instrument_key: finalData.instrument_key || key,
-                        symbol: symbol,
-                        name: finalData.name || symbol,
-                        trading_symbol: finalData.trading_symbol || symbol,
-                        exchange:
-                          finalData.exchange ||
-                          (key.includes("NSE")
-                            ? "NSE"
-                            : key.includes("MCX")
-                            ? "MCX"
-                            : key.includes("BSE")
-                            ? "BSE"
-                            : "UNKNOWN"),
-                        sector: finalData.sector || "OTHER",
-                        instrument_type: finalData.instrument_type || "EQ",
-
-                        // Price data with comprehensive fallbacks
-                        ltp: Number(
-                          finalData.ltp ||
-                            finalData.last_price ||
-                            finalData.price ||
-                            finalData.close ||
-                            0
-                        ),
-                        cp: Number(
-                          finalData.cp ||
-                            finalData.previous_close ||
-                            finalData.prev_close ||
-                            finalData.ltp ||
-                            0
-                        ),
-                        change: Number(finalData.change || 0),
-                        change_percent: Number(
-                          finalData.change_percent || finalData.pchange || 0
-                        ),
-
-                        // OHLCV data
-                        open: Number(finalData.open || finalData.ltp || 0),
-                        high: Number(finalData.high || finalData.ltp || 0),
-                        low: Number(finalData.low || finalData.ltp || 0),
-                        close: Number(finalData.close || finalData.ltp || 0),
-                        volume: Number(
-                          finalData.volume ||
-                            finalData.daily_volume ||
-                            finalData.vol ||
-                            0
-                        ),
-
-                        // Trading data
-                        avg_trade_price: Number(
-                          finalData.avg_trade_price ||
-                            finalData.atp ||
-                            finalData.vwap ||
-                            0
-                        ),
-                        bid_price: Number(
-                          finalData.bid_price || finalData.bid || 0
-                        ),
-                        ask_price: Number(
-                          finalData.ask_price || finalData.ask || 0
-                        ),
-                        bid_qty: Number(
-                          finalData.bid_qty || finalData.bid_quantity || 0
-                        ),
-                        ask_qty: Number(
-                          finalData.ask_qty || finalData.ask_quantity || 0
-                        ),
-
-                        // Market depth
-                        ltq: Number(
-                          finalData.ltq || finalData.last_traded_quantity || 0
-                        ),
-                        ltt:
-                          finalData.ltt || finalData.last_traded_time || null,
-
-                        // Derived data
-                        trend: finalData.trend || "neutral",
-                        volatility: finalData.volatility || "normal",
-                        gap_percent: Number(finalData.gap_percent || 0),
-
-                        // Metadata
-                        timestamp: finalData.timestamp || Date.now(),
-                        last_updated: finalData.last_updated || Date.now(),
-                        update_count: Number(finalData.update_count || 0),
-                        data_source: finalData.data_source || "websocket",
-
-                        // Additional fields that might be present
-                        market_cap_category: finalData.market_cap_category,
-                        volume_category: finalData.volume_category,
-                        performance_category: finalData.performance_category,
-                        has_derivatives: finalData.has_derivatives,
-                      };
-                    }
-                  });
-
-                  return updated;
-                });
+          case "live_prices_enriched":
+            if (data.data && typeof data.data === 'object') {
+              const enrichedData = {};
+              let validCount = 0;
+              
+              Object.entries(data.data).forEach(([key, instrumentData]) => {
+                const sanitized = sanitizeInstrumentData(instrumentData);
+                if (sanitized) {
+                  enrichedData[key] = sanitized;
+                  marketDataCache.current.set(key, sanitized);
+                  validCount++;
+                }
+              });
+              
+              if (validCount > 0) {
+                setMarketData((prev) => ({ ...prev, ...enrichedData }));
+                debugLog('debug', `Live prices enriched: ${validCount} instruments updated`);
               }
             }
             break;
@@ -326,16 +429,15 @@ export const useUnifiedMarketData = () => {
             }
             break;
 
-          // Handle analytics updates
+          // Handle analytics updates with priority handling
           case "top_movers_update":
             if (data.data) {
-              console.log(
+              debugLog('debug', 
                 "🚀 Updating top movers:",
-                data.data.gainers?.length || 0,
-                "gainers,",
-                data.data.losers?.length || 0,
-                "losers"
+                `${data.data.gainers?.length || 0} gainers, ${data.data.losers?.length || 0} losers`
               );
+              
+              // Immediate real-time update - no change detection
               setTopMovers({
                 gainers: data.data.gainers || [],
                 losers: data.data.losers || [],
@@ -426,15 +528,19 @@ export const useUnifiedMarketData = () => {
           case "intraday_highlights_update":
           case "intraday_stocks_update":
             if (data.data) {
-              console.log(
+              debugLog('debug',
                 "⚡ Updating intraday stocks:",
-                data.data.all_candidates?.length || 0,
-                "candidates"
+                `${data.data.all_candidates?.length || 0} total, ${data.data.fno_candidates?.length || 0} FNO candidates`
               );
+              
+              // Immediate real-time update for intraday data
               setIntradayStocks({
                 all_candidates: data.data.all_candidates || [],
                 high_momentum: data.data.high_momentum || [],
                 high_volume: data.data.high_volume || [],
+                fno_candidates: data.data.fno_candidates || [],
+                fno_momentum: data.data.fno_momentum || [],
+                fno_volume: data.data.fno_volume || [],
                 summary: data.data.summary || null,
               });
             }
@@ -473,6 +579,80 @@ export const useUnifiedMarketData = () => {
                 "indices"
               );
               setMarketData((prev) => ({ ...prev, ...data.data }));
+            }
+            break;
+
+          // Handle dashboard updates from centralized WebSocket manager
+          case "dashboard_update":
+            if (data.data && typeof data.data === "object") {
+              const dataSize = Array.isArray(data.data) ? data.data.length : Object.keys(data.data).length;
+              debugLog('debug', `Dashboard update received: ${dataSize} instruments`);
+              
+              // Handle both array and object formats with validation
+              const instrumentData = Array.isArray(data.data) ? 
+                data.data.reduce((acc, item) => {
+                  const sanitized = sanitizeInstrumentData(item);
+                  if (sanitized && sanitized.instrument_key) {
+                    acc[sanitized.instrument_key] = sanitized;
+                  }
+                  return acc;
+                }, {}) : data.data;
+              
+              const validUpdates = {};
+              let validCount = 0;
+              
+              Object.entries(instrumentData).forEach(([key, item]) => {
+                const sanitized = sanitizeInstrumentData(item);
+                if (sanitized) {
+                  validUpdates[key] = sanitized;
+                  marketDataCache.current.set(key, sanitized);
+                  validCount++;
+                }
+              });
+              
+              if (validCount > 0) {
+                setMarketData((prev) => ({ ...prev, ...validUpdates }));
+              }
+
+              // Separately update indices data for better tracking
+              const indicesKeys = Object.keys(instrumentData).filter(key => 
+                key.includes("NIFTY") || key.includes("SENSEX") || key.includes("BANKEX") || 
+                key.includes("INDEX") || key.includes("FINNIFTY") || key.includes("MIDCPNIFTY")
+              );
+              
+              if (indicesKeys.length > 0) {
+                const validIndicesData = {};
+                indicesKeys.forEach(key => {
+                  const sanitized = sanitizeInstrumentData(instrumentData[key]);
+                  if (sanitized) {
+                    validIndicesData[key] = sanitized;
+                  }
+                });
+                
+                debugLog('debug', `Indices in dashboard update: ${Object.keys(validIndicesData).length} keys`);
+                
+                // Update indices data state with validation
+                setIndicesData((prev) => ({
+                  ...prev,
+                  indices: [...(prev.indices || [])].map(idx => {
+                    const key = idx.instrument_key;
+                    return validIndicesData[key] ? { ...idx, ...validIndicesData[key] } : idx;
+                  }).concat(
+                    // Add new indices not in existing list
+                    Object.keys(validIndicesData)
+                      .filter(key => !prev.indices?.some(idx => idx.instrument_key === key))
+                      .map(key => ({ instrument_key: key, ...validIndicesData[key] }))
+                  )
+                }));
+              }
+              
+              // Update market status if provided
+              if (data.market_open !== undefined) {
+                const status = data.market_open ? "open" : "closed";
+                setMarketStatus(status);
+              }
+              
+              setLastUpdate(Date.now());
             }
             break;
 
@@ -558,6 +738,9 @@ export const useUnifiedMarketData = () => {
                   all_candidates: intradayData.all_candidates || [],
                   high_momentum: intradayData.high_momentum || [],
                   high_volume: intradayData.high_volume || [],
+                  fno_candidates: intradayData.fno_candidates || [],
+                  fno_momentum: intradayData.fno_momentum || [],
+                  fno_volume: intradayData.fno_volume || [],
                   summary: intradayData.summary || null,
                 });
               }
@@ -615,19 +798,33 @@ export const useUnifiedMarketData = () => {
             // Keep-alive response
             break;
 
+          case "trigger_analytics":
+            debugLog('debug', `Analytics trigger received: ${data.reason || 'no reason'}`);
+            // This is a trigger message to refresh analytics data
+            // Request fresh analytics data when triggered
+            if (connectionReady.current && subscriptionConfirmed.current) {
+              debugLog('debug', 'Requesting fresh data after analytics trigger');
+              safeSend({ type: "get_dashboard_data" });
+              safeSend({ type: "get_live_prices" });
+              safeSend({ type: "get_market_status" });
+              safeSend({ type: "get_indices_data" });
+            } else {
+              debugLog('warn', `Cannot request data: ready=${connectionReady.current}, confirmed=${subscriptionConfirmed.current}`);
+            }
+            break;
+
           case "error":
-            console.error(
-              "❌ WebSocket server error:",
-              data.message,
-              data.details
-            );
+            debugLog('error', 'WebSocket server error', data.message);
+            if (data.details) {
+              debugLog('error', 'Error details', data.details);
+            }
+            // Don't disconnect on error, just log it and continue
             break;
 
           default:
             // Log unknown message types for debugging
             if (data.type !== "heartbeat") {
-              console.log("⚠️ Unhandled message type:", data.type);
-              console.log("⚠️ Unhandled message type - data:", data.data);
+              debugLog('warn', `Unhandled message type: ${data.type}`, data);
             }
         }
       } catch (error) {
@@ -642,20 +839,40 @@ export const useUnifiedMarketData = () => {
     [processMessageQueue, safeSend]
   );
 
-  // Enhanced message handler with throttling
-  const handleMessage = useMemo(
-    () => throttle(handleMessageRaw, 250),
+  // Separate throttled handler for non-critical messages (moved up for proper dependency order)
+  const throttledMessageHandler = useMemo(
+    () => throttle(handleMessageRaw, 100), // 100ms for non-critical data
     [handleMessageRaw]
   );
+
+  // Real-time message handler with selective throttling
+  const handleMessage = useCallback((event) => {
+    try {
+      const data = JSON.parse(event.data);
+      
+      // No throttling for critical real-time data
+      if (['price_update', 'dashboard_update', 'top_movers_update', 'intraday_stocks_update', 'market_status_update'].includes(data.type)) {
+        handleMessageRaw(event);
+        return;
+      }
+      
+      // Minimal throttling for other messages
+      throttledMessageHandler(event);
+    } catch (error) {
+      console.error('Message parsing error:', error);
+    }
+  }, [handleMessageRaw, throttledMessageHandler]);
+  
+  // Helper functions moved above for proper dependency order
 
   // Enhanced connection setup
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) {
-      console.log("🔌 Already connected");
+      debugLog('debug', 'Already connected');
       return;
     }
 
-    console.log("🔌 Establishing WebSocket connection to:", WEBSOCKET_URL);
+    debugLog('info', `Establishing WebSocket connection to: ${WEBSOCKET_URL}`);
     setConnectionStatus("connecting");
     connectionReady.current = false;
     subscriptionConfirmed.current = false;
@@ -664,7 +881,7 @@ export const useUnifiedMarketData = () => {
       ws.current = new WebSocket(WEBSOCKET_URL);
 
       ws.current.onopen = () => {
-        console.log("✅ WebSocket connected successfully");
+        debugLog('info', 'WebSocket connected successfully');
         setIsConnected(true);
         setConnectionStatus("connected");
         reconnectAttempts.current = 0;
@@ -675,8 +892,10 @@ export const useUnifiedMarketData = () => {
 
           const subscriptionMessage = {
             type: "subscribe",
+            real_time: true,  // Enable real-time mode for immediate updates
             events: [
               "price_update",
+              "dashboard_update",
               "live_prices_enriched",
               "market_status_update",
               "top_movers_update",
@@ -691,15 +910,12 @@ export const useUnifiedMarketData = () => {
               "index_update",
               "market_breadth_update",
               "performance_summary_update",
+              "trigger_analytics",
               "all",
             ],
           };
 
-          console.log(
-            "📡 Subscribing to",
-            subscriptionMessage.events.length,
-            "event types"
-          );
+          debugLog('info', `Subscribing to ${subscriptionMessage.events.length} event types`);
           safeSend(subscriptionMessage);
 
           // Process any queued messages
@@ -720,9 +936,7 @@ export const useUnifiedMarketData = () => {
       ws.current.onmessage = handleMessage;
 
       ws.current.onclose = (event) => {
-        console.log(
-          `🔌 WebSocket disconnected: code=${event.code}, reason="${event.reason}"`
-        );
+        debugLog('warn', `WebSocket disconnected: code=${event.code}, reason="${event.reason}"`);
         setIsConnected(false);
         setConnectionStatus("disconnected");
         connectionReady.current = false;
@@ -733,10 +947,13 @@ export const useUnifiedMarketData = () => {
           pingInterval.current = null;
         }
 
-        // Clear message queue on disconnect
-        messageQueue.current = [];
+        // Clear message queue on disconnect but preserve some critical messages
+        const criticalMessages = messageQueue.current.filter(msg => 
+          msg.type === 'get_dashboard_data' || msg.type === 'get_live_prices'
+        );
+        messageQueue.current = criticalMessages;
 
-        // Auto-reconnect with exponential backoff
+        // Enhanced auto-reconnect with exponential backoff
         if (
           event.code !== 1000 && // Not a normal close
           event.code !== 1001 && // Not going away
@@ -745,33 +962,36 @@ export const useUnifiedMarketData = () => {
           const delay = RECONNECT_INTERVALS[reconnectAttempts.current] || 32000;
           reconnectAttempts.current++;
 
-          console.log(
-            `🔄 Scheduling reconnection in ${delay}ms (attempt ${reconnectAttempts.current}/${RECONNECT_INTERVALS.length})`
+          debugLog('info', 
+            `Scheduling reconnection in ${delay}ms (attempt ${reconnectAttempts.current}/${RECONNECT_INTERVALS.length})`
           );
           setConnectionStatus("reconnecting");
 
           reconnectTimeout.current = setTimeout(() => {
-            console.log(
-              `🔄 Executing reconnection attempt ${reconnectAttempts.current}`
-            );
+            debugLog('info', `Executing reconnection attempt ${reconnectAttempts.current}`);
             connect();
           }, delay);
         } else {
-          console.error(
-            "❌ Max reconnection attempts reached or connection closed permanently"
-          );
+          debugLog('error', 'Max reconnection attempts reached or connection closed permanently');
           setConnectionStatus("failed");
         }
       };
 
       ws.current.onerror = (error) => {
-        console.error("❌ WebSocket connection error:", error);
+        debugLog('error', 'WebSocket connection error', error);
         setConnectionStatus("error");
         connectionReady.current = false;
       };
     } catch (error) {
-      console.error("❌ Failed to create WebSocket connection:", error);
+      debugLog('error', 'Failed to create WebSocket connection', error);
       setConnectionStatus("error");
+      
+      // Fallback: try again after a delay if not at max attempts
+      if (reconnectAttempts.current < RECONNECT_INTERVALS.length) {
+        const delay = RECONNECT_INTERVALS[reconnectAttempts.current] || 5000;
+        reconnectAttempts.current++;
+        setTimeout(() => connect(), delay);
+      }
     }
   }, [handleMessage, safeSend, processMessageQueue]);
 
@@ -1120,26 +1340,55 @@ export const useUnifiedMarketData = () => {
 
   // Initialize connection on mount
   useEffect(() => {
-    console.log("🚀 Initializing market data connection");
+    debugLog('info', 'Initializing market data connection');
     connect();
+    
+    // Copy ref value for cleanup function
+    const currentCache = marketDataCache.current;
 
-    // Cleanup function
+    // Cleanup function with comprehensive resource cleanup
     return () => {
-      console.log("🧹 Cleaning up market data connection");
+      debugLog('info', 'Cleaning up market data connection');
 
+      // Clear all timeouts and intervals
       if (reconnectTimeout.current) {
         clearTimeout(reconnectTimeout.current);
+        reconnectTimeout.current = null;
       }
       if (pingInterval.current) {
         clearInterval(pingInterval.current);
-      }
-      if (ws.current) {
-        connectionReady.current = false;
-        ws.current.close(1000, "Component unmounting");
+        pingInterval.current = null;
       }
 
-      // Clear message queue
+      // Close WebSocket connection
+      if (ws.current) {
+        connectionReady.current = false;
+        try {
+          ws.current.close(1000, 'Component unmounting');
+        } catch (e) {
+          debugLog('warn', 'Error closing WebSocket', e);
+        }
+        ws.current = null;
+      }
+
+      // Clean up all resources
       messageQueue.current = [];
+      subscriptionConfirmed.current = false;
+      
+      // Run all registered cleanup functions
+      cleanupFunctions.current.forEach(cleanup => {
+        try {
+          if (typeof cleanup === 'function') cleanup();
+        } catch (e) {
+          debugLog('warn', 'Error in cleanup function', e);
+        }
+      });
+      cleanupFunctions.current = [];
+
+      // Clear cache using copied ref value
+      if (currentCache) {
+        currentCache.clear();
+      }
     };
   }, [connect]);
 
@@ -1150,17 +1399,32 @@ export const useUnifiedMarketData = () => {
     }
   }, [isConnected]);
 
-  // Debug logging for performance monitoring
+  // Performance monitoring with proper cleanup
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (isConnected) {
-        console.log(
-          `📊 Stats: ${totalStocks} stocks, ${sectors.length} sectors, ${messageCount.current} messages processed`
-        );
-      }
-    }, 60000); // Log every minute
+    let interval = null;
+    
+    if (DEBUG_VERBOSE) {
+      interval = setInterval(() => {
+        if (isConnected) {
+          debugLog('debug', 
+            `Performance stats: ${totalStocks} stocks, ${sectors.length} sectors, ` +
+            `${messageCount.current} messages, cache: ${marketDataCache.current.size()}`
+          );
+        }
+      }, 60000); // Log every minute
+      
+      // Register cleanup function
+      cleanupFunctions.current.push(() => {
+        if (interval) clearInterval(interval);
+      });
+    }
 
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
   }, [isConnected, totalStocks, sectors.length]);
 
   return {

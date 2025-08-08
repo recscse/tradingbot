@@ -54,12 +54,21 @@ async def unified_websocket_endpoint(websocket: WebSocket):
 
         logger.info(f"🔌 New client connected: {client_id}")
 
-        # Send initial data
+        # Send initial data with better error handling
         try:
             from services.enhanced_market_analytics import enhanced_analytics
+            from services.instrument_registry import instrument_registry
 
+            # Force analytics calculation to ensure fresh data
+            try:
+                if unified_manager.is_running and unified_manager.analytics_service:
+                    await unified_manager._calculate_all_analytics()
+            except Exception as analytics_error:
+                logger.warning(f"⚠️ Could not force analytics update: {analytics_error}")
+
+            # Send analytics data
             initial_data = enhanced_analytics.get_complete_analytics()
-            if isinstance(initial_data, dict):
+            if isinstance(initial_data, dict) and initial_data:
                 await websocket.send_json(
                     {
                         "type": "initial_data",
@@ -68,8 +77,46 @@ async def unified_websocket_endpoint(websocket: WebSocket):
                     }
                 )
                 logger.info(f"📊 Sent initial analytics data to {client_id}")
+            else:
+                # Send minimal data if analytics not available
+                await websocket.send_json(
+                    {
+                        "type": "initial_data",
+                        "data": {"message": "Analytics initializing, please wait for updates"},
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+                logger.info(f"📊 Sent minimal initial data to {client_id}")
+
+            # Send enriched live prices
+            enriched_prices = instrument_registry.get_enriched_prices()
+            if enriched_prices:
+                await websocket.send_json(
+                    {
+                        "type": "live_prices_enriched",
+                        "data": enriched_prices,
+                        "total_instruments": len(enriched_prices),
+                        "data_format": "enriched",
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+                logger.info(f"💰 Sent initial enriched prices to {client_id}: {len(enriched_prices)} instruments")
+            else:
+                logger.info(f"💰 No enriched prices available for {client_id}")
+
         except Exception as e:
             logger.error(f"❌ Error sending initial data: {e}")
+            # Send error notification to client
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "error", 
+                        "message": "Initial data loading error, real-time updates will continue",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as send_error:
+                logger.error(f"❌ Could not send error notification: {send_error}")
 
         # Message handling loop
         while True:
@@ -163,6 +210,8 @@ async def handle_unified_message(
         if message_type == "subscribe":
             # Subscribe to specific events
             events = message.get("events", [])
+            real_time_mode = message.get("real_time", False)  # NEW: Real-time mode flag
+            
             if not isinstance(events, list):
                 await websocket.send_json(
                     {
@@ -174,11 +223,27 @@ async def handle_unified_message(
                 return
 
             unified_manager.subscribe_to_events(client_id, events)
+            
+            # If real-time mode requested, trigger immediate updates
+            if real_time_mode:
+                try:
+                    # Force immediate analytics calculation and broadcast
+                    from services.enhanced_market_analytics import enhanced_analytics
+                    priority_analytics = enhanced_analytics.get_priority_analytics()
+                    
+                    for feature, data in priority_analytics.items():
+                        if feature not in ["generated_at", "processing_time_ms", "is_priority_update"]:
+                            unified_manager.emit_event(f"{feature}_update", data, priority=1)
+                    
+                    logger.info(f"✅ Real-time mode activated for client {client_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error activating real-time mode: {e}")
 
             await websocket.send_json(
                 {
                     "type": "subscription_confirmed",
                     "events": events,
+                    "real_time_mode": real_time_mode,
                     "available_events": unified_manager.get_available_events(),
                     "timestamp": datetime.now().isoformat(),
                 }

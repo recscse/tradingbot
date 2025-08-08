@@ -185,3 +185,133 @@ def refresh_upstox_token(broker_id: int, db: Session = Depends(get_db)):
 
     # Return auth_url so frontend can open it in a popup
     return {"auth_url": auth_url}
+
+
+@upstox_router.post("/automation/refresh-all")
+async def automated_refresh_all_tokens(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Automated refresh of expired Upstox tokens
+    - Admin users: Can refresh admin account token using API credentials from database
+    - Regular users: Can only refresh their own tokens
+    """
+    try:
+        from services.upstox_automation_service import UpstoxAutomationService
+        
+        automation_service = UpstoxAutomationService()
+        
+        # Check user role
+        is_admin = current_user.role and current_user.role.lower() == "admin"
+        
+        if is_admin:
+            logger.info(f"Admin user {current_user.id} triggered automated refresh for admin account")
+            # Admin can refresh the admin account's token using admin's DB credentials
+            result = await automation_service.refresh_admin_upstox_token()
+        else:
+            logger.info(f"Regular user {current_user.id} triggered automated refresh for own tokens")
+            # Regular users can only refresh their own tokens
+            result = await automation_service.refresh_user_tokens(current_user.id)
+        
+        return {
+            "success": result["success"],
+            "message": result.get("message", "Token refresh completed"),
+            "user_role": current_user.role,
+            "scope": "admin_account" if is_admin else "own_tokens",
+            "details": result,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Automated refresh failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@upstox_router.post("/automation/force-refresh")
+async def force_immediate_refresh(db: Session = Depends(get_db)):
+    """
+    Force immediate token refresh for expired tokens - Emergency endpoint
+    """
+    try:
+        from services.upstox_automation_service import UpstoxAutomationService
+        
+        logger.info("🚨 Emergency token refresh triggered via API")
+        automation_service = UpstoxAutomationService()
+        
+        # Force refresh regardless of expiry time
+        result = await automation_service.refresh_admin_upstox_token()
+        
+        # Also trigger WebSocket reconnection if available
+        try:
+            from services.centralized_ws_manager import CentralizedWebSocketManager
+            ws_manager = CentralizedWebSocketManager()
+            
+            if ws_manager.admin_token:
+                logger.info("🔄 Triggering WebSocket reconnection with new token...")
+                await ws_manager._load_admin_token()  # Reload the new token
+                ws_manager.reconnect_attempts = 0  # Reset retry counter
+                ws_manager.connection_ready.clear()  # Force reconnect
+                
+        except Exception as ws_error:
+            logger.warning(f"⚠️ Could not trigger WebSocket reconnection: {ws_error}")
+        
+        return {
+            "success": result["success"],
+            "message": f"Emergency refresh completed: {result.get('message', 'Token refreshed')}",
+            "force_refresh": True,
+            "details": result,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Emergency refresh failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Emergency refresh failed: {str(e)}")
+
+
+@upstox_router.get("/automation/status")
+async def get_automation_status(db: Session = Depends(get_db)):
+    """
+    Get status of Upstox automation system
+    """
+    try:
+        from services.upstox_automation_service import get_upstox_scheduler
+        
+        # Get scheduler status
+        scheduler = get_upstox_scheduler()
+        
+        # Count expired brokers
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+        
+        expired_count = db.query(BrokerConfig).filter(
+            BrokerConfig.broker_name.ilike("upstox"),
+            BrokerConfig.is_active == True,
+            BrokerConfig.access_token_expiry <= tomorrow
+        ).count()
+        
+        total_upstox = db.query(BrokerConfig).filter(
+            BrokerConfig.broker_name.ilike("upstox")
+        ).count()
+        
+        return {
+            "success": True,
+            "automation_enabled": True,
+            "scheduler_running": scheduler.is_running,
+            "total_upstox_brokers": total_upstox,
+            "brokers_needing_refresh": expired_count,
+            "next_scheduled_run": "04:00 AM daily",
+            "credentials_configured": bool(
+                os.getenv("UPSTOX_MOBILE") and 
+                os.getenv("UPSTOX_PIN")
+            ),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting automation status: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }

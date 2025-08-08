@@ -10,26 +10,95 @@ class EnhancedMarketAnalyticsService:
     def __init__(self):
         self.cache = {}
         self.last_calculated = {}
-        self.cache_ttl = 30  # 30 seconds cache
+        self.cache_ttl = 2  # TRADING SAFETY: Reduced to 2 seconds for better accuracy
+        self.max_cache_size = 1000  # Maximum cached items
+        self.cache_access_times = {}  # Track access times for LRU cleanup
+
+    def _cleanup_cache(self):
+        """Clean up old cache entries using LRU strategy"""
+        if len(self.cache) <= self.max_cache_size:
+            return
+        
+        # Remove oldest 20% of entries
+        now = datetime.now()
+        entries_to_remove = []
+        
+        # Find expired entries first
+        for key, timestamp in self.last_calculated.items():
+            if (now - timestamp).total_seconds() > self.cache_ttl:
+                entries_to_remove.append(key)
+        
+        # If still over limit, use LRU
+        if len(self.cache) - len(entries_to_remove) > self.max_cache_size:
+            # Sort by access time and remove oldest
+            sorted_by_access = sorted(
+                self.cache_access_times.items(), 
+                key=lambda x: x[1]
+            )
+            remaining_to_remove = len(self.cache) - len(entries_to_remove) - self.max_cache_size + 200
+            entries_to_remove.extend([key for key, _ in sorted_by_access[:remaining_to_remove]])
+        
+        # Remove selected entries
+        for key in entries_to_remove:
+            self.cache.pop(key, None)
+            self.last_calculated.pop(key, None)
+            self.cache_access_times.pop(key, None)
+        
+        if entries_to_remove:
+            logger.debug(f"Cleaned up {len(entries_to_remove)} cache entries")
+
+    def _get_cached_or_compute(self, cache_key: str, compute_func: callable, ttl: int = None) -> Any:
+        """Get cached result or compute new one with automatic cleanup"""
+        now = datetime.now()
+        effective_ttl = ttl or self.cache_ttl
+        
+        # Check if cached result exists and is valid
+        if (cache_key in self.cache and 
+            cache_key in self.last_calculated and
+            (now - self.last_calculated[cache_key]).total_seconds() < effective_ttl):
+            
+            # Update access time for LRU
+            self.cache_access_times[cache_key] = now
+            return self.cache[cache_key]
+        
+        # Compute new result
+        try:
+            result = compute_func()
+            
+            # Store in cache with cleanup
+            self.cache[cache_key] = result
+            self.last_calculated[cache_key] = now
+            self.cache_access_times[cache_key] = now
+            
+            # Trigger cleanup if needed
+            if len(self.cache) > self.max_cache_size:
+                self._cleanup_cache()
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error computing {cache_key}: {e}")
+            return None
 
     def get_complete_analytics(self) -> Dict[str, Any]:
-        """COMPLETE: Get all analytics with enriched data"""
+        """COMPLETE: Get all analytics with enriched data - optimized for real-time"""
         try:
             start_time = datetime.now()
 
+            # Prioritized order - most critical features first for faster UI updates
             analytics = {
                 "top_movers": self.get_top_gainers_losers(),
+                "intraday_stocks": self.get_intraday_stocks(),  # High priority for trading
                 "market_sentiment": self.get_market_sentiment(),
-                "sector_heatmap": self.get_sector_heatmap(),
+                "indices_data": self.get_indices_data(),
                 "volume_analysis": self.get_volume_analysis(),
+                "sector_heatmap": self.get_sector_heatmap(),
                 "gap_analysis": self.get_gap_analysis(),
                 "breakout_analysis": self.get_breakout_analysis(),
                 "market_breadth": self.get_market_breadth(),
                 "intraday_highlights": self.get_intraday_highlights(),
-                "intraday_stocks": self.get_intraday_stocks(),  # Added alias
                 "performance_summary": self.get_performance_summary(),
-                "record_movers": self.get_record_movers(),  # Added
-                "indices_data": self.get_indices_data(),
+                "record_movers": self.get_record_movers(),
                 "generated_at": datetime.now().isoformat(),
                 "processing_time_ms": (datetime.now() - start_time).total_seconds()
                 * 1000,
@@ -44,6 +113,29 @@ class EnhancedMarketAnalyticsService:
         except Exception as e:
             logger.error(f"Error generating complete analytics: {e}")
             return {"error": str(e), "timestamp": datetime.now().isoformat()}
+            
+    def get_priority_analytics(self) -> Dict[str, Any]:
+        """Get high-priority analytics for real-time updates - bypasses cache"""
+        try:
+            start_time = datetime.now()
+
+            # Force refresh for real-time critical features
+            analytics = {
+                "top_movers": self.get_top_gainers_losers(force_refresh=True),
+                "intraday_stocks": self.get_intraday_stocks(force_refresh=True),
+                "market_sentiment": self.get_market_sentiment(),
+                "indices_data": self.get_indices_data(),
+                "generated_at": datetime.now().isoformat(),
+                "processing_time_ms": (datetime.now() - start_time).total_seconds() * 1000,
+                "is_priority_update": True,
+            }
+            
+            logger.info(f"📊 Priority analytics generated in {analytics['processing_time_ms']:.2f}ms")
+            return analytics
+            
+        except Exception as e:
+            logger.error(f"Error generating priority analytics: {e}")
+            return {"error": str(e), "timestamp": datetime.now().isoformat(), "is_priority_update": True}
 
     def get_all_live_stocks(self) -> List[Dict[str, Any]]:
         """COMPLETE: Get enriched stock data"""
@@ -55,7 +147,8 @@ class EnhancedMarketAnalyticsService:
 
             stocks = []
             for instrument_key, data in enriched_data.items():
-                if data.get("ltp") and data.get("symbol"):
+                # Check for either ltp or last_price for compatibility
+                if (data.get("ltp") or data.get("last_price")) and data.get("symbol"):
                     # Data is already enriched with all metadata
                     stock_entry = {
                         "symbol": data["symbol"],
@@ -114,9 +207,9 @@ class EnhancedMarketAnalyticsService:
             logger.error(f"Error getting live stocks: {e}")
             return []
 
-    def get_top_gainers_losers(self, limit: int = 20) -> Dict[str, Any]:
-        """COMPLETE: Top movers with enriched data"""
-        if not self._should_recalculate("top_movers"):
+    def get_top_gainers_losers(self, limit: int = 20, force_refresh: bool = False) -> Dict[str, Any]:
+        """COMPLETE: Top movers with enriched data - real-time capable"""
+        if not force_refresh and not self._should_recalculate("top_movers"):
             return self.cache.get("top_movers", {"gainers": [], "losers": []})
 
         try:
@@ -1098,7 +1191,7 @@ class EnhancedMarketAnalyticsService:
             for stock in stocks:
                 # Simple breakout logic: price at/near high with good volume
                 high = stock.get("high", 0)
-                ltp = stock.get("last_price", 0)
+                ltp = stock.get("last_price", 0) or stock.get("ltp", 0)  # Support both field names
                 volume = stock.get("volume", 0)
                 avg_volume = 100000  # Placeholder
 
@@ -1166,39 +1259,115 @@ class EnhancedMarketAnalyticsService:
         """Intraday highlights and opportunities"""
         return self.get_intraday_stocks()
 
-    def get_intraday_stocks(self) -> Dict[str, Any]:
-        """Intraday stock opportunities"""
+    def get_intraday_stocks(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """Intraday stock opportunities with enhanced FNO stock inclusion - real-time capable"""
+        # Skip cache for real-time updates if requested
+        if not force_refresh and not self._should_recalculate("intraday_stocks"):
+            cached = self.cache.get("intraday_stocks")
+            if cached:
+                return cached
+                
         try:
             stocks = self.get_all_live_stocks()
+            
+            # Get FNO-eligible stocks specifically
+            fno_stocks = self._get_fno_eligible_stocks(stocks)
 
             # Filter for high momentum and high volume stocks
             high_momentum = [s for s in stocks if abs(s.get("change_percent", 0)) > 3]
             high_volume = [s for s in stocks if s.get("volume", 0) > 1000000]
+            
+            # FNO-specific filters with lower thresholds
+            fno_momentum = [s for s in fno_stocks if abs(s.get("change_percent", 0)) > 1.5]
+            fno_volume = [s for s in fno_stocks if s.get("volume", 0) > 500000]
 
-            # Combine and deduplicate
+            # Combine all candidates with priority for FNO stocks
             all_candidates = []
             seen = set()
 
+            # Add FNO stocks first (higher priority)
+            for stock in fno_momentum + fno_volume:
+                symbol = stock.get("symbol")
+                if symbol not in seen:
+                    stock["is_fno"] = True
+                    stock["priority"] = "high"
+                    all_candidates.append(stock)
+                    seen.add(symbol)
+
+            # Add other high momentum/volume stocks
             for stock in high_momentum + high_volume:
                 symbol = stock.get("symbol")
                 if symbol not in seen:
+                    stock["is_fno"] = symbol in [s.get("symbol") for s in fno_stocks]
+                    stock["priority"] = "normal"
                     all_candidates.append(stock)
                     seen.add(symbol)
+
+            # Sort by FNO status and performance
+            all_candidates.sort(key=lambda x: (
+                not x.get("is_fno", False),  # FNO stocks first
+                -abs(x.get("change_percent", 0)),  # Then by performance
+                -x.get("volume", 0)  # Then by volume
+            ))
 
             return {
                 "high_momentum": high_momentum[:15],
                 "high_volume": high_volume[:15],
-                "all_candidates": all_candidates[:25],
+                "fno_momentum": fno_momentum[:15],
+                "fno_volume": fno_volume[:15],
+                "all_candidates": all_candidates[:50],  # Increased limit for FNO
+                "fno_candidates": [s for s in all_candidates if s.get("is_fno", False)][:25],
                 "summary": {
                     "total_high_momentum": len(high_momentum),
                     "total_high_volume": len(high_volume),
+                    "total_fno_momentum": len(fno_momentum),
+                    "total_fno_volume": len(fno_volume),
                     "total_candidates": len(all_candidates),
+                    "total_fno_candidates": len([s for s in all_candidates if s.get("is_fno", False)]),
                 },
                 "timestamp": datetime.now().isoformat(),
             }
         except Exception as e:
             logger.error(f"Error calculating intraday stocks: {e}")
             return {"all_candidates": [], "error": str(e)}
+
+    def _get_fno_eligible_stocks(self, stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Get FNO eligible stocks from the stock list"""
+        try:
+            # Try to get FNO stock list from service
+            from services.fno_stock_service import get_fno_stocks_from_file
+            
+            fno_data = get_fno_stocks_from_file()
+            fno_symbols = set()
+            
+            if fno_data:
+                fno_symbols = {stock.get("symbol", "").upper() for stock in fno_data if stock.get("symbol")}
+            
+            # Fallback: common FNO stocks if service not available
+            if not fno_symbols:
+                fno_symbols = {
+                    "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+                    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", 
+                    "HDFC", "KOTAKBANK", "SBI", "BAJFINANCE", "BHARTIARTL",
+                    "ITC", "ASIANPAINT", "MARUTI", "LT", "ULTRACEMCO"
+                }
+            
+            # Filter stocks that are FNO eligible
+            fno_stocks = []
+            for stock in stocks:
+                symbol = stock.get("symbol", "").upper()
+                if symbol in fno_symbols:
+                    stock_copy = stock.copy()
+                    stock_copy["has_fno"] = True
+                    fno_stocks.append(stock_copy)
+            
+            logger.info(f"📊 Found {len(fno_stocks)} FNO eligible stocks out of {len(stocks)} total stocks")
+            return fno_stocks
+            
+        except Exception as e:
+            logger.error(f"Error getting FNO eligible stocks: {e}")
+            # Return empty list to avoid breaking the main function
+            return []
 
     def get_performance_summary(self) -> Dict[str, Any]:
         """Performance summary statistics"""
@@ -1232,7 +1401,7 @@ class EnhancedMarketAnalyticsService:
             new_lows = []
 
             for stock in stocks:
-                ltp = stock.get("last_price", 0)
+                ltp = stock.get("last_price", 0) or stock.get("ltp", 0)  # Support both field names
                 high = stock.get("high", 0)
                 low = stock.get("low", 0)
 
@@ -1525,12 +1694,14 @@ class EnhancedMarketAnalyticsService:
         return interpretations.get(sentiment, "Market sentiment unclear.")
 
     def _should_recalculate(self, feature: str) -> bool:
-        """Check if feature should be recalculated"""
+        """Check if feature should be recalculated - optimized for real-time"""
         if feature not in self.last_calculated:
             return True
 
         last_calc = self.last_calculated[feature]
-        return (datetime.now() - last_calc).total_seconds() > self.cache_ttl
+        # Real-time TTL for different features
+        ttl = 0.5 if feature in ['top_movers', 'intraday_stocks', 'market_sentiment'] else 1
+        return (datetime.now() - last_calc).total_seconds() > ttl
 
     def _mark_calculated(self, feature: str):
         """Mark feature as calculated"""

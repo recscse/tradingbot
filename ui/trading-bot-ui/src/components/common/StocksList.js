@@ -1,5 +1,28 @@
-// components/common/StocksList.jsx - ENHANCED VERSION
+// components/common/StocksList.jsx - OPTIMIZED RESPONSIVE VERSION WITH BETTER SPACE UTILIZATION
 import React, { memo } from "react";
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+  Skeleton,
+  Grid,
+  Stack,
+  useTheme,
+  useMediaQuery,
+  Tooltip,
+} from "@mui/material";
+import {
+  Info,
+} from "@mui/icons-material";
 
 const StocksList = memo(
   ({
@@ -10,22 +33,110 @@ const StocksList = memo(
     emptyMessage = "No data available",
     maxItems = 20,
     showVolume = true,
-    layoutType = "table", // "table" for stocks, "cards" for indices
+    showName = true,
+    showSector = false,
+    layoutType = "auto",
+    enableExpansion = false,
+    compact = false,
+    density = "standard", // compact, standard, comfortable
+    containerHeight = "70vh", // Default container height
   }) => {
-    // Bloomberg-style color scheme
-    const bloombergColors = {
-      background: "#0f0f12",
-      text: "#e6e6e6",
-      positive: "#00ff00",
-      negative: "#ff0000",
-      neutral: "#ffff00",
-      header: "#00b0f0",
-      border: "#333333",
-      tableHeader: "#1a1a1a",
-      tableRowEven: "#141414",
-      tableRowOdd: "#1a1a1a",
-      cardBackground: "#1a1a1a",
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+    const isTablet = useMediaQuery(theme.breakpoints.down("md"));
+
+    // Bloomberg-inspired professional color scheme
+    const colors = {
+      // Bloomberg Terminal inspired dark mode
+      background: theme.palette.mode === "dark" ? "#000000" : "#ffffff",
+      surface: theme.palette.mode === "dark" ? "#1a1a1a" : "#f8f9fa",
+      surfaceHover: theme.palette.mode === "dark" ? "#2a2a2a" : "#e9ecef",
+      text: theme.palette.mode === "dark" ? "#ffffff" : "#000000",
+      textSecondary: theme.palette.mode === "dark" ? "#cccccc" : "#666666",
+      textMuted: theme.palette.mode === "dark" ? "#999999" : "#888888",
+      // Bloomberg-style accent colors
+      positive: theme.palette.mode === "dark" ? "#00ff00" : "#008000",
+      negative: theme.palette.mode === "dark" ? "#ff4500" : "#dc3545",
+      neutral: theme.palette.mode === "dark" ? "#ffff00" : "#ffc107",
+      // Professional header styling
+      header: theme.palette.mode === "dark" ? "#00aaff" : "#0066cc",
+      headerSecondary: theme.palette.mode === "dark" ? "#ff8c00" : "#ff6b35",
+      // Clean borders and dividers
+      border: theme.palette.mode === "dark" ? "#333333" : "#dee2e6",
+      borderLight: theme.palette.mode === "dark" ? "#222222" : "#f1f3f4",
+      // Card and container backgrounds
+      cardBackground: theme.palette.mode === "dark" ? "#0d1117" : "#ffffff",
+      cardBackgroundHover: theme.palette.mode === "dark" ? "#161b22" : "#f8f9fa",
+      // Bloomberg orange accent
+      accent: theme.palette.mode === "dark" ? "#ff8c00" : "#ff6b35",
+      accentMuted: theme.palette.mode === "dark" ? "#cc7000" : "#e55a2b",
+      // Volume and additional data colors
+      volume: theme.palette.mode === "dark" ? "#6495ed" : "#4169e1",
+      info: theme.palette.mode === "dark" ? "#17a2b8" : "#0dcaf0",
     };
+
+    // Bloomberg-inspired density configuration with professional spacing
+    const densityConfig = {
+      compact: {
+        cardPadding: { xs: 0, sm: 0 },
+        tablePadding: { xs: "4px 8px", sm: "6px 10px" },
+        fontSize: { xs: "0.8rem", sm: "0.85rem" },
+        rowHeight: { xs: 36, sm: 40 },
+        avatarSize: { xs: 28, sm: 32 },
+        borderRadius: 0,
+      },
+      standard: {
+        cardPadding: { xs: 0, sm: 0 },
+        tablePadding: { xs: "6px 10px", sm: "8px 12px" },
+        fontSize: { xs: "0.85rem", sm: "0.9rem" },
+        rowHeight: { xs: 40, sm: 44 },
+        avatarSize: { xs: 32, sm: 36 },
+        borderRadius: 0,
+      },
+      comfortable: {
+        cardPadding: { xs: 0.5, sm: 0.75 },
+        tablePadding: { xs: "8px 12px", sm: "10px 14px" },
+        fontSize: { xs: "0.9rem", sm: "0.95rem" },
+        rowHeight: { xs: 44, sm: 48 },
+        avatarSize: { xs: 36, sm: 40 },
+        borderRadius: 0,
+      },
+    };
+
+    const currentDensity = densityConfig[density] || densityConfig.standard;
+
+    // Dynamic layout optimization based on data size
+    const getOptimalLayout = () => {
+      const dataLength = data.length;
+      if (isMobile) {
+        return {
+          itemsPerRow: 1,
+          cardMinHeight: dataLength <= 5 ? "auto" : "65px",
+          showMoreDetails: dataLength <= 10,
+          fontSize: dataLength <= 10 ? "0.9rem" : "0.85rem",
+        };
+      }
+      
+      if (isTablet) {
+        return {
+          itemsPerRow: dataLength <= 10 ? 2 : 1,
+          cardMinHeight: "auto",
+          showMoreDetails: dataLength <= 20,
+          fontSize: "0.9rem",
+        };
+      }
+      
+      // Desktop
+      return {
+        itemsPerRow: 1,
+        cardMinHeight: "auto",
+        showMoreDetails: true,
+        tableRowHeight: dataLength <= 15 ? currentDensity.rowHeight.sm + 8 : currentDensity.rowHeight.sm,
+        fontSize: dataLength <= 20 ? "0.95rem" : "0.9rem",
+      };
+    };
+
+    const optimalLayout = getOptimalLayout();
 
     // Format price
     const formatPrice = (price) => {
@@ -37,432 +148,830 @@ const StocksList = memo(
         : "N/A";
     };
 
-    // Format change with color
-    const formatChange = (change, percent) => {
-      const isPositive = (change || 0) >= 0;
-      const arrow = isPositive ? "▲" : "▼";
-      const color = isPositive
-        ? bloombergColors.positive
-        : bloombergColors.negative;
 
-      return (
-        <span style={{ color }}>
-          {arrow} {typeof change === "number" ? change.toFixed(2) : "N/A"} (
-          {typeof percent === "number" ? percent.toFixed(2) : "N/A"}%)
-        </span>
-      );
+    // Format volume for display
+    const formatVolume = (volume) => {
+      if (!volume) return "N/A";
+
+      if (volume >= 10000000) {
+        return `${(volume / 10000000).toFixed(1)}Cr`;
+      }
+      if (volume >= 100000) {
+        return `${(volume / 100000).toFixed(1)}L`;
+      }
+      return volume.toLocaleString();
     };
 
+
+    // Enhanced loading state with skeleton
     if (isLoading) {
       return (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "40px",
-            color: bloombergColors.text,
-            background: `linear-gradient(45deg, ${bloombergColors.tableHeader}, ${bloombergColors.cardBackground})`,
-            borderRadius: "4px",
-            border: `1px solid ${bloombergColors.border}`,
-          }}
-        >
-          <div
-            style={{
-              display: "inline-block",
-              width: "30px",
-              height: "30px",
-              border: `3px solid ${bloombergColors.header}`,
-              borderTop: "3px solid transparent",
-              borderRadius: "50%",
-              animation: "spin 1s linear infinite",
-              marginBottom: "15px",
-            }}
-          ></div>
-          <div>LOADING {title}...</div>
-          <style>
-            {`
-            @keyframes spin {
-              0% { transform: rotate(0deg); }
-              100% { transform: rotate(360deg); }
-            }
-          `}
-          </style>
-        </div>
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Skeleton variant="text" width="40%" height={32} sx={{ mb: 2 }} />
+            <Grid container spacing={2}>
+              {[...Array(isMobile ? 4 : 6)].map((_, i) => (
+                <Grid item xs={12} sm={6} md={4} key={i}>
+                  <Skeleton
+                    variant="rectangular"
+                    height={120}
+                    sx={{ borderRadius: 1 }}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          </CardContent>
+        </Card>
       );
     }
 
-    // Card layout for indices (enhanced)
-    if (layoutType === "cards") {
+    // CLEAN MOBILE CARD LAYOUT - Fixed container with clean scrolling
+    if (isMobile) {
       return (
-        <div>
-          <h2
-            style={{
-              color: bloombergColors.header,
-              marginBottom: "15px",
-              fontSize: "18px",
-              fontWeight: "bold",
-              textShadow: "0 0 10px rgba(0, 180, 240, 0.5)",
-              borderBottom: `2px solid ${bloombergColors.header}`,
-              paddingBottom: "8px",
+        <Box 
+          sx={{ 
+            mb: 0.5,
+            height: containerHeight,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            bgcolor: colors.cardBackground,
+            border: "none",
+            borderRadius: 0,
+            boxShadow: "none",
+            maxWidth: "100%",
+          }}
+        >
+          <Box 
+            sx={{ 
+              p: { xs: 0.5, sm: 0.75 },
+              pb: 0.25,
+              flexShrink: 0,
+              bgcolor: colors.surface,
+              borderBottom: `1px solid ${colors.border}`,
             }}
           >
-            {title}
-          </h2>
+            <Typography
+              variant="h6"
+              sx={{
+                mb: 0,
+                color: colors.header,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                fontSize: { xs: "0.75rem", sm: "0.8rem" },
+                lineHeight: 1.1,
+                fontFamily: '"SF Pro Display", "Segoe UI", sans-serif',
+                textTransform: "uppercase",
+                letterSpacing: "0.75px",
+              }}
+            >
+              {titleIcon} {title}
+            </Typography>
+          </Box>
 
           {data.length === 0 ? (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "40px",
-                color: bloombergColors.text,
-                background: bloombergColors.cardBackground,
-                borderRadius: "4px",
-                border: `1px solid ${bloombergColors.border}`,
+            <Box
+              sx={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                p: 3,
               }}
             >
-              {emptyMessage}
-            </div>
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ textAlign: "center" }}
+              >
+                {emptyMessage}
+              </Typography>
+            </Box>
           ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-                gap: "15px",
-              }}
-            >
-              {data.slice(0, maxItems).map((item, index) => {
-                const isPositive = (item.change || 0) >= 0;
-                return (
-                  <div
-                    key={item.instrument_key || item.symbol || index}
-                    style={{
-                      padding: "15px",
-                      backgroundColor: bloombergColors.cardBackground,
-                      border: `1px solid ${bloombergColors.border}`,
-                      borderLeft: `4px solid ${
-                        isPositive
-                          ? bloombergColors.positive
-                          : bloombergColors.negative
-                      }`,
-                      borderRadius: "6px",
-                      transition: "all 0.3s ease",
-                      cursor: "pointer",
-                      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.3)",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.transform = "translateY(-2px)";
-                      e.target.style.boxShadow = `0 4px 15px ${
-                        isPositive
-                          ? bloombergColors.positive
-                          : bloombergColors.negative
-                      }30`;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.transform = "translateY(0px)";
-                      e.target.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.3)";
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: "8px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontWeight: "bold",
-                          fontSize: "16px",
-                          color: bloombergColors.header,
+            <>
+              {/* Scrollable Content Area */}
+              <Box
+                sx={{
+                  flex: 1,
+                  overflow: "auto",
+                  px: { xs: 1.25, sm: 1.5 },
+                  pb: { xs: 1.25, sm: 1.5 },
+                  // Hide scrollbars
+                  "&::-webkit-scrollbar": {
+                    display: "none",
+                  },
+                  "&": {
+                    msOverflowStyle: "none",
+                    scrollbarWidth: "none",
+                  },
+                }}
+              >
+                <Stack spacing={0.5}>
+                  {data.slice(0, maxItems).map((item, index) => {
+                    const isPositive = (item.change || 0) >= 0;
+                    const changePercent = Math.abs(item.change_percent || 0);
+                    const changeValue = item.change || 0;
+                    const changePercentValue = item.change_percent || 0;
+
+                    return (
+                      <Box
+                        key={item.instrument_key || item.symbol || index}
+                        sx={{
+                          bgcolor: "transparent",
+                          borderRadius: 0,
+                          border: "none",
+                          borderLeft: `2px solid ${
+                            isPositive ? colors.positive : colors.negative
+                          }`,
+                          borderBottom: `1px solid ${colors.borderLight}`,
+                          boxShadow: "none",
+                          transition: "all 0.15s ease",
+                          "&:hover": {
+                            bgcolor: colors.surfaceHover,
+                            borderLeft: `3px solid ${
+                              isPositive ? colors.positive : colors.negative
+                            }`,
+                          },
                         }}
                       >
-                        {item.symbol || "N/A"}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "14px",
-                          color: bloombergColors.text,
-                          opacity: 0.8,
-                        }}
-                      >
-                        {Math.abs(item.change_percent || 0) > 2 ? "🔥" : ""}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "18px",
-                        fontWeight: "bold",
-                        color: bloombergColors.text,
-                        marginBottom: "8px",
-                      }}
-                    >
-                      ₹{formatPrice(item.last_price || item.ltp)}
-                    </div>
-                    <div style={{ fontSize: "14px" }}>
-                      {formatChange(item.change, item.change_percent)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                        <Box sx={{ p: { xs: 0.75, sm: 1 } }}>
+                          {/* Ultra-Clean Compact Row */}
+                          <Box
+                            sx={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              mb: 0.5,
+                              minHeight: optimalLayout.cardMinHeight,
+                            }}
+                          >
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flex: 1 }}>
+                              <Box
+                                sx={{
+                                  width: 16,
+                                  height: 16,
+                                  borderRadius: 0,
+                                  bgcolor: "transparent",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontSize: "0.7rem",
+                                  fontWeight: "bold",
+                                  color: isPositive ? colors.positive : colors.negative,
+                                }}
+                              >
+                                {isPositive ? "▲" : "▼"}
+                              </Box>
+                              <Box>
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    fontWeight: 600,
+                                    color: colors.text,
+                                    fontSize: { xs: optimalLayout.fontSize, sm: "0.9rem" },
+                                    lineHeight: 1.1,
+                                    fontFamily: '"SF Pro Display", "Segoe UI", sans-serif',
+                                  }}
+                                >
+                                  {item.symbol || "N/A"}
+                                  {changePercent > 5 && (
+                                    <Box component="span" sx={{ ml: 0.25, color: colors.accent, fontSize: "0.7rem" }}>●</Box>
+                                  )}
+                                </Typography>
+                                {showName && item.name && (
+                                  <Typography
+                                    variant="caption"
+                                    sx={{
+                                      display: "block",
+                                      color: "text.secondary",
+                                      fontSize: "0.65rem",
+                                      lineHeight: 1,
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                      maxWidth: "120px",
+                                    }}
+                                  >
+                                    {item.name}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Box>
+
+                            <Box sx={{ textAlign: "right", minWidth: "90px" }}>
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  fontWeight: 600,
+                                  fontSize: { xs: "0.9rem", sm: "0.95rem" },
+                                  color: colors.text,
+                                  fontFamily: '"SF Mono", "Consolas", monospace',
+                                  lineHeight: 1.1,
+                                }}
+                              >
+                                ₹{formatPrice(item.last_price || item.ltp)}
+                              </Typography>
+                            </Box>
+                          </Box>
+
+                          {/* Inline Performance Strip */}
+                          <Box
+                            sx={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              p: 0.375,
+                              bgcolor: isPositive
+                                ? `${colors.positive}08`
+                                : `${colors.negative}08`,
+                              borderRadius: 0.75,
+                              border: `1px solid ${
+                                isPositive ? colors.positive : colors.negative
+                              }20`,
+                            }}
+                          >
+                            {/* Change Display - Inline */}
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 600,
+                                color: isPositive ? colors.positive : colors.negative,
+                                fontSize: { xs: "0.8rem", sm: "0.85rem" },
+                                fontFamily: '"SF Mono", "Consolas", monospace',
+                              }}
+                            >
+                              {changeValue >= 0 ? "+" : ""}{changeValue.toFixed(2)} ({changePercentValue >= 0 ? "+" : ""}{changePercentValue.toFixed(2)}%)
+                            </Typography>
+
+                            {/* Minimal Info Icons */}
+                            <Box sx={{ display: "flex", gap: 0.75, alignItems: "center" }}>
+                              {showVolume && item.volume && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    fontFamily: '"SF Mono", "Consolas", monospace',
+                                    fontSize: "0.58rem",
+                                    color: colors.volume,
+                                    opacity: 0.9,
+                                  }}
+                                >
+                                  {formatVolume(item.volume)}
+                                </Typography>
+                              )}
+                              
+                              {showSector && item.sector && (
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    fontSize: "0.6rem",
+                                    color: colors.header,
+                                    opacity: 0.8,
+                                    maxWidth: "50px",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {item.sector}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Box>
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              </Box>
+
+              {/* Fixed Footer */}
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  p: { xs: 1, sm: 1.5 },
+                  pt: { xs: 0.75, sm: 1 },
+                  borderTop: `1px solid ${colors.border}30`,
+                  bgcolor: "background.paper",
+                }}
+              >
+                <Chip
+                  label={`${Math.min(data.length, maxItems)} / ${data.length}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{ 
+                    fontSize: { xs: "0.6rem", sm: "0.65rem" },
+                    height: { xs: 20, sm: 24 },
+                  }}
+                />
+                <Typography
+                  variant="caption"
+                  sx={{ 
+                    color: "text.secondary", 
+                    fontSize: { xs: "0.55rem", sm: "0.6rem" },
+                    opacity: 0.8,
+                  }}
+                >
+                  {new Date().toLocaleTimeString()}
+                </Typography>
+              </Box>
+            </>
           )}
-        </div>
+        </Box>
       );
     }
 
-    // Table layout for stocks (enhanced)
+    // BLOOMBERG-STYLE PROFESSIONAL TABLE LAYOUT
     return (
-      <div>
-        <h2
-          style={{
-            color: bloombergColors.header,
-            marginBottom: "15px",
-            fontSize: "18px",
-            fontWeight: "bold",
-            textShadow: "0 0 10px rgba(0, 180, 240, 0.5)",
-            borderBottom: `2px solid ${bloombergColors.header}`,
-            paddingBottom: "8px",
+      <Box 
+        sx={{ 
+          mb: 0.5, 
+          height: containerHeight,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          bgcolor: colors.cardBackground,
+          border: "none",
+          borderRadius: 0,
+          boxShadow: "none",
+        }}
+      >
+        <Box 
+          sx={{ 
+            p: { xs: 0.5, sm: 0.75 },
+            pb: 0.25,
+            flexShrink: 0,
+            bgcolor: colors.surface,
+            borderBottom: `1px solid ${colors.border}`,
           }}
         >
-          {title}
-        </h2>
-
-        {data.length === 0 ? (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "40px",
-              color: bloombergColors.text,
-              background: bloombergColors.cardBackground,
-              borderRadius: "4px",
-              border: `1px solid ${bloombergColors.border}`,
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              mb: 1,
+              flexWrap: "wrap",
+              gap: 1,
             }}
           >
-            {emptyMessage}
-          </div>
-        ) : (
-          <div
-            style={{
-              background: bloombergColors.cardBackground,
-              borderRadius: "6px",
-              overflow: "hidden",
-              border: `1px solid ${bloombergColors.border}`,
-              boxShadow: "0 4px 15px rgba(0, 0, 0, 0.3)",
-            }}
-          >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: "14px",
+            <Typography
+              variant={isTablet ? "h6" : "h5"}
+              sx={{
+                color: colors.header,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 0.75,
+                fontSize: isTablet ? "0.9rem" : "1rem",
+                fontFamily: '"SF Pro Display", "Segoe UI", sans-serif',
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
               }}
             >
-              <thead>
-                <tr
-                  style={{
-                    backgroundColor: bloombergColors.tableHeader,
-                    borderBottom: `2px solid ${bloombergColors.header}`,
+              {titleIcon} {title}
+            </Typography>
+            
+            {/* Table Summary Stats */}
+            <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+              <Chip
+                label={`${data.length} items`}
+                size="small"
+                variant="outlined"
+                color="primary"
+                sx={{ fontSize: "0.65rem" }}
+              />
+              {data.length > 0 && (
+                <Chip
+                  label={`${Math.round((data.filter(item => (item.change || 0) > 0).length / data.length) * 100)}% ↑`}
+                  size="small"
+                  sx={{
+                    bgcolor: colors.positive,
+                    color: "white",
+                    fontSize: "0.65rem",
+                    fontFamily: '"SF Mono", "Consolas", monospace',
+                  }}
+                />
+              )}
+            </Box>
+          </Box>
+        </Box>
+
+        {data.length === 0 ? (
+          <Box
+            sx={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              p: 4,
+            }}
+          >
+            <Typography 
+              variant="body2" 
+              color="text.secondary"
+              sx={{ textAlign: "center" }}
+            >
+              {emptyMessage}
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            <Box
+              sx={{
+                flex: 1,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <TableContainer
+                component={Paper}
+                sx={{
+                  flex: 1,
+                  overflowY: "auto",
+                  overflowX: "auto",
+                  bgcolor: colors.cardBackground,
+                  borderRadius: 0,
+                  border: "none",
+                  // Hide scrollbars but keep functionality
+                  "&::-webkit-scrollbar": {
+                    display: "none",
+                  },
+                  "&": {
+                    msOverflowStyle: "none",
+                    scrollbarWidth: "none",
+                  },
+                }}
+              >
+                <Table
+                  size={compact || isTablet ? "small" : "medium"}
+                  stickyHeader
+                  sx={{
+                    minWidth: isTablet ? 500 : 650,
+                    "& .MuiTableCell-root": {
+                      borderBottom: `1px solid ${colors.border}`,
+                      fontSize: currentDensity.fontSize,
+                      padding: currentDensity.tablePadding,
+                      color: colors.text,
+                    },
+                    "& .MuiTableCell-head": {
+                      backgroundColor: colors.surface,
+                      fontWeight: 600,
+                      fontSize: { xs: "0.65rem", sm: "0.7rem", md: "0.75rem" },
+                      color: colors.header,
+                      borderBottom: `1px solid ${colors.border}`,
+                      borderTop: "none",
+                      textTransform: "uppercase",
+                      letterSpacing: { xs: "0.75px", md: "1px" },
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                      fontFamily: '"SF Pro Display", "Segoe UI", sans-serif',
+                      py: { xs: 0.75, md: 1 },
+                      px: { xs: 0.75, md: 1 },
+                    },
+                    "& .MuiTableRow-root": {
+                      height: optimalLayout.tableRowHeight || currentDensity.rowHeight,
+                      "&:hover": {
+                        backgroundColor: colors.surfaceHover,
+                        transform: isTablet ? "none" : "translateY(-1px)",
+                        transition: "all 0.15s ease",
+                      },
+                      "&:nth-of-type(even)": {
+                        backgroundColor: colors.surface,
+                      },
+                      "&:nth-of-type(odd)": {
+                        backgroundColor: colors.cardBackground,
+                      },
+                    },
                   }}
                 >
-                  <th
-                    style={{
-                      padding: "12px 15px",
-                      textAlign: "left",
-                      color: bloombergColors.header,
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                      letterSpacing: "0.5px",
-                    }}
-                  >
-                    SYMBOL
-                  </th>
-                  <th
-                    style={{
-                      padding: "12px 15px",
-                      textAlign: "right",
-                      color: bloombergColors.header,
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                      letterSpacing: "0.5px",
-                    }}
-                  >
-                    LAST
-                  </th>
-                  <th
-                    style={{
-                      padding: "12px 15px",
-                      textAlign: "right",
-                      color: bloombergColors.header,
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                      letterSpacing: "0.5px",
-                    }}
-                  >
-                    CHG
-                  </th>
-                  <th
-                    style={{
-                      padding: "12px 15px",
-                      textAlign: "right",
-                      color: bloombergColors.header,
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                      letterSpacing: "0.5px",
-                    }}
-                  >
-                    %CHG
-                  </th>
-                  {showVolume && (
-                    <th
-                      style={{
-                        padding: "12px 15px",
-                        textAlign: "right",
-                        color: bloombergColors.header,
-                        fontWeight: "bold",
-                        fontSize: "13px",
-                        letterSpacing: "0.5px",
-                      }}
-                    >
-                      VOLUME
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {data.slice(0, maxItems).map((stock, index) => {
-                  const isPositive = (stock.change || 0) >= 0;
-                  return (
-                    <tr
-                      key={stock.instrument_key || stock.symbol || index}
-                      style={{
-                        backgroundColor:
-                          index % 2 === 0
-                            ? bloombergColors.tableRowEven
-                            : bloombergColors.tableRowOdd,
-                        borderBottom: `1px solid ${bloombergColors.border}`,
-                        transition: "all 0.2s ease",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.target.style.backgroundColor = `${
-                          isPositive
-                            ? bloombergColors.positive
-                            : bloombergColors.negative
-                        }20`;
-                      }}
-                      onMouseLeave={(e) => {
-                        e.target.style.backgroundColor =
-                          index % 2 === 0
-                            ? bloombergColors.tableRowEven
-                            : bloombergColors.tableRowOdd;
-                      }}
-                    >
-                      <td
-                        style={{
-                          padding: "12px 15px",
-                          color: bloombergColors.text,
-                          fontWeight: "500",
+                  <TableHead>
+                    <TableRow>
+                      <TableCell 
+                        sx={{ 
+                          minWidth: isTablet ? 90 : 100, 
+                          maxWidth: isTablet ? 130 : 150,
+                          width: isTablet ? "18%" : "auto"
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
+                        SYMBOL
+                      </TableCell>
+                      {showName && !isTablet && (
+                        <TableCell 
+                          sx={{ 
+                            minWidth: 120, 
+                            maxWidth: 200,
+                            width: "20%"
                           }}
                         >
-                          <span>
-                            {stock.symbol || stock.trading_symbol || "N/A"}
-                          </span>
-                          {Math.abs(stock.change_percent || 0) > 5 && (
-                            <span style={{ fontSize: "10px" }}>🔥</span>
-                          )}
-                        </div>
-                      </td>
-                      <td
-                        style={{
-                          padding: "12px 15px",
-                          textAlign: "right",
-                          color: bloombergColors.text,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        ₹{formatPrice(stock.last_price || stock.ltp)}
-                      </td>
-                      <td
-                        style={{
-                          padding: "12px 15px",
-                          textAlign: "right",
-                          color: isPositive
-                            ? bloombergColors.positive
-                            : bloombergColors.negative,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        {typeof stock.change === "number"
-                          ? stock.change.toFixed(2)
-                          : "N/A"}
-                      </td>
-                      <td
-                        style={{
-                          padding: "12px 15px",
-                          textAlign: "right",
-                          color: isPositive
-                            ? bloombergColors.positive
-                            : bloombergColors.negative,
-                          fontWeight: "bold",
-                        }}
-                      >
-                        {typeof stock.change_percent === "number"
-                          ? stock.change_percent.toFixed(2) + "%"
-                          : "N/A"}
-                      </td>
-                      {showVolume && (
-                        <td
-                          style={{
-                            padding: "12px 15px",
-                            textAlign: "right",
-                            color: bloombergColors.text,
-                            fontSize: "12px",
-                          }}
-                        >
-                          {stock.volume
-                            ? stock.volume >= 10000000
-                              ? `${(stock.volume / 10000000).toFixed(1)}Cr`
-                              : stock.volume >= 100000
-                              ? `${(stock.volume / 100000).toFixed(1)}L`
-                              : stock.volume.toLocaleString()
-                            : "N/A"}
-                        </td>
+                          NAME
+                        </TableCell>
                       )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      <TableCell 
+                        align="right" 
+                        sx={{ 
+                          minWidth: isTablet ? 80 : 100,
+                          width: isTablet ? "20%" : "15%"
+                        }}
+                      >
+                        PRICE
+                      </TableCell>
+                      <TableCell 
+                        align="right" 
+                        sx={{ 
+                          minWidth: isTablet ? 60 : 80,
+                          width: isTablet ? "15%" : "12%"
+                        }}
+                      >
+                        CHG
+                      </TableCell>
+                      <TableCell 
+                        align="right" 
+                        sx={{ 
+                          minWidth: isTablet ? 70 : 80,
+                          width: isTablet ? "15%" : "12%"
+                        }}
+                      >
+                        CHG%
+                      </TableCell>
+                      {showVolume && (
+                        <TableCell 
+                          align="right" 
+                          sx={{ 
+                            minWidth: isTablet ? 70 : 100,
+                            width: isTablet ? "15%" : "12%"
+                          }}
+                        >
+                          VOL
+                        </TableCell>
+                      )}
+                      {showSector && !isTablet && (
+                        <TableCell 
+                          sx={{ 
+                            minWidth: 100, 
+                            maxWidth: 120,
+                            width: "15%"
+                          }}
+                        >
+                          SECTOR
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {data.slice(0, maxItems).map((stock, index) => {
+                      const isPositive = (stock.change || 0) >= 0;
+                      const changePercent = Math.abs(stock.change_percent || 0);
 
-            {/* Table Footer */}
-            <div
-              style={{
-                padding: "10px 15px",
-                backgroundColor: bloombergColors.tableHeader,
-                borderTop: `1px solid ${bloombergColors.border}`,
-                fontSize: "12px",
-                color: bloombergColors.text,
+                      return (
+                        <TableRow
+                          key={stock.instrument_key || stock.symbol || index}
+                          hover
+                          sx={{
+                            cursor: "pointer",
+                            "&:hover .stock-actions": {
+                              opacity: 1,
+                            },
+                          }}
+                        >
+                          <TableCell>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 0.5,
+                              }}
+                            >
+                              <Box
+                                sx={{
+                                  width: 14,
+                                  height: 14,
+                                  borderRadius: "50%",
+                                  bgcolor: isPositive ? colors.positive : colors.negative,
+                                  mr: 0.75,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontSize: "0.6rem",
+                                  fontWeight: "bold",
+                                  color: "white",
+                                }}
+                              >
+                                {isPositive ? "▲" : "▼"}
+                              </Box>
+                              <Box>
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    fontWeight: 600,
+                                    fontSize: "inherit",
+                                    lineHeight: 1.2,
+                                    fontFamily: '"SF Pro Display", "Segoe UI", sans-serif',
+                                  }}
+                                >
+                                  {stock.symbol || "N/A"}
+                                  {changePercent > 5 && (
+                                    <Box component="span" sx={{ ml: 0.5, color: colors.accent, fontSize: "0.7rem" }}>●</Box>
+                                  )}
+                                </Typography>
+                                {showName && isTablet && stock.name && (
+                                  <Typography
+                                    variant="caption"
+                                    sx={{
+                                      color: "text.secondary",
+                                      fontSize: "0.65rem",
+                                      lineHeight: 1,
+                                      display: "block",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                      maxWidth: "100px",
+                                    }}
+                                  >
+                                    {stock.name}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          </TableCell>
+
+                          {showName && !isTablet && (
+                            <TableCell>
+                              <Tooltip title={stock.name || "N/A"} arrow>
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    color: "text.secondary",
+                                    fontSize: "inherit",
+                                  }}
+                                >
+                                  {stock.name || "N/A"}
+                                </Typography>
+                              </Tooltip>
+                            </TableCell>
+                          )}
+
+                          <TableCell align="right">
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 600,
+                                fontFamily: '"SF Mono", "Consolas", monospace',
+                                fontSize: "inherit",
+                                lineHeight: 1.2,
+                              }}
+                            >
+                              ₹{formatPrice(stock.last_price || stock.ltp)}
+                            </Typography>
+                          </TableCell>
+
+                          <TableCell align="right">
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 600,
+                                color: isPositive ? colors.positive : colors.negative,
+                                fontFamily: '"SF Mono", "Consolas", monospace',
+                                fontSize: "inherit",
+                              }}
+                            >
+                              {typeof stock.change === "number"
+                                ? (stock.change >= 0 ? "+" : "") + stock.change.toFixed(2)
+                                : "N/A"}
+                            </Typography>
+                          </TableCell>
+
+                          <TableCell align="right">
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 600,
+                                color: isPositive ? colors.positive : colors.negative,
+                                fontFamily: '"SF Mono", "Consolas", monospace',
+                                fontSize: "inherit",
+                              }}
+                            >
+                              {typeof stock.change_percent === "number"
+                                ? (stock.change_percent >= 0 ? "+" : "") + stock.change_percent.toFixed(2) + "%"
+                                : "N/A"}
+                            </Typography>
+                          </TableCell>
+
+                          {showVolume && (
+                            <TableCell align="right">
+                              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 0.25 }}>
+                                <Typography
+                                  variant="body2"
+                                  sx={{
+                                    fontFamily: '"SF Mono", "Consolas", monospace',
+                                    color: colors.volume,
+                                    fontSize: "inherit",
+                                    opacity: 0.9,
+                                  }}
+                                >
+                                  {formatVolume(stock.volume)}
+                                </Typography>
+                              </Box>
+                            </TableCell>
+                          )}
+
+                          {showSector && !isTablet && (
+                            <TableCell>
+                              {stock.sector ? (
+                                <Chip
+                                  label={stock.sector}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{
+                                    fontSize: "0.65rem",
+                                    height: 20,
+                                    maxWidth: "100%",
+                                    "& .MuiChip-label": {
+                                      px: 0.5,
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    },
+                                  }}
+                                />
+                              ) : (
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                  sx={{ fontSize: "inherit" }}
+                                >
+                                  —
+                                </Typography>
+                              )}
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+
+            {/* Fixed Table Footer */}
+            <Box
+              sx={{
+                flexShrink: 0,
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                p: 1.5,
+                pt: 1,
+                bgcolor: "background.paper",
+                borderTop: `1px solid ${colors.border}`,
+                flexWrap: "wrap",
+                gap: 1,
               }}
             >
-              <span>
-                Showing {Math.min(data.length, maxItems)} of {data.length}{" "}
-                stocks
-              </span>
-              <span>Updated: {new Date().toLocaleTimeString()}</span>
-            </div>
-          </div>
+              <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
+                <Chip
+                  label={`${Math.min(data.length, maxItems)} / ${data.length}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{ fontSize: "0.65rem" }}
+                />
+                {data.length > maxItems && (
+                  <Typography
+                    variant="caption"
+                    sx={{ color: "text.secondary", fontSize: "0.6rem" }}
+                  >
+                    Top {maxItems}
+                  </Typography>
+                )}
+              </Box>
+              
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.5,
+                  fontSize: "0.6rem",
+                }}
+              >
+                <Info sx={{ fontSize: 10 }} />
+                {new Date().toLocaleTimeString()}
+              </Typography>
+            </Box>
+          </>
         )}
-      </div>
+      </Box>
     );
   }
 );

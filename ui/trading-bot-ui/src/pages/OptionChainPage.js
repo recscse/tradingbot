@@ -107,14 +107,17 @@ const OptionChainPage = () => {
       <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell align="right">Δ</TableCell>
             <TableCell align="right">Call LTP</TableCell>
-            <TableCell align="right">Lots</TableCell>
+            <TableCell align="right">CHG</TableCell>
+            <TableCell align="right">IV</TableCell>
+            <TableCell align="right">VOL</TableCell>
+            <TableCell align="right">OI</TableCell>
             <TableCell align="center">Strike</TableCell>
+            <TableCell align="left">OI</TableCell>
+            <TableCell align="left">VOL</TableCell>
             <TableCell align="left">IV</TableCell>
-            <TableCell align="left">Lots</TableCell>
+            <TableCell align="left">CHG</TableCell>
             <TableCell align="left">Put LTP</TableCell>
-            <TableCell align="left">Δ</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -130,16 +133,23 @@ const OptionChainPage = () => {
                 key={row.strike}
                 sx={{ bgcolor: isATM ? "#e3f2fd" : "inherit" }}
               >
-                <TableCell align="right">{format(ce.delta)}</TableCell>
                 <TableCell align="right">{format(callLTP)}</TableCell>
-                <TableCell align="right">{ce.lot_size ?? "–"}</TableCell>
+                <TableCell align="right" sx={{ color: callLTP >= 0 ? 'green' : 'red' }}>
+                  {format(ce.change || 0)}
+                </TableCell>
+                <TableCell align="right">{format(ce.iv)}</TableCell>
+                <TableCell align="right">{ce.volume || "–"}</TableCell>
+                <TableCell align="right">{ce.open_interest || "–"}</TableCell>
                 <TableCell align="center">
                   <strong>{row.strike}</strong>
                 </TableCell>
+                <TableCell align="left">{pe.open_interest || "–"}</TableCell>
+                <TableCell align="left">{pe.volume || "–"}</TableCell>
                 <TableCell align="left">{format(pe.iv)}</TableCell>
-                <TableCell align="left">{pe.lot_size ?? "–"}</TableCell>
+                <TableCell align="left" sx={{ color: putLTP >= 0 ? 'green' : 'red' }}>
+                  {format(pe.change || 0)}
+                </TableCell>
                 <TableCell align="left">{format(putLTP)}</TableCell>
-                <TableCell align="left">{format(pe.delta)}</TableCell>
               </TableRow>
             );
           })}
