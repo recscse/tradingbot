@@ -67,37 +67,53 @@ jobs:
           BRANCH_DESC="$BRANCH_NAME"
         fi
         
-        # Generate title based on branch type
+        # Set PR type based on branch type
         case $BRANCH_TYPE in
           "feature")
-            PR_TITLE="feat: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
             PR_TYPE="✨ Feature"
             ;;
           "fix")
-            PR_TITLE="fix: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
             PR_TYPE="🐛 Bug Fix"
             ;;
           "hotfix")
-            PR_TITLE="hotfix: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
             PR_TYPE="🚨 Hotfix"
             ;;
           "enhancement")
-            PR_TITLE="enhance: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
             PR_TYPE="⚡ Enhancement"
             ;;
           "refactor")
-            PR_TITLE="refactor: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
             PR_TYPE="♻️ Refactor"
             ;;
           *)
-            PR_TITLE="$(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
             PR_TYPE="🔧 Change"
             ;;
         esac
         
-        # Use commit message as title if it looks more descriptive
-        if [[ ${#COMMIT_MSG} -gt 10 ]] && [[ ! $COMMIT_MSG =~ ^(Initial commit|Update|Fix|Add) ]]; then
+        # Always use commit message as PR title (primary choice)
+        if [[ ${#COMMIT_MSG} -gt 5 ]] && [[ ! $COMMIT_MSG =~ ^(Initial commit)$ ]]; then
           PR_TITLE="$COMMIT_MSG"
+        else
+          # Fallback to branch name only if commit message is too short/generic
+          case $BRANCH_TYPE in
+            "feature")
+              PR_TITLE="feat: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+              ;;
+            "fix")
+              PR_TITLE="fix: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+              ;;
+            "hotfix")
+              PR_TITLE="hotfix: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+              ;;
+            "enhancement")
+              PR_TITLE="enhance: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+              ;;
+            "refactor")
+              PR_TITLE="refactor: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+              ;;
+            *)
+              PR_TITLE="$(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+              ;;
+          esac
         fi
         
         echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT

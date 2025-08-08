@@ -108,13 +108,30 @@ jobs:
         echo "📈 Code complexity analysis:"
         radon cc . -s -a --exclude="*/venv/*,*/ui/*,*/node_modules/*"
         
-        # Check for high complexity
-        HIGH_COMPLEXITY=$(radon cc . -s -j --exclude="*/venv/*,*/ui/*,*/node_modules/*" | jq -r '.[] | select(.complexity > 10) | .name')
+        # Check for high complexity functions with improved error handling
+        echo "🔍 Checking for high complexity functions..."
         
-        if [ ! -z "$HIGH_COMPLEXITY" ]; then
-          echo "⚠️  High complexity functions found:"
-          echo "$HIGH_COMPLEXITY"
-          echo "Consider refactoring these functions"
+        RADON_OUTPUT=$(radon cc . -s -j --exclude="*/venv/*,*/ui/*,*/node_modules/*" 2>/dev/null || echo '{}')
+        
+        if [ "$RADON_OUTPUT" != "{}" ] && [ ! -z "$RADON_OUTPUT" ]; then
+          HIGH_COMPLEXITY=$(echo "$RADON_OUTPUT" | jq -r '
+            try (
+              to_entries[] | 
+              .value[] | 
+              select(.complexity > 10) | 
+              "\(.name) (complexity: \(.complexity))"
+            ) catch empty
+          ' 2>/dev/null || echo "")
+          
+          if [ ! -z "$HIGH_COMPLEXITY" ] && [ "$HIGH_COMPLEXITY" != "null" ]; then
+            echo "⚠️  High complexity functions found:"
+            echo "$HIGH_COMPLEXITY"
+            echo "Consider refactoring these functions"
+          else
+            echo "✅ No high complexity functions detected"
+          fi
+        else
+          echo "ℹ️  Could not analyze complexity (no Python files or radon failed)"
         fi
         
     - name: Security analysis
