@@ -50,10 +50,11 @@ TWILIO_PHONE_NUMBER = "+123456789"
 
 # Upstox API Configuration
 
-API_KEY = "your_api_key"
-API_SECRET = "your_api_secret"
-REDIRECT_URI = "your_redirect_uri"
-ACCESS_TOKEN = "your_access_token"  # You need to generate this
+# Security: Use environment variables instead of hardcoded values
+API_KEY = os.getenv("UPSTOX_API_KEY", "REPLACE_WITH_ACTUAL_API_KEY")
+API_SECRET = os.getenv("UPSTOX_API_SECRET", "REPLACE_WITH_ACTUAL_API_SECRET")
+REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", "REPLACE_WITH_ACTUAL_REDIRECT_URI")
+ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN", "GENERATE_VIA_AUTH_FLOW")
 WS_URL = "wss://api.upstox.com/live/market-data"  # Upstox WebSocket URL
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")

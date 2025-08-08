@@ -1,0 +1,121 @@
+# Trading Application Alert Rules
+groups:
+  - name: trading.critical
+    rules:
+      # High Priority Trading Alerts
+      - alert: TradingSystemDown
+        expr: up{job="trading-backend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: trading
+        annotations:
+          summary: "Trading system is down"
+          description: "The trading backend has been down for more than 30 seconds"
+          runbook_url: "https://docs.company.com/runbooks/trading-system-down"
+
+      - alert: BrokerConnectionLost
+        expr: broker_connection_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: broker
+        annotations:
+          summary: "Broker connection lost: {{ $labels.broker }}"
+          description: "Lost connection to {{ $labels.broker }} for more than 1 minute"
+
+      - alert: HighPositionLoss
+        expr: portfolio_unrealized_pnl < -10000
+        for: 0s
+        labels:
+          severity: critical
+          service: risk
+        annotations:
+          summary: "High position loss detected"
+          description: "Unrealized P&L is below -₹10,000: {{ $value }}"
+
+      - alert: OrderExecutionFailureRate
+        expr: rate(order_execution_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: trading
+        annotations:
+          summary: "High order execution failure rate"
+          description: "Order execution failure rate is {{ $value }} per second"
+
+  - name: trading.performance
+    rules:
+      # Performance Monitoring
+      - alert: HighAPILatency
+        expr: broker_api_request_duration_seconds > 2
+        for: 1m
+        labels:
+          severity: warning
+          service: performance
+        annotations:
+          summary: "High API latency to {{ $labels.broker }}"
+          description: "API latency is {{ $value }}s for {{ $labels.broker }}"
+
+      - alert: WebSocketReconnections
+        expr: rate(websocket_reconnections_total[10m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          service: websocket
+        annotations:
+          summary: "Frequent WebSocket reconnections"
+          description: "WebSocket reconnecting {{ $value }} times per second"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 90%: {{ $value }}%"
+
+  - name: trading.business
+    rules:
+      # Business Logic Alerts
+      - alert: TokenExpirationSoon
+        expr: (broker_token_expiry_timestamp - time()) < 3600
+        for: 0s
+        labels:
+          severity: warning
+          service: auth
+        annotations:
+          summary: "{{ $labels.broker }} token expires soon"
+          description: "Token for {{ $labels.broker }} expires in less than 1 hour"
+
+      - alert: DailyLossLimit
+        expr: daily_realized_pnl < -5000
+        for: 0s
+        labels:
+          severity: critical
+          service: risk
+        annotations:
+          summary: "Daily loss limit reached"
+          description: "Daily P&L is {{ $value }}, exceeding loss limit of -₹5,000"
+
+      - alert: NoTradesExecuted
+        expr: rate(trades_executed_total[1h]) == 0 and market_hours == 1
+        for: 30m
+        labels:
+          severity: info
+          service: trading
+        annotations:
+          summary: "No trades executed during market hours"
+          description: "No trades have been executed in the last hour during market hours"
+
+      - alert: AbnormalVolumeDetected
+        expr: stock_volume_ratio > 3
+        for: 2m
+        labels:
+          severity: info
+          service: analysis
+        annotations:
+          summary: "Abnormal volume detected for {{ $labels.symbol }}"
+          description: "Volume is {{ $value }}x normal for {{ $labels.symbol }}"

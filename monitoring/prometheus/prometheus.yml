@@ -1,0 +1,62 @@
+# Prometheus Configuration for Trading Application
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "alert_rules.yml"
+  - "trading_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Trading Application Backend
+  - job_name: 'trading-backend'
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Node Exporter (System Metrics)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node_exporter:9100']
+
+  # Redis Metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # Custom Trading Metrics
+  - job_name: 'trading-metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: '/api/v1/metrics/trading'
+    scrape_interval: 5s  # High frequency for trading data
+
+  # Broker Connection Health
+  - job_name: 'broker-health'
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: '/api/v1/metrics/brokers'
+    scrape_interval: 30s
+
+  # WebSocket Health Monitoring  
+  - job_name: 'websocket-health'
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+    metrics_path: '/api/v1/metrics/websockets'
+    scrape_interval: 15s

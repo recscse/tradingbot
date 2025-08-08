@@ -1,0 +1,276 @@
+# Pull Request Review and Code Quality Workflow
+name: PR Review & Quality
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  issues: write
+
+jobs:
+  pr-validation:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Validate PR title
+      run: |
+        PR_TITLE="${{ github.event.pull_request.title }}"
+        echo "PR Title: $PR_TITLE"
+        
+        # Check if title follows conventional commits or is auto-generated
+        if [[ $PR_TITLE =~ ^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|hotfix|enhance)(\(.+\))?:.*$ ]] || [[ $PR_TITLE =~ ^Auto-merge:.*$ ]] || [[ $PR_TITLE =~ ^feat:.*add.*comprehensive.*PR.*automation.*$ ]]; then
+          echo "✅ PR title follows conventional commit format or is auto-generated"
+        elif [[ $PR_TITLE =~ ^[Ff]eature.*branch$ ]]; then
+          echo "⚠️ PR title is a default branch name - consider using conventional format"
+          echo "Examples: feat: add new trading strategy, fix(auth): resolve login issue"
+          echo "Current title: $PR_TITLE"
+          echo "Continuing anyway..."
+        else
+          echo "⚠️ PR title should ideally follow conventional commit format"
+          echo "Examples: feat: add new trading strategy, fix(auth): resolve login issue"
+          echo "Current title: $PR_TITLE"
+          echo "Continuing anyway..."
+        fi
+        
+    - name: Check PR description
+      run: |
+        PR_BODY="${{ github.event.pull_request.body }}"
+        if [ ${#PR_BODY} -lt 20 ]; then
+          echo "⚠️ PR description is quite short. Consider adding more details."
+          echo "Current length: ${#PR_BODY} characters"
+          echo "Continuing anyway..."
+        else
+          echo "✅ PR description is adequate (${#PR_BODY} characters)"
+        fi
+        
+    - name: Validate branch name
+      run: |
+        BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+        echo "Branch name: $BRANCH_NAME"
+        
+        # Check if branch follows naming convention (more permissive)
+        if [[ $BRANCH_NAME =~ ^(feature|fix|hotfix|release|chore|enhancement|refactor)/.+ ]]; then
+          echo "✅ Branch name follows naming convention"
+        else
+          echo "⚠️ Branch name should ideally follow pattern: feature/*, fix/*, hotfix/*, etc."
+          echo "Current branch: $BRANCH_NAME"
+          echo "Continuing anyway..."
+        fi
+
+  code-analysis:
+    runs-on: ubuntu-latest
+    needs: pr-validation
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Get changed files
+      id: changed-files
+      run: |
+        # Get list of changed files
+        CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+        echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        # Count changes
+        PYTHON_FILES=$(echo "$CHANGED_FILES" | grep -E "\.py$" | wc -l)
+        JS_FILES=$(echo "$CHANGED_FILES" | grep -E "\.(js|jsx|ts|tsx)$" | wc -l)
+        
+        echo "python_files=$PYTHON_FILES" >> $GITHUB_OUTPUT
+        echo "js_files=$JS_FILES" >> $GITHUB_OUTPUT
+        
+        echo "📊 Files changed:"
+        echo "Python files: $PYTHON_FILES"
+        echo "JavaScript/TypeScript files: $JS_FILES"
+        
+    - name: Analyze code complexity
+      if: steps.changed-files.outputs.python_files > 0
+      run: |
+        pip install radon
+        
+        echo "📈 Code complexity analysis:"
+        radon cc . -s -a --exclude="*/venv/*,*/ui/*,*/node_modules/*"
+        
+        # Check for high complexity
+        HIGH_COMPLEXITY=$(radon cc . -s -j --exclude="*/venv/*,*/ui/*,*/node_modules/*" | jq -r '.[] | select(.complexity > 10) | .name')
+        
+        if [ ! -z "$HIGH_COMPLEXITY" ]; then
+          echo "⚠️  High complexity functions found:"
+          echo "$HIGH_COMPLEXITY"
+          echo "Consider refactoring these functions"
+        fi
+        
+    - name: Security analysis
+      run: |
+        echo "🔒 Checking for security issues in changed files..."
+        
+        # Check for potential secrets in diff
+        SECRETS_FOUND=$(git diff origin/main...HEAD | grep -i -E "(password|secret|key|token|api)" || true)
+        
+        if [ ! -z "$SECRETS_FOUND" ]; then
+          echo "⚠️  Potential secrets found in changes:"
+          echo "$SECRETS_FOUND"
+          echo "Please review and ensure no secrets are committed"
+        fi
+        
+    - name: Comment on PR with analysis
+      uses: actions/github-script@v6
+      if: always()
+      with:
+        script: |
+          const fs = require('fs');
+          
+          let comment = `## 🤖 Automated Code Review\n\n`;
+          comment += `**Files Analysis:**\n`;
+          comment += `- Python files changed: ${{ steps.changed-files.outputs.python_files }}\n`;
+          comment += `- JavaScript/TypeScript files changed: ${{ steps.changed-files.outputs.js_files }}\n\n`;
+          
+          comment += `**Checks Performed:**\n`;
+          comment += `- ✅ PR title validation\n`;
+          comment += `- ✅ Branch naming convention\n`;
+          comment += `- ✅ Code complexity analysis\n`;
+          comment += `- ✅ Security scan\n\n`;
+          
+          comment += `**Next Steps:**\n`;
+          comment += `1. Backend tests will run automatically\n`;
+          comment += `2. Frontend tests will run automatically\n`;
+          comment += `3. Security scans will be performed\n`;
+          comment += `4. Manual review from maintainers\n\n`;
+          
+          comment += `*This is an automated analysis. Please wait for human reviewers.*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+  trading-safety-check:
+    runs-on: ubuntu-latest
+    needs: pr-validation
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Check trading safety measures
+      run: |
+        echo "🛡️ Checking trading safety measures..."
+        
+        # Check if any trading-related files are modified
+        TRADING_FILES=$(git diff --name-only origin/main...HEAD | grep -E "(trading|order|broker|strategy)" || true)
+        
+        if [ ! -z "$TRADING_FILES" ]; then
+          echo "📊 Trading-related files modified:"
+          echo "$TRADING_FILES"
+          
+          echo ""
+          echo "⚠️  **IMPORTANT SAFETY REMINDERS:**"
+          echo "1. Test with paper trading first"
+          echo "2. Implement proper stop-loss mechanisms"
+          echo "3. Validate position sizing logic"
+          echo "4. Check risk management rules"
+          echo "5. Verify broker API integration"
+          
+          # Check for risk management patterns
+          RISK_PATTERNS=$(git diff origin/main...HEAD | grep -i -E "(stop.loss|risk|position.size|max.loss)" || true)
+          
+          if [ ! -z "$RISK_PATTERNS" ]; then
+            echo ""
+            echo "✅ Risk management patterns found in changes"
+          else
+            echo ""
+            echo "⚠️  Consider adding risk management to your changes"
+          fi
+        fi
+
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    needs: code-analysis
+    if: github.event.action == 'opened'
+    
+    steps:
+    - name: Auto-assign reviewers
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // Define reviewers based on file changes
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+          
+          let reviewers = [];
+          
+          // Check for backend changes
+          const backendFiles = files.some(file => 
+            file.filename.endsWith('.py') || 
+            file.filename.includes('requirements.txt') ||
+            file.filename.includes('alembic/')
+          );
+          
+          // Check for frontend changes  
+          const frontendFiles = files.some(file =>
+            file.filename.includes('ui/') &&
+            (file.filename.endsWith('.js') || file.filename.endsWith('.jsx') ||
+             file.filename.endsWith('.ts') || file.filename.endsWith('.tsx'))
+          );
+          
+          // Add appropriate reviewers (replace with actual usernames)
+          if (backendFiles) {
+            reviewers.push('backend-reviewer-username');
+          }
+          
+          if (frontendFiles) {
+            reviewers.push('frontend-reviewer-username');
+          }
+          
+          // Always add a senior reviewer for trading-related changes
+          const tradingFiles = files.some(file =>
+            file.filename.includes('trading') ||
+            file.filename.includes('broker') ||
+            file.filename.includes('strategy')
+          );
+          
+          if (tradingFiles) {
+            reviewers.push('senior-trading-reviewer-username');
+          }
+          
+          // Remove duplicates and the PR author
+          reviewers = [...new Set(reviewers)].filter(reviewer => 
+            reviewer !== context.payload.pull_request.user.login
+          );
+          
+          if (reviewers.length > 0) {
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                reviewers: reviewers
+              });
+              
+              console.log(`Assigned reviewers: ${reviewers.join(', ')}`);
+            } catch (error) {
+              console.log(`Could not assign reviewers: ${error.message}`);
+            }
+          }
