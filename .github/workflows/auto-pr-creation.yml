@@ -1,0 +1,308 @@
+# Auto Pull Request Creation Workflow
+# Automatically creates PR when pushing to feature branches
+name: Auto PR Creation
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - 'fix/**'
+      - 'hotfix/**'
+      - 'enhancement/**'
+      - 'refactor/**'
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '.gitignore'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  create-pull-request:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip-pr]')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Check if PR already exists
+      id: check-pr
+      run: |
+        BRANCH_NAME="${{ github.ref_name }}"
+        echo "Checking for existing PR from branch: $BRANCH_NAME"
+        
+        # Check if PR already exists
+        EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --json number --jq '.[0].number')
+        
+        if [ "$EXISTING_PR" != "null" ] && [ -n "$EXISTING_PR" ]; then
+          echo "pr_exists=true" >> $GITHUB_OUTPUT
+          echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+          echo "PR #$EXISTING_PR already exists for this branch"
+        else
+          echo "pr_exists=false" >> $GITHUB_OUTPUT
+          echo "No existing PR found for this branch"
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Generate PR title and description
+      id: pr-content
+      if: steps.check-pr.outputs.pr_exists == 'false'
+      run: |
+        BRANCH_NAME="${{ github.ref_name }}"
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+        
+        # Extract branch type and name
+        if [[ $BRANCH_NAME =~ ^(feature|fix|hotfix|enhancement|refactor)/(.+)$ ]]; then
+          BRANCH_TYPE="${BASH_REMATCH[1]}"
+          BRANCH_DESC="${BASH_REMATCH[2]}"
+        else
+          BRANCH_TYPE="feature"
+          BRANCH_DESC="$BRANCH_NAME"
+        fi
+        
+        # Generate title based on branch type
+        case $BRANCH_TYPE in
+          "feature")
+            PR_TITLE="feat: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+            PR_TYPE="✨ Feature"
+            ;;
+          "fix")
+            PR_TITLE="fix: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+            PR_TYPE="🐛 Bug Fix"
+            ;;
+          "hotfix")
+            PR_TITLE="hotfix: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+            PR_TYPE="🚨 Hotfix"
+            ;;
+          "enhancement")
+            PR_TITLE="enhance: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+            PR_TYPE="⚡ Enhancement"
+            ;;
+          "refactor")
+            PR_TITLE="refactor: $(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+            PR_TYPE="♻️ Refactor"
+            ;;
+          *)
+            PR_TITLE="$(echo $BRANCH_DESC | tr '-' ' ' | tr '_' ' ')"
+            PR_TYPE="🔧 Change"
+            ;;
+        esac
+        
+        # Use commit message as title if it looks more descriptive
+        if [[ ${#COMMIT_MSG} -gt 10 ]] && [[ ! $COMMIT_MSG =~ ^(Initial commit|Update|Fix|Add) ]]; then
+          PR_TITLE="$COMMIT_MSG"
+        fi
+        
+        echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+        echo "pr_type=$PR_TYPE" >> $GITHUB_OUTPUT
+        echo "branch_type=$BRANCH_TYPE" >> $GITHUB_OUTPUT
+        
+    - name: Get file changes summary
+      id: changes
+      if: steps.check-pr.outputs.pr_exists == 'false'
+      run: |
+        echo "Analyzing changes in this branch..."
+        
+        # Get diff stats
+        DIFF_STATS=$(git diff --stat origin/main...HEAD)
+        FILES_CHANGED=$(git diff --name-only origin/main...HEAD | wc -l)
+        
+        # Categorize changes
+        BACKEND_FILES=$(git diff --name-only origin/main...HEAD | grep -E "\.(py)$" | wc -l)
+        FRONTEND_FILES=$(git diff --name-only origin/main...HEAD | grep -E "\.(js|jsx|ts|tsx|css|html)$" | wc -l)
+        CONFIG_FILES=$(git diff --name-only origin/main...HEAD | grep -E "\.(yml|yaml|json|toml|ini|txt|md)$" | wc -l)
+        
+        # Check for critical files
+        CRITICAL_FILES=""
+        if git diff --name-only origin/main...HEAD | grep -q "requirements.txt\|package.json\|alembic\|start.sh"; then
+          CRITICAL_FILES="⚠️ **Critical files modified** (dependencies/migrations/startup scripts)"
+        fi
+        
+        echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+        echo "backend_files=$BACKEND_FILES" >> $GITHUB_OUTPUT
+        echo "frontend_files=$FRONTEND_FILES" >> $GITHUB_OUTPUT
+        echo "config_files=$CONFIG_FILES" >> $GITHUB_OUTPUT
+        echo "critical_files=$CRITICAL_FILES" >> $GITHUB_OUTPUT
+        
+        # Save diff stats for PR description
+        echo "DIFF_STATS<<EOF" >> $GITHUB_OUTPUT
+        echo "$DIFF_STATS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create Pull Request
+      id: create-pr
+      if: steps.check-pr.outputs.pr_exists == 'false'
+      run: |
+        # Create comprehensive PR description
+        cat > pr_description.md << 'EOF'
+## ${{ steps.pr-content.outputs.pr_type }} - Auto-Generated PR
+
+### 📋 Summary
+This pull request was automatically created from branch `${{ github.ref_name }}`.
+
+**Latest Commit:** ${{ github.event.head_commit.message }}
+**Author:** ${{ github.event.head_commit.author.name }}
+**Branch:** `${{ github.ref_name }}` → `main`
+
+### 📊 Changes Summary
+- **Files changed:** ${{ steps.changes.outputs.files_changed }}
+- **Backend files:** ${{ steps.changes.outputs.backend_files }} Python files
+- **Frontend files:** ${{ steps.changes.outputs.frontend_files }} JS/React files  
+- **Config files:** ${{ steps.changes.outputs.config_files }} configuration files
+
+${{ steps.changes.outputs.critical_files }}
+
+### 🔍 File Changes
+```
+${{ steps.changes.outputs.DIFF_STATS }}
+```
+
+### ✅ Pre-merge Checklist
+- [ ] Code builds successfully
+- [ ] All tests pass
+- [ ] No security vulnerabilities introduced
+- [ ] Trading safety measures reviewed (if applicable)
+- [ ] Documentation updated
+- [ ] Performance impact assessed
+
+### 🚀 Deployment Impact
+- **Backend:** ${{ steps.changes.outputs.backend_files > 0 && 'Will trigger Render deployment' || 'No backend changes' }}
+- **Frontend:** ${{ steps.changes.outputs.frontend_files > 0 && 'Will trigger Netlify deployment' || 'No frontend changes' }}
+
+### 🤖 Auto-Merge Eligible
+This PR can be auto-merged if:
+- All CI checks pass ✅
+- No merge conflicts 🔄
+- Branch is up to date with main 📡
+- Author has merge permissions 👤
+
+---
+*Auto-generated PR - Review and merge when ready! 🎉*
+EOF
+        
+        # Create the pull request
+        PR_URL=$(gh pr create \
+          --title "${{ steps.pr-content.outputs.pr_title }}" \
+          --body-file pr_description.md \
+          --base main \
+          --head "${{ github.ref_name }}" \
+          --assignee "${{ github.actor }}" \
+          --label "auto-created" \
+          --label "${{ steps.pr-content.outputs.branch_type }}")
+        
+        # Extract PR number from URL
+        PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]*$')
+        
+        echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+        echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        
+        echo "✅ Created PR #$PR_NUMBER: $PR_URL"
+        
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Add appropriate labels based on changes
+      if: steps.create-pr.outputs.pr_number
+      run: |
+        PR_NUMBER="${{ steps.create-pr.outputs.pr_number }}"
+        
+        # Add labels based on file changes
+        LABELS=()
+        
+        if [ "${{ steps.changes.outputs.backend_files }}" -gt "0" ]; then
+          LABELS+=("backend")
+          LABELS+=("python")
+        fi
+        
+        if [ "${{ steps.changes.outputs.frontend_files }}" -gt "0" ]; then
+          LABELS+=("frontend")
+          LABELS+=("react")
+        fi
+        
+        if [ "${{ steps.changes.outputs.config_files }}" -gt "0" ]; then
+          LABELS+=("config")
+        fi
+        
+        # Check for trading-related changes
+        if git diff --name-only origin/main...HEAD | grep -q -i "trad\|broker\|order\|market"; then
+          LABELS+=("trading")
+          LABELS+=("high-priority")
+        fi
+        
+        # Check for security-related changes
+        if git diff --name-only origin/main...HEAD | grep -q -i "auth\|security\|encrypt"; then
+          LABELS+=("security")
+        fi
+        
+        # Add size labels
+        FILES_COUNT=${{ steps.changes.outputs.files_changed }}
+        if [ $FILES_COUNT -gt 20 ]; then
+          LABELS+=("size/XL")
+        elif [ $FILES_COUNT -gt 10 ]; then
+          LABELS+=("size/L")
+        elif [ $FILES_COUNT -gt 5 ]; then
+          LABELS+=("size/M")
+        else
+          LABELS+=("size/S")
+        fi
+        
+        # Apply labels
+        for label in "${LABELS[@]}"; do
+          gh pr edit $PR_NUMBER --add-label "$label" || echo "Could not add label: $label"
+        done
+        
+        echo "Added labels: ${LABELS[*]}"
+        
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Request reviewers
+      if: steps.create-pr.outputs.pr_number
+      run: |
+        PR_NUMBER="${{ steps.create-pr.outputs.pr_number }}"
+        
+        # Add reviewers based on changes (customize with your team members)
+        REVIEWERS=()
+        
+        # Add backend reviewer for Python changes
+        if [ "${{ steps.changes.outputs.backend_files }}" -gt "0" ]; then
+          # Replace with actual usernames
+          REVIEWERS+=("backend-reviewer")
+        fi
+        
+        # Add frontend reviewer for React changes  
+        if [ "${{ steps.changes.outputs.frontend_files }}" -gt "0" ]; then
+          # Replace with actual usernames
+          REVIEWERS+=("frontend-reviewer")
+        fi
+        
+        # Add senior reviewer for trading changes
+        if git diff --name-only origin/main...HEAD | grep -q -i "trad\|broker\|order"; then
+          REVIEWERS+=("senior-dev")
+        fi
+        
+        # Remove duplicates and current author
+        UNIQUE_REVIEWERS=($(echo "${REVIEWERS[@]}" | tr ' ' '\n' | sort -u | grep -v "${{ github.actor }}"))
+        
+        if [ ${#UNIQUE_REVIEWERS[@]} -gt 0 ]; then
+          for reviewer in "${UNIQUE_REVIEWERS[@]}"; do
+            gh pr edit $PR_NUMBER --add-reviewer "$reviewer" || echo "Could not add reviewer: $reviewer"
+          done
+          echo "Requested reviews from: ${UNIQUE_REVIEWERS[*]}"
+        fi
+        
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Notify about existing PR
+      if: steps.check-pr.outputs.pr_exists == 'true'
+      run: |
+        echo "PR #${{ steps.check-pr.outputs.pr_number }} already exists for this branch"
+        echo "Skipping PR creation"

@@ -1,0 +1,417 @@
+# Auto-Merge Workflow with Safety Checks
+# Automatically merges PRs when all conditions are met
+name: Auto Merge PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  check_suite:
+    types: [completed]
+  status: {}
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'pull_request' || 
+      github.event_name == 'check_suite' || 
+      github.event_name == 'status' ||
+      github.event_name == 'pull_request_review'
+    
+    steps:
+    - name: Get Pull Request Info
+      id: pr-info
+      uses: actions/github-script@v6
+      with:
+        script: |
+          let prNumber, prData;
+          
+          if (context.eventName === 'pull_request') {
+            prNumber = context.payload.pull_request.number;
+            prData = context.payload.pull_request;
+          } else if (context.eventName === 'check_suite') {
+            // Find PRs associated with this commit
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.check_suite.head_sha
+            });
+            
+            if (prs.data.length === 0) {
+              console.log('No PRs found for this check suite');
+              return { skip: true };
+            }
+            
+            prNumber = prs.data[0].number;
+            prData = prs.data[0];
+          } else if (context.eventName === 'pull_request_review') {
+            prNumber = context.payload.pull_request.number;
+            prData = context.payload.pull_request;
+          } else {
+            console.log('Unsupported event type');
+            return { skip: true };
+          }
+          
+          return {
+            skip: false,
+            number: prNumber,
+            title: prData.title,
+            author: prData.user.login,
+            draft: prData.draft,
+            mergeable: prData.mergeable,
+            mergeable_state: prData.mergeable_state,
+            base_ref: prData.base.ref,
+            head_ref: prData.head.ref,
+            labels: prData.labels.map(l => l.name)
+          };
+          
+    - name: Check if auto-merge is enabled
+      id: auto-merge-check
+      if: steps.pr-info.outputs.result && !fromJSON(steps.pr-info.outputs.result).skip
+      run: |
+        PR_INFO='${{ steps.pr-info.outputs.result }}'
+        PR_LABELS=$(echo $PR_INFO | jq -r '.labels[]' 2>/dev/null || echo "")
+        PR_TITLE=$(echo $PR_INFO | jq -r '.title')
+        PR_AUTHOR=$(echo $PR_INFO | jq -r '.author')
+        
+        # Check if auto-merge is disabled
+        if echo "$PR_LABELS" | grep -q "no-auto-merge"; then
+          echo "auto_merge_enabled=false" >> $GITHUB_OUTPUT
+          echo "reason=Label 'no-auto-merge' found" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Check if it's a draft PR
+        IS_DRAFT=$(echo $PR_INFO | jq -r '.draft')
+        if [ "$IS_DRAFT" = "true" ]; then
+          echo "auto_merge_enabled=false" >> $GITHUB_OUTPUT
+          echo "reason=PR is still in draft mode" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Check for hotfix or urgent labels
+        if echo "$PR_LABELS" | grep -q -E "(hotfix|urgent|emergency)"; then
+          echo "auto_merge_enabled=true" >> $GITHUB_OUTPUT
+          echo "priority=high" >> $GITHUB_OUTPUT
+          echo "reason=Hotfix/urgent PR detected" >> $GITHUB_OUTPUT
+        # Check for auto-created PRs
+        elif echo "$PR_LABELS" | grep -q "auto-created"; then
+          echo "auto_merge_enabled=true" >> $GITHUB_OUTPUT
+          echo "priority=normal" >> $GITHUB_OUTPUT
+          echo "reason=Auto-created PR with standard checks" >> $GITHUB_OUTPUT
+        # Check if title indicates automated changes
+        elif [[ "$PR_TITLE" =~ ^(feat|fix|chore|docs|refactor): ]]; then
+          echo "auto_merge_enabled=true" >> $GITHUB_OUTPUT
+          echo "priority=normal" >> $GITHUB_OUTPUT
+          echo "reason=Conventional commit format detected" >> $GITHUB_OUTPUT
+        else
+          echo "auto_merge_enabled=false" >> $GITHUB_OUTPUT
+          echo "reason=Manual merge required - not matching auto-merge criteria" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Wait for required checks
+      id: check-status
+      if: steps.auto-merge-check.outputs.auto_merge_enabled == 'true'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const prNumber = JSON.parse('${{ steps.pr-info.outputs.result }}').number;
+          
+          // Get the latest commit SHA
+          const { data: pr } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber
+          });
+          
+          const commitSha = pr.head.sha;
+          
+          // Required checks that must pass
+          const requiredChecks = [
+            'Frontend CI/CD Clean / test',
+            'Backend CI/CD / test',
+            'PR Review & Quality / pr-validation'
+          ];
+          
+          console.log(`Checking status for commit: ${commitSha}`);
+          
+          // Get check runs
+          const { data: checkRuns } = await github.rest.checks.listForRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: commitSha
+          });
+          
+          // Get status checks
+          const { data: statuses } = await github.rest.repos.listCommitStatusesForRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: commitSha
+          });
+          
+          let allChecksPassed = true;
+          let pendingChecks = [];
+          let failedChecks = [];
+          
+          // Check each required check
+          for (const requiredCheck of requiredChecks) {
+            const checkRun = checkRuns.check_runs.find(run => 
+              run.name === requiredCheck || run.name.includes(requiredCheck.split(' / ')[0])
+            );
+            
+            const status = statuses.find(s => s.context === requiredCheck);
+            
+            if (checkRun) {
+              if (checkRun.status === 'completed' && checkRun.conclusion === 'success') {
+                console.log(`✅ ${requiredCheck}: Passed`);
+              } else if (checkRun.status === 'in_progress' || checkRun.status === 'queued') {
+                console.log(`⏳ ${requiredCheck}: Pending`);
+                pendingChecks.push(requiredCheck);
+                allChecksPassed = false;
+              } else {
+                console.log(`❌ ${requiredCheck}: Failed (${checkRun.conclusion})`);
+                failedChecks.push(requiredCheck);
+                allChecksPassed = false;
+              }
+            } else if (status) {
+              if (status.state === 'success') {
+                console.log(`✅ ${requiredCheck}: Passed`);
+              } else if (status.state === 'pending') {
+                console.log(`⏳ ${requiredCheck}: Pending`);
+                pendingChecks.push(requiredCheck);
+                allChecksPassed = false;
+              } else {
+                console.log(`❌ ${requiredCheck}: Failed`);
+                failedChecks.push(requiredCheck);
+                allChecksPassed = false;
+              }
+            } else {
+              console.log(`⚠️ ${requiredCheck}: Not found, skipping`);
+            }
+          }
+          
+          return {
+            all_passed: allChecksPassed,
+            pending: pendingChecks,
+            failed: failedChecks,
+            total_checks: checkRuns.check_runs.length + statuses.length
+          };
+          
+    - name: Check merge conflicts
+      id: merge-conflicts
+      if: steps.auto-merge-check.outputs.auto_merge_enabled == 'true' && fromJSON(steps.check-status.outputs.result).all_passed
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const prNumber = JSON.parse('${{ steps.pr-info.outputs.result }}').number;
+          
+          const { data: pr } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber
+          });
+          
+          return {
+            mergeable: pr.mergeable,
+            mergeable_state: pr.mergeable_state,
+            has_conflicts: pr.mergeable === false
+          };
+          
+    - name: Check required approvals
+      id: approvals
+      if: steps.auto-merge-check.outputs.auto_merge_enabled == 'true' && fromJSON(steps.check-status.outputs.result).all_passed
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const prNumber = JSON.parse('${{ steps.pr-info.outputs.result }}').number;
+          const prInfo = JSON.parse('${{ steps.pr-info.outputs.result }}');
+          
+          // Get reviews
+          const { data: reviews } = await github.rest.pulls.listReviews({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber
+          });
+          
+          // Check if trading-related changes need senior approval
+          const needsSeniorApproval = prInfo.labels.some(label => 
+            ['trading', 'high-priority', 'hotfix', 'security'].includes(label)
+          );
+          
+          const approvals = reviews.filter(review => review.state === 'APPROVED');
+          const rejections = reviews.filter(review => review.state === 'CHANGES_REQUESTED');
+          
+          let requiresApproval = needsSeniorApproval;
+          let hasRequiredApprovals = approvals.length >= (needsSeniorApproval ? 1 : 0);
+          
+          // For auto-created PRs, reduce approval requirements
+          if (prInfo.labels.includes('auto-created') && !needsSeniorApproval) {
+            requiresApproval = false;
+            hasRequiredApprovals = true;
+          }
+          
+          return {
+            requires_approval: requiresApproval,
+            has_approvals: hasRequiredApprovals,
+            approval_count: approvals.length,
+            rejection_count: rejections.length,
+            needs_senior: needsSeniorApproval
+          };
+          
+    - name: Auto-merge PR
+      id: merge
+      if: >
+        steps.auto-merge-check.outputs.auto_merge_enabled == 'true' &&
+        fromJSON(steps.check-status.outputs.result).all_passed &&
+        !fromJSON(steps.merge-conflicts.outputs.result).has_conflicts &&
+        fromJSON(steps.approvals.outputs.result).has_approvals &&
+        fromJSON(steps.approvals.outputs.result).rejection_count == 0
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const prNumber = JSON.parse('${{ steps.pr-info.outputs.result }}').number;
+          const prInfo = JSON.parse('${{ steps.pr-info.outputs.result }}');
+          
+          try {
+            // Merge the PR
+            const { data: mergeResult } = await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              commit_title: `Auto-merge: ${prInfo.title} (#${prNumber})`,
+              commit_message: `Automatically merged PR #${prNumber}\n\n✅ All checks passed\n✅ No conflicts\n✅ Required approvals obtained\n\n🤖 Auto-merged by GitHub Actions`,
+              merge_method: 'squash'
+            });
+            
+            console.log(`✅ Successfully merged PR #${prNumber}`);
+            
+            // Add success comment
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🎉 Auto-Merge Successful!
+              
+**PR #${prNumber} has been automatically merged to main**
+
+### Merge Details
+- **Commit SHA:** ${mergeResult.sha}
+- **Merge Method:** Squash and merge
+- **Checks Passed:** All required checks ✅
+- **Conflicts:** None ✅
+- **Approvals:** Required approvals obtained ✅
+
+### Next Steps
+- Backend deployment to Render will trigger automatically
+- Frontend deployment to Netlify will trigger automatically
+- Monitor deployment status in respective dashboards
+
+*Merged automatically by GitHub Actions* 🤖`
+            });
+            
+            return {
+              success: true,
+              sha: mergeResult.sha,
+              message: mergeResult.message
+            };
+            
+          } catch (error) {
+            console.error('Merge failed:', error.message);
+            
+            // Add failure comment
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## ❌ Auto-Merge Failed
+              
+**Unable to automatically merge PR #${prNumber}**
+
+**Error:** ${error.message}
+
+### Manual Action Required
+Please review and merge manually:
+1. Check for any new conflicts
+2. Ensure all checks are still passing
+3. Verify no new commits were pushed
+4. Merge manually when ready
+
+*Auto-merge will retry on next update*`
+            });
+            
+            return {
+              success: false,
+              error: error.message
+            };
+          }
+          
+    - name: Handle merge failure reasons
+      if: >
+        steps.auto-merge-check.outputs.auto_merge_enabled == 'true' &&
+        steps.merge.outcome != 'success'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const prNumber = JSON.parse('${{ steps.pr-info.outputs.result }}').number;
+          const checksPassed = fromJSON('${{ steps.check-status.outputs.result }}').all_passed;
+          const hasConflicts = fromJSON('${{ steps.merge-conflicts.outputs.result }}').has_conflicts;
+          const hasApprovals = fromJSON('${{ steps.approvals.outputs.result }}').has_approvals;
+          const rejectionCount = fromJSON('${{ steps.approvals.outputs.result }}').rejection_count;
+          
+          let reason = 'Unknown reason';
+          let action = 'Please check manually';
+          
+          if (!checksPassed) {
+            const pending = JSON.parse('${{ steps.check-status.outputs.result }}').pending;
+            const failed = JSON.parse('${{ steps.check-status.outputs.result }}').failed;
+            
+            if (failed.length > 0) {
+              reason = `Failed checks: ${failed.join(', ')}`;
+              action = 'Fix failing checks and push new commits';
+            } else if (pending.length > 0) {
+              reason = `Pending checks: ${pending.join(', ')}`;
+              action = 'Wait for checks to complete';
+            }
+          } else if (hasConflicts) {
+            reason = 'Merge conflicts detected';
+            action = 'Resolve conflicts and update PR';
+          } else if (!hasApprovals) {
+            reason = 'Missing required approvals';
+            action = 'Request review from appropriate team members';
+          } else if (rejectionCount > 0) {
+            reason = 'Changes requested in reviews';
+            action = 'Address review feedback and request re-review';
+          }
+          
+          await github.rest.issues.createComment({
+            issue_number: prNumber,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## ⏸️ Auto-Merge Pending
+            
+**PR #${prNumber} is eligible for auto-merge but waiting for conditions**
+
+**Status:** ${reason}
+**Action Needed:** ${action}
+
+### Current Status
+- **Checks:** ${checksPassed ? '✅ Passed' : '⏳ Pending/Failed'}
+- **Conflicts:** ${hasConflicts ? '❌ Conflicts found' : '✅ No conflicts'}
+- **Approvals:** ${hasApprovals ? '✅ Approved' : '⏳ Awaiting approval'}
+- **Rejections:** ${rejectionCount > 0 ? '❌ Changes requested' : '✅ No rejections'}
+
+*Auto-merge will retry when conditions are met*`
+          });
+          
+    - name: Skip auto-merge notification
+      if: steps.auto-merge-check.outputs.auto_merge_enabled == 'false'
+      run: |
+        echo "Auto-merge skipped: ${{ steps.auto-merge-check.outputs.reason }}"

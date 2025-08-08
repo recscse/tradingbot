@@ -1,0 +1,273 @@
+# Branch Management and Protection
+# Manages branch lifecycle and enforces naming conventions
+name: Branch Management
+
+on:
+  create: # When branches are created
+  delete: # When branches are deleted
+  push:
+    branches:
+      - '**'
+  pull_request:
+    types: [opened, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  branch-validation:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'create' && github.event.ref_type == 'branch'
+    
+    steps:
+    - name: Validate branch name
+      id: validate
+      run: |
+        BRANCH_NAME="${{ github.event.ref }}"
+        echo "Validating branch name: $BRANCH_NAME"
+        
+        # Define allowed patterns
+        VALID_PATTERNS=(
+          "^feature/[a-zA-Z0-9._-]+$"
+          "^fix/[a-zA-Z0-9._-]+$" 
+          "^hotfix/[a-zA-Z0-9._-]+$"
+          "^enhancement/[a-zA-Z0-9._-]+$"
+          "^refactor/[a-zA-Z0-9._-]+$"
+          "^docs/[a-zA-Z0-9._-]+$"
+          "^test/[a-zA-Z0-9._-]+$"
+          "^chore/[a-zA-Z0-9._-]+$"
+          "^main$"
+          "^develop$"
+          "^staging$"
+        )
+        
+        # Check if branch name matches any valid pattern
+        VALID=false
+        for pattern in "${VALID_PATTERNS[@]}"; do
+          if [[ $BRANCH_NAME =~ $pattern ]]; then
+            VALID=true
+            break
+          fi
+        done
+        
+        if [ "$VALID" = true ]; then
+          echo "branch_valid=true" >> $GITHUB_OUTPUT
+          echo "✅ Branch name is valid: $BRANCH_NAME"
+        else
+          echo "branch_valid=false" >> $GITHUB_OUTPUT
+          echo "❌ Branch name is invalid: $BRANCH_NAME"
+          
+          # Suggest correct format
+          echo "suggested_format<<EOF" >> $GITHUB_OUTPUT
+          echo "Branch names must follow these patterns:" >> $GITHUB_OUTPUT
+          echo "- feature/description (new features)" >> $GITHUB_OUTPUT
+          echo "- fix/description (bug fixes)" >> $GITHUB_OUTPUT
+          echo "- hotfix/description (urgent fixes)" >> $GITHUB_OUTPUT
+          echo "- enhancement/description (improvements)" >> $GITHUB_OUTPUT
+          echo "- refactor/description (code refactoring)" >> $GITHUB_OUTPUT
+          echo "- docs/description (documentation)" >> $GITHUB_OUTPUT
+          echo "- test/description (tests)" >> $GITHUB_OUTPUT
+          echo "- chore/description (maintenance)" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create issue for invalid branch
+      if: steps.validate.outputs.branch_valid == 'false'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const branchName = '${{ github.event.ref }}';
+          const suggestedFormat = `${{ steps.validate.outputs.suggested_format }}`;
+          
+          const issueBody = `## ⚠️ Invalid Branch Name Detected
+          
+**Branch:** \`${branchName}\`
+**Created by:** @${{ github.actor }}
+**Created at:** ${{ github.event.repository.created_at }}
+
+### Problem
+The branch name \`${branchName}\` does not follow our naming conventions.
+
+### Required Format
+${suggestedFormat}
+
+### Recommended Actions
+1. **Rename the branch:**
+   \`\`\`bash
+   git branch -m ${branchName} feature/your-feature-name
+   git push origin -u feature/your-feature-name
+   git push origin --delete ${branchName}
+   \`\`\`
+
+2. **Or create a new branch with correct naming:**
+   \`\`\`bash
+   git checkout -b feature/your-feature-name
+   git push origin -u feature/your-feature-name
+   \`\`\`
+
+### Why This Matters
+- Consistent branch naming helps with automation
+- Makes it easier to understand the purpose of changes
+- Enables automatic PR creation and labeling
+- Improves project organization and searchability
+
+Please rename your branch to follow the conventions above. This issue will be automatically closed when the branch is renamed or deleted.
+
+*This issue was created automatically by our branch management system.*`;
+
+          const { data: issue } = await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Invalid branch name: ${branchName}`,
+            body: issueBody,
+            labels: ['invalid-branch', 'needs-attention'],
+            assignees: ['${{ github.actor }}']
+          });
+          
+          console.log(`Created issue #${issue.number} for invalid branch: ${branchName}`);
+
+  stale-branch-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Find stale branches
+      id: stale-branches
+      run: |
+        echo "Finding branches that haven't been updated in 30 days..."
+        
+        # Get all remote branches except protected ones
+        PROTECTED_BRANCHES="main develop staging"
+        STALE_BRANCHES=""
+        THIRTY_DAYS_AGO=$(date -d "30 days ago" +%s)
+        
+        for branch in $(git branch -r --format='%(refname:short)' | grep -v HEAD | sed 's/origin\///'); do
+          # Skip protected branches
+          if [[ " $PROTECTED_BRANCHES " =~ " $branch " ]]; then
+            continue
+          fi
+          
+          # Get last commit date
+          LAST_COMMIT=$(git log -1 --format=%ct origin/$branch 2>/dev/null || echo "0")
+          
+          if [ "$LAST_COMMIT" -lt "$THIRTY_DAYS_AGO" ]; then
+            STALE_BRANCHES="$STALE_BRANCHES $branch"
+            echo "Stale branch found: $branch (last commit: $(date -d @$LAST_COMMIT))"
+          fi
+        done
+        
+        echo "stale_branches=$STALE_BRANCHES" >> $GITHUB_OUTPUT
+        
+    - name: Create cleanup PR
+      if: steps.stale-branches.outputs.stale_branches != ''
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const staleBranches = '${{ steps.stale-branches.outputs.stale_branches }}'.trim().split(/\s+/).filter(b => b);
+          
+          if (staleBranches.length === 0) return;
+          
+          const branchList = staleBranches.map(branch => `- \`${branch}\``).join('\n');
+          
+          const prBody = `## 🧹 Stale Branch Cleanup
+          
+This PR cleans up branches that haven't been updated in over 30 days.
+
+### Branches to be deleted:
+${branchList}
+
+### Safety Measures
+- Only branches older than 30 days are included
+- Protected branches (main, develop, staging) are excluded
+- Each branch has been verified to have no recent activity
+- Branch deletion is reversible if needed
+
+### Review Process
+1. **Review the branch list** to ensure no important work will be lost
+2. **Check for any pending PRs** associated with these branches
+3. **Verify with team members** if any branches should be preserved
+4. **Approve and merge** this PR to delete the stale branches
+
+If you need to preserve any branch, add a comment with the branch name and it will be excluded from cleanup.
+
+*This cleanup is automatically generated to maintain repository hygiene.*`;
+
+          // Create a cleanup branch
+          const cleanupBranchName = `chore/cleanup-stale-branches-${new Date().toISOString().split('T')[0]}`;
+          
+          // Create the PR (this is just for notification - actual deletion would be manual)
+          const { data: pr } = await github.rest.pulls.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `chore: cleanup ${staleBranches.length} stale branches`,
+            head: 'main', // Would normally create a cleanup branch
+            base: 'main',
+            body: prBody,
+            draft: true
+          });
+          
+          console.log(`Created cleanup PR #${pr.number} for ${staleBranches.length} stale branches`);
+
+  pr-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    
+    steps:
+    - name: Delete merged branch
+      if: github.event.pull_request.merged == true
+      run: |
+        BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+        
+        # Don't delete protected branches
+        if [[ "$BRANCH_NAME" =~ ^(main|develop|staging)$ ]]; then
+          echo "Skipping deletion of protected branch: $BRANCH_NAME"
+          exit 0
+        fi
+        
+        echo "Deleting merged branch: $BRANCH_NAME"
+        
+        # Delete the branch
+        curl -X DELETE \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ github.repository }}/git/refs/heads/$BRANCH_NAME"
+        
+        echo "✅ Deleted merged branch: $BRANCH_NAME"
+        
+    - name: Comment on successful branch deletion
+      if: github.event.pull_request.merged == true
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const branchName = '${{ github.event.pull_request.head.ref }}';
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## 🧹 Branch Cleanup Complete
+
+**Branch \`${branchName}\` has been automatically deleted** after successful merge to main.
+
+### What happened:
+- ✅ PR was successfully merged
+- 🗑️ Source branch was automatically cleaned up
+- 🚀 Changes are now live in main branch
+
+This keeps our repository clean and organized. If you need to reference this branch later, you can always restore it from the git history.
+
+*Branch deletion performed automatically by our cleanup workflow*`
+          });
+
+# Add schedule trigger for stale branch cleanup (runs weekly)
+on:
+  schedule:
+    - cron: '0 2 * * 0' # Every Sunday at 2 AM UTC
