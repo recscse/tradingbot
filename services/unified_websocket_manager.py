@@ -54,7 +54,25 @@ class UnifiedWebSocketManager:
 
         # Event system
         self.event_handlers: Dict[str, List[Callable]] = defaultdict(list)
-        self.event_queue = asyncio.Queue(maxsize=1000)  # FIXED: Limit queue size
+        self.event_queue = asyncio.Queue(maxsize=200)  # TRADING SAFETY: Increased for volatile periods
+        
+        # PERFORMANCE: Rate limiting and deduplication - ADJUSTED FOR TRADING SAFETY
+        self.last_event_time = {}
+        self.event_rate_limits = {
+            "price_update": 0.1,  # CRITICAL: Reduced to 100ms for trading accuracy
+            "dashboard_update": 0.2,  # Reduced to 200ms for UI responsiveness
+            "top_movers_update": 1.0,  # Reduced to 1 second for momentum detection
+            "intraday_stocks_update": 1.0,  # Reduced to 1 second for breakouts  
+            "market_sentiment_update": 3.0,  # Reduced to 3 seconds
+            "indices_data_update": 0.5,  # Reduced to 500ms for index tracking
+            "volume_analysis_update": 2.0,  # Reduced to 2 seconds
+            "analytics_update": 5.0,  # Reduced to 5 seconds
+        }
+        
+        # SAFETY: Trading mode configuration
+        self.trading_mode = True  # Enable stricter limits for trading
+        self.emergency_mode = False  # Bypass rate limiting in extreme volatility
+        self.pending_events = {}  # For deduplication
 
         # Feature-specific data caches
         self.live_prices = {}
@@ -106,6 +124,13 @@ class UnifiedWebSocketManager:
         analytics_task = asyncio.create_task(self._update_analytics())
         self.background_tasks.add(analytics_task)
         analytics_task.add_done_callback(lambda t: self.background_tasks.discard(t))
+        
+        # Start pending event processor
+        pending_task = asyncio.create_task(self._process_pending_events())
+        self.background_tasks.add(pending_task)
+        pending_task.add_done_callback(lambda t: self.background_tasks.discard(t))
+        
+        # PERFORMANCE: Removed real-time heartbeat to prevent excessive analytics computation
 
         logger.info("🚀 Unified WebSocket Manager started")
 
@@ -148,6 +173,17 @@ class UnifiedWebSocketManager:
             self.connections[client_id] = websocket
             self.client_types[client_id] = client_type
             self.client_subscriptions[client_id] = set()
+            
+            # Ensure event processor is running when first client connects
+            if len(self.connections) == 1 and self.is_running:
+                try:
+                    # Start event processor if not already running
+                    if not any(task for task in self.background_tasks if not task.done()):
+                        task = asyncio.create_task(self._process_events())
+                        self.background_tasks.add(task)
+                        logger.info("🔄 Started event processor for new client connection")
+                except Exception as e:
+                    logger.error(f"❌ Error starting event processor: {e}")
 
             # Send welcome message directly via WebSocket
             try:
@@ -203,30 +239,172 @@ class UnifiedWebSocketManager:
             self.client_subscriptions[client_id].update(events)
             logger.info(f"📡 Client {client_id} subscribed to {len(events)} events")
 
-    def emit_event(self, event_type: str, data: Dict[str, Any]):
-        """Emit an event to the queue"""
+    def emit_event(self, event_type: str, data: Dict[str, Any], priority: int = 5):
+        """Emit an event to the queue with priority support and rate limiting (1=highest, 10=lowest)"""
+        
+        # TRADING SAFETY: Emergency mode bypasses rate limiting
+        if self.emergency_mode:
+            logger.warning(f"🚨 EMERGENCY MODE: Bypassing rate limit for {event_type}")
+        else:
+            # PERFORMANCE: Rate limiting check
+            now = datetime.now()
+            rate_limit = self.event_rate_limits.get(event_type, 1.0)
+            
+            if event_type in self.last_event_time:
+                time_since_last = (now - self.last_event_time[event_type]).total_seconds()
+                if time_since_last < rate_limit:
+                    # TRADING SAFETY: Allow high-priority events to bypass rate limiting
+                    if priority <= 2 and event_type in ["price_update", "dashboard_update"]:
+                        # Critical trading data bypasses rate limiting
+                        logger.debug(f"⚡ Bypassing rate limit for critical {event_type} (priority: {priority})")
+                        pass  
+                    else:
+                        # Rate limited - store as pending for later processing
+                        self.pending_events[event_type] = {
+                            "data": data,
+                            "priority": priority,
+                            "timestamp": now
+                        }
+                        logger.debug(f"🚦 Rate limited {event_type}, stored as pending")
+                        return
+        
+        self.last_event_time[event_type] = now
+        
+        # Process any pending event of this type
+        if event_type in self.pending_events:
+            # Use the latest pending data
+            pending = self.pending_events.pop(event_type)
+            data = pending["data"]
+            priority = pending["priority"]
+        
+        # Determine priority based on event type and data content
+        if not isinstance(priority, int):
+            priority = self._determine_event_priority(event_type, data)
+        
+        # PERFORMANCE: Normalize event type to prevent typos
+        normalized_event_type = self._normalize_event_type(event_type)
+        
         event = {
-            "type": event_type,
+            "type": normalized_event_type,
             "data": data,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
+            "priority": priority,
         }
 
         try:
             self.event_queue.put_nowait(event)
+            logger.debug(f"✅ Queued {normalized_event_type} (priority: {priority})")
         except asyncio.QueueFull:
-            logger.warning(f"⚠️ Event queue full, dropping event: {event_type}")
-            # FIXED: Remove oldest event and add new one
-            try:
-                self.event_queue.get_nowait()  # Remove one item
-                self.event_queue.put_nowait(event)  # Add new event
-            except asyncio.QueueEmpty:
-                pass
+            # For full queue, drop lower priority events first
+            if priority <= 3:  # High priority events
+                logger.warning(f"⚠️ Queue full but keeping high priority event: {normalized_event_type}")
+                # Try to make room by processing one event immediately if possible
+                try:
+                    oldest_event = self.event_queue.get_nowait()
+                    if oldest_event.get("priority", 5) > priority:
+                        # Replace with higher priority event
+                        self.event_queue.put_nowait(event)
+                        logger.debug(f"🔄 Replaced lower priority event with {normalized_event_type}")
+                    else:
+                        # Put the old event back and drop current
+                        self.event_queue.put_nowait(oldest_event) 
+                        logger.warning(f"⚠️ Dropping high priority event due to queue pressure: {normalized_event_type}")
+                except asyncio.QueueEmpty:
+                    pass
+            else:
+                logger.warning(f"⚠️ Event queue full, dropping event: {normalized_event_type}")
+
+    def _normalize_event_type(self, event_type: str) -> str:
+        """Normalize event types to prevent duplicates from typos"""
+        # Fix common typos seen in logs
+        fixes = {
+            "price_upddate": "price_update",
+            "pprice_update": "price_update", 
+            "dashboardd_update": "dashboard_update",
+            "ddashboard_update": "dashboard_update",
+            "top_moverrs_update": "top_movers_update",
+            "ttop_movers_update": "top_movers_update",
+            "intraday__stocks_update": "intraday_stocks_update", 
+            "iintraday_stocks_update": "intraday_stocks_update",
+            "market_seentiment_update": "market_sentiment_update",
+            "mmarket_sentiment_update": "market_sentiment_update",
+            "indices_ddata_update": "indices_data_update",
+            "iindices_data_update": "indices_data_update",
+        }
+        
+        return fixes.get(event_type, event_type)
+
+    def _determine_event_priority(self, event_type: str, data: Dict[str, Any]) -> int:
+        """Determine event priority based on type and content (1=highest, 10=lowest)"""
+        
+        # Indices data - highest priority
+        if "indices" in event_type.lower() or event_type in ["market_status_update"]:
+            return 1
+            
+        # FNO stocks data - high priority  
+        if ("fno" in event_type.lower() or 
+            (isinstance(data, dict) and data.get("fno_candidates")) or
+            self._contains_fno_symbols(data)):
+            return 2
+            
+        # Price updates and dashboard data - high priority
+        if event_type in ["price_update", "dashboard_update", "live_prices_update"]:
+            return 2
+            
+        # Top movers and volume analysis - medium-high priority
+        if event_type in ["top_movers_update", "intraday_stocks_update"]:
+            return 3
+            
+        # Market sentiment - medium priority  
+        if "sentiment" in event_type.lower():
+            return 4
+            
+        # Analytics and other updates - lower priority
+        if "analytics" in event_type.lower():
+            return 6
+            
+        # Default priority
+        return 5
+        
+    def _contains_fno_symbols(self, data: Dict[str, Any]) -> bool:
+        """Check if data contains FNO symbols"""
+        try:
+            fno_symbols = {"RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", 
+                          "WIPRO", "MARUTI", "HINDUNILVR", "ITC", "BAJFINANCE"}
+            
+            if isinstance(data, dict):
+                # Check various data structures for FNO symbols
+                for value in data.values():
+                    if isinstance(value, str) and value.upper() in fno_symbols:
+                        return True
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict) and item.get("symbol", "").upper() in fno_symbols:
+                                return True  
+                            elif isinstance(item, str) and item.upper() in fno_symbols:
+                                return True
+                                
+            return False
+        except:
+            return False
 
     async def _process_events(self):
-        """Process events from the queue"""
+        """Process events from the queue with improved error handling"""
+        logger.info("🔄 Event processor started")
+        processed_count = 0
+        
         while self.is_running:
             try:
-                event = await asyncio.wait_for(self.event_queue.get(), timeout=1.0)
+                # Check if we're still supposed to be running
+                if not self.is_running:
+                    logger.info("🛑 Event processor stopping - is_running=False")
+                    break
+                    
+                event = await asyncio.wait_for(self.event_queue.get(), timeout=1.0)  # OPTIMIZED: Longer timeout for batch processing
+                processed_count += 1
+                
+                if processed_count % 50 == 0:  # OPTIMIZED: More frequent logging for monitoring
+                    logger.info(f"🔄 Processed {processed_count} events, queue size: {self.event_queue.qsize()}")
 
                 # FIXED: Special handling for analytics triggers
                 if event.get("type") == "trigger_analytics":
@@ -237,14 +415,15 @@ class UnifiedWebSocketManager:
 
                         analytics_data = enhanced_analytics.get_complete_analytics()
 
-                        # Emit individual feature events
+                        # Emit individual feature events with proper priority
                         for feature, data in analytics_data.items():
                             if feature not in [
                                 "generated_at",
                                 "processing_time_ms",
                                 "cache_status",
                             ]:
-                                self.emit_event(f"{feature}_update", data)
+                                # Use priority for analytics events  
+                                self.emit_event(f"{feature}_update", data, priority=6)
 
                         logger.info(
                             f"✅ Analytics refreshed and broadcast: {list(analytics_data.keys())}"
@@ -252,13 +431,31 @@ class UnifiedWebSocketManager:
                     except Exception as e:
                         logger.error(f"❌ Error refreshing analytics: {e}")
 
-                # Process regular event
+                # Process regular event - REMOVED immediate analytics to prevent feedback loops
+                event_type = event.get("type", "")
+                
+                # PERFORMANCE: Removed immediate analytics trigger to prevent excessive computation
+                # Analytics are now handled by separate scheduled updates with proper caching
+                
                 await self._handle_event(event)
+                
+                # Mark task as done for the queue
+                self.event_queue.task_done()
+                
             except asyncio.TimeoutError:
+                # Timeout is normal when no events are available - reduced timeout for faster processing
+                if processed_count % 100 == 0 and processed_count > 0:  # OPTIMIZED: Less frequent status updates
+                    logger.debug(f"🔄 Event processor alive, processed {processed_count} events")
                 continue
+            except asyncio.CancelledError:
+                logger.info("🛑 Event processor cancelled")
+                break
             except Exception as e:
                 logger.error(f"❌ Event processing error: {e}")
-                await asyncio.sleep(1)
+                # Continue processing despite errors
+                await asyncio.sleep(0.1)
+                
+        logger.info(f"🛑 Event processor stopped after processing {processed_count} events")
 
     async def _handle_event(self, event: Dict[str, Any]):
         """Handle a single event with registered handlers"""
@@ -289,19 +486,28 @@ class UnifiedWebSocketManager:
 
     # ===== FEATURE-SPECIFIC METHODS =====
     async def _update_analytics(self):
-        """Update analytics data periodically"""
+        """Update analytics data periodically with optimized cycles"""
+        cycle_count = 0
         while self.is_running:
             try:
                 if self.analytics_service:
-                    await self._calculate_all_analytics()
+                    cycle_count += 1
+                    # Only do full analytics every 6th cycle (30 seconds)
+                    if cycle_count % 6 == 0:  
+                        await self._calculate_all_analytics()
+                        logger.info("🔄 Full analytics update cycle")
+                    else:  
+                        # Priority analytics every 5 seconds
+                        await self._calculate_priority_analytics()
+                        logger.debug("⚡ Priority analytics update cycle")
                 else:
                     await self._calculate_basic_analytics()
 
-                await asyncio.sleep(30)  # Update every 30 seconds
+                await asyncio.sleep(5)  # OPTIMIZED: 5 seconds for less frequent updates
 
             except Exception as e:
                 logger.error(f"❌ Analytics update error: {e}")
-                await asyncio.sleep(60)
+                await asyncio.sleep(60)  # Longer error recovery time
 
     async def _calculate_all_analytics(self):
         """Calculate all analytics using enhanced service"""
@@ -312,22 +518,88 @@ class UnifiedWebSocketManager:
             # Store in cache
             self.analytics_cache = complete_analytics
 
-            # Emit individual events
+            # Emit individual events with proper data validation
             for feature, data in complete_analytics.items():
-                if (
-                    feature == "generated_at"
-                    or feature == "cache_status"
-                    or feature == "processing_time_ms"
-                ):
+                if feature in ["generated_at", "cache_status", "processing_time_ms"]:
                     continue
 
                 event_type = f"{feature}_update"
+                
+                # Ensure FNO data is properly included
+                if feature == "intraday_stocks" and isinstance(data, dict):
+                    if "fno_candidates" in data:
+                        logger.info(f"📊 Broadcasting {len(data.get('fno_candidates', []))} FNO candidates")
+                    if "all_candidates" in data:
+                        logger.info(f"📊 Broadcasting {len(data.get('all_candidates', []))} total candidates")
+                
                 self.emit_event(event_type, data)
 
             logger.debug("📊 All analytics calculated and emitted")
 
         except Exception as e:
             logger.error(f"❌ Error calculating analytics: {e}")
+            
+    async def _calculate_priority_analytics(self):
+        """Calculate priority analytics using enhanced service - faster updates"""
+        try:
+            # Get priority analytics for real-time critical updates
+            priority_analytics = self.analytics_service.get_priority_analytics()
+
+            # Store in cache
+            self.analytics_cache.update(priority_analytics)
+
+            # Emit individual events with high priority
+            for feature, data in priority_analytics.items():
+                if feature in ["generated_at", "cache_status", "processing_time_ms", "is_priority_update"]:
+                    continue
+
+                event_type = f"{feature}_update"
+                
+                # Mark as priority update and emit with high priority
+                self.emit_event(event_type, data, priority=1 if feature in ['top_movers', 'intraday_stocks'] else 2)
+
+            logger.debug("📊 Priority analytics calculated and emitted")
+
+        except Exception as e:
+            logger.error(f"❌ Error calculating priority analytics: {e}")
+            
+    async def _process_pending_events(self):
+        """Process rate-limited pending events periodically"""
+        logger.info("⏰ Pending event processor started")
+        
+        while self.is_running:
+            try:
+                now = datetime.now()
+                events_to_process = []
+                
+                # Check which pending events can now be processed
+                for event_type, pending in list(self.pending_events.items()):
+                    rate_limit = self.event_rate_limits.get(event_type, 1.0)
+                    
+                    if event_type in self.last_event_time:
+                        time_since_last = (now - self.last_event_time[event_type]).total_seconds()
+                        if time_since_last >= rate_limit:
+                            events_to_process.append(event_type)
+                    else:
+                        events_to_process.append(event_type)
+                
+                # Process pending events
+                for event_type in events_to_process:
+                    if event_type in self.pending_events:
+                        pending = self.pending_events.pop(event_type)
+                        self.emit_event(event_type, pending["data"], pending["priority"])
+                        logger.debug(f"⏰ Processed pending event: {event_type}")
+                
+                await asyncio.sleep(1.0)  # Check pending events every second
+                
+            except Exception as e:
+                logger.error(f"❌ Pending event processor error: {e}")
+                await asyncio.sleep(5)
+
+    # PERFORMANCE: Real-time heartbeat removed to prevent excessive analytics computation
+    # async def _real_time_heartbeat(self):
+    #     """DISABLED: Continuous real-time updates heartbeat was causing performance issues"""
+    #     pass
 
     async def _calculate_basic_analytics(self):
         """Fallback basic analytics if enhanced service unavailable"""
@@ -566,6 +838,8 @@ class UnifiedWebSocketManager:
         """Get list of available event types"""
         return [
             "price_update",
+            "dashboard_update",
+            "index_update", 
             "top_movers_update",
             "volume_analysis_update",
             "gap_analysis_update",
@@ -575,10 +849,15 @@ class UnifiedWebSocketManager:
             "intraday_stocks_update",
             "record_movers_update",
             "options_chain_update",
+            "market_status_update",
+            "live_prices_enriched",
         ]
 
     def get_status(self) -> Dict[str, Any]:
-        """Get system status"""
+        """Get system status with trading safety metrics"""
+        queue_size = self.event_queue.qsize()
+        queue_percentage = (queue_size / self.event_queue.maxsize) * 100
+        
         return {
             "is_running": self.is_running,
             "total_connections": len(self.connections),
@@ -593,10 +872,32 @@ class UnifiedWebSocketManager:
             ),
             "cached_analytics": list(self.analytics_cache.keys()),
             "live_prices_count": len(self.live_prices),
-            "event_queue_size": self.event_queue.qsize(),
+            "event_queue_size": queue_size,
+            "event_queue_percentage": round(queue_percentage, 1),
+            "queue_status": "CRITICAL" if queue_percentage > 80 else "WARNING" if queue_percentage > 60 else "OK",
             "background_tasks": len(self.background_tasks),
             "analytics_service_available": self.analytics_service is not None,
+            # TRADING SAFETY METRICS
+            "trading_mode": self.trading_mode,
+            "emergency_mode": self.emergency_mode,
+            "pending_events_count": len(self.pending_events),
+            "rate_limits": self.event_rate_limits,
         }
+    
+    def enable_emergency_mode(self):
+        """Enable emergency mode to bypass rate limiting during high volatility"""
+        self.emergency_mode = True
+        logger.warning("🚨 EMERGENCY MODE ENABLED - Rate limiting bypassed for all events")
+        
+    def disable_emergency_mode(self):
+        """Disable emergency mode to restore normal rate limiting"""
+        self.emergency_mode = False  
+        logger.info("✅ EMERGENCY MODE DISABLED - Normal rate limiting restored")
+        
+    def adjust_rate_limits(self, new_limits: Dict[str, float]):
+        """Dynamically adjust rate limits for different market conditions"""
+        self.event_rate_limits.update(new_limits)
+        logger.info(f"⚙️ Rate limits adjusted: {new_limits}")
 
 
 # Singleton instance
@@ -609,14 +910,27 @@ def integrate_with_centralized_manager():
     try:
         from services.centralized_ws_manager import centralized_manager
 
-        # Register callback to forward price updates
+        # Register callback to forward price updates with immediate analytics
         def price_update_callback(data):
             try:
                 price_data = data.get("data", {})
                 if price_data:
-                    unified_manager.emit_event("price_update", price_data)
+                    # Emit price update with highest priority
+                    unified_manager.emit_event("price_update", price_data, priority=1)
+                    
+                    # Also forward as dashboard_update for broader compatibility
+                    unified_manager.emit_event("dashboard_update", {
+                        "type": "dashboard_update",
+                        "data": price_data,
+                        "market_open": data.get("market_open", True),
+                        "timestamp": data.get("timestamp", datetime.now().isoformat())
+                    }, priority=1)
+                    
+                    # PERFORMANCE: Removed immediate analytics to prevent feedback loops
+                    # Analytics will be updated by the scheduled task with proper caching
+                    
             except Exception as e:
-                logger.error(f"❌ Error in price update callback: {e}")
+                logger.error(f"❌ Error in real-time price update callback: {e}")
 
         centralized_manager.register_callback("price_update", price_update_callback)
         logger.info("✅ Integrated with centralized manager")

@@ -1,5 +1,6 @@
 # In services/instrument_registry.py
 import asyncio
+import time
 import traceback
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -36,6 +37,12 @@ class InstrumentRegistry:
         self._sector_mapping = {}
         self._performance_cache = {}
         self._last_analytics_update = None
+        
+        # Cache management for memory optimization
+        self.max_live_prices = 15000  # Maximum live price entries
+        self.max_enriched_prices = 10000  # Maximum enriched price entries
+        self.max_performance_cache = 5000  # Maximum performance cache entries
+        self._cache_access_times = {}  # Track access times for cleanup
 
         # Initialize enhanced features
         self._initialize_enhanced_features()
@@ -44,8 +51,44 @@ class InstrumentRegistry:
         self._initialized = False
         self._last_update = None
 
-        logger.info("🏗️ Instrument Registry created")
+        logger.info("🏗️ Instrument Registry created with cache management")
         self._initialized = True
+
+    def _cleanup_cache(self, cache_dict: dict, max_size: int, cache_name: str):
+        """Clean up cache using LRU strategy"""
+        if len(cache_dict) <= max_size:
+            return
+        
+        # Remove oldest 20% of entries
+        from datetime import datetime
+        now = datetime.now()
+        
+        # Sort by access time (if tracked) or just remove oldest entries
+        if hasattr(self, '_cache_access_times') and self._cache_access_times:
+            # Use LRU based on access times
+            cache_items = [(k, self._cache_access_times.get(k, now)) for k in cache_dict.keys()]
+            cache_items.sort(key=lambda x: x[1])
+        else:
+            # Fallback to simple key-based removal (remove oldest keys)
+            cache_items = [(k, now) for k in list(cache_dict.keys())]
+        
+        # Remove oldest 20%
+        num_to_remove = max(1, int(len(cache_dict) * 0.2))
+        keys_to_remove = [item[0] for item in cache_items[:num_to_remove]]
+        
+        for key in keys_to_remove:
+            cache_dict.pop(key, None)
+            if hasattr(self, '_cache_access_times'):
+                self._cache_access_times.pop(key, None)
+        
+        logger.debug(f"Cleaned up {len(keys_to_remove)} entries from {cache_name} cache")
+
+    def _update_cache_access(self, cache_key: str):
+        """Update access time for cache key"""
+        if not hasattr(self, '_cache_access_times'):
+            return
+        from datetime import datetime
+        self._cache_access_times[cache_key] = datetime.now()
 
     async def initialize_registry(self):
         """Initialize the registry with data from instrument service"""
@@ -308,9 +351,19 @@ class InstrumentRegistry:
         self._options_chain[symbol] = chain
 
     def update_live_prices(self, data: Dict[str, Any]) -> Dict[str, int]:
-        """COMPLETE: Update with full enrichment and analytics"""
+        """COMPLETE: Update with full enrichment and analytics with cache management"""
         start_time = datetime.now()
         stats = {"updated": 0, "new": 0, "ignored": 0, "enriched": 0, "errors": 0}
+        
+        # Check and cleanup caches if needed
+        if len(self._live_prices) > self.max_live_prices:
+            self._cleanup_cache(self._live_prices, self.max_live_prices, "live_prices")
+        
+        if len(self._enriched_prices) > self.max_enriched_prices:
+            self._cleanup_cache(self._enriched_prices, self.max_enriched_prices, "enriched_prices")
+        
+        if len(self._performance_cache) > self.max_performance_cache:
+            self._cleanup_cache(self._performance_cache, self.max_performance_cache, "performance_cache")
 
         for instrument_key, price_data in data.items():
             try:
@@ -646,46 +699,120 @@ class InstrumentRegistry:
             logger.error(f"❌ Error getting spot price for {symbol}: {e}")
             return None
 
-    def get_dashboard_data(self) -> Dict[str, Any]:
-        """Get structured data for dashboard with improved error handling"""
+    def _format_price_data(self, symbol: str, price_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Format price data for dashboard (optimized helper)"""
         try:
-            # Get index data
+            if not price_data or price_data.get("last_price") is None:
+                return None
+                
+            return {
+                "symbol": symbol,
+                "last_price": price_data.get("last_price") or price_data.get("ltp"),
+                "change": price_data.get("change", 0),
+                "change_percent": price_data.get("change_percent", 0),
+                "volume": price_data.get("volume", 0),
+                "high": price_data.get("high"),
+                "low": price_data.get("low"), 
+                "open": price_data.get("open"),
+                "close": price_data.get("close"),
+                "last_updated": price_data.get("last_updated") or price_data.get("timestamp"),
+                "exchange": price_data.get("exchange", "NSE"),
+            }
+        except Exception as e:
+            logger.error(f"❌ Error formatting price data for {symbol}: {e}")
+            return None
+
+    def get_dashboard_data(self) -> Dict[str, Any]:
+        """OPTIMIZED: Get structured data for dashboard with batching and caching"""
+        try:
+            start_time = time.time()
+            
+            # Quick batch processing of active price data from cache
+            active_data = {}
+            for key, data in self._price_cache.items():
+                if data and isinstance(data, dict) and data.get("last_price") is not None:
+                    symbol = self._extract_symbol_from_key(key)
+                    if symbol and data.get("last_updated"):
+                        # Check if data is recent (within 5 minutes)
+                        last_updated = data.get("last_updated")
+                        if isinstance(last_updated, str):
+                            try:
+                                last_updated = datetime.fromisoformat(last_updated)
+                            except:
+                                continue
+                        if isinstance(last_updated, datetime):
+                            age_minutes = (datetime.now() - last_updated).total_seconds() / 60
+                            if age_minutes <= 5:  # Only include recent data
+                                active_data[symbol] = data
+            
+            # Process indices first (highest priority)
             indices = []
-            for symbol in ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]:
-                index_data = self.get_spot_price(symbol)
-                if index_data:
-                    indices.append(index_data)
+            index_symbols = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"}
+            for symbol in index_symbols:
+                if symbol in active_data:
+                    index_data = self._format_price_data(symbol, active_data[symbol])
+                    if index_data:
+                        indices.append(index_data)
 
-            # Get top stocks data
+            # Get FNO eligible symbols (cached)
+            fno_symbols = self._get_fno_symbols()
+
+            # Process stocks in batches
             top_stocks = []
-            for symbol in self._symbols_map:
-                # Skip indices
-                if symbol in ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]:
+            fno_stocks = []
+            
+            # Only process symbols with recent active data
+            processed_symbols = set(index_symbols)  # Skip indices
+            
+            for symbol, data in active_data.items():
+                if symbol in processed_symbols:
                     continue
-
-                stock_data = self.get_spot_price(symbol)
-                if stock_data and stock_data.get("last_price") is not None:
+                
+                stock_data = self._format_price_data(symbol, data)
+                if stock_data:
+                    # Mark FNO stocks
+                    is_fno = symbol.upper() in fno_symbols
+                    stock_data["is_fno"] = is_fno
+                    stock_data["has_derivatives"] = is_fno
+                    
+                    if is_fno:
+                        fno_stocks.append(stock_data)
+                    
                     top_stocks.append(stock_data)
+                    
+                # Limit processing to prevent performance issues
+                if len(top_stocks) >= 500:  # Process max 500 stocks
+                    break
 
-            # Sort by volume (if available) or by price change
+            # Optimized sorting with early termination
             top_stocks.sort(
                 key=lambda x: (
-                    x.get("volume", 0) or 0,
-                    abs(x.get("change_percent", 0) or 0),
+                    not x.get("is_fno", False),
+                    -(x.get("volume", 0) or 0),
+                    -abs(x.get("change_percent", 0) or 0),
                 ),
-                reverse=True,
             )
 
-            # Log what we're returning
+            fno_stocks.sort(
+                key=lambda x: (
+                    -(x.get("volume", 0) or 0),
+                    -abs(x.get("change_percent", 0) or 0),
+                ),
+            )
+
+            processing_time = (time.time() - start_time) * 1000
             logger.info(
-                f"📊 Dashboard data: {len(indices)} indices, {len(top_stocks)} top stocks"
+                f"📊 OPTIMIZED Dashboard data: {len(indices)} indices, {len(top_stocks)} stocks ({len(fno_stocks)} FNO) in {processing_time:.1f}ms"
             )
 
             return {
                 "indices": indices,
-                "top_stocks": top_stocks[:200],  # Top 50 by volume
+                "top_stocks": top_stocks[:150],  # Reduced from 200
+                "fno_stocks": fno_stocks[:80],   # Reduced from 100  
                 "total_stocks": len(top_stocks),
+                "total_fno_stocks": len(fno_stocks),
                 "updated_at": datetime.now().isoformat(),
+                "processing_time_ms": round(processing_time, 1),
             }
 
         except Exception as e:
@@ -694,10 +821,43 @@ class InstrumentRegistry:
             return {
                 "indices": [],
                 "top_stocks": [],
+                "fno_stocks": [],
                 "total_stocks": 0,
+                "total_fno_stocks": 0,
                 "updated_at": datetime.now().isoformat(),
                 "error": str(e),
             }
+
+    def _get_fno_symbols(self) -> set:
+        """Get FNO eligible symbols with fallback"""
+        try:
+            from services.fno_stock_service import get_fno_stocks_from_file
+            
+            fno_data = get_fno_stocks_from_file()
+            if fno_data:
+                fno_symbols = {stock.get("symbol", "").upper() for stock in fno_data if stock.get("symbol")}
+                if fno_symbols:
+                    logger.info(f"📊 Loaded {len(fno_symbols)} FNO symbols from file")
+                    return fno_symbols
+            
+        except Exception as e:
+            logger.debug(f"Could not load FNO symbols from file: {e}")
+        
+        # Fallback to common FNO stocks
+        fallback_symbols = {
+            # Major indices
+            "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+            # Top FNO stocks
+            "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", 
+            "HDFC", "KOTAKBANK", "SBI", "BAJFINANCE", "BHARTIARTL",
+            "ITC", "ASIANPAINT", "MARUTI", "LT", "ULTRACEMCO",
+            "WIPRO", "AXISBANK", "TATAMOTORS", "SBIN", "ONGC",
+            "POWERGRID", "NTPC", "COALINDIA", "DRREDDY", "SUNPHARMA",
+            "TECHM", "TITAN", "NESTLEIND", "INDUSINDBK", "BAJAJ-AUTO"
+        }
+        
+        logger.info(f"📊 Using fallback FNO symbols: {len(fallback_symbols)} symbols")
+        return fallback_symbols
 
     def get_options_chain(self, symbol: str, expiry: str = None) -> Dict[str, Any]:
         """Get options chain for a symbol with live prices and visualization enhancements"""
@@ -1872,21 +2032,6 @@ class InstrumentRegistry:
             "timestamp": datetime.now().isoformat(),
         }
 
-    def get_top_movers(self, limit: int = 10) -> Dict[str, List[Dict[str, Any]]]:
-        """Get top gainers and losers with full data"""
-        all_stocks = list(self._enriched_prices.values())
-        valid_stocks = [s for s in all_stocks if s.get("change_percent") is not None]
-
-        # Sort once for efficiency
-        sorted_stocks = sorted(valid_stocks, key=lambda x: x.get("change_percent", 0))
-
-        return {
-            "gainers": sorted_stocks[-limit:][::-1],  # Top gainers (reversed)
-            "losers": sorted_stocks[:limit],  # Top losers
-            "total_stocks_analyzed": len(valid_stocks),
-            "timestamp": datetime.now().isoformat(),
-        }
-
     def get_sector_analysis(self) -> Dict[str, Any]:
         """Complete sector analysis"""
         sector_data = self.get_stocks_by_sector()
@@ -1944,6 +2089,33 @@ class InstrumentRegistry:
             "total_sectors_analyzed": len(analysis),
             "timestamp": datetime.now().isoformat(),
         }
+
+    def get_volume_leaders(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get top volume leaders with FNO prioritization"""
+        try:
+            fno_symbols = self._get_fno_symbols()
+            all_stocks = list(self._enriched_prices.values())
+            
+            # Filter stocks with volume data
+            volume_stocks = [s for s in all_stocks if s.get("volume", 0) > 0]
+            
+            # Mark FNO stocks
+            for stock in volume_stocks:
+                stock["is_fno"] = stock.get("symbol", "").upper() in fno_symbols
+            
+            # Sort by FNO status first, then by volume
+            volume_stocks.sort(
+                key=lambda x: (
+                    not x.get("is_fno", False),  # FNO stocks first
+                    -(x.get("volume", 0) or 0),  # Then by volume
+                ),
+            )
+
+            return volume_stocks[:limit]
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting volume leaders: {e}")
+            return []
 
     def search_instruments(
         self, query: str, filters: Dict[str, Any] = None

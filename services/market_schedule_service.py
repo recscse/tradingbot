@@ -91,30 +91,47 @@ class MarketScheduleService:
                 await asyncio.sleep(300)  # Wait 5 minutes on error
 
     async def _run_early_morning_preparation(self):
-        """Run at 8:00 AM - Build FNO list first, then instruments"""
+        """FIXED: Run at 8:00 AM - FNO service ALWAYS runs BEFORE instrument service"""
         logger.info("🌅 Starting early morning preparation...")
 
         try:
-            # Step 1: Build FNO stock list FIRST
-            logger.info("🔧 Step 1: Building FNO stock list...")
-            from services.fno_stock_service import (
-                FnoStockListService,
-            )  # Your FNO service from paste-5.txt
+            # Check if it's Monday (weekday 0) for weekly FNO refresh
+            current_weekday = datetime.now(self.ist).weekday()
+            should_refresh_fno = current_weekday == 0  # Monday only
+            
+            # FIXED: ALWAYS run FNO service first (either refresh or verify existing data)
+            logger.info("🔧 Step 1: FNO stock list preparation...")
+            from services.fno_stock_service import FnoStockListService
 
             fno_service = FnoStockListService()
-            fno_result = (
-                fno_service.update_fno_list()
-            )  # This saves to data/fno_stock_list.json
+            
+            if should_refresh_fno:
+                # WEEKLY: Full refresh on Mondays
+                logger.info("📊 Running weekly FNO stock list refresh (Monday)...")
+                fno_result = fno_service.update_fno_list()
 
-            if fno_result["status"] == "success":
-                logger.info(
-                    f"✅ FNO stock list built and saved: {fno_result['total_stocks']} stocks"
-                )
+                if fno_result["status"] == "success":
+                    logger.info(f"✅ Weekly FNO refresh: {fno_result['total_stocks']} stocks")
+                else:
+                    logger.error(f"❌ Weekly FNO refresh failed: {fno_result.get('error')}")
+                    # Don't continue if FNO data is corrupted
+                    return
             else:
-                logger.error(f"❌ FNO stock list failed: {fno_result.get('error')}")
+                # DAILY: Verify existing FNO data is available
+                logger.info(f"🔍 Verifying existing FNO data (Tuesday-Sunday)...")
+                existing_stocks = fno_service.load_from_json()
+                
+                if not existing_stocks:
+                    logger.warning("⚠️ No existing FNO data found, running emergency refresh...")
+                    fno_result = fno_service.update_fno_list()
+                    if fno_result["status"] != "success":
+                        logger.error(f"❌ Emergency FNO refresh failed: {fno_result.get('error')}")
+                        return
+                else:
+                    logger.info(f"✅ FNO data verified: {len(existing_stocks)} stocks available")
 
-            # Step 2: Build instrument service (reads from data/fno_stock_list.json)
-            logger.info("🔧 Step 2: Building instrument service...")
+            # FIXED: Step 2 now ALWAYS runs AFTER FNO service has completed successfully
+            logger.info("🔧 Step 2: Building instrument service (depends on FNO data)...")
             from services.instrument_refresh_service import get_trading_service
 
             instrument_service = get_trading_service()

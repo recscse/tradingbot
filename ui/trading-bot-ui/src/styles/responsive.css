@@ -1,0 +1,323 @@
+/* ==========================================
+   GLOBAL RESPONSIVE CSS FRAMEWORK
+   For GrowthQuantix Trading Application
+   ========================================== */
+
+/* === RESPONSIVE BREAKPOINTS === */
+:root {
+  --breakpoint-xs: 0px;      /* phones */
+  --breakpoint-sm: 600px;    /* tablets */
+  --breakpoint-md: 900px;    /* small laptops */
+  --breakpoint-lg: 1200px;   /* desktop */
+  --breakpoint-xl: 1536px;   /* large screens */
+  
+  /* Touch-friendly sizes */
+  --touch-target-min: 44px;
+  --touch-spacing: 8px;
+}
+
+/* === GLOBAL RESPONSIVE UTILITIES === */
+
+/* Hide/Show based on screen size */
+@media (max-width: 599px) {
+  .hide-xs { display: none !important; }
+  .show-sm-up { display: none !important; }
+}
+
+@media (min-width: 600px) {
+  .hide-sm-up { display: none !important; }
+  .show-xs-only { display: none !important; }
+}
+
+@media (max-width: 899px) {
+  .hide-sm-down { display: none !important; }
+  .show-md-up { display: none !important; }
+}
+
+@media (min-width: 900px) {
+  .hide-md-up { display: none !important; }
+  .show-sm-down { display: none !important; }
+}
+
+@media (max-width: 1199px) {
+  .hide-lg-down { display: none !important; }
+}
+
+@media (min-width: 1200px) {
+  .hide-lg-up { display: none !important; }
+}
+
+/* === RESPONSIVE GRID UTILITIES === */
+.responsive-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 600px) {
+  .responsive-grid.grid-sm-2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 900px) {
+  .responsive-grid.grid-md-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .responsive-grid.grid-md-4 {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1200px) {
+  .responsive-grid.grid-lg-5 {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .responsive-grid.grid-lg-6 {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* === RESPONSIVE FLEXBOX UTILITIES === */
+.responsive-flex {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (min-width: 600px) {
+  .responsive-flex.flex-sm-row {
+    flex-direction: row;
+  }
+}
+
+@media (min-width: 900px) {
+  .responsive-flex.flex-md-row {
+    flex-direction: row;
+  }
+}
+
+/* === RESPONSIVE SPACING === */
+.spacing-xs { padding: 0.5rem !important; }
+.spacing-sm { padding: 1rem !important; }
+.spacing-md { padding: 1.5rem !important; }
+.spacing-lg { padding: 2rem !important; }
+
+@media (max-width: 599px) {
+  .spacing-responsive { padding: 0.5rem !important; }
+}
+
+@media (min-width: 600px) and (max-width: 899px) {
+  .spacing-responsive { padding: 1rem !important; }
+}
+
+@media (min-width: 900px) {
+  .spacing-responsive { padding: 1.5rem !important; }
+}
+
+/* === RESPONSIVE TYPOGRAPHY === */
+.text-responsive-xs { font-size: clamp(0.75rem, 2vw, 0.875rem) !important; }
+.text-responsive-sm { font-size: clamp(0.875rem, 2.5vw, 1rem) !important; }
+.text-responsive-md { font-size: clamp(1rem, 3vw, 1.25rem) !important; }
+.text-responsive-lg { font-size: clamp(1.25rem, 4vw, 1.75rem) !important; }
+.text-responsive-xl { font-size: clamp(1.5rem, 5vw, 2.5rem) !important; }
+
+/* === TRADING-SPECIFIC RESPONSIVE CLASSES === */
+
+/* Responsive Tables */
+.trading-table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.trading-table {
+  min-width: 600px;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+@media (max-width: 599px) {
+  .trading-table {
+    min-width: 300px;
+    font-size: 0.75rem;
+  }
+  
+  .trading-table th,
+  .trading-table td {
+    padding: 0.5rem 0.25rem !important;
+  }
+}
+
+/* Responsive Cards for Trading Data */
+.trading-card {
+  padding: 1rem;
+  margin: 0.5rem;
+  border-radius: 8px;
+  min-height: 120px;
+}
+
+@media (max-width: 599px) {
+  .trading-card {
+    padding: 0.75rem;
+    margin: 0.25rem;
+    min-height: 100px;
+  }
+}
+
+/* Touch-Friendly Buttons */
+.touch-button {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  padding: 0.75rem 1rem;
+  margin: 0.25rem;
+}
+
+@media (max-width: 599px) {
+  .touch-button {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+/* Responsive Chart Containers */
+.chart-container {
+  position: relative;
+  width: 100%;
+  height: 400px;
+}
+
+@media (max-width: 599px) {
+  .chart-container {
+    height: 250px;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 899px) {
+  .chart-container {
+    height: 300px;
+  }
+}
+
+/* Responsive Form Layouts */
+.form-responsive {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 600px) {
+  .form-responsive.form-sm-2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 900px) {
+  .form-responsive.form-md-3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Responsive Modal/Dialog Sizing */
+.dialog-responsive {
+  width: 95vw;
+  max-width: 500px;
+}
+
+@media (min-width: 600px) {
+  .dialog-responsive {
+    width: 80vw;
+    max-width: 600px;
+  }
+}
+
+@media (min-width: 900px) {
+  .dialog-responsive {
+    width: 60vw;
+    max-width: 800px;
+  }
+}
+
+/* === ANIMATION PERFORMANCE === */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* === SCROLLBAR STYLING === */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* === RESPONSIVE DEBUGGING === */
+.debug-responsive {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.debug-responsive::before {
+  content: 'XS';
+}
+
+@media (min-width: 600px) {
+  .debug-responsive::before {
+    content: 'SM';
+  }
+}
+
+@media (min-width: 900px) {
+  .debug-responsive::before {
+    content: 'MD';
+  }
+}
+
+@media (min-width: 1200px) {
+  .debug-responsive::before {
+    content: 'LG';
+  }
+}
+
+@media (min-width: 1536px) {
+  .debug-responsive::before {
+    content: 'XL';
+  }
+}
+
+/* === PRINT STYLES === */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-full-width {
+    width: 100% !important;
+    max-width: none !important;
+  }
+}

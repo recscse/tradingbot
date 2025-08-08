@@ -22,7 +22,7 @@ import ProfilePage from "./pages/ProfilePage";
 import BacktestingPage from "./pages/BacktestingPage";
 import PaperTradingPage from "./pages/PaperTradingPage";
 import { MarketProvider } from "./context/MarketProvider";
-import OptionChainPage from "./pages/OptionChainPage";
+import EnhancedOptionChainPage from "./pages/EnhancedOptionChainPage";
 import AboutPage from "./pages/AboutPage";
 import ContactPage from "./pages/ContactPage";
 import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
@@ -90,7 +90,7 @@ const App = () => {
               path="/option-chain/:symbol"
               element={
                 <ProtectedLayout>
-                  <OptionChainPage />
+                  <EnhancedOptionChainPage />
                 </ProtectedLayout>
               }
             />

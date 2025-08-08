@@ -10,13 +10,14 @@ import logging
 import time
 import aiohttp
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Any, Union
 from collections import defaultdict
 import aiofiles
 from functools import wraps
 from dataclasses import dataclass, asdict
+import pytz
 
 # Redis import with fallback
 try:
@@ -799,6 +800,16 @@ class TradingInstrumentService:
         self._last_refresh = None
         self._selected_trading_stocks = set()
 
+        # Market schedule integration
+        self.ist = pytz.timezone("Asia/Kolkata")
+        self.market_hours = {
+            'early_start': dt_time(8, 0),    # 8:00 AM - Early preparation
+            'premarket': dt_time(9, 0),      # 9:00 AM - Pre-market  
+            'market_open': dt_time(9, 15),   # 9:15 AM - Market open
+            'trading_start': dt_time(9, 30), # 9:30 AM - Trading start
+            'market_close': dt_time(15, 30)  # 3:30 PM - Market close
+        }
+
         self._initialized_instance = True
         logger.info("🔧 TradingInstrumentService instance created")
 
@@ -1430,7 +1441,20 @@ class TradingInstrumentService:
         return mcx_keys
 
     async def _should_download_fresh_data(self) -> bool:
-        """Check if fresh data download is needed"""
+        """Check if fresh data download is needed with market schedule compliance"""
+        # Check market schedule compliance first
+        schedule_check = self.is_market_schedule_compliant()
+        logger.info(f"🕰️ Market schedule: {schedule_check['message']}")
+        
+        # If market schedule says use cache, honor it (unless data doesn't exist)
+        if not schedule_check["compliant"] and schedule_check.get("use_cache", False):
+            if self.filtered_instruments_file.exists():
+                logger.info("📂 Market schedule restricts refresh - using cached data")
+                return False
+            else:
+                logger.warning("⚠️ Market schedule restricts refresh but no cached data available - allowing download")
+        
+        # Original logic continues
         if not self.filtered_instruments_file.exists():
             return True
 
@@ -1449,6 +1473,76 @@ class TradingInstrumentService:
             return True
 
         return False
+    
+    def is_market_schedule_compliant(self) -> Dict[str, Any]:
+        """
+        Check if instrument refresh is allowed based on market schedule
+        """
+        try:
+            current_time = datetime.now(self.ist)
+            current_dt_time = current_time.time()
+            
+            # Check if it's a weekday
+            if current_time.weekday() >= 5:
+                return {
+                    "compliant": False,
+                    "reason": "weekend",
+                    "message": "Market closed - Weekend",
+                    "next_update_time": "Monday 08:00 AM",
+                    "use_cache": True
+                }
+            
+            # Allow updates during early preparation (8:00-9:00 AM)
+            if self.market_hours['early_start'] <= current_dt_time < self.market_hours['premarket']:
+                return {
+                    "compliant": True,
+                    "reason": "early_preparation",
+                    "message": "Early preparation window - safe to refresh instruments",
+                    "current_time": current_time.strftime("%H:%M:%S"),
+                    "use_cache": False
+                }
+            
+            # Check if data is stale (older than 12 hours) - force refresh
+            if self.filtered_instruments_file.exists():
+                file_mtime = datetime.fromtimestamp(self.filtered_instruments_file.stat().st_mtime, tz=self.ist)
+                hours_old = (current_time - file_mtime).total_seconds() / 3600
+                
+                if hours_old > 12:
+                    return {
+                        "compliant": True,
+                        "reason": "stale_data", 
+                        "message": f"Instrument data is {hours_old:.1f} hours old - refresh needed",
+                        "last_update": file_mtime.strftime("%Y-%m-%d %H:%M:%S"),
+                        "use_cache": False
+                    }
+            
+            # During market hours, use cached data only
+            if self.market_hours['market_open'] <= current_dt_time <= self.market_hours['market_close']:
+                return {
+                    "compliant": False,
+                    "reason": "market_hours",
+                    "message": "Market is open - using cached data to avoid disruption",
+                    "next_update_time": "After 3:30 PM",
+                    "use_cache": True
+                }
+            
+            # Before market or after market - allow limited updates
+            return {
+                "compliant": True,
+                "reason": "off_hours",
+                "message": "Market closed - safe to refresh if needed",
+                "current_time": current_time.strftime("%H:%M:%S"),
+                "use_cache": False
+            }
+            
+        except Exception as e:
+            logger.error(f"Market schedule compliance check failed: {e}")
+            return {
+                "compliant": True,
+                "reason": "error_fallback",
+                "message": f"Schedule check error: {str(e)}",
+                "use_cache": False
+            }
 
     async def _count_existing_instruments(self) -> int:
         """Count existing instruments"""

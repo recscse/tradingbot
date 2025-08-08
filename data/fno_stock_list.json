@@ -1,256 +1,6 @@
 {
   "securities": [
     {
-      "name": "Reliance Industries",
-      "symbol": "RELIANCE",
-      "exchange": "NSE"
-    },
-    {
-      "name": "HDFC Bank",
-      "symbol": "HDFC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Tata Consultancy Services",
-      "symbol": "TCS",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Bharti Airtel",
-      "symbol": "BHARTIARTL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "ICICI Bank",
-      "symbol": "ICICI",
-      "exchange": "NSE"
-    },
-    {
-      "name": "State Bank of India",
-      "symbol": "SBIN",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Infosys",
-      "symbol": "INFY",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Bajaj Finance",
-      "symbol": "BAJFINANCE",
-      "exchange": "NSE"
-    },
-    {
-      "name": "LIC of India",
-      "symbol": "LIC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Hindustan Unilever",
-      "symbol": "HINDUNILVR",
-      "exchange": "NSE"
-    },
-    {
-      "name": "ITC",
-      "symbol": "ITC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Larsen & Toubro",
-      "symbol": "LT",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Kotak Bank",
-      "symbol": "KOTAKBANK",
-      "exchange": "NSE"
-    },
-    {
-      "name": "HCL Technologies",
-      "symbol": "HCL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Sun Pharmaceutical",
-      "symbol": "SUNPHARMA",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Mahindra & Mahindra",
-      "symbol": "M&M",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Maruti Suzuki",
-      "symbol": "MARUTI",
-      "exchange": "NSE"
-    },
-    {
-      "name": "UltraTech Cement",
-      "symbol": "ULTRACEMCO",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Axis Bank",
-      "symbol": "AXISBANK",
-      "exchange": "NSE"
-    },
-    {
-      "name": "NTPC",
-      "symbol": "NTPC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Bajaj Finserv",
-      "symbol": "BAJAJFINSV",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Hindustan Aeronautics",
-      "symbol": "HAL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Titan",
-      "symbol": "TITAN",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Oil & Natural Gas Corporation",
-      "symbol": "ONGC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Adani Ports & SEZ",
-      "symbol": "SEZ",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Eternal",
-      "symbol": "ETERNAL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Adani Enterprises",
-      "symbol": "ADANIENT",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Bharat Electronics",
-      "symbol": "BEL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Power Grid Corporation of India",
-      "symbol": "POWERGRID",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Wipro",
-      "symbol": "WIPRO",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Avenue Supermarts DMart",
-      "symbol": "DMART",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Tata Motors",
-      "symbol": "TATAMOTORS",
-      "exchange": "NSE"
-    },
-    {
-      "name": "JSW Steel",
-      "symbol": "JSW",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Coal India",
-      "symbol": "COALINDIA",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Bajaj Auto",
-      "symbol": "BAJAJ-AUTO",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Interglobe Aviation",
-      "symbol": "INDIGO",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Asian Paints",
-      "symbol": "ASIANPAINT",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Nestle",
-      "symbol": "NESTLEIND",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Indian Oil Corporation",
-      "symbol": "IOC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "DLF",
-      "symbol": "DLF",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Tata Steel",
-      "symbol": "TATASTEEL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Jio Financial Services",
-      "symbol": "JIOFIN",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Hindustan Zinc",
-      "symbol": "HINDZINC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Grasim Industries",
-      "symbol": "GRASIM",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Trent",
-      "symbol": "TRENT",
-      "exchange": "NSE"
-    },
-    {
-      "name": "SBI Life Insurance",
-      "symbol": "SBI",
-      "exchange": "NSE"
-    },
-    {
-      "name": "IRFC",
-      "symbol": "IRFC",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Vedanta",
-      "symbol": "VEDL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Divis Laboratories",
-      "symbol": "DIVISLAB",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Varun Beverages",
-      "symbol": "VBL",
-      "exchange": "NSE"
-    },
-    {
       "name": "Nifty Bank",
       "symbol": "BANKNIFTY",
       "exchange": "NSE"
@@ -276,13 +26,8 @@
       "exchange": "NSE"
     },
     {
-      "name": "3360 One WAM",
-      "symbol": "",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Aarti Industries",
-      "symbol": "AARTIIND",
+      "name": "360 One WAM",
+      "symbol": "360ONE",
       "exchange": "NSE"
     },
     {
@@ -301,13 +46,13 @@
       "exchange": "NSE"
     },
     {
-      "name": "ACC",
-      "symbol": "ACC",
+      "name": "Adani Energy Solutions",
+      "symbol": "ADANIENSOL",
       "exchange": "NSE"
     },
     {
-      "name": "Adani Energy Solutions",
-      "symbol": "ADANIENSOL",
+      "name": "Adani Enterprises",
+      "symbol": "ADANIENT",
       "exchange": "NSE"
     },
     {
@@ -356,8 +101,18 @@
       "exchange": "NSE"
     },
     {
+      "name": "Asian Paints",
+      "symbol": "ASIANPAINT",
+      "exchange": "NSE"
+    },
+    {
       "name": "Astral",
       "symbol": "ASTRAL",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Adani Total Gas",
+      "symbol": "ATGL",
       "exchange": "NSE"
     },
     {
@@ -371,8 +126,23 @@
       "exchange": "NSE"
     },
     {
-      "name": "Balkrishna Industries",
-      "symbol": "BALKRISIND",
+      "name": "Axis Bank",
+      "symbol": "AXISBANK",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Bajaj Auto",
+      "symbol": "BAJAJ-AUTO",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Bajaj Finserv",
+      "symbol": "BAJAJFINSV",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Bajaj Finance",
+      "symbol": "BAJFINANCE",
       "exchange": "NSE"
     },
     {
@@ -396,8 +166,18 @@
       "exchange": "NSE"
     },
     {
+      "name": "Bharat Electronics",
+      "symbol": "BEL",
+      "exchange": "NSE"
+    },
+    {
       "name": "Bharat Forge",
       "symbol": "BHARATFORG",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Bharti Airtel",
+      "symbol": "BHARTIARTL",
       "exchange": "NSE"
     },
     {
@@ -436,11 +216,6 @@
       "exchange": "NSE"
     },
     {
-      "name": "Birlasoft",
-      "symbol": "BSOFT",
-      "exchange": "NSE"
-    },
-    {
       "name": "Computer Age Management Services",
       "symbol": "CAMS",
       "exchange": "NSE"
@@ -466,11 +241,6 @@
       "exchange": "NSE"
     },
     {
-      "name": "Chambal Fertilisers & Chemicals",
-      "symbol": "CHAMBLFERT",
-      "exchange": "NSE"
-    },
-    {
       "name": "Cholamandalam Investment",
       "symbol": "CHOLAFIN",
       "exchange": "NSE"
@@ -478,6 +248,11 @@
     {
       "name": "Cipla",
       "symbol": "CIPLA",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Coal India",
+      "symbol": "COALINDIA",
       "exchange": "NSE"
     },
     {
@@ -526,8 +301,23 @@
       "exchange": "NSE"
     },
     {
+      "name": "Divis Laboratories",
+      "symbol": "DIVISLAB",
+      "exchange": "NSE"
+    },
+    {
       "name": "Dixon Technologies",
       "symbol": "DIXON",
+      "exchange": "NSE"
+    },
+    {
+      "name": "DLF",
+      "symbol": "DLF",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Avenue Supermarts DMart",
+      "symbol": "DMART",
       "exchange": "NSE"
     },
     {
@@ -538,6 +328,11 @@
     {
       "name": "Eicher Motors",
       "symbol": "EICHERMOT",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Eternal",
+      "symbol": "ETERNAL",
       "exchange": "NSE"
     },
     {
@@ -586,6 +381,16 @@
       "exchange": "NSE"
     },
     {
+      "name": "Grasim Industries",
+      "symbol": "GRASIM",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Hindustan Aeronautics",
+      "symbol": "HAL",
+      "exchange": "NSE"
+    },
+    {
       "name": "Havells",
       "symbol": "HAVELLS",
       "exchange": "NSE"
@@ -626,13 +431,18 @@
       "exchange": "NSE"
     },
     {
-      "name": "Hindustan Copper",
-      "symbol": "HINDCOPPER",
+      "name": "Hindustan Petroleum",
+      "symbol": "HINDPETRO",
       "exchange": "NSE"
     },
     {
-      "name": "Hindustan Petroleum",
-      "symbol": "HINDPETRO",
+      "name": "Hindustan Unilever",
+      "symbol": "HINDUNILVR",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Hindustan Zinc",
+      "symbol": "HINDZINC",
       "exchange": "NSE"
     },
     {
@@ -676,7 +486,7 @@
       "exchange": "NSE"
     },
     {
-      "name": "IIFL Finance",
+      "name": "IFL Finance",
       "symbol": "IIFL",
       "exchange": "NSE"
     },
@@ -691,6 +501,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Interglobe Aviation",
+      "symbol": "INDIGO",
+      "exchange": "NSE"
+    },
+    {
       "name": "Indusind Bank",
       "symbol": "INDUSINDBK",
       "exchange": "NSE"
@@ -701,8 +516,18 @@
       "exchange": "NSE"
     },
     {
+      "name": "Infosys",
+      "symbol": "INFY",
+      "exchange": "NSE"
+    },
+    {
       "name": "Inox Wind",
       "symbol": "INOXWIND",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Indian Oil Corporation",
+      "symbol": "IOC",
       "exchange": "NSE"
     },
     {
@@ -721,8 +546,23 @@
       "exchange": "NSE"
     },
     {
+      "name": "IRFC",
+      "symbol": "IRFC",
+      "exchange": "NSE"
+    },
+    {
+      "name": "ITC",
+      "symbol": "ITC",
+      "exchange": "NSE"
+    },
+    {
       "name": "Jindal Steel",
       "symbol": "JINDALSTEL",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Jio Financial Services",
+      "symbol": "JIOFIN",
       "exchange": "NSE"
     },
     {
@@ -751,7 +591,7 @@
       "exchange": "NSE"
     },
     {
-      "name": "Kaynes Technology",
+      "name": "Kaynes Technology India",
       "symbol": "KAYNES",
       "exchange": "NSE"
     },
@@ -763,6 +603,11 @@
     {
       "name": "KFin Technologies",
       "symbol": "KFINTECH",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Kotak Bank",
+      "symbol": "KOTAKBANK",
       "exchange": "NSE"
     },
     {
@@ -791,6 +636,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Larsen & Toubro",
+      "symbol": "LT",
+      "exchange": "NSE"
+    },
+    {
       "name": "L&T Finance",
       "symbol": "LTF",
       "exchange": "NSE"
@@ -806,8 +656,8 @@
       "exchange": "NSE"
     },
     {
-      "name": "M&M Financial Services",
-      "symbol": "M&MFIN",
+      "name": "Mahindra & Mahindra",
+      "symbol": "M&M",
       "exchange": "NSE"
     },
     {
@@ -823,6 +673,11 @@
     {
       "name": "Marico",
       "symbol": "MARICO",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Maruti Suzuki",
+      "symbol": "MARUTI",
       "exchange": "NSE"
     },
     {
@@ -843,11 +698,6 @@
     {
       "name": "Max Financial Services",
       "symbol": "MFSL",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Mahanagar Gas",
-      "symbol": "MGL",
       "exchange": "NSE"
     },
     {
@@ -886,6 +736,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Nestle",
+      "symbol": "NESTLEIND",
+      "exchange": "NSE"
+    },
+    {
       "name": "NHPC",
       "symbol": "NHPC",
       "exchange": "NSE"
@@ -893,6 +748,16 @@
     {
       "name": "NMDC",
       "symbol": "NMDC",
+      "exchange": "NSE"
+    },
+    {
+      "name": "NTPC",
+      "symbol": "NTPC",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Nuvama Wealth Management",
+      "symbol": "NUVAMA",
       "exchange": "NSE"
     },
     {
@@ -916,6 +781,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Oil & Natural Gas Corporation",
+      "symbol": "ONGC",
+      "exchange": "NSE"
+    },
+    {
       "name": "Page Industries",
       "symbol": "PAGEIND",
       "exchange": "NSE"
@@ -928,11 +798,6 @@
     {
       "name": "One 97 Communications",
       "symbol": "PAYTM",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Piramal Enterprises",
-      "symbol": "PEL",
       "exchange": "NSE"
     },
     {
@@ -996,6 +861,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Power Grid Corporation of India",
+      "symbol": "POWERGRID",
+      "exchange": "NSE"
+    },
+    {
       "name": "Piramal Pharma",
       "symbol": "PPLPHARMA",
       "exchange": "NSE"
@@ -1016,6 +886,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Reliance Industries",
+      "symbol": "RELIANCE",
+      "exchange": "NSE"
+    },
+    {
       "name": "Rail Vikas Nigam",
       "symbol": "RVNL",
       "exchange": "NSE"
@@ -1033,6 +908,11 @@
     {
       "name": "SBI Life Insurance",
       "symbol": "SBILIFE",
+      "exchange": "NSE"
+    },
+    {
+      "name": "State Bank of India",
+      "symbol": "SBIN",
       "exchange": "NSE"
     },
     {
@@ -1071,8 +951,18 @@
       "exchange": "NSE"
     },
     {
+      "name": "Sun Pharmaceutical",
+      "symbol": "SUNPHARMA",
+      "exchange": "NSE"
+    },
+    {
       "name": "Supreme Industries",
       "symbol": "SUPREMEIND",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Suzlon Energy",
+      "symbol": "SUZLON",
       "exchange": "NSE"
     },
     {
@@ -1086,11 +976,6 @@
       "exchange": "NSE"
     },
     {
-      "name": "Tata Communications",
-      "symbol": "TATACOMM",
-      "exchange": "NSE"
-    },
-    {
       "name": "Tata Consumer Products",
       "symbol": "TATACONSUM",
       "exchange": "NSE"
@@ -1101,13 +986,28 @@
       "exchange": "NSE"
     },
     {
+      "name": "Tata Motors",
+      "symbol": "TATAMOTORS",
+      "exchange": "NSE"
+    },
+    {
       "name": "Tata Power",
       "symbol": "TATAPOWER",
       "exchange": "NSE"
     },
     {
+      "name": "Tata Steel",
+      "symbol": "TATASTEEL",
+      "exchange": "NSE"
+    },
+    {
       "name": "Tata Technologies",
       "symbol": "TATATECH",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Tata Consultancy Services",
+      "symbol": "TCS",
       "exchange": "NSE"
     },
     {
@@ -1126,6 +1026,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Titan",
+      "symbol": "TITAN",
+      "exchange": "NSE"
+    },
+    {
       "name": "Torrent Pharmaceuticals",
       "symbol": "TORNTPHARM",
       "exchange": "NSE"
@@ -1136,8 +1041,18 @@
       "exchange": "NSE"
     },
     {
+      "name": "Trent",
+      "symbol": "TRENT",
+      "exchange": "NSE"
+    },
+    {
       "name": "TVS Motors",
       "symbol": "TVSMOTOR",
+      "exchange": "NSE"
+    },
+    {
+      "name": "UltraTech Cement",
+      "symbol": "ULTRACEMCO",
       "exchange": "NSE"
     },
     {
@@ -1161,8 +1076,23 @@
       "exchange": "NSE"
     },
     {
+      "name": "Varun Beverages",
+      "symbol": "VBL",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Vedanta",
+      "symbol": "VEDL",
+      "exchange": "NSE"
+    },
+    {
       "name": "Voltas",
       "symbol": "VOLTAS",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Wipro",
+      "symbol": "WIPRO",
       "exchange": "NSE"
     },
     {
@@ -1176,7 +1106,7 @@
       "exchange": "NSE"
     }
   ],
-  "last_updated": "2025-07-28T01:23:35.566843",
-  "total_count": 235,
+  "last_updated": "2025-08-02T22:38:19.858467",
+  "total_count": 221,
   "data_source": "dhan_scraper"
 }

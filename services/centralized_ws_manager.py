@@ -324,6 +324,52 @@ class CentralizedWebSocketManager:
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return False
 
+    async def _validate_token_expiry(self, broker_config) -> dict:
+        """Validate token expiry and return detailed status"""
+        try:
+            now = datetime.now()
+            expiry = broker_config.access_token_expiry
+            
+            if not expiry:
+                return {
+                    "valid": False,
+                    "reason": "no_expiry_info",
+                    "message": "Token expiry information not available"
+                }
+            
+            if expiry <= now:
+                minutes_expired = int((now - expiry).total_seconds() / 60)
+                return {
+                    "valid": False,
+                    "reason": "expired",
+                    "message": f"Token expired {minutes_expired} minutes ago",
+                    "expired_minutes": minutes_expired
+                }
+            
+            minutes_until_expiry = int((expiry - now).total_seconds() / 60)
+            
+            if minutes_until_expiry <= 10:
+                return {
+                    "valid": False,
+                    "reason": "expiring_soon",
+                    "message": f"Token expires in {minutes_until_expiry} minutes",
+                    "minutes_remaining": minutes_until_expiry
+                }
+            
+            return {
+                "valid": True,
+                "reason": "valid",
+                "message": f"Token valid for {minutes_until_expiry} minutes",
+                "minutes_remaining": minutes_until_expiry
+            }
+            
+        except Exception as e:
+            return {
+                "valid": False,
+                "reason": "validation_error",
+                "message": f"Error validating token: {str(e)}"
+            }
+
     async def _load_admin_token(self) -> bool:
         """Load admin token from database"""
         try:
@@ -356,9 +402,38 @@ class CentralizedWebSocketManager:
                 )
                 return False
 
-            # Store token and user ID
+            # Validate token expiry BEFORE storing
+            validation_result = await self._validate_token_expiry(admin_broker)
+            
+            # If token is expired or expiring soon, refresh it BEFORE storing
+            if not validation_result["valid"] and validation_result["reason"] in ["expired", "expiring_soon"]:
+                reason = validation_result["reason"]
+                message = validation_result["message"]
+                
+                if reason == "expired":
+                    logger.error(f"❌ Admin token expired: {message}")
+                elif reason == "expiring_soon":
+                    logger.warning(f"⚠️ Admin token expiring soon: {message}")
+                
+                logger.info(f"🤖 Attempting automated token refresh for {reason} token BEFORE storing...")
+                
+                try:
+                    refresh_success = await self._try_automated_refresh()
+                    if refresh_success:
+                        logger.info("✅ Automated token refresh completed - reloading fresh token")
+                        # Recursively reload to get the fresh token
+                        return await self._load_admin_token()
+                    else:
+                        logger.warning("⚠️ Automated token refresh failed - will store expired token and retry on connection failure")
+                        # Fall through to store the expired token as fallback
+                except Exception as refresh_error:
+                    logger.error(f"❌ Error during automated token refresh: {refresh_error}")
+                    # Fall through to store the expired token as fallback
+            
+            # Store token and user ID (only reached if valid OR refresh failed)
             self.admin_token = token.strip()
             self.admin_user_id = admin_broker.user_id
+            self._token_validation_status = validation_result
 
             # Log with masked token for security
             token_preview = (
@@ -366,25 +441,204 @@ class CentralizedWebSocketManager:
                 if len(self.admin_token) > 10
                 else "***"
             )
-            logger.info(
-                f"✅ Admin token loaded for user ID: {self.admin_user_id} - Token: {token_preview}"
-            )
-
+            
+            if validation_result["valid"]:
+                logger.info(
+                    f"✅ Admin token loaded for user ID: {self.admin_user_id} - Token: {token_preview}"
+                )
+                logger.info(f"ℹ️ {validation_result['message']}")
+            else:
+                reason = validation_result["reason"]
+                message = validation_result["message"]
+                logger.info(f"⚠️ Admin token loaded with issues for user ID: {self.admin_user_id} - {message}")
+                
+            # Set automation trigger flag for future cycles
+            if not validation_result["valid"] and validation_result["reason"] in ["expired", "expiring_soon"]:
+                self._needs_token_refresh = True
+                if validation_result["reason"] == "expired":
+                    logger.info("🔄 Token expired but loaded for refresh attempt")
+            else:
+                self._needs_token_refresh = False
+                
             return True
 
         except Exception as e:
             logger.error(f"❌ Failed to load admin token: {e}")
             traceback.print_exc()
             return False
+            
+    async def _try_automated_refresh(self) -> bool:
+        """
+        Attempt automated token refresh using the automation service
+        """
+        try:
+            logger.info("🤖 Attempting automated token refresh...")
+            
+            # Import automation service dynamically to avoid circular imports
+            from services.upstox_automation_service import UpstoxAutomationService
+            
+            automation_service = UpstoxAutomationService()
+            result = await automation_service.refresh_admin_upstox_token()
+            
+            if result.get("success", False):
+                logger.info("✅ Automated token refresh completed successfully")
+                
+                # Reload the admin token after successful refresh
+                token_reloaded = await self._load_admin_token()
+                if token_reloaded:
+                    logger.info("✅ Admin token reloaded after automated refresh")
+                    return True
+                else:
+                    logger.error("❌ Failed to reload token after automated refresh")
+                    return False
+            else:
+                error_msg = result.get("error", "Unknown error")
+                logger.error(f"❌ Automated token refresh failed: {error_msg}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error during automated token refresh: {e}")
+            return False
+
+
+    async def _validate_and_refresh_token(self) -> bool:
+        """Proactively validate token and refresh if needed"""
+        try:
+            if not self.admin_token:
+                logger.warning("⚠️ No admin token available, loading...")
+                return await self._load_admin_token()
+            
+            # Check token expiry from database
+            from database.connection import SessionLocal
+            from database.models import BrokerConfig
+            from core.config import ADMIN_EMAIL
+            
+            with SessionLocal() as db:
+                admin_user = db.query(BrokerConfig).filter(
+                    BrokerConfig.user.has(email=ADMIN_EMAIL),
+                    BrokerConfig.broker_name.ilike("upstox"),
+                    BrokerConfig.is_active == True,
+                ).first()
+                
+                if not admin_user or not admin_user.access_token_expiry:
+                    logger.warning("⚠️ No admin broker config found")
+                    return await self._load_admin_token()
+                
+                # Check if token is expired or expires soon (within 10 minutes)
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                buffer_time = timedelta(minutes=10)
+                
+                if admin_user.access_token_expiry <= (now + buffer_time):
+                    logger.info(f"🔄 Token expires soon ({admin_user.access_token_expiry}), refreshing...")
+                    
+                    # Try automatic refresh
+                    refresh_success = await self._try_automated_refresh()
+                    if refresh_success:
+                        # Reload the new token
+                        return await self._load_admin_token()
+                    else:
+                        logger.error("❌ Proactive token refresh failed")
+                        return False
+                
+                logger.debug(f"✅ Token valid until {admin_user.access_token_expiry}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"❌ Error validating token: {e}")
+            return False
+
+    async def reload_admin_token(self) -> bool:
+        """
+        Reload admin token after successful refresh
+        This method should be called by the automation service after token refresh
+        """
+        try:
+            logger.info("🔄 Reloading admin token after successful refresh...")
+            
+            # Clear current token
+            old_token = self.admin_token
+            self.admin_token = None
+            self.admin_user_id = None
+            
+            # Load fresh token from database
+            token_loaded = await self._load_admin_token()
+            
+            if token_loaded and self.admin_token != old_token:
+                logger.info("✅ Admin token successfully reloaded with new value")
+                
+                # Stop existing WebSocket connection if any
+                if self.ws_client:
+                    logger.info("🔄 Stopping existing WebSocket connection to use new token...")
+                    self.ws_client.stop()
+                    
+                # Clear connection ready flag to trigger reconnection
+                self.connection_ready.clear()
+                
+                # Reset reconnect attempts to allow fresh connection with new token
+                self.reconnect_attempts = 0
+                
+                # Start fresh connection with new token
+                await self.start_connection()
+                
+                return True
+            elif token_loaded:
+                logger.warning("⚠️ Token reloaded but value unchanged")
+                return True
+            else:
+                logger.error("❌ Failed to reload admin token")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error reloading admin token: {e}")
+            return False
+    
+    async def force_reconnect(self) -> bool:
+        """
+        Force reconnection with current token - useful after token refresh
+        """
+        try:
+            logger.info("🔄 Forcing WebSocket reconnection...")
+            
+            # Stop existing connection
+            if self.ws_client:
+                self.ws_client.stop()
+            
+            # Clear connection state
+            self.connection_ready.clear()
+            self.reconnect_attempts = 0
+            
+            # Wait a moment for cleanup
+            await asyncio.sleep(1)
+            
+            # Start fresh connection
+            await self.start_connection()
+            
+            logger.info("✅ Force reconnection initiated")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error during force reconnection: {e}")
+            return False
 
     async def _load_instrument_keys(self):
-        """Load instrument keys - CLEAN & SIMPLE approach"""
+        """Load instrument keys - CLEAN & SIMPLE approach with service initialization"""
         try:
             logger.info("🔄 Loading focused instrument keys...")
 
-            # ONE SIMPLE CALL to get all focused keys
-            from services.instrument_refresh_service import get_focused_instrument_keys
+            # Ensure instrument service is initialized first
+            from services.instrument_refresh_service import get_trading_service, get_focused_instrument_keys
+            
+            service = get_trading_service()
+            if not getattr(service, '_service_initialized', False):
+                logger.info("🔧 Initializing instrument service for WebSocket...")
+                try:
+                    init_result = await service.initialize_service()
+                    logger.info(f"✅ Service initialization: {init_result.status if hasattr(init_result, 'status') else 'completed'}")
+                except Exception as init_error:
+                    logger.warning(f"⚠️ Service initialization failed, continuing with available data: {init_error}")
 
+            # Get all focused keys (now with initialized service)
             focused_data = get_focused_instrument_keys()
 
             if focused_data and focused_data.get("keys"):
@@ -397,7 +651,8 @@ class CentralizedWebSocketManager:
                 logger.info(f"✅ Loaded {total} focused instrument keys:")
                 logger.info(f"   F&O Spots: {breakdown.get('fno_equity_spots', 0)}")
                 logger.info(f"   Indices: {breakdown.get('selected_indices', 0)}")
-                logger.info(f"   MCX: {breakdown.get('mcx_futures', 0)}")
+                logger.info(f"   MCX Futures: {breakdown.get('mcx_futures', 0)}")
+                logger.info(f"   MCX Options: {breakdown.get('mcx_options', 0)}")
 
                 return True
             else:
@@ -424,12 +679,28 @@ class CentralizedWebSocketManager:
                 logger.info(f"✅ Fallback loaded {len(spot_keys)} spot keys")
                 return True
 
-            # Emergency fallback
-            self.all_instrument_keys = set(
-                ["NSE_INDEX|Nifty 50", "NSE_INDEX|Nifty Bank", "BSE_INDEX|SENSEX"]
-            )
+            # Emergency fallback - Include FNO stocks and indices
+            from services.fno_stock_service import get_fno_stocks_from_file
+            emergency_keys = ["NSE_INDEX|Nifty 50", "NSE_INDEX|Nifty Bank", "BSE_INDEX|SENSEX"]
+            
+            # Add top FNO stocks for better data coverage
+            try:
+                fno_stocks = get_fno_stocks_from_file()
+                if fno_stocks:
+                    # Add top 50 FNO stocks by volume/activity
+                    top_fno = [stock for stock in fno_stocks if stock.get('symbol') and stock.get('exchange') == 'NSE'][:50]
+                    for stock in top_fno:
+                        if stock.get('symbol'):
+                            # Use NSE_EQ format for equity stocks
+                            emergency_keys.append(f"NSE_EQ|{stock['symbol']}")
+                    
+                    logger.info(f"✅ Added {len(top_fno)} top FNO stocks to emergency fallback")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load FNO stocks for fallback: {e}")
+            
+            self.all_instrument_keys = set(emergency_keys)
             logger.warning(
-                f"⚠️ Emergency fallback: {len(self.all_instrument_keys)} keys"
+                f"⚠️ Emergency fallback: {len(self.all_instrument_keys)} keys (indices + FNO stocks)"
             )
             return True
 
@@ -531,6 +802,9 @@ class CentralizedWebSocketManager:
     async def _start_ws_client(self):
         """Start the actual WebSocket client"""
         try:
+            # Validate and refresh token before starting connection
+            await self._validate_and_refresh_token()
+            
             # Stop existing client
             if self.ws_client:
                 self.ws_client.stop()
@@ -849,9 +1123,11 @@ class CentralizedWebSocketManager:
                     )
 
                 # If we have index data, emit separate index event
-                index_data = {k: v for k, v in normalized_data.items() if "INDEX" in k}
+                index_data = {k: v for k, v in normalized_data.items() 
+                             if any(idx in k.upper() for idx in ["NIFTY", "SENSEX", "BANKEX", "INDEX"])}
                 if index_data:
                     unified_manager.emit_event("index_update", index_data)
+                    logger.info(f"📊 Broadcasting {len(index_data)} indices: {list(index_data.keys())[:5]}...")
 
                 logger.debug(
                     f"📡 Emitted events: {len(normalized_data)} instruments, {len(index_data)} indices"
@@ -1067,7 +1343,7 @@ class CentralizedWebSocketManager:
             # Calculate derived metrics
             self._calculate_price_metrics(extracted_data)
 
-            # Create enriched structure
+            # Create enriched structure with frontend-compatible field names
             enriched = {
                 # Identifiers
                 "instrument_key": instrument_key,
@@ -1076,8 +1352,10 @@ class CentralizedWebSocketManager:
                 "exchange": symbol_info["exchange"],
                 "sector": symbol_info["sector"],
                 "instrument_type": symbol_info["type"],
-                # Price data
+                # Price data with frontend-compatible field names
                 **extracted_data,
+                # CRITICAL FIX: Add frontend-compatible field mapping
+                "last_price": extracted_data.get("ltp", 0),  # Map ltp → last_price for frontend
                 # Metadata
                 "timestamp": datetime.now().isoformat(),
                 "data_source": "upstox_live",
@@ -1568,32 +1846,166 @@ class CentralizedWebSocketManager:
         task.add_done_callback(self.background_tasks.discard)
 
     async def _update_cache(self, feed_data: dict):
-        """Update market data cache"""
+        """Update market data cache with proper data extraction and field mapping"""
         if not feed_data:
             return
 
-        # Update cache
-        for instrument_key, data in feed_data.items():
-            self.market_data_cache[instrument_key] = data
+        processed_count = 0
+        indices_count = 0
+        stocks_count = 0
+
+        # Process each instrument
+        for instrument_key, raw_data in feed_data.items():
+            try:
+                # Extract data based on Upstox feed structure
+                extracted_data = self._extract_market_data(instrument_key, raw_data)
+                
+                if extracted_data and extracted_data.get("ltp", 0) > 0:
+                    # CRITICAL FIX: Add frontend-compatible field mapping
+                    processed_data = {
+                        **extracted_data,
+                        "last_price": extracted_data.get("ltp", 0),  # Map ltp → last_price for frontend
+                        "symbol": self._extract_symbol_from_key(instrument_key),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    # Update cache with processed data
+                    self.market_data_cache[instrument_key] = processed_data
+                    processed_count += 1
+                    
+                    # Count by type
+                    if "INDEX|" in instrument_key:
+                        indices_count += 1
+                    else:
+                        stocks_count += 1
+                else:
+                    # Still store raw data for debugging but mark as incomplete
+                    incomplete_data = {
+                        "raw_data": raw_data,
+                        "symbol": self._extract_symbol_from_key(instrument_key),
+                        "ltp": 0,
+                        "last_price": 0,
+                        "status": "incomplete",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    self.market_data_cache[instrument_key] = incomplete_data
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error processing {instrument_key}: {e}")
+
+        # Log processing stats
+        if processed_count > 0:
+            logger.info(f"📊 Processed {processed_count} instruments ({indices_count} indices, {stocks_count} stocks)")
 
         # Store in Redis if available
-        if redis_manager:
+        if redis_manager and processed_count > 0:
             try:
                 essential_data = {}
-                for key, data in feed_data.items():
-                    if isinstance(data, dict):
+                for key, data in self.market_data_cache.items():
+                    if isinstance(data, dict) and data.get("ltp", 0) > 0:
                         essential_data[key] = {
-                            "ltp": data.get("ltp"),
+                            "ltp": data.get("ltp", 0),
+                            "last_price": data.get("last_price", 0),  # Include frontend field
                             "ltq": data.get("ltq"),
                             "cp": data.get("cp"),
-                            "timestamp": data.get(
-                                "timestamp", datetime.now().isoformat()
-                            ),
+                            "symbol": data.get("symbol"),
+                            "timestamp": data.get("timestamp", datetime.now().isoformat()),
                         }
 
                 redis_manager.set("market_data_cache", essential_data, ttl=3600)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to store market data in Redis: {e}")
+
+    def _extract_market_data(self, instrument_key: str, raw_data: dict) -> dict:
+        """Extract market data from Upstox feed structure"""
+        try:
+            extracted = {}
+            
+            # Handle different Upstox data structures
+            if isinstance(raw_data, dict):
+                full_feed = raw_data.get("fullFeed", {})
+                
+                # For indices: indexFF -> ltpc
+                if "indexFF" in full_feed:
+                    ltpc_data = full_feed["indexFF"].get("ltpc", {})
+                    if ltpc_data and ltpc_data.get("ltp"):
+                        extracted = {
+                            "ltp": ltpc_data.get("ltp", 0),
+                            "ltt": ltpc_data.get("ltt"),
+                            "cp": ltpc_data.get("cp", 0),
+                            "change": ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0),
+                            "type": "index"
+                        }
+                        # Calculate change percentage
+                        if ltpc_data.get("cp", 0) > 0:
+                            extracted["change_percent"] = round(
+                                ((ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0)) / ltpc_data.get("cp", 0)) * 100, 2
+                            )
+                
+                # For stocks: marketFF -> ltpc
+                elif "marketFF" in full_feed:
+                    ltpc_data = full_feed["marketFF"].get("ltpc", {})
+                    market_level = full_feed["marketFF"].get("marketLevel", {})
+                    
+                    # Sometimes stock data is in ltpc
+                    if ltpc_data and ltpc_data.get("ltp"):
+                        extracted = {
+                            "ltp": ltpc_data.get("ltp", 0),
+                            "ltt": ltpc_data.get("ltt"),
+                            "cp": ltpc_data.get("cp", 0),
+                            "ltq": ltpc_data.get("ltq", 0),
+                            "change": ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0),
+                            "type": "stock"
+                        }
+                        # Calculate change percentage
+                        if ltpc_data.get("cp", 0) > 0:
+                            extracted["change_percent"] = round(
+                                ((ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0)) / ltpc_data.get("cp", 0)) * 100, 2
+                            )
+                    
+                    # Sometimes data is in marketLevel
+                    elif market_level:
+                        bid_ask = market_level.get("bidAsk", {})
+                        if bid_ask:
+                            # Use bid/ask as fallback
+                            bid_price = bid_ask.get("bid", [{}])[0].get("price", 0) if bid_ask.get("bid") else 0
+                            ask_price = bid_ask.get("ask", [{}])[0].get("price", 0) if bid_ask.get("ask") else 0
+                            
+                            if bid_price > 0 or ask_price > 0:
+                                ltp = (bid_price + ask_price) / 2 if bid_price > 0 and ask_price > 0 else (bid_price or ask_price)
+                                extracted = {
+                                    "ltp": ltp,
+                                    "bid": bid_price,
+                                    "ask": ask_price,
+                                    "type": "stock",
+                                    "source": "bid_ask"
+                                }
+                
+                # Direct data format (fallback)
+                elif raw_data.get("ltp"):
+                    extracted = {
+                        "ltp": raw_data.get("ltp", 0),
+                        "ltt": raw_data.get("ltt"),
+                        "cp": raw_data.get("cp", 0),
+                        "ltq": raw_data.get("ltq", 0),
+                        "type": "direct"
+                    }
+                    
+            return extracted
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error extracting data for {instrument_key}: {e}")
+            return {}
+
+    def _extract_symbol_from_key(self, instrument_key: str) -> str:
+        """Extract symbol from instrument key"""
+        try:
+            # Format: "NSE_EQ|RELIANCE" or "NSE_INDEX|Nifty 50"
+            if "|" in instrument_key:
+                return instrument_key.split("|", 1)[1]
+            return instrument_key
+        except:
+            return instrument_key
 
     async def _broadcast_market_status(self):
         """Broadcast market status to all clients"""
@@ -1766,24 +2178,48 @@ class CentralizedWebSocketManager:
         logger.error("🔐 Admin token authentication failed")
         self.connection_ready.clear()
 
-        # Try to refresh token
+        # First try to trigger automated token refresh
+        logger.info("🔄 Attempting automated token refresh...")
+        refresh_success = await self._try_automated_refresh()
+        
+        if refresh_success:
+            logger.info("✅ Automated token refresh successful, reloading token...")
+            token_refreshed = await self._load_admin_token()
+            if token_refreshed:
+                logger.info("✅ New token loaded, triggering reconnection...")
+                # Reset reconnect attempts to allow retry with new token
+                self.reconnect_attempts = 0
+                # Clear any connection ready flag to force reconnect
+                self.connection_ready.clear()
+                return
+        
+        # Fallback: Try to reload token from database (in case it was manually refreshed)
         token_refreshed = await self._load_admin_token()
 
         if not token_refreshed:
-            # Send error notification
+            # Send error notification with enhanced troubleshooting
             subject = "🚨 Critical: Trading Bot Admin Token Expired"
             message = f"""
             The admin token for the centralized WebSocket manager has expired.
+            Automated refresh failed - manual intervention required.
             
             Immediate action required:
             1. Log in to the admin dashboard
-            2. Refresh the Upstox broker connection
+            2. Refresh the Upstox broker connection manually
             3. Verify the new token is valid
+            
+            If running on Windows and automation fails:
+            1. Browser automation may not work due to subprocess limitations
+            2. Consider running from WSL for automated token refresh
+            3. Use manual token refresh via Upstox website as workaround
             
             System Impact:
             - Real-time market data will not be available
             - Trading signals may be delayed
             - Dashboard updates will stop
+            
+            Time: {datetime.now()}
+            Reconnect attempts: {self.reconnect_attempts}/{self.max_reconnect_attempts}
             """
 
             try:
@@ -2146,6 +2582,12 @@ class CentralizedWebSocketManager:
 
     def get_dashboard_data(self) -> Dict[str, Any]:
         """Get formatted data for dashboard"""
+        # Calculate active instruments (those with recent valid data)
+        active_instruments = 0
+        for data in self.market_data_cache.values():
+            if isinstance(data, dict) and data.get('last_price'):
+                active_instruments += 1
+        
         return {
             "market_status": self.market_status,
             "last_updated": (
@@ -2153,6 +2595,8 @@ class CentralizedWebSocketManager:
             ),
             "data": self.market_data_cache,
             "update_count": self.update_count,
+            "total_instruments": len(self.market_data_cache),
+            "active_instruments": active_instruments,
         }
 
     def get_top_performers(

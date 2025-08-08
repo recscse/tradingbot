@@ -187,7 +187,8 @@ SECTOR_STOCKS = {
         "OBEROIRLTY",
         "PHOENIXLTD",
         "LODHA",
-        "PRESTIGE",  # Added
+        "PRESTIGE",
+        "NCC",  # Added
     ],
     "CEMENT": [
         "ULTRACEMCO",
