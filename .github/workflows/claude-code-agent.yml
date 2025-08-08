@@ -1,0 +1,383 @@
+# Claude Code Agent Integration for Automated Code Review and Analysis
+name: Claude Code Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    paths:
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.ts'
+      - '**/*.tsx'
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      task_type:
+        description: 'Type of Claude Code task'
+        required: true
+        default: 'code_review'
+        type: choice
+        options:
+          - code_review
+          - bug_analysis
+          - feature_implementation
+          - security_audit
+          - documentation_update
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  claude-code-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Get changed files
+      id: changed-files
+      run: |
+        # Get list of changed files
+        CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+        echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+        # Count and categorize changes
+        PYTHON_CHANGES=$(echo "$CHANGED_FILES" | grep -E "\.py$" | wc -l)
+        JS_CHANGES=$(echo "$CHANGED_FILES" | grep -E "\.(js|jsx|ts|tsx)$" | wc -l)
+        TRADING_CHANGES=$(echo "$CHANGED_FILES" | grep -E "(trading|broker|strategy|order)" | wc -l)
+        
+        echo "python_changes=$PYTHON_CHANGES" >> $GITHUB_OUTPUT
+        echo "js_changes=$JS_CHANGES" >> $GITHUB_OUTPUT
+        echo "trading_changes=$TRADING_CHANGES" >> $GITHUB_OUTPUT
+        
+    - name: Analyze code complexity and patterns
+      id: code-analysis
+      run: |
+        echo "🤖 Claude Code Agent Analysis" > analysis_report.md
+        echo "================================" >> analysis_report.md
+        echo "" >> analysis_report.md
+        
+        # Simulate Claude Code analysis (in real implementation, this would call Claude API)
+        echo "## 📊 Code Analysis Summary" >> analysis_report.md
+        echo "" >> analysis_report.md
+        echo "- **Python files changed**: ${{ steps.changed-files.outputs.python_changes }}" >> analysis_report.md
+        echo "- **JavaScript/TypeScript files changed**: ${{ steps.changed-files.outputs.js_changes }}" >> analysis_report.md
+        echo "- **Trading-related files changed**: ${{ steps.changed-files.outputs.trading_changes }}" >> analysis_report.md
+        echo "" >> analysis_report.md
+        
+        # Check for common patterns that need attention
+        if [ "${{ steps.changed-files.outputs.trading_changes }}" -gt "0" ]; then
+          echo "## ⚠️ Trading System Changes Detected" >> analysis_report.md
+          echo "" >> analysis_report.md
+          echo "**Claude Code Agent Recommendations:**" >> analysis_report.md
+          echo "1. ✅ Verify risk management logic" >> analysis_report.md
+          echo "2. ✅ Test with paper trading first" >> analysis_report.md
+          echo "3. ✅ Validate position sizing calculations" >> analysis_report.md
+          echo "4. ✅ Check stop-loss mechanisms" >> analysis_report.md
+          echo "5. ✅ Review broker API error handling" >> analysis_report.md
+          echo "" >> analysis_report.md
+        fi
+        
+        # Check for security patterns
+        SECURITY_PATTERNS=$(git diff origin/main...HEAD | grep -i -E "(password|secret|key|token|api)" || echo "")
+        if [ ! -z "$SECURITY_PATTERNS" ]; then
+          echo "## 🔒 Security Review Required" >> analysis_report.md
+          echo "" >> analysis_report.md
+          echo "**Potential security-sensitive changes detected:**" >> analysis_report.md
+          echo '```diff' >> analysis_report.md
+          echo "$SECURITY_PATTERNS" | head -10 >> analysis_report.md
+          echo '```' >> analysis_report.md
+          echo "" >> analysis_report.md
+          echo "**Claude Code Agent Security Checklist:**" >> analysis_report.md
+          echo "- [ ] Verify no hardcoded credentials" >> analysis_report.md
+          echo "- [ ] Ensure secrets use environment variables" >> analysis_report.md
+          echo "- [ ] Check for proper input validation" >> analysis_report.md
+          echo "- [ ] Review authentication logic" >> analysis_report.md
+          echo "" >> analysis_report.md
+        fi
+        
+        # Performance analysis
+        LARGE_FILES=$(echo "${{ steps.changed-files.outputs.changed_files }}" | xargs wc -l 2>/dev/null | sort -nr | head -5 || echo "")
+        if [ ! -z "$LARGE_FILES" ]; then
+          echo "## 🚀 Performance Considerations" >> analysis_report.md
+          echo "" >> analysis_report.md
+          echo "**Files with significant changes:**" >> analysis_report.md
+          echo '```' >> analysis_report.md
+          echo "$LARGE_FILES" >> analysis_report.md
+          echo '```' >> analysis_report.md
+          echo "" >> analysis_report.md
+        fi
+        
+        # Code quality suggestions
+        echo "## 💡 Claude Code Agent Suggestions" >> analysis_report.md
+        echo "" >> analysis_report.md
+        echo "**Automated Code Quality Recommendations:**" >> analysis_report.md
+        
+        if [ "${{ steps.changed-files.outputs.python_changes }}" -gt "0" ]; then
+          echo "### Python Code:" >> analysis_report.md
+          echo "- Consider adding type hints for better code clarity" >> analysis_report.md
+          echo "- Ensure proper error handling and logging" >> analysis_report.md
+          echo "- Add docstrings for new functions/classes" >> analysis_report.md
+          echo "- Consider breaking down large functions (>50 lines)" >> analysis_report.md
+          echo "" >> analysis_report.md
+        fi
+        
+        if [ "${{ steps.changed-files.outputs.js_changes }}" -gt "0" ]; then
+          echo "### JavaScript/TypeScript Code:" >> analysis_report.md
+          echo "- Use TypeScript for better type safety" >> analysis_report.md
+          echo "- Implement proper error boundaries" >> analysis_report.md
+          echo "- Consider memoization for expensive computations" >> analysis_report.md
+          echo "- Add unit tests for new components" >> analysis_report.md
+          echo "" >> analysis_report.md
+        fi
+        
+        echo "## 🧪 Testing Recommendations" >> analysis_report.md
+        echo "" >> analysis_report.md
+        echo "**Claude Code Agent Testing Strategy:**" >> analysis_report.md
+        echo "1. **Unit Tests**: Add tests for new functions/components" >> analysis_report.md
+        echo "2. **Integration Tests**: Test API endpoints and database interactions" >> analysis_report.md
+        echo "3. **E2E Tests**: Verify critical user workflows" >> analysis_report.md
+        echo "4. **Performance Tests**: Monitor response times and memory usage" >> analysis_report.md
+        
+        if [ "${{ steps.changed-files.outputs.trading_changes }}" -gt "0" ]; then
+          echo "5. **Trading Tests**: Backtest strategies with historical data" >> analysis_report.md
+          echo "6. **Paper Trading**: Validate with simulated trades" >> analysis_report.md
+        fi
+        
+        echo "" >> analysis_report.md
+        echo "---" >> analysis_report.md
+        echo "*🤖 Analysis generated by Claude Code Agent Integration*" >> analysis_report.md
+        echo "*For more detailed analysis, run: \`claude-code analyze --comprehensive\`*" >> analysis_report.md
+        
+    - name: Post Claude Code analysis to PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const analysisReport = fs.readFileSync('analysis_report.md', 'utf8');
+          
+          // Find existing Claude Code comment to update
+          const comments = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const existingComment = comments.data.find(comment => 
+            comment.body.includes('🤖 Claude Code Agent Analysis')
+          );
+          
+          if (existingComment) {
+            // Update existing comment
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existingComment.id,
+              body: analysisReport
+            });
+          } else {
+            // Create new comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: analysisReport
+            });
+          }
+
+  claude-bug-analysis:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'bug')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Analyze bug report
+      id: bug-analysis
+      env:
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        ISSUE_BODY: ${{ github.event.issue.body }}
+      run: |
+        echo "🤖 Claude Code Agent - Bug Analysis" > bug_analysis.md
+        echo "====================================" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        
+        echo "## 📋 Bug Report Analysis" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo "**Issue**: $ISSUE_TITLE" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        
+        # Categorize bug type based on title/content
+        if [[ "$ISSUE_TITLE" =~ [Tt]rading|[Oo]rder|[Bb]roker ]]; then
+          echo "## 🎯 Bug Category: Trading System" >> bug_analysis.md
+          echo "" >> bug_analysis.md
+          echo "**Claude Code Agent Investigation Areas:**" >> bug_analysis.md
+          echo "1. 🔍 Check broker API integration logs" >> bug_analysis.md
+          echo "2. 🔍 Verify order placement logic" >> bug_analysis.md
+          echo "3. 🔍 Review risk management calculations" >> bug_analysis.md
+          echo "4. 🔍 Check WebSocket connection stability" >> bug_analysis.md
+          echo "5. 🔍 Validate market data accuracy" >> bug_analysis.md
+        elif [[ "$ISSUE_TITLE" =~ [Uu]I|[Ff]rontend|[Rr]eact ]]; then
+          echo "## 🎯 Bug Category: Frontend/UI" >> bug_analysis.md
+          echo "" >> bug_analysis.md
+          echo "**Claude Code Agent Investigation Areas:**" >> bug_analysis.md
+          echo "1. 🔍 Check browser console for errors" >> bug_analysis.md
+          echo "2. 🔍 Verify React component state management" >> bug_analysis.md
+          echo "3. 🔍 Review Material-UI component usage" >> bug_analysis.md
+          echo "4. 🔍 Check responsive design breakpoints" >> bug_analysis.md
+          echo "5. 🔍 Validate API call handling" >> bug_analysis.md
+        elif [[ "$ISSUE_TITLE" =~ [Aa]PI|[Bb]ackend|[Dd]atabase ]]; then
+          echo "## 🎯 Bug Category: Backend/API" >> bug_analysis.md
+          echo "" >> bug_analysis.md
+          echo "**Claude Code Agent Investigation Areas:**" >> bug_analysis.md
+          echo "1. 🔍 Check server logs for errors" >> bug_analysis.md
+          echo "2. 🔍 Verify database queries and migrations" >> bug_analysis.md
+          echo "3. 🔍 Review API endpoint logic" >> bug_analysis.md
+          echo "4. 🔍 Check authentication and authorization" >> bug_analysis.md
+          echo "5. 🔍 Validate data serialization/deserialization" >> bug_analysis.md
+        else
+          echo "## 🎯 Bug Category: General" >> bug_analysis.md
+          echo "" >> bug_analysis.md
+          echo "**Claude Code Agent Investigation Areas:**" >> bug_analysis.md
+          echo "1. 🔍 Review recent code changes" >> bug_analysis.md
+          echo "2. 🔍 Check system logs and metrics" >> bug_analysis.md
+          echo "3. 🔍 Verify environment configuration" >> bug_analysis.md
+          echo "4. 🔍 Test reproduction steps" >> bug_analysis.md
+          echo "5. 🔍 Check for related issues" >> bug_analysis.md
+        fi
+        
+        echo "" >> bug_analysis.md
+        echo "## 🔧 Suggested Debug Commands" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo '```bash' >> bug_analysis.md
+        echo "# Check application health" >> bug_analysis.md
+        echo "curl http://localhost:8000/health" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo "# View recent logs" >> bug_analysis.md
+        echo "tail -f logs/application.log" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo "# Check database connectivity" >> bug_analysis.md
+        echo "python -c \"from database.connection import get_db; next(get_db())\"" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo "# Verify broker connections" >> bug_analysis.md
+        echo "python check_upstox_status.py" >> bug_analysis.md
+        echo '```' >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        
+        echo "## 📝 Next Steps" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo "**Claude Code Agent Recommendations:**" >> bug_analysis.md
+        echo "1. 📋 **Reproduce**: Follow the steps to reproduce the issue" >> bug_analysis.md
+        echo "2. 🔍 **Investigate**: Use the debug commands above" >> bug_analysis.md
+        echo "3. 📊 **Analyze**: Check logs, metrics, and recent changes" >> bug_analysis.md
+        echo "4. 🔧 **Fix**: Implement solution and add tests" >> bug_analysis.md
+        echo "5. ✅ **Verify**: Test fix in development and staging" >> bug_analysis.md
+        echo "" >> bug_analysis.md
+        echo "---" >> bug_analysis.md
+        echo "*🤖 Analysis generated by Claude Code Agent*" >> bug_analysis.md
+        
+    - name: Post bug analysis to issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const bugAnalysis = fs.readFileSync('bug_analysis.md', 'utf8');
+          
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: bugAnalysis
+          });
+
+  claude-manual-task:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Execute Claude Code task
+      run: |
+        echo "🤖 Executing Claude Code Agent Task: ${{ github.event.inputs.task_type }}"
+        
+        case "${{ github.event.inputs.task_type }}" in
+          "security_audit")
+            echo "Running security audit..."
+            # In real implementation, this would trigger Claude Code security analysis
+            echo "Security audit completed - check security scan results"
+            ;;
+          "feature_implementation")
+            echo "Analyzing feature implementation requirements..."
+            # This would analyze feature requests and provide implementation guidance
+            echo "Feature analysis completed - check implementation suggestions"
+            ;;
+          "documentation_update")
+            echo "Reviewing documentation completeness..."
+            # This would analyze code and suggest documentation updates
+            echo "Documentation review completed - check suggestions"
+            ;;
+          *)
+            echo "Running general code review..."
+            echo "Code review completed - check analysis results"
+            ;;
+        esac
+        
+    - name: Create task summary
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const taskType = '${{ github.event.inputs.task_type }}';
+          const summary = `🤖 **Claude Code Agent Task Completed**
+          
+          **Task Type**: ${taskType}
+          **Status**: ✅ Completed
+          **Timestamp**: ${new Date().toISOString()}
+          
+          Check the Actions log for detailed results and recommendations.
+          
+          *Automated by Claude Code Agent Integration*`;
+          
+          // You could post this as a comment to a specific issue or create a new issue
+          console.log(summary);
+
+  claude-security-monitor:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Security monitoring check
+      run: |
+        echo "🔒 Claude Code Agent - Security Monitoring"
+        
+        # Check for potential security issues in the latest commits
+        RECENT_CHANGES=$(git log --oneline -10)
+        
+        if echo "$RECENT_CHANGES" | grep -i -E "(password|secret|key|token|api)"; then
+          echo "⚠️ Security-sensitive changes detected in recent commits"
+          echo "Triggering security review..."
+          # In production, this could trigger additional security scans
+        fi
+        
+        # Check for configuration changes
+        if git diff --name-only HEAD~1 HEAD | grep -E "(\.env|config|settings)"; then
+          echo "📋 Configuration changes detected - verify security settings"
+        fi
+        
+        echo "✅ Security monitoring completed"

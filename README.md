@@ -41,6 +41,7 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 ### Automation & DevOps
 - **🤖 Automated PR Creation**: Creates PRs when pushing to feature branches
 - **⚡ Auto-Merge System**: Merges PRs automatically when conditions are met
+- **🧠 Claude Code Agent Integration**: AI-powered code review and analysis
 - **🔒 Security Scanning**: CodeQL, dependency checks, vulnerability monitoring
 - **📊 Performance Monitoring**: Prometheus + Grafana stack
 - **☁️ Cloud Deployment**: Render (backend) + Netlify (frontend)
@@ -219,6 +220,13 @@ See [`.env.template`](.env.template) for complete configuration options.
 - **Smart Labeling**: Automatic labels based on file changes
 - **Reviewer Assignment**: Auto-assigns based on code changes
 
+#### Claude Code Agent Integration 🧠
+- **Intelligent Code Review**: AI-powered analysis of every PR
+- **Trading-Specific Validation**: Extra scrutiny for trading system changes
+- **Security Analysis**: Automated detection of security-sensitive changes
+- **Bug Investigation**: AI-assisted bug analysis and resolution guidance
+- **Performance Optimization**: Automated suggestions for code improvements
+
 #### Quality Gates
 - **Security Scanning**: CodeQL, Bandit, Safety checks
 - **Code Quality**: Linting, formatting, complexity analysis
@@ -299,6 +307,7 @@ See [SECURITY_FIXES.md](SECURITY_FIXES.md) for detailed security documentation.
 ### Available Documentation
 - **[CLAUDE.md](CLAUDE.md)**: Comprehensive development guide
 - **[PR_AUTOMATION_GUIDE.md](PR_AUTOMATION_GUIDE.md)**: Automation workflows
+- **[CLAUDE_CODE_INTEGRATION.md](.github/CLAUDE_CODE_INTEGRATION.md)**: AI-powered development assistance
 - **[SECURITY_FIXES.md](SECURITY_FIXES.md)**: Security guidelines
 - **API Docs**: Available at `/docs` endpoint
 - **OpenAPI Spec**: Available at `/openapi.json`

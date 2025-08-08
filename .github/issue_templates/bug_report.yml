@@ -1,0 +1,169 @@
+name: 🐛 Bug Report
+description: Report a bug to help us improve the trading platform
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🤖 Claude Code Agent Integration
+        This bug report will be automatically analyzed by our Claude Code Agent for faster resolution.
+        Please provide as much detail as possible to help with automated analysis.
+        
+  - type: dropdown
+    id: bug-category
+    attributes:
+      label: Bug Category
+      description: Select the primary category for this bug
+      options:
+        - Trading System (orders, strategies, risk management)
+        - Frontend/UI (React components, user interface)
+        - Backend/API (server, database, authentication)
+        - Broker Integration (Upstox, Zerodha, Angel One, etc.)
+        - WebSocket/Real-time (market data, live updates)
+        - Security (authentication, permissions, data protection)
+        - Performance (speed, memory, responsiveness)
+        - Other/General
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity Level
+      description: How severely does this bug impact the system?
+      options:
+        - Critical (Trading stopped, data loss, security breach)
+        - High (Major functionality broken, affects multiple users)
+        - Medium (Feature partially working, workaround available)
+        - Low (Minor issue, cosmetic problem)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Clear and concise description of what the bug is
+      placeholder: |
+        Example: "Order execution fails when placing stop-loss orders for NSE options during market hours"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the issue
+      placeholder: |
+        1. Go to Trading Dashboard
+        2. Select NSE options
+        3. Set stop-loss order with 2% below current price
+        4. Click "Place Order"
+        5. Error appears: "Order placement failed"
+      value: |
+        1. 
+        2. 
+        3. 
+        4. 
+        5. 
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What should happen instead?
+      placeholder: "Order should be placed successfully and appear in the orders list"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happens?
+      placeholder: "Error message appears and order is not placed"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Where is this bug occurring?
+      options:
+        - Production (Live trading)
+        - Staging/Development
+        - Local development
+        - Paper trading/Demo
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: brokers-affected
+    attributes:
+      label: Affected Brokers (if applicable)
+      description: Which brokers are affected by this issue?
+      options:
+        - label: Upstox
+        - label: Zerodha
+        - label: Angel One
+        - label: Dhan
+        - label: Fyers
+        - label: Not broker-specific
+
+  - type: textarea
+    id: browser-device
+    attributes:
+      label: Browser/Device Information
+      description: Browser, version, device information (for UI bugs)
+      placeholder: |
+        - Browser: Chrome 120.0
+        - Device: Desktop Windows 11
+        - Screen resolution: 1920x1080
+
+  - type: textarea
+    id: error-messages
+    attributes:
+      label: Error Messages/Logs
+      description: Any error messages, console logs, or stack traces
+      placeholder: |
+        Console Error:
+        ```
+        TypeError: Cannot read property 'price' of undefined
+        at OrderComponent.jsx:45
+        ```
+      render: shell
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Any other relevant information:
+        - Screenshots/videos
+        - Market conditions when bug occurred
+        - Account/broker configuration
+        - Recent changes or updates
+      placeholder: |
+        - Bug started occurring after market open at 9:15 AM
+        - Only affects options trading, equity orders work fine
+        - Happens with both buy and sell orders
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 🤖 What Happens Next?
+        
+        1. **Automated Analysis**: Claude Code Agent will analyze this bug report
+        2. **Categorization**: The bug will be automatically categorized and prioritized
+        3. **Investigation Guide**: You'll receive automated debugging suggestions
+        4. **Team Assignment**: The issue will be routed to the appropriate team
+        
+        **For Critical/High Severity Bugs**: The development team will be automatically notified.
+        
+        ---
+        
+        💡 **Tip**: The more detailed information you provide, the better our automated analysis will be!

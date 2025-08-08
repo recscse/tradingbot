@@ -1,0 +1,211 @@
+name: ✨ Feature Request
+description: Suggest a new feature for the trading platform
+title: "[Feature]: "
+labels: [enhancement, feature-request]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🤖 Claude Code Agent Integration
+        This feature request will be analyzed by our Claude Code Agent to provide:
+        - Implementation complexity analysis
+        - Architecture recommendations
+        - Technical feasibility assessment
+        - Integration considerations
+        
+  - type: dropdown
+    id: feature-category
+    attributes:
+      label: Feature Category
+      description: Select the primary category for this feature
+      options:
+        - Trading Features (new strategies, order types, risk management)
+        - UI/UX Improvements (interface, user experience, design)
+        - Broker Integration (new brokers, enhanced functionality)
+        - Analytics & Reporting (charts, reports, performance metrics)
+        - Real-time Features (notifications, alerts, live data)
+        - Security & Authentication (login, permissions, data protection)
+        - API & Integrations (webhooks, third-party services)
+        - Performance & Optimization (speed, memory, efficiency)
+        - Admin & Management (user management, system controls)
+        - Mobile & Accessibility (mobile support, accessibility features)
+        - Other/General
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How important is this feature for the trading platform?
+      options:
+        - Critical (Essential for trading operations)
+        - High (Significantly improves user experience)
+        - Medium (Nice to have, would add value)
+        - Low (Minor enhancement)
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature-summary
+    attributes:
+      label: Feature Summary
+      description: Brief, clear description of the proposed feature
+      placeholder: |
+        Example: "Add support for options chain analysis with Greeks calculation and volatility charting"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem/Need
+      description: What problem does this feature solve? What need does it address?
+      placeholder: |
+        Example: "Currently, traders need to use external tools to analyze options Greeks and implied volatility, which breaks their workflow and creates inefficiencies in decision-making"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Detailed description of how you envision this feature working
+      placeholder: |
+        Example: "Integrate an options chain view in the trading dashboard that shows:
+        - Live Greeks (Delta, Gamma, Theta, Vega) for all strikes
+        - Implied volatility surface visualization
+        - Options flow and volume analysis
+        - One-click trading from the chain view"
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-stories
+    attributes:
+      label: User Stories
+      description: Describe how different users would interact with this feature
+      placeholder: |
+        As a [type of user], I want [functionality] so that [benefit].
+        
+        Example:
+        - As a options trader, I want to see live Greeks so that I can make informed hedging decisions
+        - As a portfolio manager, I want volatility alerts so that I can adjust positions proactively
+        - As a day trader, I want quick options entry so that I can capitalize on momentum moves
+      value: |
+        - As a [user type], I want [functionality] so that [benefit]
+        - As a [user type], I want [functionality] so that [benefit]
+        - As a [user type], I want [functionality] so that [benefit]
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Specific, measurable criteria that define when this feature is complete
+      placeholder: |
+        Example:
+        - [ ] Options chain displays all strikes with bid/ask prices
+        - [ ] Greeks are calculated and updated in real-time
+        - [ ] User can place orders directly from the chain
+        - [ ] Volatility charts are interactive and zoomable
+        - [ ] Feature works with all supported brokers
+      value: |
+        - [ ] 
+        - [ ] 
+        - [ ] 
+        - [ ] 
+
+  - type: checkboxes
+    id: affected-components
+    attributes:
+      label: Affected Components
+      description: Which parts of the system would this feature impact?
+      options:
+        - label: Frontend/UI (React components, user interface)
+        - label: Backend/API (server logic, database changes)
+        - label: Real-time System (WebSocket, live data)
+        - label: Broker Integration (API calls, authentication)
+        - label: Database Schema (new tables, fields)
+        - label: Authentication/Security (permissions, access control)
+        - label: Performance/Caching (optimization requirements)
+        - label: Mobile Interface (responsive design, mobile features)
+
+  - type: textarea
+    id: technical-considerations
+    attributes:
+      label: Technical Considerations
+      description: Any technical requirements, constraints, or considerations
+      placeholder: |
+        Example:
+        - Requires real-time options data feed from broker APIs
+        - Need to implement complex mathematical calculations for Greeks
+        - May require additional database tables for options metadata
+        - Should cache frequently accessed data for performance
+        - Need to handle different options naming conventions across brokers
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Other ways this problem could be solved or similar features that exist
+      placeholder: |
+        Example:
+        - Users currently export data to Excel for analysis
+        - Some brokers provide basic options chains in their platforms
+        - Third-party tools like OptionsFlow provide similar functionality
+        - Could integrate with external data providers instead of building in-house
+
+  - type: dropdown
+    id: implementation-complexity
+    attributes:
+      label: Estimated Implementation Complexity
+      description: Your assessment of how complex this feature might be to implement
+      options:
+        - Simple (Few days, minimal changes)
+        - Medium (1-2 weeks, moderate changes)
+        - Complex (3-4 weeks, significant changes)
+        - Major (1+ months, architectural changes)
+        - Unknown/Need Analysis
+
+  - type: textarea
+    id: mockups-examples
+    attributes:
+      label: Mockups/Examples
+      description: |
+        Links to mockups, wireframes, screenshots, or examples from other platforms
+        (You can also drag and drop images here)
+      placeholder: |
+        Example:
+        - Wireframe: [Link to design]
+        - Similar feature in other platform: [Screenshot or link]
+        - User flow diagram: [Link to diagram]
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information, research, or context that might be helpful
+      placeholder: |
+        Example:
+        - Market research showing demand for this feature
+        - Regulatory considerations for Indian markets
+        - Integration requirements with existing systems
+        - Performance benchmarks or requirements
+        - User feedback or requests that led to this proposal
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 🤖 What Happens Next?
+        
+        1. **Automated Analysis**: Claude Code Agent will analyze this feature request
+        2. **Feasibility Assessment**: Technical complexity and implementation approach evaluation
+        3. **Architecture Planning**: High-level design recommendations and considerations
+        4. **Priority Scoring**: Feature will be scored against platform roadmap priorities
+        5. **Team Review**: Development team will review and provide timeline estimates
+        
+        **High Priority Features**: Will be fast-tracked for architectural review and planning.
+        
+        ---
+        
+        💡 **Tip**: Detailed technical considerations and user stories help our automated analysis provide better implementation guidance!
