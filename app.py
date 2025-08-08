@@ -555,15 +555,13 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ TradingScheduler not available")
 
         # 7.1. Initialize Upstox Token Automation
-        logger.info("🔄 Starting Upstox Token Automation...")
+        logger.info("🔄 Starting Upstox Token Automation (2GB RAM)...")
         try:
             from services.upstox_automation_service import start_upstox_automation
-
+            
             upstox_automation = start_upstox_automation()
             if upstox_automation:
-                logger.info(
-                    "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
-                )
+                logger.info("✅ Upstox token automation started - will refresh tokens daily at 4:00 AM")
             else:
                 logger.warning("⚠️ Upstox token automation failed to start")
         except Exception as e:
@@ -665,7 +663,7 @@ async def lifespan(app: FastAPI):
         # Stop Upstox automation
         try:
             from services.upstox_automation_service import stop_upstox_automation
-
+            
             stop_upstox_automation()
             logger.info("✅ Upstox token automation stopped")
         except Exception as e:

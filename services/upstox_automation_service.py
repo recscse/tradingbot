@@ -182,8 +182,27 @@ class UpstoxAutomationService:
 
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
-                    headless=self.headless_mode,
-                    args=['--no-sandbox', '--disable-dev-shm-usage']
+                    headless=True,  # Always headless in production
+                    args=[
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-gpu',
+                        '--disable-web-security',
+                        '--disable-features=VizDisplayCompositor',
+                        '--no-first-run',
+                        '--disable-default-apps',
+                        '--disable-extensions',
+                        '--disable-sync',
+                        '--disable-translate',
+                        '--hide-scrollbars',
+                        '--mute-audio',
+                        '--no-zygote',
+                        '--disable-accelerated-2d-canvas',
+                        '--disable-background-timer-throttling',
+                        '--disable-renderer-backgrounding',
+                        '--disable-backgrounding-occluded-windows'
+                    ]
                 )
                 context = await browser.new_context()
                 page = await context.new_page()
@@ -268,8 +287,16 @@ class UpstoxAutomationService:
                     await context.close()
                     await browser.close()
 
+        except ImportError as e:
+            logger.error(f"Playwright not available: {e}")
+            logger.error("Browser automation requires Playwright installation")
+            return False
         except Exception as e:
             logger.error(f"Login automation failed: {e}")
+            # Log more details for debugging
+            logger.error(f"Exception type: {type(e).__name__}")
+            if "browser" in str(e).lower() or "chromium" in str(e).lower():
+                logger.error("Browser-related error - check if Chromium is properly installed")
             return False
 
     async def wait_for_token_refresh(
