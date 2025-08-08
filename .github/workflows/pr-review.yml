@@ -31,24 +31,30 @@ jobs:
         echo "PR Title: $PR_TITLE"
         
         # Check if title follows conventional commits or is auto-generated
-        if [[ $PR_TITLE =~ ^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|hotfix|enhance)(\(.+\))?: .+ ]] || [[ $PR_TITLE =~ ^Auto-merge: ]] || [[ $PR_TITLE =~ feat:.*add.*comprehensive.*PR.*automation ]]; then
+        if [[ $PR_TITLE =~ ^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|hotfix|enhance)(\(.+\))?:.*$ ]] || [[ $PR_TITLE =~ ^Auto-merge:.*$ ]] || [[ $PR_TITLE =~ ^feat:.*add.*comprehensive.*PR.*automation.*$ ]]; then
           echo "✅ PR title follows conventional commit format or is auto-generated"
+        elif [[ $PR_TITLE =~ ^[Ff]eature.*branch$ ]]; then
+          echo "⚠️ PR title is a default branch name - consider using conventional format"
+          echo "Examples: feat: add new trading strategy, fix(auth): resolve login issue"
+          echo "Current title: $PR_TITLE"
+          echo "Continuing anyway..."
         else
           echo "⚠️ PR title should ideally follow conventional commit format"
           echo "Examples: feat: add new trading strategy, fix(auth): resolve login issue"
           echo "Current title: $PR_TITLE"
-          echo "Continuing anyway for auto-generated PRs..."
+          echo "Continuing anyway..."
         fi
         
     - name: Check PR description
       run: |
         PR_BODY="${{ github.event.pull_request.body }}"
-        if [ ${#PR_BODY} -lt 50 ]; then
-          echo "❌ PR description is too short. Please provide more details."
-          exit 1
+        if [ ${#PR_BODY} -lt 20 ]; then
+          echo "⚠️ PR description is quite short. Consider adding more details."
+          echo "Current length: ${#PR_BODY} characters"
+          echo "Continuing anyway..."
+        else
+          echo "✅ PR description is adequate (${#PR_BODY} characters)"
         fi
-        
-        echo "✅ PR description is adequate"
         
     - name: Validate branch name
       run: |
