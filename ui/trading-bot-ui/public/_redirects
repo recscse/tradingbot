@@ -1,0 +1,12 @@
+# Netlify redirects for React SPA
+# Handle client-side routing
+
+# IMPORTANT: This file only affects Netlify frontend deployment
+# It does NOT affect your Render backend deployment
+
+# OPTIONAL: API proxy to avoid CORS issues
+# Uncomment the line below and replace with your actual Render URL if needed
+# /api/*  https://your-actual-backend.onrender.com/api/:splat  200
+
+# SPA fallback - REQUIRED for React Router to work properly
+/*    /index.html   200
