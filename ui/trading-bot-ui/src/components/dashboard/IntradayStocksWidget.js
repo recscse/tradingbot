@@ -2,6 +2,7 @@
 import React from "react";
 import { bloombergColors } from "../../themes/bloombergColors";
 import { Paper, Box, Chip } from "@mui/material";
+import { withErrorBoundary } from "../common/ErrorBoundary";
 
 const IntradayStocksWidget = ({ data, isLoading, compact = false }) => {
   if (isLoading) {
@@ -25,12 +26,60 @@ const IntradayStocksWidget = ({ data, isLoading, compact = false }) => {
     );
   }
 
+  // FIXED: Backend sends different data structure
   const {
-    low_risk = [],
-    medium_risk = [],
-    high_risk = [],
+    all_candidates = [],
+    fno_candidates = [], 
+    high_momentum = [],
+    high_volume = [],
     summary = {},
   } = data;
+
+  // FIXED: Categorize stocks by risk level based on change_percent and volatility
+  const categorizeByRisk = (stocks) => {
+    const low_risk = [];
+    const medium_risk = [];
+    const high_risk = [];
+    
+    stocks.forEach(stock => {
+      const changePercent = Math.abs(stock.change_percent || 0);
+      const volume_ratio = stock.volume_ratio || 1;
+      const price = stock.last_price || stock.ltp || 0;
+      
+      // Risk calculation based on multiple factors
+      let riskScore = 0;
+      
+      // Change percent risk (0-3 points)
+      if (changePercent >= 5) riskScore += 3;
+      else if (changePercent >= 2.5) riskScore += 2;
+      else if (changePercent >= 1) riskScore += 1;
+      
+      // Volume risk (0-2 points)
+      if (volume_ratio >= 3) riskScore += 2;
+      else if (volume_ratio >= 1.5) riskScore += 1;
+      
+      // Price risk (0-1 point)
+      if (price < 50) riskScore += 1;
+      
+      // Categorize based on total risk score
+      if (riskScore >= 4) {
+        high_risk.push({...stock, risk_score: riskScore});
+      } else if (riskScore >= 2) {
+        medium_risk.push({...stock, risk_score: riskScore});
+      } else {
+        low_risk.push({...stock, risk_score: riskScore});
+      }
+    });
+    
+    return { low_risk, medium_risk, high_risk };
+  };
+
+  // Use all_candidates as primary source, fallback to combined arrays
+  const stocksToAnalyze = all_candidates.length > 0 
+    ? all_candidates 
+    : [...fno_candidates, ...high_momentum, ...high_volume];
+  
+  const { low_risk, medium_risk, high_risk } = categorizeByRisk(stocksToAnalyze);
 
   const getRiskColor = (risk) => {
     switch (risk) {
@@ -123,7 +172,7 @@ const IntradayStocksWidget = ({ data, isLoading, compact = false }) => {
               color: bloombergColors.textSecondary,
             }}
           >
-            Score: {stock.intraday_score?.toFixed(1) || "N/A"}
+            Score: {(stock.intraday_score || stock.risk_score || 0).toFixed(1)}
           </Box>
         </Box>
       </Box>
@@ -333,4 +382,7 @@ const IntradayStocksWidget = ({ data, isLoading, compact = false }) => {
   );
 };
 
-export default IntradayStocksWidget;
+export default withErrorBoundary(IntradayStocksWidget, {
+  fallbackMessage: "Unable to load intraday stocks data. Trading analysis may be temporarily unavailable.",
+  height: "100%"
+});

@@ -2,6 +2,7 @@
 import React from "react";
 import { Box, Grid2, Paper, Chip } from "@mui/material";
 import { bloombergColors } from "../../themes/bloombergColors";
+import { withErrorBoundary } from "../common/ErrorBoundary";
 
 const MarketIndices = ({ marketData, symbols, isLoading = false }) => {
   const getIndexData = (symbol) => {
@@ -301,4 +302,7 @@ const MarketIndices = ({ marketData, symbols, isLoading = false }) => {
   );
 };
 
-export default MarketIndices;
+export default withErrorBoundary(MarketIndices, {
+  fallbackMessage: "Unable to load market indices data. Please check your connection and try again.",
+  height: "100%"
+});

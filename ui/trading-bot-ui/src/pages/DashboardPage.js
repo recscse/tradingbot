@@ -78,6 +78,7 @@ const SECTIONS = [
   { id: "sectors", label: "SECTORS", icon: "🏢" },
   { id: "movers", label: "TOP MOVERS", icon: "🚀" },
   { id: "gaps", label: "GAP ANALYSIS", icon: "📈" },
+  { id: "breakouts", label: "BREAKOUTS", icon: "⚡" },
   { id: "indices", label: "INDICES", icon: "🏛️" },
   { id: "mcx", label: "MCX & F&O", icon: "💰" },
   { id: "fno", label: "FNO STOCKS", icon: "📋" },
@@ -351,7 +352,7 @@ const SectionNavigation = ({
 const DashboardPage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  // const isTablet = useMediaQuery(theme.breakpoints.down("md")); // Unused currently
+  const isTablet = useMediaQuery(theme.breakpoints.down("md")); // Used for heatmap responsive sizing
   // const isSmallScreen = useMediaQuery(theme.breakpoints.down("md")); // Not used anymore
   // Get current theme colors
   const colors = DASHBOARD_COLORS[theme.palette.mode] || DASHBOARD_COLORS.light;
@@ -635,8 +636,84 @@ const DashboardPage = () => {
     };
     const topGainers = extractAnalyticsData(topMovers, "gainers", 20);
     const topLosers = extractAnalyticsData(topMovers, "losers", 20);
-    const gapUp = extractAnalyticsData(gapAnalysis, "gap_up", 20);
-    const gapDown = extractAnalyticsData(gapAnalysis, "gap_down", 20);
+    // Enhanced gap data extraction with real-time updates and gap-specific info
+    const extractGapData = (analyticsObject, arrayKey, limit = 25) => {
+      try {
+        if (!analyticsObject || typeof analyticsObject !== "object") {
+          return [];
+        }
+        let data = analyticsObject[arrayKey];
+        if (!data && analyticsObject.data) {
+          data = analyticsObject.data[arrayKey];
+        }
+        if (!Array.isArray(data)) {
+          return [];
+        }
+        
+        const validData = data
+          .filter((item) => item && typeof item === "object" && item.symbol)
+          .map((item) => {
+            // Get real-time price from marketData if available
+            const realtimeData = marketData[item.instrument_key] || marketData[item.symbol] || {};
+            const currentPrice = realtimeData.last_price || realtimeData.ltp || item.current_price || item.open_price || 0;
+            
+            // Enhanced gap information
+            const gapPercentage = item.gap_percentage || 0;
+            const openPrice = item.open_price || currentPrice;
+            const previousClose = item.previous_close || 0;
+            
+            // Gap detection time (should be at market opening)
+            const gapTime = item.timestamp ? new Date(item.timestamp).toLocaleTimeString("en-US", {
+              hour12: false,
+              hour: "2-digit", 
+              minute: "2-digit",
+              second: "2-digit",
+            }) : "9:15:00"; // Default to market open time
+            
+            const gapDate = item.timestamp ? new Date(item.timestamp).toLocaleDateString("en-US", {
+              month: "short",
+              day: "2-digit",
+            }) : new Date().toLocaleDateString("en-US", {
+              month: "short", 
+              day: "2-digit",
+            });
+            
+            return {
+              symbol: item.symbol || item.trading_symbol || "N/A",
+              name: item.name || item.symbol || item.trading_symbol || "N/A",
+              last_price: currentPrice, // Use real-time price
+              change: realtimeData.change || (currentPrice - previousClose),
+              change_percent: realtimeData.change_percent || gapPercentage,
+              volume: realtimeData.volume || item.volume || 0,
+              sector: item.sector || "OTHER",
+              exchange: item.exchange || "NSE",
+              instrument_key: item.instrument_key || `${item.symbol}_KEY`,
+              // Gap-specific fields
+              gap_type: item.gap_type || arrayKey,
+              gap_percentage: gapPercentage,
+              gap_strength: item.gap_strength || "moderate",
+              confidence_score: item.confidence_score || 0,
+              open_price: openPrice,
+              previous_close: previousClose,
+              volume_ratio: item.volume_ratio || 1,
+              // Timestamp fields
+              timestamp: item.timestamp || new Date().toISOString(),
+              gap_time: gapTime,
+              gap_date: gapDate,
+              detected_at_opening: true, // Gaps are always detected at opening
+              ...item,
+            };
+          })
+          .slice(0, limit);
+        return validData;
+      } catch (error) {
+        console.error("Error extracting gap data:", error);
+        return [];
+      }
+    };
+    
+    const gapUp = extractGapData(gapAnalysis, "gap_up", 25);
+    const gapDown = extractGapData(gapAnalysis, "gap_down", 25);
     const intradayBoosters = extractAnalyticsData(
       intradayStocks,
       "all_candidates",
@@ -649,8 +726,94 @@ const DashboardPage = () => {
     );
     const newHighs = extractAnalyticsData(recordMovers, "new_highs", 20);
     const newLows = extractAnalyticsData(recordMovers, "new_lows", 20);
-    const breakouts = extractAnalyticsData(breakoutAnalysis, "breakouts", 20);
-    const breakdowns = extractAnalyticsData(breakoutAnalysis, "breakdowns", 20);
+    
+    // Enhanced breakout data extraction with real-time updates and timestamps
+    const extractBreakoutData = (analyticsObject, arrayKey, limit = 25) => {
+      try {
+        if (!analyticsObject || typeof analyticsObject !== "object") {
+          return [];
+        }
+        let data = analyticsObject[arrayKey];
+        if (!data && analyticsObject.data) {
+          data = analyticsObject.data[arrayKey];
+        }
+        if (!Array.isArray(data)) {
+          return [];
+        }
+        
+        const validData = data
+          .filter((item) => item && typeof item === "object" && item.symbol)
+          .map((item) => {
+            // Get real-time price from marketData if available
+            const realtimeData = marketData[item.instrument_key] || marketData[item.symbol] || {};
+            const currentPrice = realtimeData.last_price || realtimeData.ltp || item.current_price || item.last_price || item.ltp || 0;
+            
+            // Enhanced timestamp handling
+            const breakoutTime = item.breakout_time || (item.timestamp ? new Date(item.timestamp).toLocaleTimeString("en-US", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            }) : "N/A");
+            
+            const breakoutDate = item.breakout_date || (item.timestamp ? new Date(item.timestamp).toLocaleDateString("en-US", {
+              month: "short",
+              day: "2-digit",
+            }) : "N/A");
+            
+            // Calculate time ago
+            const timeAgo = item.timestamp ? (() => {
+              const now = new Date();
+              const breakoutTimestamp = new Date(item.timestamp);
+              const diffInMinutes = Math.floor((now - breakoutTimestamp) / (1000 * 60));
+              
+              if (diffInMinutes < 1) return "Just now";
+              if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+              const hours = Math.floor(diffInMinutes / 60);
+              if (hours < 24) return `${hours}h ${diffInMinutes % 60}m ago`;
+              return breakoutTimestamp.toLocaleDateString();
+            })() : "N/A";
+            
+            return {
+              symbol: item.symbol || item.trading_symbol || "N/A",
+              name: item.name || item.symbol || item.trading_symbol || "N/A",
+              last_price: currentPrice, // Use real-time price
+              change: realtimeData.change || item.change || 0,
+              change_percent: realtimeData.change_percent || item.change_percent || 0,
+              volume: realtimeData.volume || item.volume || 0,
+              sector: item.sector || "OTHER",
+              exchange: item.exchange || "NSE",
+              instrument_key: item.instrument_key || `${item.symbol}_KEY`,
+              // Breakout-specific fields
+              breakout_type: item.breakout_type || "breakout",
+              breakout_strength: item.breakout_strength || 0,
+              breakout_quality: item.breakout_quality || "moderate",
+              confidence_score: item.confidence_score || 0,
+              resistance_level: item.resistance_level || 0,
+              support_level: item.support_level || 0,
+              volume_ratio: item.volume_ratio || 1,
+              price_momentum: item.price_momentum || 0,
+              time_since_level: item.time_since_level || 0,
+              // Enhanced timestamp fields
+              timestamp: item.timestamp || new Date().toISOString(),
+              breakout_time: breakoutTime,
+              breakout_date: breakoutDate,
+              time_ago: timeAgo,
+              // Real-time indicator
+              is_fresh: item.timestamp ? (new Date() - new Date(item.timestamp)) < 900000 : false, // Fresh if < 15 minutes
+              ...item,
+            };
+          })
+          .slice(0, limit);
+        return validData;
+      } catch (error) {
+        console.error("Error extracting breakout data:", error);
+        return [];
+      }
+    };
+    
+    const breakouts = extractBreakoutData(breakoutAnalysis, "breakouts", 25);
+    const breakdowns = extractBreakoutData(breakoutAnalysis, "breakdowns", 25);
     return {
       indices,
       majorIndices,
@@ -1541,21 +1704,23 @@ const DashboardPage = () => {
   // Render function for the sectors section (RESPONSIVE)
   const renderSectorsSection = () => (
     <Stack spacing={2}>
-      {/* Financial Sector Heatmap - Using correct component for sector data */}
+      {/* Enhanced Financial Sector Heatmap - Full page responsive */}
       <FinancialHeatmap
         data={heatmap?.sectors || []}
         marketData={marketData}
         title="🔥 SECTOR HEATMAP"
         isLoading={!isConnected}
-        maxItems={isMobile ? 20 : 30}
+        maxItems={isMobile ? 25 : isTablet ? 35 : 40}
+        fullPage={true}
       />
-      {/* TipRanks-style Stock Heatmap - Using raw market data */}
+      {/* Enhanced TipRanks-style Stock Heatmap - Full page responsive with more stocks */}
       <TipRanksHeatmap
         data={[]} // This prop is not used by the component
         marketData={marketData}
         title="🔥 STOCK HEATMAP"
         isLoading={!isConnected}
-        maxItems={isMobile ? 30 : 50}
+        maxItems={isMobile ? 60 : isTablet ? 100 : 150}
+        fullPage={true}
       />
       {/* Sector Selection and Stocks */}
       <Paper
@@ -1987,16 +2152,33 @@ const DashboardPage = () => {
           flexDirection: "column",
         }}
       >
-        <MemoizedStocksList
-          title={`📈 GAP UP (${gapUp.length})`}
-          data={gapUp}
-          layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-          showVolume={!isMobile} // Hide volume on mobile
-          showSector={!isMobile} // Show sector on larger screens if table
-          maxItems={isMobile ? 15 : 20} // Show fewer items on mobile
-          isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
-        />
+        {gapUp.length > 0 ? (
+          <MemoizedStocksList
+            title={`📈 GAP UP (${gapUp.length})`}
+            data={gapUp}
+            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+            showVolume={!isMobile} // Hide volume on mobile
+            showSector={!isMobile} // Show sector on larger screens if table
+            showTimestamp={true} // Show gap detection time (9:15 AM)
+            maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
+            isLoading={!isConnected}
+            // Remove fixed containerHeight to allow natural flow
+          />
+        ) : (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
+              📈 GAP UP (0)
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "text.secondary", fontStyle: "italic" }}
+            >
+              Stocks opening above previous close with significant gap
+              <br />
+              No gap up detected at market opening today
+            </Typography>
+          </Box>
+        )}
       </Paper>
       <Paper
         elevation={2}
@@ -2010,16 +2192,118 @@ const DashboardPage = () => {
           flexDirection: "column",
         }}
       >
-        <MemoizedStocksList
-          title={`📉 GAP DOWN (${gapDown.length})`}
-          data={gapDown}
-          layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-          showVolume={!isMobile} // Hide volume on mobile
-          showSector={!isMobile} // Show sector on larger screens if table
-          maxItems={isMobile ? 15 : 20} // Show fewer items on mobile
-          isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
-        />
+        {gapDown.length > 0 ? (
+          <MemoizedStocksList
+            title={`📉 GAP DOWN (${gapDown.length})`}
+            data={gapDown}
+            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+            showVolume={!isMobile} // Hide volume on mobile
+            showSector={!isMobile} // Show sector on larger screens if table
+            showTimestamp={true} // Show gap detection time (9:15 AM)
+            maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
+            isLoading={!isConnected}
+            // Remove fixed containerHeight to allow natural flow
+          />
+        ) : (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
+              📉 GAP DOWN (0)
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "text.secondary", fontStyle: "italic" }}
+            >
+              Stocks opening below previous close with significant gap
+              <br />
+              No gap down detected at market opening today
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+    </Stack>
+  );
+  // Render function for the breakouts section (RESPONSIVE - SINGLE COLUMN FOR PAIRED LISTS)
+  const renderBreakoutsSection = () => (
+    <Stack spacing={2}>
+      <Paper
+        elevation={2}
+        sx={{
+          p: 2,
+          borderRadius: 3,
+          border: `1px solid ${colors.border}`,
+          bgcolor: "background.paper",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {breakouts.length > 0 ? (
+          <MemoizedStocksList
+            title={`⚡ BREAKOUTS (${breakouts.length})`}
+            data={breakouts}
+            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+            showVolume={!isMobile} // Hide volume on mobile
+            showSector={!isMobile} // Show sector on larger screens if table
+            showTimestamp={true} // Enable timestamp display for breakouts
+            maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
+            isLoading={!isConnected}
+            // Remove fixed containerHeight to allow natural flow
+          />
+        ) : (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
+              ⚡ BREAKOUTS (0)
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "text.secondary", fontStyle: "italic" }}
+            >
+              Stocks breaking above resistance with real-time detection
+              <br />
+              Waiting for market data...
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+      <Paper
+        elevation={2}
+        sx={{
+          p: 2,
+          borderRadius: 3,
+          border: `1px solid ${colors.border}`,
+          bgcolor: "background.paper",
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        {breakdowns.length > 0 ? (
+          <MemoizedStocksList
+            title={`📉 BREAKDOWNS (${breakdowns.length})`}
+            data={breakdowns}
+            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+            showVolume={!isMobile} // Hide volume on mobile
+            showSector={!isMobile} // Show sector on larger screens if table
+            showTimestamp={true} // Enable timestamp display for breakdowns
+            maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
+            isLoading={!isConnected}
+            // Remove fixed containerHeight to allow natural flow
+          />
+        ) : (
+          <Box sx={{ textAlign: "center", py: 2 }}>
+            <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
+              📉 BREAKDOWNS (0)
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{ color: "text.secondary", fontStyle: "italic" }}
+            >
+              Stocks breaking below support with real-time detection
+              <br />
+              Waiting for market data...
+            </Typography>
+          </Box>
+        )}
       </Paper>
     </Stack>
   );
@@ -2689,87 +2973,6 @@ const DashboardPage = () => {
           </Grid>
         </Paper>
       )}
-      {/* Breakout Analysis - Stack vertically on ALL screens */}
-      <Stack spacing={2}>
-        <Paper
-          elevation={2}
-          sx={{
-            p: 2,
-            borderRadius: 3,
-            border: `1px solid ${colors.border}`,
-            bgcolor: "background.paper",
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {breakouts.length > 0 ? (
-            <MemoizedStocksList
-              title={`📈 BREAKOUTS (${breakouts.length})`}
-              data={breakouts}
-              layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-              showVolume={!isMobile} // Hide volume on mobile
-              showSector={!isMobile} // Show sector on larger screens if table
-              maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
-              isLoading={!isConnected}
-              // Remove fixed containerHeight to allow natural flow
-            />
-          ) : (
-            <Box sx={{ textAlign: "center", py: 2 }}>
-              <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
-                📈 BREAKOUTS (0)
-              </Typography>
-              <Typography
-                variant="body2"
-                sx={{ color: "text.secondary", fontStyle: "italic" }}
-              >
-                Stocks breaking above resistance
-                <br />
-                No data available
-              </Typography>
-            </Box>
-          )}
-        </Paper>
-        <Paper
-          elevation={2}
-          sx={{
-            p: 2,
-            borderRadius: 3,
-            border: `1px solid ${colors.border}`,
-            bgcolor: "background.paper",
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {breakdowns.length > 0 ? (
-            <MemoizedStocksList
-              title={`📉 BREAKDOWNS (${breakdowns.length})`}
-              data={breakdowns}
-              layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-              showVolume={!isMobile} // Hide volume on mobile
-              showSector={!isMobile} // Show sector on larger screens if table
-              maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
-              isLoading={!isConnected}
-              // Remove fixed containerHeight to allow natural flow
-            />
-          ) : (
-            <Box sx={{ textAlign: "center", py: 2 }}>
-              <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
-                📉 BREAKDOWNS (0)
-              </Typography>
-              <Typography
-                variant="body2"
-                sx={{ color: "text.secondary", fontStyle: "italic" }}
-              >
-                Stocks breaking below support
-                <br />
-                No data available
-              </Typography>
-            </Box>
-          )}
-        </Paper>
-      </Stack>
       {/* Record Movers - Stack vertically on ALL screens */}
       <Stack spacing={2}>
         <Paper
@@ -3051,6 +3254,7 @@ const DashboardPage = () => {
           {activeSection === "indices" && renderIndicesSection()}
           {activeSection === "movers" && renderMoversSection()}
           {activeSection === "gaps" && renderGapsSection()}
+          {activeSection === "breakouts" && renderBreakoutsSection()}
           {activeSection === "mcx" && renderMcxSection()}
           {activeSection === "fno" && renderFnoSection()}
           {activeSection === "analytics" && renderAnalyticsSection()}

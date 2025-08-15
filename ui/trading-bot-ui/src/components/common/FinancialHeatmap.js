@@ -30,11 +30,13 @@ const FinancialHeatmap = memo(
     marketData = {},
     title = "🔥 SECTOR HEATMAP",
     isLoading = false,
-    maxItems = 20,
+    maxItems = 30, // Increased from 20 to 30
+    fullPage = true, // New prop for full page mode
   }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-    // const isTablet = useMediaQuery(theme.breakpoints.down("md")); // Unused currently
+    const isTablet = useMediaQuery(theme.breakpoints.down("md"));
+    const isLargeScreen = useMediaQuery(theme.breakpoints.up("xl"));
 
     // Removed unused sectorStocks state - functionality handled in useMemo
     const [visualizationMode, setVisualizationMode] = useState("treemap"); // treemap, bubble, bar, timeline
@@ -187,99 +189,105 @@ const FinancialHeatmap = memo(
     }, []);
 
     // Squarified treemap algorithm for better aspect ratios
-    const squarify = useCallback((data, currentRow, width, height, x, y) => {
-      if (data.length === 0) {
-        if (currentRow.length === 0) return [];
-        return layoutRow(currentRow, width, height, x, y);
-      }
-
-      const item = data[0];
-      const newRow = [...currentRow, item];
-
-      if (
-        currentRow.length === 0 ||
-        worst(newRow, Math.min(width, height)) <=
-          worst(currentRow, Math.min(width, height))
-      ) {
-        // Add item to current row
-        return squarify(data.slice(1), newRow, width, height, x, y);
-      } else {
-        // Layout current row and start new one
-        const rowArea = currentRow.reduce((sum, item) => sum + item.area, 0);
-        const totalArea = width * height;
-        const rowSize = rowArea / totalArea;
-
-        let newWidth, newHeight, newX, newY;
-
-        if (width >= height) {
-          // Horizontal split
-          const rowWidth = rowSize * width;
-          newWidth = width - rowWidth;
-          newHeight = height;
-          newX = x + rowWidth;
-          newY = y;
-        } else {
-          // Vertical split
-          const rowHeight = rowSize * height;
-          newWidth = width;
-          newHeight = height - rowHeight;
-          newX = x;
-          newY = y + rowHeight;
+    const squarify = useCallback(
+      (data, currentRow, width, height, x, y) => {
+        if (data.length === 0) {
+          if (currentRow.length === 0) return [];
+          return layoutRow(currentRow, width, height, x, y);
         }
 
-        const currentLayout = layoutRow(
-          currentRow,
-          width >= height ? rowSize * width : width,
-          width >= height ? height : rowSize * height,
-          x,
-          y
-        );
+        const item = data[0];
+        const newRow = [...currentRow, item];
 
-        const remainingLayout = squarify(
-          data,
-          [],
-          newWidth,
-          newHeight,
-          newX,
-          newY
-        );
+        if (
+          currentRow.length === 0 ||
+          worst(newRow, Math.min(width, height)) <=
+            worst(currentRow, Math.min(width, height))
+        ) {
+          // Add item to current row
+          return squarify(data.slice(1), newRow, width, height, x, y);
+        } else {
+          // Layout current row and start new one
+          const rowArea = currentRow.reduce((sum, item) => sum + item.area, 0);
+          const totalArea = width * height;
+          const rowSize = rowArea / totalArea;
 
-        return [...currentLayout, ...remainingLayout];
-      }
-    }, [worst, layoutRow]);
+          let newWidth, newHeight, newX, newY;
+
+          if (width >= height) {
+            // Horizontal split
+            const rowWidth = rowSize * width;
+            newWidth = width - rowWidth;
+            newHeight = height;
+            newX = x + rowWidth;
+            newY = y;
+          } else {
+            // Vertical split
+            const rowHeight = rowSize * height;
+            newWidth = width;
+            newHeight = height - rowHeight;
+            newX = x;
+            newY = y + rowHeight;
+          }
+
+          const currentLayout = layoutRow(
+            currentRow,
+            width >= height ? rowSize * width : width,
+            width >= height ? height : rowSize * height,
+            x,
+            y
+          );
+
+          const remainingLayout = squarify(
+            data,
+            [],
+            newWidth,
+            newHeight,
+            newX,
+            newY
+          );
+
+          return [...currentLayout, ...remainingLayout];
+        }
+      },
+      [worst, layoutRow]
+    );
 
     // Enhanced Squarified Treemap Algorithm Implementation
-    const calculateTreemapLayout = useCallback((data, containerWidth, containerHeight) => {
-      if (!data || data.length === 0) return [];
+    const calculateTreemapLayout = useCallback(
+      (data, containerWidth, containerHeight) => {
+        if (!data || data.length === 0) return [];
 
-      // Sort data by value (descending) for better layout
-      const sortedData = [...data].sort(
-        (a, b) => (b.value || 1) - (a.value || 1)
-      );
-      const totalValue = sortedData.reduce(
-        (sum, item) => sum + (item.value || 1),
-        0
-      );
+        // Sort data by value (descending) for better layout
+        const sortedData = [...data].sort(
+          (a, b) => (b.value || 1) - (a.value || 1)
+        );
+        const totalValue = sortedData.reduce(
+          (sum, item) => sum + (item.value || 1),
+          0
+        );
 
-      if (totalValue === 0) return [];
+        if (totalValue === 0) return [];
 
-      // Calculate normalized areas
-      const normalizedData = sortedData.map((item) => ({
-        ...item,
-        normalizedValue: (item.value || 1) / totalValue,
-        area:
-          ((item.value || 1) / totalValue) * containerWidth * containerHeight,
-      }));
+        // Calculate normalized areas
+        const normalizedData = sortedData.map((item) => ({
+          ...item,
+          normalizedValue: (item.value || 1) / totalValue,
+          area:
+            ((item.value || 1) / totalValue) * containerWidth * containerHeight,
+        }));
 
-      return squarify(
-        normalizedData,
-        [],
-        containerWidth,
-        containerHeight,
-        0,
-        0
-      );
-    }, [squarify]);
+        return squarify(
+          normalizedData,
+          [],
+          containerWidth,
+          containerHeight,
+          0,
+          0
+        );
+      },
+      [squarify]
+    );
 
     // Helper functions moved above for proper dependency order
 
@@ -287,8 +295,29 @@ const FinancialHeatmap = memo(
     const sectorTreemapLayout = useMemo(() => {
       if (!processedData.length) return [];
 
-      const containerWidth = isMobile ? 600 : 1000;
-      const containerHeight = isMobile ? 400 : 600;
+      // Enhanced responsive dimensions for full page mode
+      const containerWidth = fullPage
+        ? isLargeScreen
+          ? 1200
+          : isTablet
+          ? 900
+          : isMobile
+          ? 320
+          : 1000
+        : isMobile
+        ? 320
+        : 800;
+      const containerHeight = fullPage
+        ? isLargeScreen
+          ? 800
+          : isTablet
+          ? 600
+          : isMobile
+          ? 400
+          : 700
+        : isMobile
+        ? 300
+        : 500;
 
       const sectorsWithValues = processedData.map((sector) => ({
         ...sector,
@@ -301,7 +330,14 @@ const FinancialHeatmap = memo(
         containerWidth,
         containerHeight
       );
-    }, [processedData, isMobile, calculateTreemapLayout]);
+    }, [
+      processedData,
+      isMobile,
+      calculateTreemapLayout,
+      fullPage,
+      isLargeScreen,
+      isTablet,
+    ]);
 
     // Calculate stock treemap layout for each sector with better spacing
     const getStockTreemapLayout = (stocks, sectorWidth, sectorHeight) => {
@@ -408,8 +444,29 @@ const FinancialHeatmap = memo(
     const sectorBubbleLayout = useMemo(() => {
       if (!processedData.length) return [];
 
-      const containerWidth = isMobile ? 600 : 1000;
-      const containerHeight = isMobile ? 400 : 600;
+      // Enhanced responsive dimensions for full page mode
+      const containerWidth = fullPage
+        ? isLargeScreen
+          ? 1200
+          : isTablet
+          ? 900
+          : isMobile
+          ? 320
+          : 1000
+        : isMobile
+        ? 320
+        : 800;
+      const containerHeight = fullPage
+        ? isLargeScreen
+          ? 800
+          : isTablet
+          ? 600
+          : isMobile
+          ? 400
+          : 700
+        : isMobile
+        ? 300
+        : 500;
 
       const sectorsWithValues = processedData.map((sector) => ({
         ...sector,
@@ -422,7 +479,7 @@ const FinancialHeatmap = memo(
         containerWidth,
         containerHeight
       );
-    }, [processedData, isMobile]);
+    }, [processedData, isMobile, fullPage, isLargeScreen, isTablet]);
 
     // Calculate stock bubble layout for each sector
     const getStockBubbleLayout = (stocks, sectorRadius) => {
@@ -503,13 +560,20 @@ const FinancialHeatmap = memo(
     return (
       <Card
         sx={{
-          mb: 2,
+          mb: fullPage ? 0 : 2,
           bgcolor: colors.background,
           border: `1px solid ${colors.border}`,
-          borderRadius: 2,
+          borderRadius: fullPage ? 1 : 2,
+          overflow: "visible", // Always allow tooltips to show
+          width: "100%", // Use full container width
+          maxWidth: "100%", // Prevent overflow
+          minHeight: fullPage ? "auto" : "auto",
+          position: "relative",
+          mx: 0, // No extra margins
+          p: 0, // No extra padding
         }}
       >
-        <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+        <CardContent sx={{ p: { xs: 1, sm: 2, md: 3 }, overflow: "hidden" }}>
           {/* Header */}
           <Box
             sx={{
@@ -699,15 +763,28 @@ const FinancialHeatmap = memo(
           sx={{
             position: "relative",
             width: "100%",
-            height: isMobile ? 450 : 650,
+            height: fullPage
+              ? isLargeScreen
+                ? 800
+                : isTablet
+                ? 600
+                : isMobile
+                ? 400
+                : 700
+              : isMobile
+              ? 300
+              : 500,
+            maxWidth: "100%",
             border: `2px solid ${colors.border}`,
             borderRadius: 2,
             overflow: "hidden",
             bgcolor: colors.surface,
-            boxShadow:
-              theme.palette.mode === "dark"
-                ? "0 4px 20px rgba(0,0,0,0.3)"
-                : "0 4px 20px rgba(0,0,0,0.1)",
+            mx: 0,
+            boxShadow: fullPage
+              ? "none"
+              : theme.palette.mode === "dark"
+              ? "0 4px 20px rgba(0,0,0,0.3)"
+              : "0 4px 20px rgba(0,0,0,0.1)",
           }}
         >
           {sectorTreemapLayout.map((sector, index) => {
@@ -914,31 +991,19 @@ const FinancialHeatmap = memo(
                               <Box sx={{ p: 0.5 }}>
                                 <Typography
                                   variant="subtitle2"
-                                  sx={{ fontWeight: 700, mb: 0.5 }}
+                                  sx={{ fontWeight: 600, mb: 0.5 }}
                                 >
-                                  📈 {stock.symbol}
+                                  {stock.name} ({stock.symbol})
                                 </Typography>
-                                <Typography variant="body2" sx={{ mb: 0.25 }}>
-                                  {stock.name}
+                                <Typography variant="body2">
+                                  Price: ₹{stock.last_price.toFixed(2)}
                                 </Typography>
-                                <Typography variant="body2" sx={{ mb: 0.25 }}>
-                                  Price: ₹{stock.last_price?.toFixed(2)}
+                                <Typography variant="body2">
+                                  Change: {stock.change_percent >= 0 ? "+" : ""}
+                                  {stock.change_percent.toFixed(2)}%
                                 </Typography>
-                                <Typography
-                                  variant="body2"
-                                  sx={{ fontWeight: 600 }}
-                                >
-                                  Change:{" "}
-                                  <span
-                                    style={{
-                                      color: getPerformanceColor(
-                                        stock.change_percent
-                                      ),
-                                    }}
-                                  >
-                                    {stock.change_percent >= 0 ? "+" : ""}
-                                    {stock.change_percent.toFixed(2)}%
-                                  </span>
+                                <Typography variant="body2">
+                                  Volume: {stock.volume.toLocaleString()}
                                 </Typography>
                               </Box>
                             }
@@ -1043,11 +1108,23 @@ const FinancialHeatmap = memo(
           sx={{
             position: "relative",
             width: "100%",
-            height: isMobile ? 400 : 600,
+            height: fullPage
+              ? isLargeScreen
+                ? 800
+                : isTablet
+                ? 600
+                : isMobile
+                ? 400
+                : 700
+              : isMobile
+              ? 300
+              : 500,
+            maxWidth: "100%",
             border: `1px solid ${colors.border}`,
             borderRadius: 1,
             overflow: "hidden",
             bgcolor: colors.surface,
+            mx: 0,
           }}
         >
           {sectorBubbleLayout.map((sector, index) => {
@@ -1232,10 +1309,12 @@ const FinancialHeatmap = memo(
           sx={{
             width: "100%",
             height: containerHeight,
+            maxWidth: "100%",
             border: `1px solid ${colors.border}`,
             borderRadius: 1,
             overflow: "auto",
             bgcolor: colors.surface,
+            mx: 0,
             p: 2,
           }}
         >
@@ -1367,10 +1446,12 @@ const FinancialHeatmap = memo(
           sx={{
             width: "100%",
             height: containerHeight,
+            maxWidth: "100%",
             border: `1px solid ${colors.border}`,
             borderRadius: 1,
             overflow: "auto",
             bgcolor: colors.surface,
+            mx: 0,
             p: 2,
             position: "relative",
           }}

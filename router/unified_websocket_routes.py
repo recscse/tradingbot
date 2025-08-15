@@ -227,15 +227,25 @@ async def handle_unified_message(
             # If real-time mode requested, trigger immediate updates
             if real_time_mode:
                 try:
-                    # Force immediate analytics calculation and broadcast
+                    # ✅ FIX: Ensure analytics service is available and handle gracefully
                     from services.enhanced_market_analytics import enhanced_analytics
+                    
+                    # Get priority analytics with error handling
                     priority_analytics = enhanced_analytics.get_priority_analytics()
                     
-                    for feature, data in priority_analytics.items():
-                        if feature not in ["generated_at", "processing_time_ms", "is_priority_update"]:
-                            unified_manager.emit_event(f"{feature}_update", data, priority=1)
-                    
-                    logger.info(f"✅ Real-time mode activated for client {client_id}")
+                    if priority_analytics and isinstance(priority_analytics, dict):
+                        broadcast_count = 0
+                        for feature, data in priority_analytics.items():
+                            if feature not in ["generated_at", "processing_time_ms", "is_priority_update"]:
+                                unified_manager.emit_event(f"{feature}_update", data, priority=1)
+                                broadcast_count += 1
+                        
+                        logger.info(f"✅ Real-time mode activated for client {client_id} - {broadcast_count} features broadcasted")
+                    else:
+                        logger.warning(f"⚠️ Real-time mode requested but no analytics data available for client {client_id}")
+                        
+                except ImportError:
+                    logger.warning(f"⚠️ Enhanced analytics service not available for real-time mode activation")
                 except Exception as e:
                     logger.error(f"❌ Error activating real-time mode: {e}")
 

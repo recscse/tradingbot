@@ -90,6 +90,43 @@ class InstrumentRegistry:
         from datetime import datetime
         self._cache_access_times[cache_key] = datetime.now()
 
+    def _is_off_market_hours(self) -> bool:
+        """Check if current time is outside market hours (9:15 AM - 3:30 PM IST)"""
+        from datetime import datetime, time
+        now = datetime.now().time()
+        
+        # Market hours: 9:15 AM to 3:30 PM IST
+        market_open = time(9, 15)  # 9:15 AM
+        market_close = time(15, 30)  # 3:30 PM
+        
+        # Return True if outside market hours
+        return now < market_open or now > market_close
+
+    async def _emergency_cleanup_async(self):
+        """Emergency cache cleanup in background (non-blocking)"""
+        try:
+            # Remove oldest 10% of entries without blocking
+            import asyncio
+            await asyncio.sleep(0.01)  # Yield control
+            
+            entries_to_remove = max(1, int(len(self._live_prices) * 0.1))
+            oldest_keys = list(self._live_prices.keys())[:entries_to_remove]
+            
+            for key in oldest_keys:
+                self._live_prices.pop(key, None)
+                self._enriched_prices.pop(key, None)
+                if hasattr(self, '_cache_access_times'):
+                    self._cache_access_times.pop(key, None)
+                
+                # Yield control every 100 deletions
+                if len(oldest_keys) % 100 == 0:
+                    await asyncio.sleep(0.001)
+            
+            logger.info(f"✅ Emergency cleanup completed: removed {len(oldest_keys)} entries")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in emergency cleanup: {e}")
+
     async def initialize_registry(self):
         """Initialize the registry with data from instrument service"""
         async with self._lock:
@@ -355,21 +392,34 @@ class InstrumentRegistry:
         start_time = datetime.now()
         stats = {"updated": 0, "new": 0, "ignored": 0, "enriched": 0, "errors": 0}
         
-        # Check and cleanup caches if needed
-        if len(self._live_prices) > self.max_live_prices:
-            self._cleanup_cache(self._live_prices, self.max_live_prices, "live_prices")
-        
-        if len(self._enriched_prices) > self.max_enriched_prices:
-            self._cleanup_cache(self._enriched_prices, self.max_enriched_prices, "enriched_prices")
-        
-        if len(self._performance_cache) > self.max_performance_cache:
-            self._cleanup_cache(self._performance_cache, self.max_performance_cache, "performance_cache")
+        # ✅ CRITICAL FIX: Only cleanup caches during off-market hours (prevents blocking during trading)
+        if self._is_off_market_hours():
+            if len(self._live_prices) > self.max_live_prices:
+                self._cleanup_cache(self._live_prices, self.max_live_prices, "live_prices")
+            
+            if len(self._enriched_prices) > self.max_enriched_prices:
+                self._cleanup_cache(self._enriched_prices, self.max_enriched_prices, "enriched_prices")
+            
+            if len(self._performance_cache) > self.max_performance_cache:
+                self._cleanup_cache(self._performance_cache, self.max_performance_cache, "performance_cache")
+        elif len(self._live_prices) > self.max_live_prices * 1.5:  # Emergency cleanup only if 50% over limit
+            logger.warning(f"⚠️ Emergency cache cleanup during market hours - cache size: {len(self._live_prices)}")
+            # Async cleanup to avoid blocking
+            import asyncio
+            asyncio.create_task(self._emergency_cleanup_async())
 
         for instrument_key, price_data in data.items():
             try:
-                # Validate data quality
-                if not self._validate_price_data(price_data):
+                # ✅ CRITICAL FIX: Basic validation (the method was missing!)
+                if not price_data or not isinstance(price_data, dict):
                     stats["ignored"] += 1
+                    logger.debug(f"Invalid data format for {instrument_key}")
+                    continue
+                
+                # Check if price data has essential fields
+                if not (price_data.get("ltp") or price_data.get("last_price")):
+                    stats["ignored"] += 1 
+                    logger.debug(f"No price data for {instrument_key}")
                     continue
 
                 # Extract symbol from enriched data
@@ -378,10 +428,17 @@ class InstrumentRegistry:
                     stats["ignored"] += 1
                     continue
 
-                # Create complete enriched entry
-                enriched_entry = self._create_complete_entry(
-                    instrument_key, symbol, price_data
-                )
+                # ✅ PERFORMANCE FIX: Use fast update for existing entries, full creation for new ones
+                if instrument_key in self._live_prices:
+                    # Fast update for existing entries (only update dynamic fields)
+                    enriched_entry = self._update_entry_fast(
+                        self._live_prices[instrument_key], price_data
+                    )
+                else:
+                    # Full creation for new entries
+                    enriched_entry = self._create_complete_entry(
+                        instrument_key, symbol, price_data
+                    )
 
                 # Update storage
                 if instrument_key in self._live_prices:
@@ -431,6 +488,52 @@ class InstrumentRegistry:
             return False
 
         return True
+    
+    def _is_off_market_hours(self):
+        """Check if market is currently closed for cache cleanup"""
+        from datetime import datetime, time
+        now = datetime.now()
+        current_time = now.time()
+        
+        # NSE trading hours: 9:15 AM to 3:30 PM (Monday to Friday)
+        market_open = time(9, 15)
+        market_close = time(15, 30)
+        
+        # Weekend
+        if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            return True
+            
+        return current_time < market_open or current_time > market_close
+
+    def _update_entry_fast(self, existing_entry: dict, price_data: dict) -> dict:
+        """✅ PERFORMANCE FIX: Fast update - only update dynamic price fields"""
+        # Only update fields that change frequently (prices, volume, time)
+        dynamic_updates = {
+            "ltp": price_data.get("ltp"),
+            "cp": price_data.get("cp"),
+            "change": price_data.get("change"),
+            "change_percent": price_data.get("change_percent"),
+            "open": price_data.get("open"),
+            "high": price_data.get("high"),
+            "low": price_data.get("low"),
+            "close": price_data.get("close"),
+            "volume": price_data.get("volume", 0),
+            "ltq": price_data.get("ltq", 0),
+            "daily_volume": price_data.get("daily_volume"),
+            "avg_trade_price": price_data.get("avg_trade_price"),
+            "bid_price": price_data.get("bid_price"),
+            "ask_price": price_data.get("ask_price"),
+            "bid_qty": price_data.get("bid_qty"),
+            "ask_qty": price_data.get("ask_qty"),
+            "open_interest": price_data.get("open_interest"),
+            "timestamp": price_data.get("timestamp"),
+            "last_updated": datetime.now().isoformat(),
+            "update_count": existing_entry.get("update_count", 0) + 1,
+        }
+        
+        # Apply updates to existing entry (preserves static metadata)
+        existing_entry.update(dynamic_updates)
+        return existing_entry
 
     def _create_complete_entry(
         self, instrument_key: str, symbol: str, price_data: dict
@@ -727,11 +830,11 @@ class InstrumentRegistry:
         try:
             start_time = time.time()
             
-            # Quick batch processing of active price data from cache
+            # Quick batch processing of active price data from enriched cache
             active_data = {}
-            for key, data in self._price_cache.items():
-                if data and isinstance(data, dict) and data.get("last_price") is not None:
-                    symbol = self._extract_symbol_from_key(key)
+            for key, data in self._enriched_prices.items():
+                if data and isinstance(data, dict) and (data.get("last_price") is not None or data.get("ltp") is not None):
+                    symbol = data.get("symbol")  # Use symbol from enriched data directly
                     if symbol and data.get("last_updated"):
                         # Check if data is recent (within 5 minutes)
                         last_updated = data.get("last_updated")
@@ -750,12 +853,28 @@ class InstrumentRegistry:
             index_symbols = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"}
             for symbol in index_symbols:
                 if symbol in active_data:
-                    index_data = self._format_price_data(symbol, active_data[symbol])
-                    if index_data:
+                    # ✅ FIX: Direct use of enriched data (no missing method call)
+                    index_data = {
+                        "symbol": symbol,
+                        "ltp": active_data[symbol].get("ltp") or active_data[symbol].get("last_price"),
+                        "change": active_data[symbol].get("change"),
+                        "change_percent": active_data[symbol].get("change_percent"),
+                        "volume": active_data[symbol].get("volume"),
+                        "high": active_data[symbol].get("high"),
+                        "low": active_data[symbol].get("low"),
+                        "open": active_data[symbol].get("open"),
+                    }
+                    if index_data.get("ltp"):
                         indices.append(index_data)
 
-            # Get FNO eligible symbols (cached)
-            fno_symbols = self._get_fno_symbols()
+            # ✅ FIX: Get FNO eligible symbols directly
+            fno_symbols = {
+                "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", 
+                "WIPRO", "MARUTI", "HINDUNILVR", "ITC", "BAJFINANCE", "KOTAKBANK",
+                "BHARTIARTL", "ASIANPAINT", "HCLTECH", "LT", "AXISBANK", "ULTRACEMCO",
+                "NESTLEIND", "TATAMOTORS", "POWERGRID", "NTPC", "TECHM", "SUNPHARMA",
+                "ONGC", "M&M", "TATASTEEL", "COALINDIA", "INDUSINDBK", "CIPLA"
+            }
 
             # Process stocks in batches
             top_stocks = []
@@ -768,8 +887,20 @@ class InstrumentRegistry:
                 if symbol in processed_symbols:
                     continue
                 
-                stock_data = self._format_price_data(symbol, data)
-                if stock_data:
+                # ✅ FIX: Direct use of enriched data (no missing method call)
+                stock_data = {
+                    "symbol": symbol,
+                    "ltp": data.get("ltp") or data.get("last_price"),
+                    "change": data.get("change"),
+                    "change_percent": data.get("change_percent"),
+                    "volume": data.get("volume"),
+                    "high": data.get("high"),
+                    "low": data.get("low"),
+                    "open": data.get("open"),
+                    "sector": data.get("sector"),
+                    "name": data.get("name"),
+                }
+                if stock_data.get("ltp"):
                     # Mark FNO stocks
                     is_fno = symbol.upper() in fno_symbols
                     stock_data["is_fno"] = is_fno

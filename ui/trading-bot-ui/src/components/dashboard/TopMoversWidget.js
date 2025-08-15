@@ -2,6 +2,7 @@
 import React from "react";
 import { Box, Paper, Grid2, Skeleton, Chip, Tooltip } from "@mui/material";
 import { bloombergColors } from "../../themes/bloombergColors";
+import { withErrorBoundary } from "../common/ErrorBoundary";
 
 const TopMoversWidget = ({ data, isLoading, compact = false }) => {
   if (isLoading) {
@@ -334,4 +335,7 @@ const TopMoversWidget = ({ data, isLoading, compact = false }) => {
   );
 };
 
-export default TopMoversWidget;
+export default withErrorBoundary(TopMoversWidget, {
+  fallbackMessage: "Unable to load top movers data. Market data may be temporarily unavailable.",
+  height: "100%"
+});
