@@ -478,10 +478,15 @@ class CentralizedWebSocketManager:
             from services.upstox_automation_service import UpstoxAutomationService
             
             automation_service = UpstoxAutomationService()
-            result = await automation_service.refresh_admin_upstox_token()
+            # ✅ FIX: Add emergency bypass for expired tokens
+            result = await automation_service.refresh_admin_upstox_token(emergency_bypass=True)
             
             if result.get("success", False):
                 logger.info("✅ Automated token refresh completed successfully")
+                
+                # ✅ FIX: Add delay before reloading to ensure database is updated
+                logger.info("⏳ Waiting for database update to complete...")
+                await asyncio.sleep(2)
                 
                 # Reload the admin token after successful refresh
                 token_reloaded = await self._load_admin_token()
@@ -1069,101 +1074,39 @@ class CentralizedWebSocketManager:
         )
 
     async def _update_instrument_registry(self, feed_data: dict):
-        """Update instrument registry with normalized data - improved version"""
+        """✅ SIMPLE FIX: Send data directly to React frontend via unified manager"""
         try:
-            # Skip if no data
             if not feed_data:
                 return
 
-            # Start timer for performance measurement
-            start_time = time.time()
-
-            # Lazy import to avoid circular dependency
-            from services.instrument_registry import instrument_registry
-
-            # Normalize the data
-            normalized_data = self._normalize_market_data(feed_data)
-
-            # Skip if normalization produced no usable data
-            if not normalized_data:
-                return
-
-            # Update registry
-            registry_result = instrument_registry.update_live_prices(normalized_data)
-
-            # 🔧 CRITICAL FIX: Add event bridge to unified manager
+            # ✅ DIRECT FIX: Send data immediately to React frontend
             try:
                 from services.unified_websocket_manager import unified_manager
-
-                # Emit price update event
-                # Emit price update event with complete data structure
+                
+                # Send as dashboard_update (this is what React expects)
                 unified_manager.emit_event(
-                    "price_update",
-                    {
-                        "type": "price_update",
-                        "data": normalized_data,
-                        "is_snapshot": self.update_count <= 1,
-                        "update_count": self.update_count,
-                        "timestamp": datetime.now().isoformat(),
-                    },
+                    "dashboard_update",
+                    feed_data,  # Send raw feed data directly
+                    priority=1
                 )
-
-                # Trigger analytics update if needed
-                if self.update_count % 10 == 0 or self.update_count <= 1:
-                    unified_manager.emit_event(
-                        "trigger_analytics",
-                        {
-                            "type": "trigger_analytics",
-                            "reason": "scheduled_update",
-                            "timestamp": datetime.now().isoformat(),
-                        },
-                    )
-                    logger.debug(
-                        f"📡 Emitted events to unified manager: {len(normalized_data)} instruments"
-                    )
-
-                # If we have index data, emit separate index event
-                index_data = {k: v for k, v in normalized_data.items() 
-                             if any(idx in k.upper() for idx in ["NIFTY", "SENSEX", "BANKEX", "INDEX"])}
-                if index_data:
-                    unified_manager.emit_event("index_update", index_data)
-                    logger.info(f"📊 Broadcasting {len(index_data)} indices: {list(index_data.keys())[:5]}...")
-
-                logger.debug(
-                    f"📡 Emitted events: {len(normalized_data)} instruments, {len(index_data)} indices"
-                )
-
-            except ImportError:
-                logger.warning("⚠️ Unified manager not available for event emission")
+                
+                logger.debug(f"📡 Sent {len(feed_data)} instruments to React frontend")
+                
             except Exception as e:
-                logger.warning(f"⚠️ Error emitting events to unified manager: {e}")
-
-            # Calculate processing time
-            processing_time = (time.time() - start_time) * 1000
-
-            # Log results with more details
-            if (
-                registry_result.get("updated", 0) > 0
-                or registry_result.get("new", 0) > 0
-            ):
-                if self.update_count % 10 == 0:  # Log every 10 updates
-                    logger.info(
-                        f"📊 Registry update: {registry_result.get('updated', 0)} updated, "
-                        f"{registry_result.get('new', 0)} new prices "
-                        f"(ignored: {registry_result.get('ignored', 0)}, "
-                        f"unknown: {registry_result.get('unknown', 0)}, "
-                        f"errors: {registry_result.get('errors', 0)}) "
-                        f"in {processing_time:.2f}ms"
-                    )
-
-        except ImportError:
-            # Registry not available, skip update
-            logger.debug("⚠️ Instrument registry not available, skipping update")
+                logger.error(f"❌ Error sending to React frontend: {e}")
+                
+            # Original registry update (background)
+            try:
+                from services.instrument_registry import instrument_registry
+                normalized_data = self._normalize_market_data(feed_data)
+                if normalized_data:
+                    instrument_registry.update_live_prices(normalized_data)
+            except Exception as e:
+                logger.warning(f"⚠️ Registry update error: {e}")
+                
         except Exception as e:
-            logger.warning(f"⚠️ Error updating instrument registry: {e}")
-            import traceback
+            logger.error(f"❌ Error in _update_instrument_registry: {e}")
 
-            logger.debug(f"⚠️ Traceback: {traceback.format_exc()}")
 
     def _normalize_market_data(self, feed_data: dict) -> dict:
         """COMPLETE: Handle all Upstox formats with full error handling"""
@@ -2767,6 +2710,22 @@ class CentralizedWebSocketManager:
                 for client_id, subs in self.client_subscriptions.items()
             },
         }
+
+    async def _update_instrument_registry_legacy(self, feeds: Dict[str, Any]):
+        """✅ LEGACY: Update instrument registry with live price data (fallback method)"""
+        try:
+            # Import instrument registry
+            from services.instrument_registry import instrument_registry
+            
+            # Update registry with live feeds
+            if feeds and isinstance(feeds, dict):
+                stats = instrument_registry.update_live_prices(feeds)
+                logger.info(f"📊 Updated instrument registry: {stats}")  # ✅ Changed to INFO for visibility
+                
+        except ImportError:
+            logger.warning("⚠️ Instrument registry not available - data not stored")
+        except Exception as e:
+            logger.error(f"❌ Error updating instrument registry: {e}")
 
 
 # Create singleton instance

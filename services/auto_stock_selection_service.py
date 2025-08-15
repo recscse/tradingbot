@@ -42,10 +42,14 @@ class AutoStockSelectionService:
         self.scheduler_thread = None
         self.selected_stocks = []
 
+        # Morning scanning passes buffer (holds each pass results)
+        self._morning_candidates: List[Dict[str, Any]] = []
+
         # Market timing
-        self.market_open_time = time(9, 15)  # 9:15 AM
-        self.selection_time = time(8, 45)  # 8:45 AM - Before market opens
-        self.cleanup_time = time(16, 0)  # 4:00 PM - After market closes
+        # We'll run 3 passes at 09:15, 09:20, 09:25 and finalize at 09:30
+        self.morning_pass_times = ["09:15", "09:20", "09:25"]
+        self.morning_finalize_time = "09:30"
+        self.cleanup_time = "16:00"  # EOD cleanup
 
         logger.info("✅ Auto Stock Selection Service initialized")
 
@@ -57,11 +61,17 @@ class AutoStockSelectionService:
 
         logger.info("🚀 Starting Auto Stock Selection Service...")
 
-        # Schedule daily stock selection
-        schedule.every().day.at("08:45").do(self._run_stock_selection_job)
+        # Schedule morning scanning passes
+        for t in self.morning_pass_times:
+            schedule.every().day.at(t).do(self._morning_scan_job)
+
+        # Schedule finalization of morning picks
+        schedule.every().day.at(self.morning_finalize_time).do(
+            self._morning_finalize_job
+        )
 
         # Schedule cleanup
-        schedule.every().day.at("16:00").do(self._cleanup_old_selections)
+        schedule.every().day.at(self.cleanup_time).do(self._cleanup_old_selections)
 
         # Start scheduler thread
         self.is_running = True
@@ -83,69 +93,175 @@ class AutoStockSelectionService:
         while self.is_running:
             try:
                 schedule.run_pending()
-                threading.Event().wait(60)  # Check every minute
+                threading.Event().wait(10)  # Check every 10 seconds
             except Exception as e:
                 logger.error(f"Scheduler error: {e}")
                 threading.Event().wait(60)
 
-    def _run_stock_selection_job(self):
-        """Run the daily stock selection job"""
-        logger.info("🎯 Running automated daily stock selection...")
-
+    def _morning_scan_job(self):
+        """Run one morning scan pass (09:15 / 09:20 / 09:25)"""
+        logger.info("🎯 Morning scan pass starting at %s", datetime.now().isoformat())
         try:
-            # Run async function in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(self.select_daily_stocks())
+            candidates = loop.run_until_complete(self._scan_candidates())
             loop.close()
 
+            # append pass results with timestamp
+            self._morning_candidates.append(
+                {"ts": datetime.utcnow(), "candidates": candidates}
+            )
             logger.info(
-                f"✅ Stock selection completed: {result.get('selected_count', 0)} stocks selected"
+                "✅ Morning scan pass complete, candidates collected: %d",
+                len(candidates),
             )
 
         except Exception as e:
-            logger.error(f"❌ Stock selection job failed: {e}")
+            logger.exception("❌ Morning scan pass failed: %s", e)
 
-    async def select_daily_stocks(self, target_count: int = 20) -> Dict[str, Any]:
-        """Select top stocks for daily trading"""
+    def _morning_finalize_job(self):
+        """Called at 09:30 to combine passes and finalize picks"""
+        logger.info("🔔 Finalizing morning picks at %s", datetime.now().isoformat())
         try:
-            logger.info(
-                f"🔍 Analyzing stocks for daily selection (target: {target_count})..."
+            # Combine candidates across passes and aggregate scores
+            aggregated = {}
+            total_passes = len(self._morning_candidates) or 1
+            for entry in self._morning_candidates:
+                for c in entry["candidates"]:
+                    sym = c["symbol"]
+                    if sym not in aggregated:
+                        aggregated[sym] = {
+                            "symbol": sym,
+                            "instrument_key": c.get("instrument_key"),
+                            "latest_market_data": c.get("market_data", {}),
+                            "scores": [],
+                            "score_details_latest": c.get("score_details", {}),
+                            "bias_votes": [],
+                        }
+                    aggregated[sym]["scores"].append(float(c.get("total_score", 0)))
+                    aggregated[sym]["score_details_latest"] = c.get("score_details", {})
+                    # track bias votes (if candidate had bias)
+                    if c.get("bias"):
+                        aggregated[sym]["bias_votes"].append(c.get("bias"))
+
+            # create aggregated list using average score and bias majority
+            combined = []
+            for sym, info in aggregated.items():
+                avg_score = float(np.mean(info["scores"])) if info["scores"] else 0.0
+                # determine bias by majority vote across passes (if any)
+                bias = None
+                if info["bias_votes"]:
+                    # bias values expected 'GREEN'/'RED' or 'UP'/'DOWN' depending on pass impl
+                    # we will pick the most common string
+                    bias = max(set(info["bias_votes"]), key=info["bias_votes"].count)
+                combined.append(
+                    {
+                        "symbol": sym,
+                        "instrument_key": info.get("instrument_key"),
+                        "total_score": avg_score,
+                        "score_details": info.get("score_details_latest", {}),
+                        "market_data": info.get("latest_market_data", {}),
+                        "bias": bias,
+                    }
+                )
+
+            # Sort combined list and pick top N
+            target_count = 4  # pick 3-4 stocks by default; configurable
+            combined.sort(key=lambda x: x["total_score"], reverse=True)
+
+            # get sector performance snapshot for diversification decisions
+            sector_performance = market_analytics.get_sector_performance()
+
+            # apply diversification rules
+            final_picks = self._apply_diversification_rules(
+                combined, target_count, sector_performance
             )
 
-            # Get current market data
+            # persist final picks
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._store_selected_stocks(final_picks))
+            loop.close()
+
+            # push final picks to downstream queue (strategy/execution)
+            self._dispatch_to_downstream(final_picks)
+
+            # clear morning buffer
+            self._morning_candidates = []
+
+            logger.info("✅ Finalized morning picks: %d", len(final_picks))
+
+        except Exception as e:
+            logger.exception("❌ Error finalizing morning picks: %s", e)
+            # clear buffer to avoid stale accumulation
+            self._morning_candidates = []
+
+    async def select_daily_stocks(self, target_count: int = 20) -> Dict[str, Any]:
+        """Backward-compatible full selection run (manual trigger). Persists results immediately."""
+        try:
+            logger.info(f"🔍 Running full selection (manual) target: {target_count}...")
+            # Reuse the scanning pipeline but persist the immediate result
+            candidates = await self._scan_candidates(target_count=target_count)
+            sector_performance = market_analytics.get_sector_performance()
+            picks = self._apply_diversification_rules(
+                candidates, target_count, sector_performance
+            )
+            await self._store_selected_stocks(picks)
+            self._dispatch_to_downstream(picks)
+            return {
+                "status": "success",
+                "selected_count": len(picks),
+                "selected_stocks": picks,
+                "selection_time": datetime.now().isoformat(),
+            }
+        except Exception as e:
+            logger.exception("Error in select_daily_stocks: %s", e)
+            return {"status": "error", "error": str(e), "selected_count": 0}
+
+    async def _scan_candidates(self, target_count: int = 100) -> List[Dict[str, Any]]:
+        """
+        Single pass scanner: returns a list of candidate dicts (DOES NOT persist).
+        This method is the lightweight scanner used by morning passes.
+        """
+        try:
             market_data = market_analytics.get_live_market_data()
-
             if not market_data:
-                logger.warning("No market data available for stock selection")
-                return {
-                    "status": "error",
-                    "error": "No market data available",
-                    "selected_count": 0,
-                }
+                logger.warning("No market data available for scanning")
+                return []
 
-            # Get comprehensive analytics
             volume_leaders = market_analytics.get_volume_analysis(200)
             momentum_stocks = market_analytics.get_momentum_stocks(2.0, 1.2, 100)
             sector_performance = market_analytics.get_sector_performance()
 
-            # Score all available stocks
-            scored_stocks = []
+            # compute market bias from F&O universe
+            market_bias = self._compute_market_bias(market_data)
+            logger.info("Market bias for pass: %s", market_bias)
 
+            scored_stocks = []
             for instrument_key, data in market_data.items():
                 if not isinstance(data, dict):
                     continue
-
                 symbol = data.get("symbol", "")
                 if not symbol:
                     continue
 
-                # Calculate comprehensive score
                 stock_score = await self._calculate_stock_score(
                     symbol, data, volume_leaders, momentum_stocks, sector_performance
                 )
 
+                # if score > 0 include candidate; attach bias alignment score
                 if stock_score["total_score"] > 0:
+                    # attach pass bias info: prefer symbols aligned with market bias
+                    # simple alignment: if market_bias == GREEN and change_percent>0 -> aligned
+                    cp = data.get("change_percent", 0)
+                    aligned = None
+                    if market_bias == "GREEN" and cp > 0:
+                        aligned = "UP"
+                    elif market_bias == "RED" and cp < 0:
+                        aligned = "DOWN"
+                    else:
+                        aligned = "NEUTRAL"
+
                     scored_stocks.append(
                         {
                             "symbol": symbol,
@@ -153,56 +269,52 @@ class AutoStockSelectionService:
                             "score_details": stock_score,
                             "total_score": stock_score["total_score"],
                             "market_data": data,
+                            "bias": aligned,  # UP/DOWN/NEUTRAL
                         }
                     )
 
-            # Sort by total score
+            # sort and return top target_count candidates
             scored_stocks.sort(key=lambda x: x["total_score"], reverse=True)
-
-            # Select top stocks with diversification
-            selected_stocks = self._apply_diversification_rules(
-                scored_stocks, target_count, sector_performance
-            )
-
-            # Store in database
-            await self._store_selected_stocks(selected_stocks)
-
-            # Update queue service with selected stocks
-            self._update_queue_service_selection(selected_stocks)
-
-            result = {
-                "status": "success",
-                "selected_count": len(selected_stocks),
-                "total_analyzed": len(scored_stocks),
-                "selected_stocks": [
-                    {
-                        "symbol": stock["symbol"],
-                        "score": stock["total_score"],
-                        "price": stock["market_data"].get("ltp", 0),
-                        "change_percent": stock["market_data"].get("change_percent", 0),
-                        "volume": stock["market_data"].get("volume", 0),
-                        "sector": self.queue_service.sector_mapping.get(
-                            stock["symbol"], "OTHER"
-                        ),
-                        "selection_reason": stock["score_details"]["primary_reason"],
-                    }
-                    for stock in selected_stocks
-                ],
-                "selection_time": datetime.now().isoformat(),
-                "criteria_used": self._get_criteria_summary(),
-            }
-
-            logger.info(
-                f"✅ Selected {len(selected_stocks)} stocks from {len(scored_stocks)} analyzed"
-            )
-            return result
+            return scored_stocks[:target_count]
 
         except Exception as e:
-            logger.error(f"❌ Error in stock selection: {e}")
-            import traceback
+            logger.exception("Error in _scan_candidates: %s", e)
+            return []
 
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            return {"status": "error", "error": str(e), "selected_count": 0}
+    def _compute_market_bias(self, market_data: Dict[str, Any]) -> str:
+        """
+        Determine market bias (GREEN/RED/MIXED) based on fraction of F&O symbols with positive change.
+        """
+        try:
+            total = 0
+            pos = 0
+            neg = 0
+            for k, d in market_data.items():
+                if not isinstance(d, dict):
+                    continue
+                cp = d.get("change_percent")
+                if cp is None:
+                    continue
+                total += 1
+                if cp > 0:
+                    pos += 1
+                elif cp < 0:
+                    neg += 1
+
+            if total == 0:
+                return "MIXED"
+
+            pct_pos = pos / total
+            if pct_pos >= 0.55:
+                return "GREEN"
+            elif pct_pos <= 0.45:
+                return "RED"
+            else:
+                return "MIXED"
+
+        except Exception as e:
+            logger.exception("Error computing market bias: %s", e)
+            return "MIXED"
 
     async def _calculate_stock_score(
         self,
@@ -250,7 +362,6 @@ class AutoStockSelectionService:
             volume_leader_symbols = [v.get("symbol") for v in volume_leaders_list]
 
             if symbol in volume_leader_symbols:
-                # Find volume ratio
                 vol_data = next(
                     (v for v in volume_leaders_list if v.get("symbol") == symbol), None
                 )
@@ -308,14 +419,13 @@ class AutoStockSelectionService:
                 score_components["sector_score"] = 5  # Default for unknown sector
 
             # 5. Technical Score (15 points max)
-            # Simple technical analysis
             if abs(change_percent) > 3:
                 if change_percent > 0:
                     score_components["technical_score"] = 15
                     if score_components["primary_reason"] == "UNKNOWN":
                         score_components["primary_reason"] = "BREAKOUT"
                 else:
-                    score_components["technical_score"] = 8  # Oversold bounce potential
+                    score_components["technical_score"] = 8
                     if score_components["primary_reason"] == "UNKNOWN":
                         score_components["primary_reason"] = "OVERSOLD_BOUNCE"
             elif abs(change_percent) > 1:
@@ -382,9 +492,6 @@ class AutoStockSelectionService:
             # Exclude penny stocks
             if price < 10:
                 return False
-
-            # Exclude too volatile stocks (basic check)
-            # You can enhance this with actual volatility calculation
 
             return True
 
@@ -454,11 +561,17 @@ class AutoStockSelectionService:
 
             # Store new selections
             for stock in selected_stocks:
+                # include bias in the JSON breakdown so you don't need to alter schema
+                score_breakdown = stock.get("score_details", {})
+                score_breakdown["bias"] = stock.get("bias")
+
                 selected_stock = SelectedStock(
                     symbol=stock["symbol"],
-                    instrument_key=stock["instrument_key"],
+                    instrument_key=stock.get("instrument_key") or "",
                     selection_score=stock["total_score"],
-                    selection_reason=stock["score_details"]["primary_reason"],
+                    selection_reason=stock["score_details"].get(
+                        "primary_reason", "scanner"
+                    ),
                     price_at_selection=stock["market_data"].get("ltp", 0),
                     volume_at_selection=stock["market_data"].get("volume", 0),
                     change_percent_at_selection=stock["market_data"].get(
@@ -467,7 +580,7 @@ class AutoStockSelectionService:
                     sector=self.queue_service.sector_mapping.get(
                         stock["symbol"], "OTHER"
                     ),
-                    score_breakdown=json.dumps(stock["score_details"]),
+                    score_breakdown=json.dumps(score_breakdown),
                     is_active=True,
                     created_at=datetime.now(),
                 )
@@ -479,25 +592,48 @@ class AutoStockSelectionService:
             logger.info(f"✅ Stored {len(selected_stocks)} selected stocks in database")
 
         except Exception as e:
-            logger.error(f"❌ Error storing selected stocks: {e}")
+            logger.exception(f"❌ Error storing selected stocks: {e}")
             if "db" in locals():
                 db.rollback()
                 db.close()
 
-    def _update_queue_service_selection(self, selected_stocks: List[Dict]):
-        """Update queue service with selected stocks information"""
+    def _dispatch_to_downstream(self, selected_stocks: List[Dict[str, Any]]):
+        """
+        Dispatch final picks to downstream processing (strategy/execution).
+        Prefer queue service enqueue if available; else log and leave for manual processing.
+        """
         try:
-            # Mark stocks as selected in queue service (if it supports this)
-            selected_symbols = [stock["symbol"] for stock in selected_stocks]
-
-            # You can extend queue service to track selected stocks
-            # For now, just log the selection
-            logger.info(
-                f"📋 Updated queue service with {len(selected_symbols)} selected stocks"
-            )
+            if hasattr(self.queue_service, "enqueue_selected_stock"):
+                for stock in selected_stocks:
+                    try:
+                        payload = {
+                            "symbol": stock["symbol"],
+                            "instrument_key": stock.get("instrument_key"),
+                            "bias": stock.get("bias"),
+                            "score": stock.get("total_score"),
+                            "market_data": stock.get("market_data"),
+                            "score_details": stock.get("score_details"),
+                            "selected_at": datetime.utcnow().isoformat(),
+                        }
+                        # enqueue in downstream queue for strategy processing
+                        self.queue_service.enqueue_selected_stock(payload)
+                    except Exception:
+                        logger.exception(
+                            "Failed to enqueue stock to queue_service for %s",
+                            stock["symbol"],
+                        )
+            else:
+                # As a fallback, emit log and leave selection for manual or API pickup
+                for stock in selected_stocks:
+                    logger.info(
+                        "Selected: %s bias=%s score=%s",
+                        stock["symbol"],
+                        stock.get("bias"),
+                        stock["total_score"],
+                    )
 
         except Exception as e:
-            logger.error(f"Error updating queue service selection: {e}")
+            logger.exception("Error dispatching to downstream: %s", e)
 
     def _cleanup_old_selections(self):
         """Cleanup old stock selections"""
@@ -519,7 +655,7 @@ class AutoStockSelectionService:
             logger.info("🧹 Cleaned up old stock selections")
 
         except Exception as e:
-            logger.error(f"Error cleaning up old selections: {e}")
+            logger.exception(f"Error cleaning up old selections: {e}")
             if "db" in locals():
                 db.rollback()
                 db.close()
@@ -545,7 +681,7 @@ class AutoStockSelectionService:
         }
 
     async def get_current_selected_stocks(self) -> List[Dict[str, Any]]:
-        """Get currently selected stocks from database"""
+        """Get today's selected stocks from database"""
         try:
             db = next(get_db())
 
@@ -595,7 +731,7 @@ class AutoStockSelectionService:
             return selected_stocks
 
         except Exception as e:
-            logger.error(f"Error getting current selected stocks: {e}")
+            logger.exception(f"Error getting current selected stocks: {e}")
             return []
 
     async def manual_stock_selection(self, target_count: int = 20) -> Dict[str, Any]:

@@ -18,6 +18,8 @@ import aiofiles
 from functools import wraps
 from dataclasses import dataclass, asdict
 import pytz
+import psutil
+import gc
 
 # Redis import with fallback
 try:
@@ -38,26 +40,66 @@ CACHE_TTL = 86400  # 24 hours
 MAX_WEBSOCKET_INSTRUMENTS = 1500  # Upstox limit
 BATCH_SIZE = 1000
 OPTION_STRIKE_RANGE = 40  # ±40 strikes
-MCX_DEFAULT_SYMBOLS = ["CRUDEOIL", "GOLD", "SILVER", "COPPER"]
 
+# HARDCODED Essential Instruments - Always the same
+ESSENTIAL_INDICES = {
+    "NIFTY", "NIFTY 50", "NIFTY50",
+    "BANKNIFTY", "NIFTYBANK", "BANK NIFTY", 
+    "FINNIFTY", "FIN NIFTY", "NIFTY FINANCIAL SERVICES",
+    "SENSEX",
+    "MIDCPNIFTY", "NIFTY MIDCAP 50"
+}
+
+ESSENTIAL_COMMODITIES = {
+    "CRUDEOIL", "CRUDEOILM", "CRUDE", "CRUDEOLI",  # Crude oil variations
+    "GOLD", "GOLDM", "GOLDPETAL"  # Gold variations
+}
+
+# Index keywords for filtering  
+ESSENTIAL_INDEX_KEYWORDS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"]
+
+
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    try:
+        process = psutil.Process()
+        return process.memory_info().rss / 1024 / 1024
+    except:
+        return None
 
 def performance_timer(func):
-    """Decorator to measure function performance"""
+    """Decorator to measure function performance and memory usage"""
 
     @wraps(func)
     async def async_wrapper(*args, **kwargs):
         start_time = time.time()
+        start_memory = get_memory_usage()
         result = await func(*args, **kwargs)
         duration = time.time() - start_time
-        logger.info(f"⚡ {func.__name__} executed in {duration:.3f}s")
+        end_memory = get_memory_usage()
+        
+        memory_str = ""
+        if start_memory and end_memory:
+            memory_diff = end_memory - start_memory
+            memory_str = f", Memory: {end_memory:.1f}MB ({memory_diff:+.1f}MB)"
+        
+        logger.info(f"⚡ {func.__name__} executed in {duration:.3f}s{memory_str}")
         return result
 
     @wraps(func)
     def sync_wrapper(*args, **kwargs):
         start_time = time.time()
+        start_memory = get_memory_usage()
         result = func(*args, **kwargs)
         duration = time.time() - start_time
-        logger.info(f"⚡ {func.__name__} executed in {duration:.3f}s")
+        end_memory = get_memory_usage()
+        
+        memory_str = ""
+        if start_memory and end_memory:
+            memory_diff = end_memory - start_memory
+            memory_str = f", Memory: {end_memory:.1f}MB ({memory_diff:+.1f}MB)"
+        
+        logger.info(f"⚡ {func.__name__} executed in {duration:.3f}s{memory_str}")
         return result
 
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
@@ -983,99 +1025,103 @@ class TradingInstrumentService:
                 content = await response.read()
                 logger.info(f"📦 Downloaded {len(content)} bytes")
 
+        # Process data with memory optimization
+        filtered_instruments = []
+        current_time = datetime.now()
+        total_count = 0
+        
         try:
             with gzip.GzipFile(fileobj=BytesIO(content)) as gz:
+                # Load and process in memory-efficient way
                 all_instruments = json.load(gz)
+                total_count = len(all_instruments)
+                logger.info(f"📦 Parsed {total_count} total instruments")
+                
+                # Process in batches to reduce memory pressure
+                batch_size = 1000
+                for i in range(0, len(all_instruments), batch_size):
+                    batch = all_instruments[i:i + batch_size]
+                    for instrument in batch:
+                        if self._should_include_instrument(
+                            instrument, required_symbols, current_time
+                        ):
+                            filtered_instruments.append(instrument)
+                    
+                    # Progress logging and memory monitoring
+                    if i % 10000 == 0:
+                        current_memory = get_memory_usage()
+                        logger.info(f"🔄 Processed {i}/{total_count} instruments, filtered: {len(filtered_instruments)}, Memory: {current_memory:.1f}MB")
+                        
+                        # If memory usage is getting too high, limit processing
+                        if current_memory and current_memory > 1500:  # 1.5GB limit
+                            logger.warning(f"⚠️ Memory usage high ({current_memory:.1f}MB), limiting to {len(filtered_instruments)} instruments")
+                            break
+                
+                # Clear the large array from memory
+                del all_instruments
+                    
         except Exception as e:
             logger.error(f"❌ Failed to decompress/parse data: {e}")
             raise
+        finally:
+            # Clear content from memory
+            del content
 
-        logger.info(f"📦 Parsed {len(all_instruments)} total instruments")
-
-        filtered_instruments = []
-        current_time = datetime.now()
-
-        for instrument in all_instruments:
-            if self._should_include_instrument(
-                instrument, required_symbols, current_time
-            ):
-                filtered_instruments.append(instrument)
-
+        # Write filtered data efficiently to avoid memory spikes
         self.data_dir.mkdir(exist_ok=True)
+        
+        # Use compact JSON format to reduce memory usage
         async with aiofiles.open(self.filtered_instruments_file, "w") as f:
-            await f.write(json.dumps(filtered_instruments, indent=2))
+            await f.write(json.dumps(filtered_instruments, separators=(',', ':')))
 
         logger.info(f"💾 Saved {len(filtered_instruments)} filtered instruments")
-        return len(all_instruments), len(filtered_instruments)
+        return total_count, len(filtered_instruments)
 
     def _build_symbol_requirements(self, top_stocks: List[Dict]) -> Set[str]:
-        """Build symbol requirements with Upstox mappings"""
+        """Build FOCUSED symbol requirements - FnO stocks + HARDCODED indices + Essential commodities"""
         required_symbols = set()
 
+        logger.info("🎯 Building FOCUSED symbol requirements (FnO stocks + Hardcoded indices + Commodities)")
+
+        # 1. HARDCODED Essential Indices - Always the same
+        required_symbols.update(ESSENTIAL_INDICES)
+        logger.info(f"📈 Added {len(ESSENTIAL_INDICES)} hardcoded indices")
+
+        # 2. HARDCODED Essential MCX Commodities - Always the same
+        required_symbols.update(ESSENTIAL_COMMODITIES)
+        logger.info(f"🛢️ Added {len(ESSENTIAL_COMMODITIES)} hardcoded commodity variations")
+
+        # 3. DYNAMIC FnO stocks from the provided list
+        fno_count = 0
         for stock in top_stocks:
             symbol = self.safe_upper(stock.get("symbol"))
             exchange = self.safe_upper(stock.get("exchange"))
 
-            if symbol:
+            if symbol and exchange == "NSE":  # Only NSE F&O stocks
                 required_symbols.add(symbol)
                 required_symbols.add(symbol.replace("-", ""))
                 required_symbols.add(symbol.replace("&", ""))
                 required_symbols.add(symbol.replace(" ", ""))
 
-                # Add Upstox-specific mappings
+                # Add Upstox-specific mappings for F&O stocks only
                 if symbol in self.UPSTOX_SYMBOL_MAPPINGS:
                     upstox_variations = self.UPSTOX_SYMBOL_MAPPINGS[symbol]
                     required_symbols.update(upstox_variations)
-                    logger.info(
-                        f"🔍 Added Upstox mappings for {symbol}: {upstox_variations}"
-                    )
 
-                # Enhanced INDEX mappings based on actual top_stocks.json structure
-                if symbol == "NIFTY":
-                    # Based on actual data: trading_symbol="NIFTY", name="Nifty 50"
-                    required_symbols.update(["NIFTY", "NIFTY 50", "NIFTY50"])
-                elif symbol == "BANKNIFTY":
-                    required_symbols.update(["BANKNIFTY", "NIFTYBANK", "BANK NIFTY"])
-                elif symbol == "FINNIFTY":
-                    required_symbols.update(
-                        ["FINNIFTY", "FIN NIFTY", "NIFTY FINANCIAL SERVICES"]
-                    )
-                elif symbol == "SENSEX":
-                    required_symbols.update(["SENSEX"])
-                elif symbol == "MIDCPNIFTY":
-                    required_symbols.update(["MIDCPNIFTY", "NIFTY MIDCAP 50"])
-                elif symbol == "ZOMATO":
-                    required_symbols.add("ETERNAL")
-                elif exchange == "MCX":
-                    if symbol == "CRUDEOIL":
-                        required_symbols.update(["CRUDEOILM", "CRUDE", "CRUDEOLI"])
-                    elif symbol == "GOLD":
-                        required_symbols.update(["GOLDM", "GOLDPETAL"])
+                fno_count += 1
 
-        # Essential symbols based on your top_stocks.json
-        essential_symbols = [
-            "NIFTY",
-            "NIFTY 50",
-            "BANKNIFTY",
-            "FINNIFTY",
-            "SENSEX",
-            "MIDCPNIFTY",
-            "ETERNAL",
-            "RELIANCE",
-            "TCS",
-            "HDFCBANK",
-            "INFY",
-            "ICICIBANK",
-        ]
-        required_symbols.update(essential_symbols)
+        logger.info(f"📊 Added {fno_count} dynamic FnO stocks from NSE")
 
-        logger.info(f"📋 Total required symbols: {len(required_symbols)}")
+        logger.info(f"🎯 FOCUSED filtering: {len(required_symbols)} total symbols")
+        logger.info(f"   📈 Indices: {len(ESSENTIAL_INDICES)} (hardcoded)")
+        logger.info(f"   🛢️ Commodities: {len(ESSENTIAL_COMMODITIES)} (hardcoded)")
+        logger.info(f"   📊 FnO Stocks: {fno_count} (dynamic)")
         return required_symbols
 
     def _should_include_instrument(
         self, instrument: Dict, required_symbols: Set[str], current_time: datetime
     ) -> bool:
-        """Enhanced instrument inclusion with proper derivatives handling"""
+        """FOCUSED filtering: ONLY FnO stocks + Crude Oil + Gold + Sensex"""
         if not instrument.get("instrument_key"):
             return False
 
@@ -1108,27 +1154,27 @@ class TradingInstrumentService:
         underlying_symbol = self.safe_upper(instrument.get("underlying_symbol"))
         instrument_type = self.safe_upper(instrument.get("instrument_type"))
 
-        # Special handling for indices
+        # FOCUSED: Include hardcoded essential indices only
         if instrument_type == "INDEX":
-            # Include all major indices
-            for index_name in [
-                "NIFTY",
-                "BANKNIFTY",
-                "FINNIFTY",
-                "MIDCPNIFTY",
-                "SENSEX",
-            ]:
-                if index_name in trading_symbol or index_name in name:
+            for keyword in ESSENTIAL_INDEX_KEYWORDS:
+                if (keyword in trading_symbol or keyword in name or 
+                    keyword in underlying_symbol):
                     return True
-            return False  # Exclude other indices
+            return False  # Exclude all other indices
 
-        # Special handling for BSE - only include SENSEX and its derivatives
+        # FOCUSED: MCX - only include essential commodities
+        if exchange == "MCX":
+            commodity_keywords = ["CRUDEOIL", "CRUDE", "GOLD"]
+            for keyword in commodity_keywords:
+                if (keyword in trading_symbol or keyword in name or 
+                    keyword in underlying_symbol or keyword in symbol):
+                    return True
+            return False  # Exclude all other MCX instruments
+        
+        # FOCUSED: BSE - only include SENSEX derivatives
         if exchange == "BSE":
-            if (
-                "SENSEX" not in trading_symbol
-                and "SENSEX" not in name
-                and "SENSEX" not in underlying_symbol
-            ):
+            if ("SENSEX" not in trading_symbol and "SENSEX" not in name and 
+                "SENSEX" not in underlying_symbol):
                 return False
 
         # For all other instruments, check if they match required symbols
@@ -1173,22 +1219,8 @@ class TradingInstrumentService:
                     ):
                         return True
 
-                    # Enhanced NIFTY matching based on actual data structure
-                    if req_symbol in ["NIFTY", "NIFTY50", "NIFTY50-INDEX"]:
-                        if (
-                            "NIFTY" in field_value
-                            or "NIFTY 50" in field_value
-                            or field_value == "NIFTY"
-                        ):
-                            return True
-                    if req_symbol == "ETERNAL" and "ETERNAL" in field_value:
-                        return True
-                    if req_symbol in ["BANKNIFTY", "NIFTYBANK-INDEX"] and (
-                        "BANKNIFTY" in field_value
-                        or "NIFTYBANK" in field_value
-                        or "BANK NIFTY" in field_value
-                    ):
-                        return True
+                    # FOCUSED: Simple matching for our limited set
+                    # No complex NIFTY logic needed since we only want SENSEX + FnO stocks + commodities
                 except (TypeError, AttributeError):
                     continue
 
@@ -1402,7 +1434,9 @@ class TradingInstrumentService:
         """Build MCX commodity keys"""
         mcx_keys = []
 
-        for symbol in MCX_DEFAULT_SYMBOLS:
+        # Use hardcoded essential commodities
+        mcx_symbols = ["CRUDEOIL", "GOLD"]  # Only essential commodities
+        for symbol in mcx_symbols:
             search_symbols = [symbol]
             if symbol in self.UPSTOX_SYMBOL_MAPPINGS:
                 search_symbols.extend(self.UPSTOX_SYMBOL_MAPPINGS[symbol])
@@ -1699,76 +1733,95 @@ class TradingInstrumentService:
                 error=error_msg,
             )
 
+    @performance_timer
     async def _build_high_performance_indexes(self, instruments: List[Dict]):
-        """Build O(1) lookup indexes with improved symbol indexing"""
+        """Build O(1) lookup indexes with memory optimization"""
         logger.info(f"🏗️ Building indexes for {len(instruments)} instruments...")
+        
+        # Clear existing indexes to free memory
+        self._instrument_by_key.clear()
+        self._instruments_by_symbol.clear()
+        self._instruments_by_exchange_symbol.clear()
+        self._instruments_by_type.clear()
 
         # Count instruments by type for logging
         count_by_type = defaultdict(int)
         count_by_exchange = defaultdict(int)
+        processed = 0
 
-        for instrument in instruments:
-            instrument_key = instrument.get("instrument_key")
-            if not instrument_key:
-                continue
+        # Process instruments in batches to reduce memory pressure
+        batch_size = 500
+        for i in range(0, len(instruments), batch_size):
+            batch = instruments[i:i + batch_size]
+            
+            for instrument in batch:
+                instrument_key = instrument.get("instrument_key")
+                if not instrument_key:
+                    continue
 
-            try:
-                instr_data = InstrumentData(
-                    instrument_key=instrument_key,
-                    trading_symbol=self.safe_get_string(instrument, "trading_symbol"),
-                    name=self.safe_get_string(instrument, "name"),
-                    exchange=self.safe_get_string(instrument, "exchange"),
-                    segment=self.safe_get_string(instrument, "segment"),
-                    instrument_type=self.safe_get_string(instrument, "instrument_type"),
-                    expiry=instrument.get("expiry"),
-                    strike_price=self.safe_get_float(instrument, "strike_price"),
-                    lot_size=self.safe_get_int(instrument, "lot_size", 1),
-                    tick_size=self.safe_get_float(instrument, "tick_size", 0.01),
-                    underlying_symbol=instrument.get("underlying_symbol"),
-                    asset_symbol=instrument.get("asset_symbol"),
-                    last_price=self.safe_get_float(instrument, "last_price"),
-                    close_price=self.safe_get_float(instrument, "close_price"),
-                )
+                try:
+                    instr_data = InstrumentData(
+                        instrument_key=instrument_key,
+                        trading_symbol=self.safe_get_string(instrument, "trading_symbol"),
+                        name=self.safe_get_string(instrument, "name"),
+                        exchange=self.safe_get_string(instrument, "exchange"),
+                        segment=self.safe_get_string(instrument, "segment"),
+                        instrument_type=self.safe_get_string(instrument, "instrument_type"),
+                        expiry=instrument.get("expiry"),
+                        strike_price=self.safe_get_float(instrument, "strike_price"),
+                        lot_size=self.safe_get_int(instrument, "lot_size", 1),
+                        tick_size=self.safe_get_float(instrument, "tick_size", 0.01),
+                        underlying_symbol=instrument.get("underlying_symbol"),
+                        asset_symbol=instrument.get("asset_symbol"),
+                        last_price=self.safe_get_float(instrument, "last_price"),
+                        close_price=self.safe_get_float(instrument, "close_price"),
+                    )
 
-                # Track counts for logging
-                count_by_type[instr_data.instrument_type] += 1
-                count_by_exchange[instr_data.exchange] += 1
+                    # Track counts for logging
+                    count_by_type[instr_data.instrument_type] += 1
+                    count_by_exchange[instr_data.exchange] += 1
+                    processed += 1
 
-            except (TypeError, ValueError) as e:
-                logger.warning(
-                    f"⚠️ Error creating InstrumentData for {instrument_key}: {e}"
-                )
-                continue
+                except (TypeError, ValueError) as e:
+                    logger.warning(
+                        f"⚠️ Error creating InstrumentData for {instrument_key}: {e}"
+                    )
+                    continue
 
-            self._instrument_by_key[instrument_key] = instr_data
+                self._instrument_by_key[instrument_key] = instr_data
 
-            # Improved symbol field indexing
-            symbol_fields = [
-                "trading_symbol",
-                "symbol",
-                "name",
-                "underlying_symbol",  # Added to ensure derivatives are properly indexed
-            ]
+                # Optimized symbol indexing - avoid duplicates
+                symbol_fields = [
+                    "trading_symbol",
+                    "symbol", 
+                    "name",
+                    "underlying_symbol",  # Added to ensure derivatives are properly indexed
+                ]
 
-            # First index the primary identifiers
-            for field in symbol_fields:
-                symbol_value = instrument.get(field)
-                if symbol_value:
-                    symbol = self.safe_upper(symbol_value)
-                    if symbol:
-                        self._instruments_by_symbol[symbol].append(instr_data)
-                        # Also index without spaces for better matching
-                        symbol_no_space = symbol.replace(" ", "")
-                        if symbol_no_space != symbol:
-                            self._instruments_by_symbol[symbol_no_space].append(
-                                instr_data
-                            )
+                # Use set to avoid duplicate indexing
+                indexed_symbols = set()
+                
+                # First index the primary identifiers
+                for field in symbol_fields:
+                    symbol_value = instrument.get(field)
+                    if symbol_value:
+                        symbol = self.safe_upper(symbol_value)
+                        if symbol and symbol not in indexed_symbols:
+                            self._instruments_by_symbol[symbol].append(instr_data)
+                            indexed_symbols.add(symbol)
+                            
+                            # Also index without spaces for better matching (only if different)
+                            symbol_no_space = symbol.replace(" ", "")
+                            if symbol_no_space != symbol and symbol_no_space not in indexed_symbols:
+                                self._instruments_by_symbol[symbol_no_space].append(instr_data)
+                                indexed_symbols.add(symbol_no_space)
 
-            # Handle asset_symbol separately
-            asset_symbol = self.safe_upper(instrument.get("asset_symbol", ""))
-            if asset_symbol:
-                # Index directly by asset_symbol
-                self._instruments_by_symbol[asset_symbol].append(instr_data)
+                # Handle asset_symbol separately (avoid duplicates)
+                asset_symbol = self.safe_upper(instrument.get("asset_symbol", ""))
+                if asset_symbol and asset_symbol not in indexed_symbols:
+                    # Index directly by asset_symbol
+                    self._instruments_by_symbol[asset_symbol].append(instr_data)
+                    indexed_symbols.add(asset_symbol)
 
                 # Create mapping from asset_symbol to actual symbols
                 if not hasattr(self, "_asset_symbol_mappings"):
@@ -1778,27 +1831,40 @@ class TradingInstrumentService:
                 trading_symbol = self.safe_upper(instrument.get("trading_symbol", ""))
                 self._asset_symbol_mappings[asset_symbol].add(trading_symbol)
 
-            # Index by exchange_symbol combination
-            exchange_value = instrument.get("exchange")
-            if exchange_value:
-                exchange = self.safe_upper(exchange_value)
-                if exchange:
-                    for field in symbol_fields:
-                        symbol_value = instrument.get(field)
-                        if symbol_value:
-                            symbol = self.safe_upper(symbol_value)
-                            if symbol:
-                                key = f"{exchange}_{symbol}"
-                                self._instruments_by_exchange_symbol[key].append(
-                                    instr_data
-                                )
+                # Index by exchange_symbol combination (optimized)
+                exchange_value = instrument.get("exchange")
+                if exchange_value:
+                    exchange = self.safe_upper(exchange_value)
+                    if exchange:
+                        exchange_symbols = set()
+                        for field in symbol_fields:
+                            symbol_value = instrument.get(field)
+                            if symbol_value:
+                                symbol = self.safe_upper(symbol_value)
+                                if symbol:
+                                    key = f"{exchange}_{symbol}"
+                                    if key not in exchange_symbols:
+                                        self._instruments_by_exchange_symbol[key].append(instr_data)
+                                        exchange_symbols.add(key)
 
-            # Index by instrument type
-            instr_type_value = instrument.get("instrument_type")
-            if instr_type_value:
-                instr_type = self.safe_upper(instr_type_value)
-                if instr_type:
-                    self._instruments_by_type[instr_type].append(instr_data)
+                # Index by instrument type
+                instr_type_value = instrument.get("instrument_type")
+                if instr_type_value:
+                    instr_type = self.safe_upper(instr_type_value)
+                    if instr_type:
+                        self._instruments_by_type[instr_type].append(instr_data)
+            
+            # Progress logging and memory cleanup
+            if (i + batch_size) % 2500 == 0 or (i + batch_size) >= len(instruments):
+                current_memory = get_memory_usage()
+                logger.info(f"🏗️ Processed {min(i + batch_size, len(instruments))}/{len(instruments)} instruments, Memory: {current_memory:.1f}MB")
+                # Force garbage collection periodically to free memory
+                gc.collect()
+                
+                # Emergency memory protection
+                if current_memory and current_memory > 1800:  # 1.8GB emergency limit
+                    logger.error(f"🚨 Emergency memory limit reached ({current_memory:.1f}MB), stopping indexing")
+                    break
 
         # Log any asset symbols that map to multiple trading symbols
         if hasattr(self, "_asset_symbol_mappings"):

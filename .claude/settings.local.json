@@ -16,8 +16,12 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:www.benchmarksixsigma.com)",
       "WebFetch(domain:www.tipranks.com)",
-      "WebFetch(domain:blog.tipranks.com)"
+      "WebFetch(domain:blog.tipranks.com)",
+      "Bash(grep:*)"
     ],
-    "deny": []
+    "deny": [],
+    "additionalDirectories": [
+      "C:\\c\\Work\\P\\app\\tradingapp-main"
+    ]
   }
 }

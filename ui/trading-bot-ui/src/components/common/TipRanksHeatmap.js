@@ -23,11 +23,13 @@ const TipRanksHeatmap = memo(
     marketData = {},
     title = "Market Heatmap",
     isLoading = false,
-    maxItems = 50,
+    maxItems = 100, // Increased from 50 to 100
+    fullPage = true, // New prop for full page mode
   }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-    // const isTablet = useMediaQuery(theme.breakpoints.down("md")); // Tablet breakpoint check - kept for responsive calculations
+    const isTablet = useMediaQuery(theme.breakpoints.down("md"));
+    const isLargeScreen = useMediaQuery(theme.breakpoints.up("xl"));
 
     const [heatmapStocks, setHeatmapStocks] = useState([]);
 
@@ -200,8 +202,13 @@ const TipRanksHeatmap = memo(
       // Simple row-based layout algorithm
       let currentY = 0;
       let remainingStocks = [...stocks];
-      const minTileSize = isMobile ? 60 : 80;
-      const maxTileSize = isMobile ? 150 : 200;
+      // Enhanced tile sizing for full page mode
+      const minTileSize = fullPage 
+        ? (isMobile ? 50 : isTablet ? 60 : 70)
+        : (isMobile ? 60 : 80);
+      const maxTileSize = fullPage 
+        ? (isMobile ? 120 : isTablet ? 160 : isLargeScreen ? 220 : 180)
+        : (isMobile ? 150 : 200);
 
       while (remainingStocks.length > 0 && currentY < containerHeight) {
         const rowHeight = Math.min(
@@ -248,8 +255,13 @@ const TipRanksHeatmap = memo(
       return layouts;
     };
 
-    const containerWidth = isMobile ? 340 : 900; // isTablet ? 700 : 900
-    const containerHeight = isMobile ? 400 : 600; // isTablet ? 500 : 600
+    // Enhanced responsive dimensions for full page mode
+    const containerWidth = fullPage 
+      ? (isLargeScreen ? 1200 : isTablet ? 900 : isMobile ? 320 : 1000)
+      : (isMobile ? 320 : 800);
+    const containerHeight = fullPage 
+      ? (isLargeScreen ? 800 : isTablet ? 600 : isMobile ? 400 : 700)
+      : (isMobile ? 300 : 500);
     const tileLayouts = generateTreemapLayout(
       heatmapStocks,
       containerWidth,
@@ -325,14 +337,20 @@ const TipRanksHeatmap = memo(
     return (
       <Card
         sx={{
-          mb: 2,
+          mb: fullPage ? 0 : 2,
           bgcolor: colors.background,
           border: `1px solid ${colors.border}`,
-          borderRadius: 2,
-          overflow: "hidden",
+          borderRadius: fullPage ? 1 : 2,
+          overflow: "visible", // Always allow tooltips to show
+          width: "100%", // Use full container width
+          maxWidth: "100%", // Prevent overflow
+          minHeight: fullPage ? "auto" : "auto",
+          position: "relative",
+          mx: 0, // No extra margins
+          p: 0, // No extra padding
         }}
       >
-        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+        <CardContent sx={{ p: { xs: 1, sm: 2, md: 3 }, overflow: "hidden" }}>
           {/* Header */}
           <Box
             sx={{
@@ -395,16 +413,19 @@ const TipRanksHeatmap = memo(
             </Stack>
           </Box>
 
-          {/* Treemap Heatmap */}
+          {/* Enhanced Treemap Heatmap */}
           <Box
             sx={{
-              width: containerWidth,
+              width: "100%",
               height: containerHeight,
+              maxWidth: "100%",
               position: "relative",
               bgcolor: colors.surface,
               borderRadius: 1,
               overflow: "hidden",
               border: `1px solid ${colors.border}`,
+              mx: 0,
+              boxShadow: fullPage ? "none" : "0 4px 20px rgba(0,0,0,0.1)",
             }}
           >
             {tileLayouts.map((stock, index) => {

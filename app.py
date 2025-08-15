@@ -608,7 +608,23 @@ async def lifespan(app: FastAPI):
         # analytics_task = asyncio.create_task(start_analytics_processor())
         # logger.info("📊 Analytics processor started")
 
-        # 11. Start analytics processor background tasks
+        # 11. Start gap detection service
+        try:
+            from services.gap_detection_service import start_gap_detection_monitor
+            gap_task = asyncio.create_task(start_gap_detection_monitor())
+            logger.info("🕘 Gap detection service started.")
+        except Exception as e:
+            logger.warning(f"⚠️ Gap detection service failed to start: {e}")
+
+        # 12. Start breakout detection service
+        try:
+            from services.breakout_detection_service import start_breakout_monitor
+            breakout_task = asyncio.create_task(start_breakout_monitor())
+            logger.info("⚡ Breakout detection service started.")
+        except Exception as e:
+            logger.warning(f"⚠️ Breakout detection service failed to start: {e}")
+
+        # 12. Start analytics processor background tasks
         # if ANALYTICS_PROCESSOR_AVAILABLE and market_analytics_processor:
         #     try:
         #         await market_analytics_processor.start_background_tasks()
@@ -616,9 +632,9 @@ async def lifespan(app: FastAPI):
         #     except Exception as e:
         #         logger.error(f"❌ Error starting analytics processor tasks: {e}")
 
-        # logger.info(
-        #     "🟢 All services started successfully with NEW Centralized WebSocket + Optimized Architecture!"
-        # )
+        logger.info(
+            "🟢 All services started successfully with NEW Centralized WebSocket + Optimized Architecture!"
+        )
 
         yield
 
@@ -659,6 +675,24 @@ async def lifespan(app: FastAPI):
                 market_scheduler.stop_scheduler()
             except Exception as e:
                 logger.error(f"Error stopping market scheduler: {e}")
+
+        # Stop gap detection service
+        try:
+            from services.gap_detection_service import get_gap_detection_service
+            gap_service = get_gap_detection_service()
+            await gap_service.shutdown()
+            logger.info("✅ Gap detection service stopped")
+        except Exception as e:
+            logger.error(f"Error stopping gap detection service: {e}")
+
+        # Stop breakout detection service
+        try:
+            from services.breakout_detection_service import get_breakout_detection_service
+            breakout_service = get_breakout_detection_service()
+            await breakout_service.shutdown()
+            logger.info("✅ Breakout detection service stopped")
+        except Exception as e:
+            logger.error(f"Error stopping breakout detection service: {e}")
 
         # Stop Upstox automation
         try:

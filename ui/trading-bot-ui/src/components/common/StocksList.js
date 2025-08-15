@@ -35,6 +35,7 @@ const StocksList = memo(
     showVolume = true,
     showName = true,
     showSector = false,
+    showTimestamp = false, // New prop for showing breakout timestamps
     layoutType = "auto",
     enableExpansion = false,
     compact = false,
@@ -437,6 +438,31 @@ const StocksList = memo(
                                   {item.sector}
                                 </Typography>
                               )}
+                              
+                              {showTimestamp && item.breakout_time && item.breakout_time !== "N/A" && (
+                                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                                  {item.is_fresh && (
+                                    <Typography
+                                      sx={{
+                                        fontSize: "0.6rem",
+                                        color: colors.accent,
+                                      }}
+                                    >
+                                      🔥
+                                    </Typography>
+                                  )}
+                                  <Typography
+                                    variant="caption"
+                                    sx={{
+                                      fontSize: "0.6rem",
+                                      color: item.is_fresh ? colors.accent : colors.textSecondary,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {item.breakout_time}
+                                  </Typography>
+                                </Box>
+                              )}
                             </Box>
                           </Box>
                         </Box>
@@ -723,6 +749,18 @@ const StocksList = memo(
                           SECTOR
                         </TableCell>
                       )}
+                      {showTimestamp && !isTablet && (
+                        <TableCell 
+                          align="center"
+                          sx={{ 
+                            minWidth: 120, 
+                            maxWidth: 140,
+                            width: "15%"
+                          }}
+                        >
+                          TIME
+                        </TableCell>
+                      )}
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -912,6 +950,51 @@ const StocksList = memo(
                                   —
                                 </Typography>
                               )}
+                            </TableCell>
+                          )}
+
+                          {showTimestamp && !isTablet && (
+                            <TableCell align="center">
+                              <Box>
+                                {stock.breakout_time && stock.breakout_time !== "N/A" ? (
+                                  <Box>
+                                    <Typography
+                                      variant="body2"
+                                      sx={{
+                                        fontSize: "0.7rem",
+                                        fontWeight: 600,
+                                        color: stock.is_fresh ? colors.accent : "text.primary",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        gap: 0.5,
+                                      }}
+                                    >
+                                      {stock.is_fresh && "🔥"} {stock.breakout_time}
+                                    </Typography>
+                                    {stock.time_ago && stock.time_ago !== "N/A" && (
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontSize: "0.6rem",
+                                          color: "text.secondary",
+                                          display: "block",
+                                        }}
+                                      >
+                                        {stock.time_ago}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                ) : (
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    sx={{ fontSize: "inherit" }}
+                                  >
+                                    —
+                                  </Typography>
+                                )}
+                              </Box>
                             </TableCell>
                           )}
                         </TableRow>

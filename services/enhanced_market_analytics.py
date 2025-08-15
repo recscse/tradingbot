@@ -2,6 +2,12 @@ from datetime import datetime
 import logging
 from typing import Any, Dict, List
 
+# Import the correct breakout detection service
+try:
+    from services.breakout_detection_service import get_breakout_detection_service
+    BREAKOUT_SERVICE_AVAILABLE = True
+except ImportError:
+    BREAKOUT_SERVICE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +164,8 @@ class EnhancedMarketAnalyticsService:
                         "trading_symbol": data.get("trading_symbol", data["symbol"]),
                         "exchange": data.get("exchange", "NSE"),
                         "instrument_type": data.get("instrument_type", "EQ"),
-                        # Price data
-                        "last_price": data["ltp"],
+                        # ✅ FIX: Handle both ltp and last_price fields
+                        "last_price": data.get("ltp") or data.get("last_price", 0),
                         "change": data.get("change", 0),
                         "change_percent": data.get("change_percent", 0),
                         "previous_close": data.get("cp", 0),
@@ -176,7 +182,7 @@ class EnhancedMarketAnalyticsService:
                         "volatility": data.get("volatility", "normal"),
                         "has_derivatives": data.get("has_derivatives", False),
                         # Computed fields
-                        "market_cap_category": self._categorize_by_price(data["ltp"]),
+                        "market_cap_category": self._categorize_by_price(data.get("ltp") or data.get("last_price", 0)),
                         "volume_category": self._categorize_volume(
                             data.get("volume", 0)
                         ),
@@ -201,6 +207,38 @@ class EnhancedMarketAnalyticsService:
             logger.info(
                 f"📊 Retrieved {len(stocks)} enriched stocks with complete metadata"
             )
+            
+            # ✅ CRITICAL FIX: If no stocks retrieved, try to get data from fallback sources
+            if len(stocks) == 0:
+                logger.warning("⚠️ No enriched stocks found - checking fallback data sources")
+                # Try to get any available live prices data
+                try:
+                    live_data = instrument_registry._live_prices
+                    if live_data:
+                        logger.info(f"📊 Found {len(live_data)} live prices as fallback")
+                        # Convert live data to basic stock format
+                        for key, data in list(live_data.items())[:50]:  # Limit to prevent overload
+                            if isinstance(data, dict) and data.get("ltp"):
+                                symbol = key.split("|")[-1] if "|" in key else key
+                                fallback_stock = {
+                                    "symbol": symbol,
+                                    "name": symbol,
+                                    "sector": "UNKNOWN",
+                                    "last_price": data.get("ltp", 0),
+                                    "change": data.get("change", 0),
+                                    "change_percent": data.get("change_percent", 0),
+                                    "volume": data.get("volume", 0),
+                                    "market_cap_category": "unknown",
+                                    "volume_category": "unknown", 
+                                    "performance_category": "unknown",
+                                    "has_derivatives": False,
+                                    "last_updated": datetime.now().isoformat()
+                                }
+                                stocks.append(fallback_stock)
+                        logger.info(f"📊 Created {len(stocks)} fallback stock entries")
+                except Exception as fallback_error:
+                    logger.warning(f"⚠️ Fallback data retrieval failed: {fallback_error}")
+            
             return stocks
 
         except Exception as e:
@@ -1177,57 +1215,67 @@ class EnhancedMarketAnalyticsService:
             return {"gap_up": [], "gap_down": [], "error": str(e)}
 
     def get_breakout_analysis(self) -> Dict[str, Any]:
-        """Breakout analysis for stocks"""
+        """Get breakout analysis using the proper breakout detection service"""
         if not self._should_recalculate("breakout_analysis"):
             return self.cache.get(
                 "breakout_analysis", {"breakouts": [], "breakdowns": []}
             )
 
         try:
-            stocks = self.get_all_live_stocks()
-            breakouts = []
-            breakdowns = []
-
-            for stock in stocks:
-                # Simple breakout logic: price at/near high with good volume
-                high = stock.get("high", 0)
-                ltp = stock.get("last_price", 0) or stock.get("ltp", 0)  # Support both field names
-                volume = stock.get("volume", 0)
-                avg_volume = 100000  # Placeholder
-
-                if high > 0 and ltp > 0:
-                    near_high_pct = (ltp / high) * 100
-
-                    if (
-                        near_high_pct >= 98 and volume > avg_volume * 1.5
-                    ):  # Near high with volume
-                        breakouts.append(stock)
-                    elif (
-                        near_high_pct <= 60 and volume > avg_volume * 1.5
-                    ):  # Near low with volume
-                        breakdowns.append(stock)
-
-            # Sort by performance
-            breakouts.sort(key=lambda x: x.get("change_percent", 0), reverse=True)
-            breakdowns.sort(key=lambda x: x.get("change_percent", 0))
-
-            result = {
-                "breakouts": breakouts[:20],
-                "breakdowns": breakdowns[:20],
-                "summary": {
-                    "total_breakouts": len(breakouts),
-                    "total_breakdowns": len(breakdowns),
-                },
-                "timestamp": datetime.now().isoformat(),
-            }
-
-            self.cache["breakout_analysis"] = result
-            self._mark_calculated("breakout_analysis")
-            return result
+            # Use the proper breakout detection service
+            if BREAKOUT_SERVICE_AVAILABLE:
+                breakout_service = get_breakout_detection_service()
+                
+                # Get active breakouts from the service
+                all_breakouts = breakout_service.get_active_breakouts()
+                
+                # Separate breakouts and breakdowns
+                breakouts = [b for b in all_breakouts if b.get("breakout_type") == "breakout"]
+                breakdowns = [b for b in all_breakouts if b.get("breakout_type") == "breakdown"]
+                
+                # Sort by confidence score and strength
+                breakouts.sort(key=lambda x: (x.get("confidence_score", 0), x.get("breakout_strength", 0)), reverse=True)
+                breakdowns.sort(key=lambda x: (x.get("confidence_score", 0), x.get("breakout_strength", 0)), reverse=True)
+                
+                # Get performance metrics from the service
+                metrics = breakout_service.get_performance_metrics()
+                
+                result = {
+                    "breakouts": breakouts[:20],  # Top 20 breakouts
+                    "breakdowns": breakdowns[:20],  # Top 20 breakdowns
+                    "summary": {
+                        "total_breakouts": len(breakouts),
+                        "total_breakdowns": len(breakdowns),
+                        "breakouts_detected_today": metrics.get("breakouts_detected_today", 0),
+                        "symbols_monitored": metrics.get("symbols_monitored", 0),
+                        "detection_active": metrics.get("detection_active", False),
+                        "is_trading_hours": metrics.get("is_trading_hours", False),
+                        "avg_processing_time_us": metrics.get("avg_processing_time_us", 0),
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                }
+                
+                self.cache["breakout_analysis"] = result
+                self._mark_calculated("breakout_analysis")
+                return result
+            else:
+                # Fallback if breakout service is not available
+                logger.warning("Breakout detection service not available, returning empty result")
+                result = {
+                    "breakouts": [],
+                    "breakdowns": [],
+                    "summary": {
+                        "total_breakouts": 0,
+                        "total_breakdowns": 0,
+                        "error": "Breakout detection service not available",
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                }
+                return result
 
         except Exception as e:
             logger.error(f"Error calculating breakout analysis: {e}")
-            return {"breakouts": [], "breakdowns": [], "error": str(e)}
+            return {"breakouts": [], "breakdowns": [], "error": str(e), "data_source": "error"}
 
     def get_market_breadth(self) -> Dict[str, Any]:
         """Market breadth analysis"""
