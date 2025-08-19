@@ -5,13 +5,13 @@ import requests
 import time
 
 # Configuration
-API_KEY = "0d0fd83e-e563-472e-8a9f-a44b32da86d3"
-SECRET_KEY = "e8icv2ufqn"
+API_KEY = "**************8"
+SECRET_KEY = "*****"
 RURL = "http://localhost:8000/api/broker/upstox/callback"
 
 TOTP_KEY = "I7YOC3GRMOPMZAWLYCRXRAJFIXUDIBFE"
-MOBILE_NO = "8181893818"
-PIN = "265811"
+MOBILE_NO = "*****"
+PIN = "***"
 
 AUTH_URL = (
     f"https://api-v2.upstox.com/login/authorization/dialog"

@@ -8,14 +8,14 @@ import requests
 # python -m  playwright codegen demo.playwright.dev/todomvc
 
 
-API_KEY = "0d0fd83e-e563-472e-8a9f-a44b32da86d3"
-SECRET_KEY = "e8icv2ufqn"
+API_KEY = "****************"
+SECRET_KEY = "************"
 RURLT = "http://127.0.0.1:8000/"
 RURL = "http://localhost:8000/api/broker/upstox/callback"
 
 TOTP_KEY = "YKNAOEEDJARCQQTJMHP2OMGRBIIRYMFD"
-MOBILE_NO = "8181893818"
-PIN = "265811"
+MOBILE_NO = "***********"
+PIN = "***********"
 
 
 rurlEncode = quote(RURL, safe="")
