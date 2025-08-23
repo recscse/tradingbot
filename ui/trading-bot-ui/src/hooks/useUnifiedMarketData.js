@@ -1,7 +1,8 @@
-// hooks/useUnifiedMarketData.js - COMPLETE PRODUCTION READY VERSION
+// hooks/useUnifiedMarketData.js - OPTIMIZED WITH ZUSTAND FOR REAL-TIME PERFORMANCE
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createContext, useContext } from "react";
+import useMarketStore from '../store/marketStore';
 
 // Enhanced logging utility for performance
 const DEBUG_ENABLED = process.env.NODE_ENV === "development";
@@ -96,38 +97,6 @@ const sanitizeInstrumentData = (data) => {
 
   return sanitized;
 };
-
-// Optimized throttle function for performance with cleanup
-// const throttle = (func, delay) => {
-//   let timeoutId;
-//   let lastExecTime = 0;
-
-//   const throttledFunction = function (...args) {
-//     const currentTime = Date.now();
-
-//     if (currentTime - lastExecTime > delay) {
-//       func.apply(this, args);
-//       lastExecTime = currentTime;
-//     } else {
-//       clearTimeout(timeoutId);
-//       timeoutId = setTimeout(() => {
-//         func.apply(this, args);
-//         lastExecTime = Date.now();
-//       }, delay - (currentTime - lastExecTime));
-//     }
-//   };
-
-//   // Add cleanup method
-//   throttledFunction.cleanup = () => {
-//     if (timeoutId) {
-//       clearTimeout(timeoutId);
-//       timeoutId = null;
-//     }
-//   };
-
-//   return throttledFunction;
-// };
-
 // Memory-aware cache with size limits
 const createBoundedCache = (maxSize = MAX_CACHE_SIZE) => {
   const cache = new Map();
@@ -399,49 +368,39 @@ export const useUnifiedMarketData = () => {
             }, 50); // 🚀 ULTRA FAST: Reduced to 50ms for immediate data
             break;
 
-          // 🚀 CRITICAL FIX: Fast-path price updates with minimal validation
+          // 🚀 REAL-TIME PRICE UPDATE: Direct to Zustand store for maximum speed
           case "price_update":
             if (data.data) {
-              const priceData = Array.isArray(data.data)
-                ? data.data
-                : [data.data];
-              const validUpdates = {};
-              let validCount = 0;
-
-              // 🚀 FAST PATH: Skip heavy validation during real-time updates
-              if (data.source === "centralized_direct") {
-                // Direct from centralized manager - trust the data
-                Object.entries(priceData).forEach(([key, instrumentData]) => {
-                  if (instrumentData && instrumentData.ltp !== undefined) {
-                    validUpdates[key] = {
-                      ...instrumentData,
-                      timestamp: Date.now(),
-                      last_updated: Date.now(),
-                    };
-                    validCount++;
+              // 🚀 ULTRA-FAST: Single price update directly to Zustand
+              if (data.realtime && data.data.symbol) {
+                // Real-time individual price update
+                useMarketStore.getState().updatePrice(data.data);
+                debugLog("debug", `🚀 Real-time price: ${data.data.symbol} = ${data.data.ltp}`);
+              } else if (Array.isArray(data.data)) {
+                // Array format - update each price
+                data.data.forEach((item) => {
+                  if (item && item.symbol) {
+                    useMarketStore.getState().updatePrice(item);
                   }
                 });
-              } else {
-                // Legacy path with validation
-                priceData.forEach((instrumentData) => {
-                  if (instrumentData && typeof instrumentData === "object") {
-                    const sanitized = sanitizeInstrumentData(instrumentData);
-                    if (sanitized && sanitized.instrument_key) {
-                      validUpdates[sanitized.instrument_key] = sanitized;
-                      validCount++;
-                    }
-                  }
-                });
+                debugLog("debug", `🚀 Batch price update: ${data.data.length} instruments`);
+              } else if (typeof data.data === "object") {
+                // Object format - batch update
+                useMarketStore.getState().updatePrices(data.data);
+                debugLog("debug", `🚀 Object price update: ${Object.keys(data.data).length} instruments`);
               }
-
-              if (validCount > 0) {
-                setMarketData((prev) => ({ ...prev, ...validUpdates }));
-                debugLog(
-                  "debug",
-                  `Price update: ${validCount} instruments updated (${
-                    data.source || "legacy"
-                  })`
-                );
+              
+              // Also update legacy marketData for backward compatibility (analytics)
+              if (typeof data.data === "object" && !Array.isArray(data.data)) {
+                const legacyUpdates = {};
+                Object.entries(data.data).forEach(([key, item]) => {
+                  if (item && typeof item === "object") {
+                    legacyUpdates[key] = { ...item, timestamp: Date.now() };
+                  }
+                });
+                if (Object.keys(legacyUpdates).length > 0) {
+                  setMarketData((prev) => ({ ...prev, ...legacyUpdates }));
+                }
               }
             }
             break;
@@ -488,18 +447,12 @@ export const useUnifiedMarketData = () => {
             }
             break;
 
-          // Handle analytics updates with priority handling
+          // ⚡ ZERO-DELAY: Analytics updates with instant processing
           case "top_movers_update":
             if (data.data) {
-              debugLog(
-                "debug",
-                "🚀 Updating top movers:",
-                `${data.data.gainers?.length || 0} gainers, ${
-                  data.data.losers?.length || 0
-                } losers`
-              );
+              debugLog("debug", `⚡ ZERO-DELAY top movers: ${data.data.gainers?.length || 0} gainers, ${data.data.losers?.length || 0} losers`);
 
-              // Immediate real-time update - no change detection
+              // ⚡ INSTANT UPDATE: Direct state assignment for maximum speed
               setTopMovers({
                 gainers: data.data.gainers || [],
                 losers: data.data.losers || [],
@@ -526,19 +479,38 @@ export const useUnifiedMarketData = () => {
             break;
 
           case "breakout_analysis_update":
+          case "enhanced_breakout_update":
+          case "breakout_update":
             if (data.data) {
               console.log(
-                "📊 Updating breakout analysis:",
+                "🚀 Updating enhanced breakout analysis:",
                 data.data.breakouts?.length || 0,
-                "breakouts,",
-                data.data.breakdowns?.length || 0,
-                "breakdowns"
+                "total breakouts,",
+                data.data.recent_breakouts?.length || 0,
+                "recent,",
+                data.data.total_today || 0,
+                "today"
               );
-              setBreakoutAnalysis({
+              
+              // Handle both legacy and enhanced breakout data formats
+              const enhancedData = {
+                // Legacy format support
                 breakouts: data.data.breakouts || [],
                 breakdowns: data.data.breakdowns || [],
-                summary: data.data.summary || null,
-              });
+                summary: data.data.summary || {},
+                
+                // Enhanced format support
+                recent_breakouts: data.data.recent_breakouts || [],
+                top_breakouts: data.data.top_breakouts || [],
+                breakouts_by_type: data.data.breakouts_by_type || {},
+                total_breakouts_today: data.data.total_today || data.data.total_breakouts_today || 0,
+                engine_metrics: data.data.engine_metrics || data.data.metrics || {},
+                
+                // Unified timestamp
+                timestamp: data.data.timestamp || new Date().toISOString()
+              };
+              
+              setBreakoutAnalysis(enhancedData);
             }
             break;
 
@@ -590,15 +562,9 @@ export const useUnifiedMarketData = () => {
           case "intraday_highlights_update":
           case "intraday_stocks_update":
             if (data.data) {
-              debugLog(
-                "debug",
-                "⚡ Updating intraday stocks:",
-                `${data.data.all_candidates?.length || 0} total, ${
-                  data.data.fno_candidates?.length || 0
-                } FNO candidates`
-              );
+              debugLog("debug", `⚡ ZERO-DELAY intraday: ${data.data.all_candidates?.length || 0} total, ${data.data.fno_candidates?.length || 0} FNO candidates`);
 
-              // Immediate real-time update for intraday data
+              // ⚡ INSTANT UPDATE: Direct assignment for maximum trading speed
               setIntradayStocks({
                 all_candidates: data.data.all_candidates || [],
                 high_momentum: data.data.high_momentum || [],
@@ -647,42 +613,69 @@ export const useUnifiedMarketData = () => {
             }
             break;
 
-          // Handle dashboard updates from centralized WebSocket manager
+          // ⚡ ZERO-DELAY: Dashboard updates with MAXIMUM SPEED processing
           case "dashboard_update":
             if (data.data && typeof data.data === "object") {
-              const dataSize = Array.isArray(data.data)
-                ? data.data.length
-                : Object.keys(data.data).length;
-              debugLog(
-                "debug",
-                `Dashboard update received: ${dataSize} instruments`
-              );
+              const dataSize = Array.isArray(data.data) ? data.data.length : Object.keys(data.data).length;
+              console.log("📡 DASHBOARD UPDATE: Received", dataSize, "instruments");
+              debugLog("debug", `⚡ ZERO-DELAY dashboard: ${dataSize} instruments`);
 
-              // Handle both array and object formats with validation
-              const instrumentData = Array.isArray(data.data)
-                ? data.data.reduce((acc, item) => {
-                    const sanitized = sanitizeInstrumentData(item);
-                    if (sanitized && sanitized.instrument_key) {
-                      acc[sanitized.instrument_key] = sanitized;
-                    }
-                    return acc;
-                  }, {})
-                : data.data;
+              // ⚡ ULTRA-FAST PATH: Skip validation for maximum speed
+              let instrumentData;
+              
+              if (Array.isArray(data.data)) {
+                // Array format - convert to object quickly
+                instrumentData = {};
+                data.data.forEach((item) => {
+                  if (item?.instrument_key) {
+                    instrumentData[item.instrument_key] = item;
+                  }
+                });
+              } else {
+                // Object format - use directly
+                instrumentData = data.data;
+              }
 
-              const validUpdates = {};
-              let validCount = 0;
+              // ⚡ DIRECT UPDATE: Skip validation for maximum trading speed
+              const fastUpdates = {};
+              let updateCount = 0;
 
               Object.entries(instrumentData).forEach(([key, item]) => {
-                const sanitized = sanitizeInstrumentData(item);
-                if (sanitized) {
-                  validUpdates[key] = sanitized;
-                  marketDataCache.current.set(key, sanitized);
-                  validCount++;
+                if (item && typeof item === "object") {
+                  fastUpdates[key] = {
+                    ...item,
+                    timestamp: Date.now(),
+                  };
+                  updateCount++;
                 }
               });
 
-              if (validCount > 0) {
-                setMarketData((prev) => ({ ...prev, ...validUpdates }));
+              if (updateCount > 0) {
+                // ⚡ INSTANT STATE UPDATE: No delays, no caching overhead
+                setMarketData((prev) => ({ ...prev, ...fastUpdates }));
+                
+                // 🔧 CRITICAL FIX: Also update Zustand store for getRealTimeTopMovers
+                // Convert instrument_key format to symbol-based format for Zustand
+                const zustandUpdates = {};
+                Object.entries(fastUpdates).forEach(([key, item]) => {
+                  if (item && item.symbol) {
+                    // Convert from instrument_key format to symbol-based format
+                    zustandUpdates[item.symbol] = {
+                      ...item,
+                      ltp: item.ltp || item.last_price || 0,
+                      change: item.change || 0,
+                      change_percent: item.change_percent || 0,
+                      symbol: item.symbol,
+                    };
+                  }
+                });
+                
+                if (Object.keys(zustandUpdates).length > 0) {
+                  console.log("🔧 ZUSTAND UPDATE: Adding", Object.keys(zustandUpdates).length, "symbols to store");
+                  useMarketStore.getState().updatePrices(zustandUpdates);
+                  const storeSize = Object.keys(useMarketStore.getState().prices).length;
+                  console.log("🔧 ZUSTAND UPDATE: Store now has", storeSize, "total symbols");
+                }
               }
 
               // Separately update indices data for better tracking

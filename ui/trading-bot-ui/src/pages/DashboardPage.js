@@ -19,6 +19,7 @@ import {
   IconButton,
   Card,
   CardContent,
+  GlobalStyles,
 } from "@mui/material";
 import {
   ExpandMore as ExpandMoreIcon,
@@ -27,11 +28,16 @@ import {
   Search as SearchIcon,
 } from "@mui/icons-material";
 import StocksList from "../components/common/StocksList";
+import StocksListOptimized from "../components/common/StocksListOptimized";
+import StocksListWithLivePrices from "../components/common/StocksListWithLivePrices";
 import TipRanksHeatmap from "../components/common/TipRanksHeatmap";
 import FinancialHeatmap from "../components/common/FinancialHeatmap";
 import { useMarket } from "../hooks/useUnifiedMarketData";
+import useMarketStore from "../store/marketStore";
 // PERFORMANCE FIX: Memoized components to prevent unnecessary re-renders
 const MemoizedStocksList = React.memo(StocksList);
+const MemoizedStocksListOptimized = React.memo(StocksListOptimized);
+const MemoizedStocksListWithLivePrices = React.memo(StocksListWithLivePrices);
 // MODERN THEME COLORS - Enhanced design system
 const DASHBOARD_COLORS = {
   // Dark theme
@@ -131,7 +137,7 @@ const SectionNavigation = ({
   const isExtraSmall = useMediaQuery(theme.breakpoints.down("xs"));
   const [isScrolled, setIsScrolled] = React.useState(false);
   const scrollContainerRef = React.useRef(null);
-  
+
   // Handle scroll effect for sticky header
   React.useEffect(() => {
     const handleScroll = () => {
@@ -205,7 +211,9 @@ const SectionNavigation = ({
                   key={section.id}
                   onClick={() => handleSectionChange(section.id)}
                   data-section={section.id}
-                  variant={activeSection === section.id ? "contained" : "outlined"}
+                  variant={
+                    activeSection === section.id ? "contained" : "outlined"
+                  }
                   size="small"
                   sx={{
                     minWidth: isExtraSmall ? 70 : 85,
@@ -220,7 +228,7 @@ const SectionNavigation = ({
                     whiteSpace: "nowrap",
                     transition: "all 0.2s ease",
                     position: "relative",
-                    
+
                     // Clean active state
                     ...(activeSection === section.id && {
                       bgcolor: colors.primary,
@@ -242,14 +250,16 @@ const SectionNavigation = ({
 
                     "&:hover": {
                       transform: "translateY(-1px)",
-                      ...(activeSection === section.id ? {
-                        boxShadow: `0 4px 12px ${colors.primary}50`,
-                      } : {
-                        bgcolor: colors.surfaceHover,
-                        borderColor: colors.primary,
-                      }),
+                      ...(activeSection === section.id
+                        ? {
+                            boxShadow: `0 4px 12px ${colors.primary}50`,
+                          }
+                        : {
+                            bgcolor: colors.surfaceHover,
+                            borderColor: colors.primary,
+                          }),
                     },
-                    
+
                     display: "flex",
                     alignItems: "center",
                     gap: 0.5,
@@ -257,7 +267,11 @@ const SectionNavigation = ({
                 >
                   <span style={{ fontSize: "0.9rem" }}>{section.icon}</span>
                   {!isExtraSmall && (
-                    <span>{section.label.length > 7 ? section.label.substring(0, 5) + "..." : section.label}</span>
+                    <span>
+                      {section.label.length > 7
+                        ? section.label.substring(0, 5) + "..."
+                        : section.label}
+                    </span>
                   )}
                 </Button>
               ))}
@@ -282,7 +296,9 @@ const SectionNavigation = ({
                   key={section.id}
                   onClick={() => handleSectionChange(section.id)}
                   data-section={section.id}
-                  variant={activeSection === section.id ? "contained" : "outlined"}
+                  variant={
+                    activeSection === section.id ? "contained" : "outlined"
+                  }
                   size="small"
                   sx={{
                     minWidth: 0,
@@ -295,7 +311,7 @@ const SectionNavigation = ({
                     textTransform: "none",
                     transition: "all 0.2s ease",
                     position: "relative",
-                    
+
                     // Clean active state
                     ...(activeSection === section.id && {
                       bgcolor: colors.primary,
@@ -317,27 +333,33 @@ const SectionNavigation = ({
 
                     "&:hover": {
                       transform: "translateY(-2px)",
-                      ...(activeSection === section.id ? {
-                        boxShadow: `0 6px 16px ${colors.primary}50`,
-                      } : {
-                        bgcolor: colors.surfaceHover,
-                        borderColor: colors.primary,
-                        boxShadow: `0 2px 8px ${colors.border}30`,
-                      }),
+                      ...(activeSection === section.id
+                        ? {
+                            boxShadow: `0 6px 16px ${colors.primary}50`,
+                          }
+                        : {
+                            bgcolor: colors.surfaceHover,
+                            borderColor: colors.primary,
+                            boxShadow: `0 2px 8px ${colors.border}30`,
+                          }),
                     },
-                    
+
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
                     gap: 0.5,
                   }}
                 >
-                  <span style={{ fontSize: { xs: "1rem", sm: "1.1rem" } }}>{section.icon}</span>
-                  <span style={{ 
-                    fontSize: "inherit", 
-                    lineHeight: 1.1,
-                    textAlign: "center"
-                  }}>
+                  <span style={{ fontSize: { xs: "1rem", sm: "1.1rem" } }}>
+                    {section.icon}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "inherit",
+                      lineHeight: 1.1,
+                      textAlign: "center",
+                    }}
+                  >
                     {section.label}
                   </span>
                 </Button>
@@ -383,6 +405,16 @@ const DashboardPage = () => {
     getMarketSentimentFromIndices,
     getIndicesSummary,
   } = useMarket();
+
+  // 🚀 REAL-TIME DATA: Get live prices from Zustand store
+  const allLivePrices = useMarketStore((state) => state.prices);
+  
+  // 🔍 DEBUG: Check all data sources
+  console.log("🔍 Zustand store has", Object.keys(allLivePrices).length, "symbols");
+  console.log("🔍 topMovers from WebSocket:", topMovers);
+  console.log("🔍 marketData keys:", Object.keys(marketData || {}).length);
+  
+
   const [activeSection, setActiveSection] = useState("overview");
   const [expandedSection, setExpandedSection] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -445,6 +477,70 @@ const DashboardPage = () => {
     () => getMarketSentimentFromIndices(),
     [getMarketSentimentFromIndices]
   );
+
+  // 🚀 REAL-TIME DATA HELPERS: Convert Zustand store data to component format
+  const getRealTimeTopMovers = useCallback(() => {
+    const zustandPrices = Object.values(allLivePrices);
+    
+    console.log("🚀 getRealTimeTopMovers called, Zustand has", zustandPrices.length, "prices");
+    
+    if (zustandPrices.length === 0) {
+      console.log("⚠️ No Zustand data available");
+      return { gainers: [], losers: [] };
+    }
+
+    const gainers = zustandPrices
+      .filter((stock) => stock.change_percent > 0)
+      .sort((a, b) => b.change_percent - a.change_percent)
+      .slice(0, 20)
+      .map((stock) => stock.symbol);
+
+    const losers = zustandPrices
+      .filter((stock) => stock.change_percent < 0)
+      .sort((a, b) => a.change_percent - b.change_percent)
+      .slice(0, 20)
+      .map((stock) => stock.symbol);
+    
+    console.log("🚀 Returning:", { gainers: gainers.length, losers: losers.length });
+    return { gainers, losers };
+  }, [allLivePrices]);
+
+  // Enhanced function to get real-time indices data for cards
+  const getEnhancedIndicesData = useCallback(
+    (indicesArray) => {
+      return indicesArray.map((index) => {
+        const symbol = index.symbol || index.name;
+
+        // Try to get live data from Zustand store
+        const livePrice = allLivePrices[symbol];
+        if (livePrice) {
+          return {
+            ...index,
+            last_price: livePrice.ltp,
+            ltp: livePrice.ltp,
+            current_price: livePrice.ltp,
+            change: livePrice.change,
+            change_percent: livePrice.change_percent,
+            volume: livePrice.volume,
+            high: livePrice.high,
+            low: livePrice.low,
+            open: livePrice.open,
+            _live_data_available: true,
+            _source: "zustand_realtime",
+          };
+        }
+
+        // Return original data if no live data
+        return {
+          ...index,
+          _live_data_available: false,
+          _source: "analytics_static",
+        };
+      });
+    },
+    [allLivePrices]
+  );
+
   // Helper function to identify indices
   const isIndexSymbol = useCallback((symbol, name) => {
     if (!symbol && !name) return false;
@@ -466,28 +562,112 @@ const DashboardPage = () => {
       ) || symbolLower.match(/^(nifty|sensex|banknifty|finnifty|midcpnifty)/)
     );
   }, []);
-  // PERFORMANCE FIX: Memoized FNO stocks processing with categorization
+  // ENHANCED: Memoized FNO stocks processing with proper sector mapping and live data integration
   const fnoStocksData = useMemo(() => {
-    const processedStocks = fnoStockList.securities.map((stock, index) => ({
-      instrument_key: `${stock.exchange || "NSE"}|${stock.symbol}`,
-      symbol: stock.symbol,
-      name: stock.name,
-      exchange: stock.exchange || "NSE",
-      last_price: 0,
-      change: 0,
-      change_percent: 0,
-      volume: 0,
-      sector: "F&O",
-      timestamp: Date.now(),
-      is_index: isIndexSymbol(stock.symbol, stock.name),
-    }));
+    const processedStocks = fnoStockList.securities.map((stock, index) => {
+      const symbol = stock.symbol;
+      const instrumentKey = `${stock.exchange || "NSE"}|${symbol}`;
+
+      // Get sector mapping from marketData or use a basic sector mapping
+      let sector = "F&O"; // Default fallback
+
+      // Try to get sector from live market data first
+      const liveDataKey = Object.keys(marketData || {}).find(
+        (key) =>
+          key.includes(symbol) ||
+          key.toLowerCase().includes(symbol.toLowerCase()) ||
+          key.endsWith(`|${symbol}`) ||
+          marketData[key]?.symbol === symbol ||
+          marketData[key]?.trading_symbol === symbol
+      );
+
+      if (liveDataKey && marketData[liveDataKey]?.sector) {
+        sector = marketData[liveDataKey].sector;
+      } else {
+        // Basic sector mapping for common FNO stocks
+        const symbolUpper = symbol.toUpperCase();
+        if (
+          [
+            "NIFTY",
+            "BANKNIFTY",
+            "FINNIFTY",
+            "MIDCPNIFTY",
+            "NIFTY-NEXT50",
+          ].includes(symbolUpper)
+        ) {
+          sector = "INDEX";
+        } else if (
+          [
+            "HDFCBANK",
+            "SBIN",
+            "ICICIBANK",
+            "KOTAKBANK",
+            "AXISBANK",
+            "INDUSINDBK",
+          ].includes(symbolUpper)
+        ) {
+          sector = "BANKING";
+        } else if (
+          ["TCS", "INFY", "WIPRO", "HCLTECH", "TECHM", "LTIM"].includes(
+            symbolUpper
+          )
+        ) {
+          sector = "IT";
+        } else if (
+          ["RELIANCE", "ONGC", "BPCL", "IOC", "POWERGRID", "NTPC"].includes(
+            symbolUpper
+          )
+        ) {
+          sector = "ENERGY";
+        } else if (
+          [
+            "MARUTI",
+            "TATAMOTORS",
+            "M&M",
+            "EICHERMOT",
+            "BAJAJ-AUTO",
+            "HEROMOTOCO",
+          ].includes(symbolUpper)
+        ) {
+          sector = "AUTO";
+        } else if (
+          [
+            "SUNPHARMA",
+            "DRREDDY",
+            "CIPLA",
+            "DIVISLAB",
+            "LUPIN",
+            "BIOCON",
+          ].includes(symbolUpper)
+        ) {
+          sector = "PHARMA";
+        } else {
+          sector = "F&O"; // Keep F&O as default for unknown stocks
+        }
+      }
+
+      return {
+        instrument_key: instrumentKey,
+        symbol: symbol,
+        name: stock.name,
+        exchange: stock.exchange || "NSE",
+        last_price: 0,
+        change: 0,
+        change_percent: 0,
+        volume: 0,
+        sector: sector,
+        timestamp: Date.now(),
+        is_index: isIndexSymbol(stock.symbol, stock.name),
+      };
+    });
+
     // Sort: indices first (alphabetically), then stocks (alphabetically)
     return processedStocks.sort((a, b) => {
       if (a.is_index && !b.is_index) return -1;
       if (!a.is_index && b.is_index) return 1;
       return (a.name || a.symbol).localeCompare(b.name || b.symbol);
     });
-  }, [fnoStockList.securities, isIndexSymbol]);
+  }, [fnoStockList.securities, isIndexSymbol, marketData]);
   // Separate indices and stocks for categorized display
   const { fnoIndices, fnoStocks } = useMemo(() => {
     const indices = fnoStocksData.filter((stock) => stock.is_index);
@@ -497,22 +677,76 @@ const DashboardPage = () => {
       fnoStocks: stocks,
     };
   }, [fnoStocksData]);
-  // Process live data for categorized stocks
-  const { fnoIndicesWithLiveData, fnoStocksWithLiveData } = useMemo(() => {
-    const addLiveData = (stocksArray) => {
-      if (!marketData || Object.keys(marketData).length === 0) {
-        return stocksArray;
+  // ⚡ PERFORMANCE OPTIMIZED: Create market data lookup map outside useMemo for better performance
+  const marketDataLookup = useMemo(() => {
+    if (!marketData || Object.keys(marketData).length === 0) return new Map();
+
+    const lookup = new Map();
+    Object.entries(marketData).forEach(([key, data]) => {
+      const keyUpper = key.toUpperCase();
+      const symbol = data?.symbol?.toUpperCase() || "";
+      const tradingSymbol = data?.trading_symbol?.toUpperCase() || "";
+
+      // Primary key lookup
+      lookup.set(keyUpper, { key, data });
+
+      // Symbol-based lookups
+      if (symbol) lookup.set(symbol, { key, data });
+      if (tradingSymbol) lookup.set(tradingSymbol, { key, data });
+
+      // Extract symbol from key (e.g., "NSE|RELIANCE" -> "RELIANCE")
+      const keyParts = key.split("|");
+      if (keyParts.length > 1) {
+        lookup.set(keyParts[keyParts.length - 1].toUpperCase(), { key, data });
       }
+    });
+
+    return lookup;
+  }, [marketData]);
+
+  // ⚡ PERFORMANCE OPTIMIZED: Real-time live data processing with Map-based lookups
+  const {
+    fnoIndicesWithLiveData,
+    fnoStocksWithLiveData,
+    livePriceCount,
+    gainersCount,
+    losersCount,
+  } = useMemo(() => {
+    // Fast live data integration with Map lookups
+    const addLiveDataFast = (stocksArray) => {
+      if (marketDataLookup.size === 0) return stocksArray;
+
       return stocksArray.map((stock) => {
-        const liveDataKey = Object.keys(marketData).find(
-          (key) =>
-            key.includes(stock.symbol) ||
-            key.toLowerCase().includes(stock.symbol.toLowerCase())
-        );
-        if (liveDataKey && marketData[liveDataKey]) {
-          const liveData = marketData[liveDataKey];
+        const symbolUpper = stock.symbol.toUpperCase();
+
+        // Fast Map lookup instead of Array.find
+        let match =
+          marketDataLookup.get(symbolUpper) ||
+          marketDataLookup.get(`NSE|${symbolUpper}`) ||
+          marketDataLookup.get(`BSE|${symbolUpper}`);
+
+        // Special index handling
+        if (!match && stock.is_index) {
+          if (symbolUpper === "BANKNIFTY") {
+            match =
+              marketDataLookup.get("NIFTY BANK") ||
+              marketDataLookup.get("BANK NIFTY");
+          } else if (symbolUpper === "FINNIFTY") {
+            match =
+              marketDataLookup.get("NIFTY FIN SERVICE") ||
+              marketDataLookup.get("FIN NIFTY");
+          } else if (symbolUpper === "MIDCPNIFTY") {
+            match =
+              marketDataLookup.get("NIFTY MIDCAP SELECT") ||
+              marketDataLookup.get("MIDCAP NIFTY");
+          }
+        }
+
+        if (match?.data) {
+          const liveData = match.data;
           return {
             ...stock,
+            // ⚡ Direct assignment for speed
             last_price: safeNumber(
               liveData.ltp || liveData.last_price || liveData.price
             ),
@@ -520,21 +754,48 @@ const DashboardPage = () => {
             change_percent: safeNumber(
               liveData.change_percent || liveData.pchange
             ),
-            volume: safeNumber(liveData.volume),
+            volume: safeNumber(liveData.volume || liveData.daily_volume),
             high: safeNumber(liveData.high),
             low: safeNumber(liveData.low),
-            open: safeNumber(liveData.open), // Fixed typo: opcoloren -> open
-            close: safeNumber(liveData.close),
+            open: safeNumber(liveData.open),
+            close: safeNumber(liveData.close || liveData.cp),
+            sector: liveData.sector || stock.sector,
+            instrument_key: liveData.instrument_key || stock.instrument_key,
+            timestamp: liveData.timestamp || Date.now(),
+            last_updated: liveData.last_updated || Date.now(),
           };
         }
         return stock;
       });
     };
+
+    // Process both arrays in parallel for speed
+    const [indicesWithLive, stocksWithLive] = [
+      addLiveDataFast(fnoIndices),
+      addLiveDataFast(fnoStocks),
+    ];
+
+    // Pre-compute stats efficiently
+    const allSecurities = [...indicesWithLive, ...stocksWithLive];
+    let livePrices = 0,
+      gainers = 0,
+      losers = 0;
+
+    allSecurities.forEach((s) => {
+      if (s.last_price > 0) livePrices++;
+      if (s.change_percent > 0) gainers++;
+      else if (s.change_percent < 0) losers++;
+    });
+
     return {
-      fnoIndicesWithLiveData: addLiveData(fnoIndices),
-      fnoStocksWithLiveData: addLiveData(fnoStocks),
+      fnoIndicesWithLiveData: indicesWithLive,
+      fnoStocksWithLiveData: stocksWithLive,
+      livePriceCount: livePrices,
+      totalSecurities: allSecurities.length,
+      gainersCount: gainers,
+      losersCount: losers,
     };
-  }, [fnoIndices, fnoStocks, marketData]);
+  }, [fnoIndices, fnoStocks, marketDataLookup]);
   // FIXED: Heavily optimized data processing
   const processedData = useMemo(() => {
     const marketDataEntries = Object.entries(marketData || {});
@@ -636,6 +897,16 @@ const DashboardPage = () => {
     };
     const topGainers = extractAnalyticsData(topMovers, "gainers", 20);
     const topLosers = extractAnalyticsData(topMovers, "losers", 20);
+    
+    console.log("📊 DEBUG: WebSocket analytics data:", {
+      topGainers: topGainers.length,
+      topLosers: topLosers.length,
+      sampleGainers: topGainers.slice(0, 3).map(g => g?.symbol),
+      sampleLosers: topLosers.slice(0, 3).map(l => l?.symbol)
+    });
+    
+    console.log("📊 FULL topGainers data:", topGainers);
+    console.log("📊 FULL topLosers data:", topLosers);
     // Enhanced gap data extraction with real-time updates and gap-specific info
     const extractGapData = (analyticsObject, arrayKey, limit = 25) => {
       try {
@@ -649,40 +920,50 @@ const DashboardPage = () => {
         if (!Array.isArray(data)) {
           return [];
         }
-        
+
         const validData = data
           .filter((item) => item && typeof item === "object" && item.symbol)
           .map((item) => {
             // Get real-time price from marketData if available
-            const realtimeData = marketData[item.instrument_key] || marketData[item.symbol] || {};
-            const currentPrice = realtimeData.last_price || realtimeData.ltp || item.current_price || item.open_price || 0;
-            
+            const realtimeData =
+              marketData[item.instrument_key] || marketData[item.symbol] || {};
+            const currentPrice =
+              realtimeData.last_price ||
+              realtimeData.ltp ||
+              item.current_price ||
+              item.open_price ||
+              0;
+
             // Enhanced gap information
             const gapPercentage = item.gap_percentage || 0;
             const openPrice = item.open_price || currentPrice;
             const previousClose = item.previous_close || 0;
-            
+
             // Gap detection time (should be at market opening)
-            const gapTime = item.timestamp ? new Date(item.timestamp).toLocaleTimeString("en-US", {
-              hour12: false,
-              hour: "2-digit", 
-              minute: "2-digit",
-              second: "2-digit",
-            }) : "9:15:00"; // Default to market open time
-            
-            const gapDate = item.timestamp ? new Date(item.timestamp).toLocaleDateString("en-US", {
-              month: "short",
-              day: "2-digit",
-            }) : new Date().toLocaleDateString("en-US", {
-              month: "short", 
-              day: "2-digit",
-            });
-            
+            const gapTime = item.timestamp
+              ? new Date(item.timestamp).toLocaleTimeString("en-US", {
+                  hour12: false,
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })
+              : "9:15:00"; // Default to market open time
+
+            const gapDate = item.timestamp
+              ? new Date(item.timestamp).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "2-digit",
+                })
+              : new Date().toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "2-digit",
+                });
+
             return {
               symbol: item.symbol || item.trading_symbol || "N/A",
               name: item.name || item.symbol || item.trading_symbol || "N/A",
               last_price: currentPrice, // Use real-time price
-              change: realtimeData.change || (currentPrice - previousClose),
+              change: realtimeData.change || currentPrice - previousClose,
               change_percent: realtimeData.change_percent || gapPercentage,
               volume: realtimeData.volume || item.volume || 0,
               sector: item.sector || "OTHER",
@@ -711,7 +992,7 @@ const DashboardPage = () => {
         return [];
       }
     };
-    
+
     const gapUp = extractGapData(gapAnalysis, "gap_up", 25);
     const gapDown = extractGapData(gapAnalysis, "gap_down", 25);
     const intradayBoosters = extractAnalyticsData(
@@ -726,7 +1007,7 @@ const DashboardPage = () => {
     );
     const newHighs = extractAnalyticsData(recordMovers, "new_highs", 20);
     const newLows = extractAnalyticsData(recordMovers, "new_lows", 20);
-    
+
     // Enhanced breakout data extraction with real-time updates and timestamps
     const extractBreakoutData = (analyticsObject, arrayKey, limit = 25) => {
       try {
@@ -740,46 +1021,66 @@ const DashboardPage = () => {
         if (!Array.isArray(data)) {
           return [];
         }
-        
+
         const validData = data
           .filter((item) => item && typeof item === "object" && item.symbol)
           .map((item) => {
             // Get real-time price from marketData if available
-            const realtimeData = marketData[item.instrument_key] || marketData[item.symbol] || {};
-            const currentPrice = realtimeData.last_price || realtimeData.ltp || item.current_price || item.last_price || item.ltp || 0;
-            
+            const realtimeData =
+              marketData[item.instrument_key] || marketData[item.symbol] || {};
+            const currentPrice =
+              realtimeData.last_price ||
+              realtimeData.ltp ||
+              item.current_price ||
+              item.last_price ||
+              item.ltp ||
+              0;
+
             // Enhanced timestamp handling
-            const breakoutTime = item.breakout_time || (item.timestamp ? new Date(item.timestamp).toLocaleTimeString("en-US", {
-              hour12: false,
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            }) : "N/A");
-            
-            const breakoutDate = item.breakout_date || (item.timestamp ? new Date(item.timestamp).toLocaleDateString("en-US", {
-              month: "short",
-              day: "2-digit",
-            }) : "N/A");
-            
+            const breakoutTime =
+              item.breakout_time ||
+              (item.timestamp
+                ? new Date(item.timestamp).toLocaleTimeString("en-US", {
+                    hour12: false,
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })
+                : "N/A");
+
+            const breakoutDate =
+              item.breakout_date ||
+              (item.timestamp
+                ? new Date(item.timestamp).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "2-digit",
+                  })
+                : "N/A");
+
             // Calculate time ago
-            const timeAgo = item.timestamp ? (() => {
-              const now = new Date();
-              const breakoutTimestamp = new Date(item.timestamp);
-              const diffInMinutes = Math.floor((now - breakoutTimestamp) / (1000 * 60));
-              
-              if (diffInMinutes < 1) return "Just now";
-              if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-              const hours = Math.floor(diffInMinutes / 60);
-              if (hours < 24) return `${hours}h ${diffInMinutes % 60}m ago`;
-              return breakoutTimestamp.toLocaleDateString();
-            })() : "N/A";
-            
+            const timeAgo = item.timestamp
+              ? (() => {
+                  const now = new Date();
+                  const breakoutTimestamp = new Date(item.timestamp);
+                  const diffInMinutes = Math.floor(
+                    (now - breakoutTimestamp) / (1000 * 60)
+                  );
+
+                  if (diffInMinutes < 1) return "Just now";
+                  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+                  const hours = Math.floor(diffInMinutes / 60);
+                  if (hours < 24) return `${hours}h ${diffInMinutes % 60}m ago`;
+                  return breakoutTimestamp.toLocaleDateString();
+                })()
+              : "N/A";
+
             return {
               symbol: item.symbol || item.trading_symbol || "N/A",
               name: item.name || item.symbol || item.trading_symbol || "N/A",
               last_price: currentPrice, // Use real-time price
               change: realtimeData.change || item.change || 0,
-              change_percent: realtimeData.change_percent || item.change_percent || 0,
+              change_percent:
+                realtimeData.change_percent || item.change_percent || 0,
               volume: realtimeData.volume || item.volume || 0,
               sector: item.sector || "OTHER",
               exchange: item.exchange || "NSE",
@@ -800,7 +1101,9 @@ const DashboardPage = () => {
               breakout_date: breakoutDate,
               time_ago: timeAgo,
               // Real-time indicator
-              is_fresh: item.timestamp ? (new Date() - new Date(item.timestamp)) < 900000 : false, // Fresh if < 15 minutes
+              is_fresh: item.timestamp
+                ? new Date() - new Date(item.timestamp) < 900000
+                : false, // Fresh if < 15 minutes
               ...item,
             };
           })
@@ -811,7 +1114,7 @@ const DashboardPage = () => {
         return [];
       }
     };
-    
+
     const breakouts = extractBreakoutData(breakoutAnalysis, "breakouts", 25);
     const breakdowns = extractBreakoutData(breakoutAnalysis, "breakdowns", 25);
     return {
@@ -860,6 +1163,57 @@ const DashboardPage = () => {
     breakouts,
     breakdowns,
   } = processedData;
+
+  // 🚀 SIMPLE FIX: Use WebSocket analytics data if Zustand is empty
+  const getTopMoversData = useCallback(() => {
+    const zustandData = getRealTimeTopMovers();
+    
+    // If Zustand has data, use it for live updates
+    if (zustandData.gainers.length > 0 || zustandData.losers.length > 0) {
+      console.log("✅ Using Zustand data for top movers");
+      return zustandData;
+    }
+    
+    // Otherwise use WebSocket analytics data and populate Zustand store
+    console.log("✅ Using WebSocket analytics data for top movers");
+    
+    // Convert WebSocket data to Zustand format so StocksListOptimized can use it
+    const webSocketData = {};
+    [...(topGainers || []), ...(topLosers || [])].forEach(stock => {
+      if (stock && stock.symbol) {
+        webSocketData[stock.symbol] = {
+          symbol: stock.symbol,
+          ltp: stock.last_price || stock.ltp || 0,
+          change: stock.change || 0,
+          change_percent: stock.change_percent || 0,
+          volume: stock.volume || 0,
+          high: stock.high || 0,
+          low: stock.low || 0,
+          open: stock.open || 0,
+          sector: stock.sector || 'OTHER',
+          exchange: stock.exchange || 'NSE',
+          timestamp: new Date().toISOString(),
+          last_updated: Date.now()
+        };
+      }
+    });
+    
+    // Update Zustand store so StocksListOptimized can find the data
+    if (Object.keys(webSocketData).length > 0) {
+      console.log("🔧 Populating Zustand with", Object.keys(webSocketData).length, "symbols from analytics");
+      useMarketStore.getState().updatePrices(webSocketData);
+    }
+    
+    return {
+      gainers: (topGainers || []).map(stock => stock.symbol).filter(Boolean),
+      losers: (topLosers || []).map(stock => stock.symbol).filter(Boolean)
+    };
+  }, [getRealTimeTopMovers, topGainers, topLosers]);
+
+  // Get enhanced major indices for cards (after majorIndices is available)
+  const enhancedMajorIndices = useMemo(() => {
+    return getEnhancedIndicesData(majorIndices);
+  }, [majorIndices, getEnhancedIndicesData]);
 
   // PERFORMANCE FIX: Memoized market status display
   const marketStatusDisplay = useMemo(() => {
@@ -947,7 +1301,14 @@ const DashboardPage = () => {
             }}
           >
             {/* Terminal Title with Professional Styling */}
-            <Box sx={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
               <Typography
                 variant={isMobile ? "h6" : "h5"}
                 component="div"
@@ -980,7 +1341,7 @@ const DashboardPage = () => {
                 </Box>
                 {isMobile ? "TERMINAL" : "LIVE MARKET TERMINAL"}
               </Typography>
-              
+
               {/* Live Indicator */}
               <Box
                 sx={{
@@ -997,8 +1358,8 @@ const DashboardPage = () => {
                     borderRadius: "50%",
                     bgcolor: isConnected ? colors.positive : colors.negative,
                     animation: isConnected ? "pulse 2s infinite" : "none",
-                    boxShadow: isConnected 
-                      ? `0 0 10px ${colors.positive}50` 
+                    boxShadow: isConnected
+                      ? `0 0 10px ${colors.positive}50`
                       : `0 0 10px ${colors.negative}50`,
                     "@keyframes pulse": {
                       "0%": { opacity: 1, transform: "scale(1)" },
@@ -1011,15 +1372,21 @@ const DashboardPage = () => {
             </Box>
 
             {/* Status Indicators - Professional Bloomberg Style */}
-            <Box sx={{ 
-              display: "flex", 
-              gap: { xs: 0.5, sm: 0.75, md: 1 }, 
-              flexShrink: 0,
-              alignItems: "center",
-            }}>
+            <Box
+              sx={{
+                display: "flex",
+                gap: { xs: 0.5, sm: 0.75, md: 1 },
+                flexShrink: 0,
+                alignItems: "center",
+              }}
+            >
               {/* Market Status */}
               <Chip
-                icon={<span style={{ fontSize: "0.8rem" }}>{marketStatusDisplay.icon}</span>}
+                icon={
+                  <span style={{ fontSize: "0.8rem" }}>
+                    {marketStatusDisplay.icon}
+                  </span>
+                }
                 label={
                   isMobile && marketStatusDisplay.text.length > 8
                     ? marketStatusDisplay.text.substring(0, 6)
@@ -1045,7 +1412,7 @@ const DashboardPage = () => {
                   },
                 }}
               />
-              
+
               {/* Connection Status */}
               <Chip
                 label={
@@ -1059,17 +1426,19 @@ const DashboardPage = () => {
                   fontSize: { xs: "0.65rem", sm: "0.7rem" },
                   height: { xs: 22, sm: 26 },
                   borderRadius: 1,
-                  boxShadow: isConnected 
-                    ? `0 2px 8px ${colors.positive}30` 
+                  boxShadow: isConnected
+                    ? `0 2px 8px ${colors.positive}30`
                     : `0 2px 8px ${colors.negative}30`,
                   cursor: !isConnected ? "pointer" : "default",
                   transition: "all 0.2s ease",
-                  "&:hover": !isConnected ? {
-                    transform: "translateY(-1px)",
-                    boxShadow: isConnected 
-                      ? `0 3px 12px ${colors.positive}40` 
-                      : `0 3px 12px ${colors.negative}40`,
-                  } : {},
+                  "&:hover": !isConnected
+                    ? {
+                        transform: "translateY(-1px)",
+                        boxShadow: isConnected
+                          ? `0 3px 12px ${colors.positive}40`
+                          : `0 3px 12px ${colors.negative}40`,
+                      }
+                    : {},
                   "& .MuiChip-label": {
                     px: { xs: 0.75, sm: 1 },
                     fontFamily: '"SF Mono", "Consolas", monospace',
@@ -1136,11 +1505,44 @@ const DashboardPage = () => {
             }}
           >
             {[
-              { icon: "📊", value: totalStocks, label: "STOCKS", color: colors.primary },
-              { icon: "🏢", value: sectors.length, label: "SECTORS", color: colors.secondary },
-              { icon: "📈", value: totalIndices || indices.length, label: "INDICES", color: colors.accent },
-              ...(majorIndicesCount > 0 ? [{ icon: "🏛️", value: majorIndicesCount, label: "MAJOR", color: colors.positive }] : []),
-              ...(isConnected ? [{ icon: "⚡", value: "LIVE", label: "DATA", color: colors.positive }] : []),
+              {
+                icon: "📊",
+                value: totalStocks,
+                label: "STOCKS",
+                color: colors.primary,
+              },
+              {
+                icon: "🏢",
+                value: sectors.length,
+                label: "SECTORS",
+                color: colors.secondary,
+              },
+              {
+                icon: "📈",
+                value: totalIndices || indices.length,
+                label: "INDICES",
+                color: colors.accent,
+              },
+              ...(majorIndicesCount > 0
+                ? [
+                    {
+                      icon: "🏛️",
+                      value: majorIndicesCount,
+                      label: "MAJOR",
+                      color: colors.positive,
+                    },
+                  ]
+                : []),
+              ...(isConnected
+                ? [
+                    {
+                      icon: "⚡",
+                      value: "LIVE",
+                      label: "DATA",
+                      color: colors.positive,
+                    },
+                  ]
+                : []),
             ].map((stat, index) => (
               <Chip
                 key={index}
@@ -1174,7 +1576,7 @@ const DashboardPage = () => {
                 }}
               />
             ))}
-            
+
             {/* Current Time Display */}
             <Box sx={{ ml: "auto", display: "flex", alignItems: "center" }}>
               <Typography
@@ -1285,7 +1687,7 @@ const DashboardPage = () => {
           </Grid>
         </Paper>
       )}
-      {/* Clean Major Indices Cards */}
+      {/* Clean Major Indices Cards - Enhanced with Real-Time Data */}
       {majorIndices.length > 0 && (
         <Card sx={{ mb: 2 }}>
           <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
@@ -1302,6 +1704,21 @@ const DashboardPage = () => {
               }}
             >
               🏛️ MAJOR INDICES ({majorIndices.length})
+              {/* Real-time indicator */}
+              {Object.keys(allLivePrices).some((key) =>
+                ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(key)
+              ) && (
+                <Chip
+                  size="small"
+                  label="LIVE"
+                  sx={{
+                    backgroundColor: colors.positive,
+                    color: "white",
+                    fontSize: "0.6rem",
+                    height: "18px",
+                  }}
+                />
+              )}
             </Typography>
             {isMobile ? (
               // Mobile: Clean horizontal scroll cards
@@ -1321,11 +1738,12 @@ const DashboardPage = () => {
                   },
                 }}
               >
-                {majorIndices.slice(0, 8).map((index, i) => {
+                {enhancedMajorIndices.slice(0, 8).map((index, i) => {
                   const isPositive = (index.change_percent || 0) >= 0;
+                  const isLive = index._live_data_available;
                   return (
                     <Card
-                      key={i}
+                      key={index.symbol || index.name || i}
                       sx={{
                         minWidth: 120,
                         flexShrink: 0,
@@ -1345,20 +1763,39 @@ const DashboardPage = () => {
                       <CardContent
                         sx={{ p: 1.25, "&:last-child": { pb: 1.25 } }}
                       >
-                        <Typography
-                          variant="body2"
+                        <Box
                           sx={{
-                            fontWeight: 700,
-                            color: colors.header,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 0.5,
                             mb: 0.5,
-                            fontSize: "0.8rem",
-                            textAlign: "center",
-                            lineHeight: 1.2,
                           }}
-                          noWrap
                         >
-                          {index.symbol}
-                        </Typography>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              fontWeight: 700,
+                              color: colors.header,
+                              fontSize: "0.8rem",
+                              lineHeight: 1.2,
+                            }}
+                            noWrap
+                          >
+                            {index.symbol}
+                          </Typography>
+                          {isLive && (
+                            <Box
+                              sx={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                bgcolor: colors.positive,
+                                animation: "pulse 1.5s infinite",
+                              }}
+                            />
+                          )}
+                        </Box>
                         <Typography
                           variant="body1"
                           sx={{
@@ -1370,7 +1807,7 @@ const DashboardPage = () => {
                             fontFamily: "monospace",
                           }}
                         >
-                          ₹{index.last_price?.toFixed(2)}
+                          ₹{(index.last_price || index.ltp || 0).toFixed(2)}
                         </Typography>
                         <Box
                           sx={{
@@ -1414,10 +1851,17 @@ const DashboardPage = () => {
             ) : (
               // Desktop: Grid layout
               <Grid container spacing={2}>
-                {majorIndices.slice(0, 6).map((index, i) => {
+                {enhancedMajorIndices.slice(0, 6).map((index, i) => {
                   const isPositive = (index.change_percent || 0) >= 0;
+                  const isLive = index._live_data_available;
                   return (
-                    <Grid item xs={6} sm={4} md={2} key={i}>
+                    <Grid
+                      item
+                      xs={6}
+                      sm={4}
+                      md={2}
+                      key={index.symbol || index.name || i}
+                    >
                       <Card
                         sx={{
                           bgcolor: colors.cardBackground,
@@ -1436,19 +1880,38 @@ const DashboardPage = () => {
                         <CardContent
                           sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}
                         >
-                          <Typography
-                            variant="body2"
+                          <Box
                             sx={{
-                              fontWeight: 700,
-                              color: colors.header,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 0.5,
                               mb: 0.75,
-                              fontSize: "0.85rem",
-                              textAlign: "center",
                             }}
-                            noWrap
                           >
-                            {index.symbol}
-                          </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 700,
+                                color: colors.header,
+                                fontSize: "0.85rem",
+                              }}
+                              noWrap
+                            >
+                              {index.symbol}
+                            </Typography>
+                            {isLive && (
+                              <Box
+                                sx={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: "50%",
+                                  bgcolor: colors.positive,
+                                  animation: "pulse 1.5s infinite",
+                                }}
+                              />
+                            )}
+                          </Box>
                           <Typography
                             variant="h6"
                             sx={{
@@ -1460,7 +1923,7 @@ const DashboardPage = () => {
                               fontFamily: "monospace",
                             }}
                           >
-                            ₹{index.last_price?.toFixed(2)}
+                            ₹{(index.last_price || index.ltp || 0).toFixed(2)}
                           </Typography>
                           <Box sx={{ textAlign: "center" }}>
                             <Typography
@@ -1510,7 +1973,7 @@ const DashboardPage = () => {
           bgcolor: "background.paper",
         }}
       >
-        <MemoizedStocksList
+        <MemoizedStocksListWithLivePrices
           title={`🏛️ INDICES (${indices.length})`}
           data={indices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
@@ -1519,6 +1982,8 @@ const DashboardPage = () => {
           maxItems={isMobile ? 8 : 12} // Show fewer items on mobile
           density="compact" // Use compact density
           compact={true}
+          enhanceWithLivePrices={true}
+          showLiveIndicator={true}
           // Remove fixed containerHeight to allow natural flow
           // containerHeight={isMobile ? "50vh" : "55vh"}
         />
@@ -1538,18 +2003,15 @@ const DashboardPage = () => {
             flexDirection: "column",
           }}
         >
-          <MemoizedStocksList
-            title={`🚀 GAINERS (${topGainers.length})`}
-            data={topGainers}
-            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+          <MemoizedStocksListOptimized
+            title={`🚀 GAINERS (${getTopMoversData().gainers.length})`}
+            symbols={getTopMoversData().gainers}
             showVolume={!isMobile} // Hide volume on mobile
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={isMobile ? 5 : 8} // Show fewer items on mobile
-            isLoading={!isConnected}
-            density="compact" // Use compact density
+            isLoading={getTopMoversData().gainers.length === 0}
             compact={true}
-            // Remove fixed containerHeight to allow natural flow
-            // containerHeight={isMobile ? "55vh" : "60vh"}
+            containerHeight="auto"
           />
         </Paper>
         <Paper
@@ -1564,18 +2026,15 @@ const DashboardPage = () => {
             flexDirection: "column",
           }}
         >
-          <MemoizedStocksList
-            title={`📉 LOSERS (${topLosers.length})`}
-            data={topLosers}
-            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+          <MemoizedStocksListOptimized
+            title={`📉 LOSERS (${getTopMoversData().losers.length})`}
+            symbols={getTopMoversData().losers}
             showVolume={!isMobile} // Hide volume on mobile
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={isMobile ? 5 : 8} // Show fewer items on mobile
-            isLoading={!isConnected}
-            density="compact" // Use compact density
+            isLoading={getTopMoversData().losers.length === 0}
             compact={true}
-            // Remove fixed containerHeight to allow natural flow
-            // containerHeight={isMobile ? "55vh" : "60vh"}
+            containerHeight="auto"
           />
         </Paper>
       </Stack>
@@ -1871,15 +2330,17 @@ const DashboardPage = () => {
           bgcolor: "background.paper",
         }}
       >
-        <MemoizedStocksList
-          title={`🏛️ MAJOR INDICES (${majorIndices.length})`}
-          data={majorIndices}
+        <MemoizedStocksListWithLivePrices
+          title={`🏛️ MAJOR INDICES (${enhancedMajorIndices.length})`}
+          data={enhancedMajorIndices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={false} // Hide volume for indices
           showName={true}
           showSector={false} // Hide sector for indices
           maxItems={isMobile ? 8 : 20} // Show fewer items on mobile
           isLoading={!isConnected}
+          enhanceWithLivePrices={true}
+          showLiveIndicator={true}
           // Remove fixed containerHeight to allow natural flow
         />
       </Paper>
@@ -1893,7 +2354,7 @@ const DashboardPage = () => {
           bgcolor: "background.paper",
         }}
       >
-        <MemoizedStocksList
+        <MemoizedStocksListWithLivePrices
           title={`🏢 SECTOR INDICES (${sectorIndices.length})`}
           data={sectorIndices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
@@ -1902,6 +2363,8 @@ const DashboardPage = () => {
           showSector={false} // Hide sector for indices
           maxItems={isMobile ? 8 : 30} // Show fewer items on mobile
           isLoading={!isConnected}
+          enhanceWithLivePrices={true}
+          showLiveIndicator={true}
           // Remove fixed containerHeight to allow natural flow
         />
       </Paper>
@@ -1920,7 +2383,7 @@ const DashboardPage = () => {
               flexDirection: "column",
             }}
           >
-            <MemoizedStocksList
+            <MemoizedStocksListWithLivePrices
               title={`📈 TOP GAINING INDICES (${indicesPerformance.gainers.length})`}
               data={indicesPerformance.gainers.slice(0, isMobile ? 5 : 10)}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
@@ -1929,6 +2392,8 @@ const DashboardPage = () => {
               showSector={false} // Hide sector for indices
               maxItems={isMobile ? 5 : 10} // Show fewer items on mobile
               isLoading={!isConnected}
+              enhanceWithLivePrices={true}
+              showLiveIndicator={true}
               // Remove fixed containerHeight to allow natural flow
             />
           </Paper>
@@ -1946,7 +2411,7 @@ const DashboardPage = () => {
               flexDirection: "column",
             }}
           >
-            <MemoizedStocksList
+            <MemoizedStocksListWithLivePrices
               title={`📉 TOP LOSING INDICES (${indicesPerformance.losers.length})`}
               data={indicesPerformance.losers.slice(0, isMobile ? 5 : 10)}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
@@ -1955,6 +2420,8 @@ const DashboardPage = () => {
               showSector={false} // Hide sector for indices
               maxItems={isMobile ? 5 : 10} // Show fewer items on mobile
               isLoading={!isConnected}
+              enhanceWithLivePrices={true}
+              showLiveIndicator={true}
               // Remove fixed containerHeight to allow natural flow
             />
           </Paper>
@@ -1970,7 +2437,7 @@ const DashboardPage = () => {
           bgcolor: "background.paper",
         }}
       >
-        <MemoizedStocksList
+        <MemoizedStocksListWithLivePrices
           title={`🏛️ ALL INDICES (${indices.length})`}
           data={indices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
@@ -1979,6 +2446,8 @@ const DashboardPage = () => {
           showSector={false} // Hide sector for indices
           maxItems={isMobile ? 8 : 100} // Show fewer items on mobile, more on desktop
           isLoading={!isConnected}
+          enhanceWithLivePrices={true}
+          showLiveIndicator={true}
           // Remove fixed containerHeight to allow natural flow
         />
       </Paper>
@@ -2014,7 +2483,7 @@ const DashboardPage = () => {
               variant="h6"
               sx={{ color: colors.primary, fontWeight: 700 }}
             >
-              🚀 TOP GAINERS ({topGainers.length})
+              🚀 TOP GAINERS ({getTopMoversData().gainers.length})
             </Typography>
             <Button
               size="small"
@@ -2031,10 +2500,9 @@ const DashboardPage = () => {
               {expandedSection === "gainers" ? "COMPACT" : "EXPAND"}
             </Button>
           </Box>
-          <MemoizedStocksList
+          <MemoizedStocksListOptimized
             title="" // Title already shown above
-            data={topGainers}
-            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+            symbols={getTopMoversData().gainers}
             showVolume={!isMobile} // Hide volume on mobile
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={
@@ -2046,9 +2514,9 @@ const DashboardPage = () => {
                 ? 10
                 : 15
             }
-            isLoading={!isConnected}
-            compact={true} // Pass compact prop if your StocksList supports it
-            // Remove fixed containerHeight to allow natural flow
+            isLoading={getTopMoversData().gainers.length === 0}
+            compact={true}
+            containerHeight="auto"
           />
         </Paper>
         <Paper
@@ -2076,7 +2544,7 @@ const DashboardPage = () => {
               variant="h6"
               sx={{ color: colors.primary, fontWeight: 700 }}
             >
-              📉 TOP LOSERS ({topLosers.length})
+              📉 TOP LOSERS ({getTopMoversData().losers.length})
             </Typography>
             <Button
               size="small"
@@ -2093,10 +2561,9 @@ const DashboardPage = () => {
               {expandedSection === "losers" ? "COMPACT" : "EXPAND"}
             </Button>
           </Box>
-          <MemoizedStocksList
+          <MemoizedStocksListOptimized
             title="" // Title already shown above
-            data={topLosers}
-            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
+            symbols={getTopMoversData().losers}
             showVolume={!isMobile} // Hide volume on mobile
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={
@@ -2108,9 +2575,9 @@ const DashboardPage = () => {
                 ? 10
                 : 15
             }
-            isLoading={!isConnected}
-            compact={true} // Pass compact prop if your StocksList supports it
-            // Remove fixed containerHeight to allow natural flow
+            isLoading={getTopMoversData().losers.length === 0}
+            compact={true}
+            containerHeight="auto"
           />
         </Paper>
       </Stack>
@@ -2309,87 +2776,93 @@ const DashboardPage = () => {
   );
   // Enhanced MCX trading symbol parser using proper data fields
   const parseMcxTradingSymbol = (stock) => {
-    const tradingSymbol = stock.symbol || stock.name || '';
-    const instrumentType = stock.instrument_type || '';
+    const tradingSymbol = stock.symbol || stock.name || "";
+    const instrumentType = stock.instrument_type || "";
     const strikePrice = stock.strike_price || null;
     const expiry = stock.expiry || null;
-    
+
     // Extract commodity from trading symbol (first part before space)
-    const parts = tradingSymbol.split(' ');
+    const parts = tradingSymbol.split(" ");
     const commodity = parts[0]; // CRUDEOIL, GOLD, SILVER, etc.
-    
-    const isOption = instrumentType === 'CE' || instrumentType === 'PE';
-    const isFuture = instrumentType === 'FUT' || instrumentType === 'FUTCOM';
-    
+
+    const isOption = instrumentType === "CE" || instrumentType === "PE";
+    const isFuture = instrumentType === "FUT" || instrumentType === "FUTCOM";
+
     if (isOption && strikePrice) {
       // Use actual strike_price field and parse expiry from trading symbol
-      const expiryText = parts.length >= 5 ? parts.slice(-3).join(' ') : 'N/A';
+      const expiryText = parts.length >= 5 ? parts.slice(-3).join(" ") : "N/A";
       return {
         commodity,
         displayName: `${commodity} ${strikePrice} ${instrumentType}`,
-        fullName: `${commodity} ${expiryText} ₹${strikePrice} ${instrumentType === 'CE' ? 'Call' : 'Put'}`,
-        type: instrumentType === 'CE' ? 'Call' : 'Put',
+        fullName: `${commodity} ${expiryText} ₹${strikePrice} ${
+          instrumentType === "CE" ? "Call" : "Put"
+        }`,
+        type: instrumentType === "CE" ? "Call" : "Put",
         strike: strikePrice,
         strikeFormatted: `₹${strikePrice.toLocaleString()}`,
         expiry: expiryText,
         isOption: true,
         isFuture: false,
-        sortKey: `${commodity}_OPT_${strikePrice}_${instrumentType}`
+        sortKey: `${commodity}_OPT_${strikePrice}_${instrumentType}`,
       };
     } else if (isFuture) {
       // Future parsing from trading symbol
-      const expiryText = parts.slice(2).join(' '); // Everything after "FUT"
+      const expiryText = parts.slice(2).join(" "); // Everything after "FUT"
       return {
         commodity,
         displayName: `${commodity} FUT`,
         fullName: `${commodity} ${expiryText} Futures`,
-        type: 'Future',
+        type: "Future",
         expiry: expiryText,
         isOption: false,
         isFuture: true,
-        sortKey: `${commodity}_FUT_${expiry || '0'}`
+        sortKey: `${commodity}_FUT_${expiry || "0"}`,
       };
     }
-    
+
     // Fallback for unrecognized formats
     return {
       commodity: commodity || tradingSymbol,
       displayName: tradingSymbol,
       fullName: tradingSymbol,
-      type: instrumentType || 'Unknown',
-      isOption: instrumentType === 'CE' || instrumentType === 'PE',
-      isFuture: instrumentType === 'FUT' || instrumentType === 'FUTCOM',
-      sortKey: tradingSymbol
+      type: instrumentType || "Unknown",
+      isOption: instrumentType === "CE" || instrumentType === "PE",
+      isFuture: instrumentType === "FUT" || instrumentType === "FUTCOM",
+      sortKey: tradingSymbol,
     };
   };
 
   // Enhanced MCX processing with futures/options separation
   const processMcxStocks = () => {
-    const processed = mcxStocks.map(stock => ({
+    const processed = mcxStocks.map((stock) => ({
       ...stock,
-      parsed: parseMcxTradingSymbol(stock)
+      parsed: parseMcxTradingSymbol(stock),
     }));
 
     // Group by commodity type
-    const crudeStocks = processed.filter(stock => 
-      stock.parsed.commodity?.toUpperCase().includes('CRUDE') ||
-      stock.name?.toUpperCase().includes('CRUDE')
+    const crudeStocks = processed.filter(
+      (stock) =>
+        stock.parsed.commodity?.toUpperCase().includes("CRUDE") ||
+        stock.name?.toUpperCase().includes("CRUDE")
     );
-    
-    const goldStocks = processed.filter(stock => 
-      stock.parsed.commodity?.toUpperCase().includes('GOLD') || 
-      stock.name?.toUpperCase().includes('GOLD')
+
+    const goldStocks = processed.filter(
+      (stock) =>
+        stock.parsed.commodity?.toUpperCase().includes("GOLD") ||
+        stock.name?.toUpperCase().includes("GOLD")
     );
-    
-    const silverStocks = processed.filter(stock => 
-      stock.parsed.commodity?.toUpperCase().includes('SILVER') ||
-      stock.name?.toUpperCase().includes('SILVER')
+
+    const silverStocks = processed.filter(
+      (stock) =>
+        stock.parsed.commodity?.toUpperCase().includes("SILVER") ||
+        stock.name?.toUpperCase().includes("SILVER")
     );
-    
-    const otherStocks = processed.filter(stock => 
-      !crudeStocks.includes(stock) && 
-      !goldStocks.includes(stock) && 
-      !silverStocks.includes(stock)
+
+    const otherStocks = processed.filter(
+      (stock) =>
+        !crudeStocks.includes(stock) &&
+        !goldStocks.includes(stock) &&
+        !silverStocks.includes(stock)
     );
 
     return { crudeStocks, goldStocks, silverStocks, otherStocks };
@@ -2400,8 +2873,10 @@ const DashboardPage = () => {
     if (!stocks || stocks.length === 0) return null;
 
     // Separate futures and options
-    const futures = stocks.filter(stock => stock.parsed.isFuture).slice(0, 5);
-    const options = stocks.filter(stock => stock.parsed.isOption).slice(0, 15);
+    const futures = stocks.filter((stock) => stock.parsed.isFuture).slice(0, 5);
+    const options = stocks
+      .filter((stock) => stock.parsed.isOption)
+      .slice(0, 15);
 
     return (
       <Paper
@@ -2410,22 +2885,27 @@ const DashboardPage = () => {
           borderRadius: 3,
           border: `1px solid ${colors.border}`,
           bgcolor: "background.paper",
-          overflow: "hidden"
+          overflow: "hidden",
         }}
       >
         {/* Section Header */}
-        <Box sx={{ 
-          p: 2, 
-          backgroundColor: bgColor + '10',
-          borderBottom: `1px solid ${colors.border}`
-        }}>
-          <Typography variant="h6" sx={{ 
-            color: textColor, 
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 1
-          }}>
+        <Box
+          sx={{
+            p: 2,
+            backgroundColor: bgColor + "10",
+            borderBottom: `1px solid ${colors.border}`,
+          }}
+        >
+          <Typography
+            variant="h6"
+            sx={{
+              color: textColor,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+            }}
+          >
             {title} ({stocks.length})
           </Typography>
           <Typography variant="caption" sx={{ color: colors.textSecondary }}>
@@ -2437,50 +2917,72 @@ const DashboardPage = () => {
           {/* Futures Section */}
           {futures.length > 0 && (
             <Box>
-              <Typography variant="subtitle2" sx={{ 
-                color: colors.text, 
-                fontWeight: 500, 
-                mb: 1,
-                display: "flex",
-                alignItems: "center",
-                gap: 1
-              }}>
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  color: colors.text,
+                  fontWeight: 500,
+                  mb: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                }}
+              >
                 📈 Futures ({futures.length})
               </Typography>
               <Stack spacing={0.5}>
                 {futures.map((stock, index) => (
-                  <Box key={`future-${index}`} sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    p: 1,
-                    borderRadius: 1,
-                    bgcolor: colors.surface + '50',
-                    border: `1px solid ${colors.border}50`
-                  }}>
+                  <Box
+                    key={`future-${index}`}
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      p: 1,
+                      borderRadius: 1,
+                      bgcolor: colors.surface + "50",
+                      border: `1px solid ${colors.border}50`,
+                    }}
+                  >
                     <Box>
-                      <Typography variant="body2" sx={{ 
-                        color: colors.text,
-                        fontWeight: 500
-                      }}>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: colors.text,
+                          fontWeight: 500,
+                        }}
+                      >
                         {stock.parsed.displayName}
                       </Typography>
-                      <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                        Exp: {stock.parsed.expiry || 'N/A'}
+                      <Typography
+                        variant="caption"
+                        sx={{ color: colors.textSecondary }}
+                      >
+                        Exp: {stock.parsed.expiry || "N/A"}
                       </Typography>
                     </Box>
-                    <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="body2" sx={{ 
-                        color: colors.text,
-                        fontWeight: 500
-                      }}>
-                        ₹{stock.last_price?.toLocaleString() || 'N/A'}
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: colors.text,
+                          fontWeight: 500,
+                        }}
+                      >
+                        ₹{stock.last_price?.toLocaleString() || "N/A"}
                       </Typography>
-                      <Typography variant="caption" sx={{ 
-                        color: stock.change_percent >= 0 ? colors.positive : colors.negative,
-                        fontWeight: 500
-                      }}>
-                        {stock.change_percent >= 0 ? '+' : ''}{stock.change_percent?.toFixed(2) || '0.00'}%
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color:
+                            stock.change_percent >= 0
+                              ? colors.positive
+                              : colors.negative,
+                          fontWeight: 500,
+                        }}
+                      >
+                        {stock.change_percent >= 0 ? "+" : ""}
+                        {stock.change_percent?.toFixed(2) || "0.00"}%
                       </Typography>
                     </Box>
                   </Box>
@@ -2492,54 +2994,85 @@ const DashboardPage = () => {
           {/* Options Section */}
           {options.length > 0 && (
             <Box>
-              <Typography variant="subtitle2" sx={{ 
-                color: colors.text, 
-                fontWeight: 500, 
-                mb: 1,
-                display: "flex",
-                alignItems: "center",
-                gap: 1
-              }}>
+              <Typography
+                variant="subtitle2"
+                sx={{
+                  color: colors.text,
+                  fontWeight: 500,
+                  mb: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                }}
+              >
                 📊 Options Chain ({options.length})
               </Typography>
-              
+
               {/* Option Chain Display */}
-              <Box sx={{ maxHeight: isMobile ? 250 : 300, overflowY: 'auto' }}>
+              <Box sx={{ maxHeight: isMobile ? 250 : 300, overflowY: "auto" }}>
                 <Stack spacing={0.5}>
                   {options.map((stock, index) => (
-                    <Box key={`option-${index}`} sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      p: 1,
-                      borderRadius: 1,
-                      bgcolor: stock.parsed.type === 'Call' ? 
-                        colors.positive + '10' : colors.negative + '10',
-                      border: `1px solid ${stock.parsed.type === 'Call' ? colors.positive + '30' : colors.negative + '30'}`
-                    }}>
+                    <Box
+                      key={`option-${index}`}
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        p: 1,
+                        borderRadius: 1,
+                        bgcolor:
+                          stock.parsed.type === "Call"
+                            ? colors.positive + "10"
+                            : colors.negative + "10",
+                        border: `1px solid ${
+                          stock.parsed.type === "Call"
+                            ? colors.positive + "30"
+                            : colors.negative + "30"
+                        }`,
+                      }}
+                    >
                       <Box>
-                        <Typography variant="body2" sx={{ 
-                          color: colors.text,
-                          fontWeight: 500
-                        }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: colors.text,
+                            fontWeight: 500,
+                          }}
+                        >
                           {stock.parsed.displayName}
                         </Typography>
-                        <Typography variant="caption" sx={{ color: colors.textSecondary }}>
-                          Strike: {stock.parsed.strikeFormatted || `₹${stock.parsed.strike || 'N/A'}`} • {stock.parsed.type}
+                        <Typography
+                          variant="caption"
+                          sx={{ color: colors.textSecondary }}
+                        >
+                          Strike:{" "}
+                          {stock.parsed.strikeFormatted ||
+                            `₹${stock.parsed.strike || "N/A"}`}{" "}
+                          • {stock.parsed.type}
                         </Typography>
                       </Box>
-                      <Box sx={{ textAlign: 'right' }}>
-                        <Typography variant="body2" sx={{ 
-                          color: colors.text,
-                          fontWeight: 500
-                        }}>
-                          ₹{stock.last_price?.toLocaleString() || 'N/A'}
+                      <Box sx={{ textAlign: "right" }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: colors.text,
+                            fontWeight: 500,
+                          }}
+                        >
+                          ₹{stock.last_price?.toLocaleString() || "N/A"}
                         </Typography>
-                        <Typography variant="caption" sx={{ 
-                          color: stock.change_percent >= 0 ? colors.positive : colors.negative,
-                          fontWeight: 500
-                        }}>
-                          {stock.change_percent >= 0 ? '+' : ''}{stock.change_percent?.toFixed(2) || '0.00'}%
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color:
+                              stock.change_percent >= 0
+                                ? colors.positive
+                                : colors.negative,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {stock.change_percent >= 0 ? "+" : ""}
+                          {stock.change_percent?.toFixed(2) || "0.00"}%
                         </Typography>
                       </Box>
                     </Box>
@@ -2555,8 +3088,9 @@ const DashboardPage = () => {
 
   // Render function for the MCX section (RESPONSIVE) - Enhanced with Futures & Options Display
   const renderMcxSection = () => {
-    const { crudeStocks, goldStocks, silverStocks, otherStocks } = processMcxStocks();
-    
+    const { crudeStocks, goldStocks, silverStocks, otherStocks } =
+      processMcxStocks();
+
     if (!mcxStocks || mcxStocks.length === 0) {
       return (
         <Paper
@@ -2566,7 +3100,7 @@ const DashboardPage = () => {
             borderRadius: 3,
             border: `1px solid ${colors.border}`,
             bgcolor: "background.paper",
-            textAlign: "center"
+            textAlign: "center",
           }}
         >
           <Typography variant="h6" sx={{ mb: 1, color: colors.text }}>
@@ -2575,13 +3109,16 @@ const DashboardPage = () => {
           <Typography sx={{ color: colors.textSecondary }}>
             No MCX data available
           </Typography>
-          <Typography variant="caption" sx={{ mt: 1, display: "block", color: colors.textSecondary }}>
+          <Typography
+            variant="caption"
+            sx={{ mt: 1, display: "block", color: colors.textSecondary }}
+          >
             Waiting for Gold, Crude Oil, Silver & Copper live data...
           </Typography>
         </Paper>
       );
     }
-    
+
     return (
       <Stack spacing={2}>
         {/* Main MCX Header */}
@@ -2594,76 +3131,95 @@ const DashboardPage = () => {
             bgcolor: "background.paper",
           }}
         >
-          <Typography variant="h6" sx={{ 
-            color: colors.text, 
-            fontWeight: 600,
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            mb: 1
-          }}>
+          <Typography
+            variant="h6"
+            sx={{
+              color: colors.text,
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              mb: 1,
+            }}
+          >
             🏭 MCX Commodities ({mcxStocks.length})
           </Typography>
           <Typography variant="caption" sx={{ color: colors.textSecondary }}>
             Live futures and options for precious metals and energy commodities
           </Typography>
-          
+
           {/* Commodity Summary Chips */}
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 2 }}>
             {goldStocks.length > 0 && (
-              <Chip 
-                label={`🥇 Gold: ${goldStocks.length}`} 
-                size="small" 
-                sx={{ 
-                  backgroundColor: '#FFD70020', 
-                  color: '#B8860B',
-                  fontWeight: 500
+              <Chip
+                label={`🥇 Gold: ${goldStocks.length}`}
+                size="small"
+                sx={{
+                  backgroundColor: "#FFD70020",
+                  color: "#B8860B",
+                  fontWeight: 500,
                 }}
               />
             )}
             {crudeStocks.length > 0 && (
-              <Chip 
-                label={`🛢️ Crude: ${crudeStocks.length}`} 
-                size="small" 
-                sx={{ 
-                  backgroundColor: '#2F4F4F40', 
-                  color: '#708090',
-                  fontWeight: 500
+              <Chip
+                label={`🛢️ Crude: ${crudeStocks.length}`}
+                size="small"
+                sx={{
+                  backgroundColor: "#2F4F4F40",
+                  color: "#708090",
+                  fontWeight: 500,
                 }}
               />
             )}
             {silverStocks.length > 0 && (
-              <Chip 
-                label={`🥈 Silver: ${silverStocks.length}`} 
-                size="small" 
-                sx={{ 
-                  backgroundColor: '#C0C0C030', 
-                  color: '#778899',
-                  fontWeight: 500
+              <Chip
+                label={`🥈 Silver: ${silverStocks.length}`}
+                size="small"
+                sx={{
+                  backgroundColor: "#C0C0C030",
+                  color: "#778899",
+                  fontWeight: 500,
                 }}
               />
             )}
             {otherStocks.length > 0 && (
-              <Chip 
-                label={`Other: ${otherStocks.length}`} 
-                size="small" 
-                sx={{ 
-                  backgroundColor: colors.primary + '20', 
+              <Chip
+                label={`Other: ${otherStocks.length}`}
+                size="small"
+                sx={{
+                  backgroundColor: colors.primary + "20",
                   color: colors.primary,
-                  fontWeight: 500
+                  fontWeight: 500,
                 }}
               />
             )}
           </Box>
         </Paper>
-        
+
         {/* Enhanced Commodity Display with Futures & Options */}
-        {renderCommoditySection('🥇 Gold', goldStocks, '#FFD700', '#B8860B')}
-        {renderCommoditySection('🛢️ Crude Oil', crudeStocks, '#2F4F4F', '#708090')}
-        {renderCommoditySection('🥈 Silver', silverStocks, '#C0C0C0', '#778899')}
-        
+        {renderCommoditySection("🥇 Gold", goldStocks, "#FFD700", "#B8860B")}
+        {renderCommoditySection(
+          "🛢️ Crude Oil",
+          crudeStocks,
+          "#2F4F4F",
+          "#708090"
+        )}
+        {renderCommoditySection(
+          "🥈 Silver",
+          silverStocks,
+          "#C0C0C0",
+          "#778899"
+        )}
+
         {/* Other MCX Commodities */}
-        {otherStocks.length > 0 && renderCommoditySection('🏭 Other MCX', otherStocks, colors.primary, colors.primary)}
+        {otherStocks.length > 0 &&
+          renderCommoditySection(
+            "🏭 Other MCX",
+            otherStocks,
+            colors.primary,
+            colors.primary
+          )}
       </Stack>
     );
   };
@@ -2692,8 +3248,17 @@ const DashboardPage = () => {
               {fnoStocks.length} stocks = {fnoStockList.total_count} total
               securities.
               {Object.keys(marketData || {}).length > 0
-                ? " Live prices shown when available from market feed."
+                ? ` Live prices available for ${livePriceCount} securities from market feed.`
                 : " Connect to market feed to see live prices."}
+              {isConnected && (
+                <Box
+                  component="span"
+                  sx={{ color: colors.positive, fontWeight: 600 }}
+                >
+                  {" "}
+                  📡 Live Feed Active
+                </Box>
+              )}
             </Typography>
             <Grid container spacing={1}>
               <Grid item xs={4} sm={2} md={1}>
@@ -2742,12 +3307,7 @@ const DashboardPage = () => {
                     variant="body2"
                     sx={{ color: colors.accent, fontWeight: 700 }}
                   >
-                    {
-                      [
-                        ...fnoIndicesWithLiveData,
-                        ...fnoStocksWithLiveData,
-                      ].filter((s) => s.last_price > 0).length
-                    }
+                    {livePriceCount}
                   </Typography>
                   <Typography variant="caption">LIVE</Typography>
                 </Paper>
@@ -2764,12 +3324,7 @@ const DashboardPage = () => {
                     variant="body2"
                     sx={{ color: colors.positive, fontWeight: 700 }}
                   >
-                    {
-                      [
-                        ...fnoIndicesWithLiveData,
-                        ...fnoStocksWithLiveData,
-                      ].filter((s) => s.change_percent > 0).length
-                    }
+                    {gainersCount}
                   </Typography>
                   <Typography variant="caption">UP</Typography>
                 </Paper>
@@ -2786,12 +3341,7 @@ const DashboardPage = () => {
                     variant="body2"
                     sx={{ color: colors.negative, fontWeight: 700 }}
                   >
-                    {
-                      [
-                        ...fnoIndicesWithLiveData,
-                        ...fnoStocksWithLiveData,
-                      ].filter((s) => s.change_percent < 0).length
-                    }
+                    {losersCount}
                   </Typography>
                   <Typography variant="caption">DOWN</Typography>
                 </Paper>
@@ -2801,7 +3351,7 @@ const DashboardPage = () => {
           {/* Indices Section */}
           {fnoIndices.length > 0 && (
             <Box sx={{ mb: 2 }}>
-              <MemoizedStocksList
+              <MemoizedStocksListWithLivePrices
                 title={`🏛️ F&O INDICES (${fnoIndices.length})`}
                 data={fnoIndicesWithLiveData}
                 layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
@@ -2813,6 +3363,8 @@ const DashboardPage = () => {
                 emptyMessage="No F&O indices found"
                 density="compact" // Use compact density
                 compact={true}
+                enhanceWithLivePrices={true}
+                showLiveIndicator={true}
                 // Remove fixed containerHeight to allow natural flow
               />
             </Box>
@@ -2825,7 +3377,7 @@ const DashboardPage = () => {
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={!isMobile} // Hide volume on mobile
               showName={true}
-              showSector={false} // Hide sector for F&O stocks
+              showSector={!isMobile} // Show sector for F&O stocks on desktop
               maxItems={isMobile ? fnoStocks.length : fnoStocks.length} // Show all on mobile, limit on desktop if needed
               isLoading={fnoLoading}
               emptyMessage="No F&O stocks found"
@@ -3083,7 +3635,7 @@ const DashboardPage = () => {
                   fontSize: "1.1rem",
                 }}
               >
-                {topGainers.length}
+                {getTopMoversData().gainers.length}
               </Typography>
               <Typography variant="caption">GAINERS</Typography>
             </Paper>
@@ -3100,7 +3652,7 @@ const DashboardPage = () => {
                   fontSize: "1.1rem",
                 }}
               >
-                {topLosers.length}
+                {getTopMoversData().losers.length}
               </Typography>
               <Typography variant="caption">LOSERS</Typography>
             </Paper>
@@ -3164,8 +3716,7 @@ const DashboardPage = () => {
                 variant="body2"
                 sx={{ color: colors.text, fontWeight: 700, fontSize: "1.1rem" }}
               >
-                {breakouts.length +
-                  breakdowns.length}
+                {breakouts.length + breakdowns.length}
               </Typography>
               <Typography variant="caption">BREAK</Typography>
             </Paper>
@@ -3200,8 +3751,7 @@ const DashboardPage = () => {
         🔴 LIVE | {totalStocks} inst | {sectors.length} sec
       </Typography>
       <Typography variant="caption" sx={{ flexShrink: 0 }}>
-        G: {topGainers.length} | L:{" "}
-        {topLosers.length}
+        G: {getTopMoversData().gainers.length} | L: {getTopMoversData().losers.length}
       </Typography>
       <Typography variant="caption" sx={{ flexGrow: 1, textAlign: "right" }}>
         {new Date().toLocaleTimeString([], {
@@ -3220,48 +3770,60 @@ const DashboardPage = () => {
   );
   // Main render function
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        bgcolor: "background.default",
-        color: "text.primary",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      {renderHeader()}
-      {/* Sticky Section Navigation */}
-      <SectionNavigation
-        activeSection={activeSection}
-        handleSectionChange={handleSectionChange}
-        colors={colors}
-        isMobile={isMobile}
+    <>
+      {/* Global styles for animations */}
+      <GlobalStyles
+        styles={{
+          "@keyframes pulse": {
+            "0%": { opacity: 1 },
+            "50%": { opacity: 0.5 },
+            "100%": { opacity: 1 },
+          },
+        }}
       />
       <Box
-        component="main"
         sx={{
-          flexGrow: 1,
-          py: 2,
-          px: { xs: 1, sm: 2 },
+          minHeight: "100vh",
           bgcolor: "background.default",
-          overflowX: "hidden", // Prevent horizontal scroll on main container
+          color: "text.primary",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        <Container maxWidth="xl">
-          {activeSection === "overview" && renderOverviewSection()}
-          {activeSection === "search" && renderSearchSection()}
-          {activeSection === "sectors" && renderSectorsSection()}
-          {activeSection === "indices" && renderIndicesSection()}
-          {activeSection === "movers" && renderMoversSection()}
-          {activeSection === "gaps" && renderGapsSection()}
-          {activeSection === "breakouts" && renderBreakoutsSection()}
-          {activeSection === "mcx" && renderMcxSection()}
-          {activeSection === "fno" && renderFnoSection()}
-          {activeSection === "analytics" && renderAnalyticsSection()}
-        </Container>
+        {renderHeader()}
+        {/* Sticky Section Navigation */}
+        <SectionNavigation
+          activeSection={activeSection}
+          handleSectionChange={handleSectionChange}
+          colors={colors}
+          isMobile={isMobile}
+        />
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            py: 2,
+            px: { xs: 1, sm: 2 },
+            bgcolor: "background.default",
+            overflowX: "hidden", // Prevent horizontal scroll on main container
+          }}
+        >
+          <Container maxWidth="xl">
+            {activeSection === "overview" && renderOverviewSection()}
+            {activeSection === "search" && renderSearchSection()}
+            {activeSection === "sectors" && renderSectorsSection()}
+            {activeSection === "indices" && renderIndicesSection()}
+            {activeSection === "movers" && renderMoversSection()}
+            {activeSection === "gaps" && renderGapsSection()}
+            {activeSection === "breakouts" && renderBreakoutsSection()}
+            {activeSection === "mcx" && renderMcxSection()}
+            {activeSection === "fno" && renderFnoSection()}
+            {activeSection === "analytics" && renderAnalyticsSection()}
+          </Container>
+        </Box>
+        {renderFooter()}
       </Box>
-      {renderFooter()}
-    </Box>
+    </>
   );
 };
 export default DashboardPage;

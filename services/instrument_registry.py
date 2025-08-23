@@ -44,6 +44,24 @@ class InstrumentRegistry:
         self.max_performance_cache = 5000  # Maximum performance cache entries
         self._cache_access_times = {}  # Track access times for cleanup
 
+        # 🚀 NEW: Real-time callback system for strategies and analytics
+        self._strategy_callbacks = {}  # strategy_name -> {instruments: set, callback: callable}
+        self._analytics_callbacks = []  # List of analytics callback functions
+        self._ui_broadcast_callbacks = []  # List of UI broadcast callback functions
+        self._instrument_subscribers = {}  # instrument_key -> list of callbacks
+        self._callback_performance = {}  # Track callback execution times
+        
+        # 🚀 NEW: UI broadcast queue for optimized WebSocket updates
+        self._ui_broadcast_queue = None  # Will be initialized async
+        self._ui_update_batch = {}  # Batch UI updates for efficiency
+        self._last_ui_broadcast = time.time()
+        self._ui_broadcast_interval = 0.01  # 10ms batching for UI updates (near real-time)
+        
+        # 🚀 NEW: Strategy-specific data access optimization
+        self._strategy_price_cache = {}  # Fast access cache for strategies
+        self._hot_instruments = set()  # Frequently accessed instruments
+        self._cold_instruments = set()  # Rarely accessed instruments
+
         # Initialize enhanced features
         self._initialize_enhanced_features()
 
@@ -387,6 +405,53 @@ class InstrumentRegistry:
         # Store chain
         self._options_chain[symbol] = chain
 
+    def update_and_enrich_prices(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """🚀 ULTRA-FAST: Update and return enriched price data in <3ms for real-time broadcasting"""
+        enriched_data = {}
+        
+        try:
+            for instrument_key, price_data in data.items():
+                if not price_data or not price_data.get('ltp'):
+                    continue
+                    
+                # Fast enrichment with essential metadata only
+                enriched_tick = {
+                    "ltp": price_data.get("ltp"),
+                    "change": price_data.get("change", 0),
+                    "change_percent": price_data.get("change_percent", 0),
+                    "volume": price_data.get("volume", 0),
+                    "high": price_data.get("high"),
+                    "low": price_data.get("low"),
+                    "open": price_data.get("open"),
+                    "timestamp": price_data.get("timestamp", datetime.now().isoformat())
+                }
+                
+                # Add cached metadata (fast lookup)
+                if instrument_key in self._symbol_metadata:
+                    metadata = self._symbol_metadata[instrument_key]
+                    enriched_tick.update({
+                        "symbol": metadata.get("symbol"),
+                        "sector": metadata.get("sector", "OTHER"),
+                        "exchange": metadata.get("exchange", "NSE")
+                    })
+                else:
+                    # Fast fallback extraction
+                    enriched_tick.update({
+                        "symbol": instrument_key.split("|")[-1] if "|" in instrument_key else instrument_key,
+                        "sector": "OTHER",
+                        "exchange": "NSE" if "NSE" in instrument_key else "BSE"
+                    })
+                
+                enriched_data[instrument_key] = enriched_tick
+                
+                # Store in fast cache (non-blocking)
+                self._live_prices[instrument_key] = enriched_tick
+                
+        except Exception as e:
+            logger.debug(f"Fast enrichment error: {e}")
+        
+        return enriched_data
+
     def update_live_prices(self, data: Dict[str, Any]) -> Dict[str, int]:
         """COMPLETE: Update with full enrichment and analytics with cache management"""
         start_time = datetime.now()
@@ -402,11 +467,18 @@ class InstrumentRegistry:
             
             if len(self._performance_cache) > self.max_performance_cache:
                 self._cleanup_cache(self._performance_cache, self.max_performance_cache, "performance_cache")
-        elif len(self._live_prices) > self.max_live_prices * 1.5:  # Emergency cleanup only if 50% over limit
+        elif len(self._live_prices) > self.max_live_prices * 2.0:  # Emergency cleanup only if 100% over limit
             logger.warning(f"⚠️ Emergency cache cleanup during market hours - cache size: {len(self._live_prices)}")
-            # Async cleanup to avoid blocking
-            import asyncio
-            asyncio.create_task(self._emergency_cleanup_async())
+            # ⚡ PERFORMANCE FIX: Non-blocking emergency cleanup - just remove a few entries quickly
+            try:
+                # Quick removal of 10% oldest entries without complex operations
+                keys_to_remove = list(self._live_prices.keys())[:len(self._live_prices) // 10]
+                for key in keys_to_remove:
+                    self._live_prices.pop(key, None)
+                    self._enriched_prices.pop(key, None)
+                logger.info(f"⚡ Quick cleanup: removed {len(keys_to_remove)} entries in real-time")
+            except Exception as e:
+                logger.error(f"❌ Quick cleanup failed: {e}")
 
         for instrument_key, price_data in data.items():
             try:
@@ -464,6 +536,10 @@ class InstrumentRegistry:
             self._last_update = datetime.now()
             self._last_analytics_update = datetime.now()
 
+        # 🚀 NEW: Execute real-time callbacks for updated instruments (ZERO DELAY)
+        if stats["enriched"] > 0:
+            self._execute_real_time_callbacks(data, stats)
+
         processing_time = (datetime.now() - start_time).total_seconds() * 1000
 
         if stats["enriched"] > 0:
@@ -472,6 +548,144 @@ class InstrumentRegistry:
             )
 
         return stats
+
+    def _execute_real_time_callbacks(self, price_data: Dict[str, Any], stats: Dict[str, int]):
+        """🚀 Execute all registered callbacks for real-time updates - ZERO DELAY CRITICAL"""
+        try:
+            callback_start_time = time.time()
+            strategy_callbacks_executed = 0
+            analytics_callbacks_executed = 0
+            ui_callbacks_executed = 0
+            
+            # 1. 🚀 STRATEGY CALLBACKS (HIGHEST PRIORITY - ZERO DELAY)
+            for instrument_key in price_data.keys():
+                if instrument_key in self._instrument_subscribers:
+                    current_price_data = self._live_prices.get(instrument_key, {})
+                    
+                    for subscriber in self._instrument_subscribers[instrument_key]:
+                        if subscriber['type'] == 'strategy':
+                            try:
+                                # Execute strategy callback immediately - no async delays
+                                callback = subscriber['callback']
+                                
+                                # Update callback stats
+                                strategy_name = subscriber['name']
+                                if strategy_name in self._strategy_callbacks:
+                                    self._strategy_callbacks[strategy_name]['call_count'] += 1
+                                    self._strategy_callbacks[strategy_name]['last_called'] = datetime.now()
+                                
+                                # Execute callback with price data
+                                if callable(callback):
+                                    callback(instrument_key, current_price_data)
+                                    strategy_callbacks_executed += 1
+                                    
+                            except Exception as e:
+                                logger.error(f"❌ Strategy callback error for {subscriber['name']}: {e}")
+            
+            # 2. 🚀 ANALYTICS CALLBACKS (BACKGROUND - NON-BLOCKING)
+            if self._analytics_callbacks:
+                try:
+                    # Create analytics update payload
+                    analytics_payload = {
+                        'updated_instruments': list(price_data.keys()),
+                        'stats': stats,
+                        'timestamp': datetime.now(),
+                        'live_data': {k: self._live_prices.get(k, {}) for k in price_data.keys()}
+                    }
+                    
+                    for analytics_callback in self._analytics_callbacks:
+                        try:
+                            callback = analytics_callback['callback']
+                            
+                            # Update callback stats
+                            analytics_callback['call_count'] += 1
+                            analytics_callback['last_called'] = datetime.now()
+                            
+                            # Execute callback (can be async)
+                            if asyncio.iscoroutinefunction(callback):
+                                # Create background task for async callbacks
+                                asyncio.create_task(callback(analytics_payload))
+                            else:
+                                callback(analytics_payload)
+                                
+                            analytics_callbacks_executed += 1
+                            
+                        except Exception as e:
+                            logger.error(f"❌ Analytics callback error for {analytics_callback['name']}: {e}")
+                            
+                except Exception as e:
+                    logger.error(f"❌ Error creating analytics payload: {e}")
+            
+            # 3. 🚀 UI BROADCAST CALLBACKS (BATCHED FOR EFFICIENCY)
+            if self._ui_broadcast_callbacks:
+                try:
+                    # Batch UI updates for efficiency
+                    current_time = time.time()
+                    
+                    # Add to batch
+                    for instrument_key in price_data.keys():
+                        if instrument_key in self._live_prices:
+                            self._ui_update_batch[instrument_key] = self._live_prices[instrument_key]
+                    
+                    # Send batch if enough time has passed or batch is large
+                    should_send_batch = (
+                        current_time - self._last_ui_broadcast >= self._ui_broadcast_interval or
+                        len(self._ui_update_batch) >= 5 or  # Send if batch has 5+ updates
+                        len(price_data) <= 3  # Immediate send for small updates (1-3 instruments)
+                    )
+                    
+                    if should_send_batch:
+                        ui_payload = {
+                            'batch_data': dict(self._ui_update_batch),
+                            'batch_size': len(self._ui_update_batch),
+                            'timestamp': datetime.now(),
+                            'stats': stats
+                        }
+                        
+                        for ui_callback in self._ui_broadcast_callbacks:
+                            try:
+                                callback = ui_callback['callback']
+                                
+                                # Update callback stats
+                                ui_callback['call_count'] += 1
+                                ui_callback['last_called'] = datetime.now()
+                                
+                                # Execute UI callback (usually async WebSocket broadcast)
+                                if asyncio.iscoroutinefunction(callback):
+                                    asyncio.create_task(callback(ui_payload))
+                                else:
+                                    callback(ui_payload)
+                                    
+                                ui_callbacks_executed += 1
+                                
+                            except Exception as e:
+                                logger.error(f"❌ UI callback error for {ui_callback['name']}: {e}")
+                        
+                        # Clear batch and update timestamp
+                        self._ui_update_batch.clear()
+                        self._last_ui_broadcast = current_time
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error in UI batch processing: {e}")
+            
+            # Performance logging
+            callback_time = (time.time() - callback_start_time) * 1000
+            if callback_time > 5:  # Log if callbacks take more than 5ms
+                logger.warning(
+                    f"⚠️ Callbacks took {callback_time:.2f}ms: "
+                    f"strategy={strategy_callbacks_executed}, "
+                    f"analytics={analytics_callbacks_executed}, "
+                    f"ui={ui_callbacks_executed}"
+                )
+            elif strategy_callbacks_executed > 0:
+                logger.debug(
+                    f"⚡ Callbacks: {strategy_callbacks_executed} strategy, "
+                    f"{analytics_callbacks_executed} analytics, "
+                    f"{ui_callbacks_executed} UI in {callback_time:.1f}ms"
+                )
+                
+        except Exception as e:
+            logger.error(f"❌ Critical error in callback execution: {e}")
 
     def _validate_price_data(self, data: dict) -> bool:
         """Comprehensive data validation"""
@@ -2061,6 +2275,187 @@ class InstrumentRegistry:
                     callback(data)
             except Exception as e:
                 logger.error(f"❌ Error in subscriber callback: {e}")
+
+    # 🚀 NEW: Enhanced Real-Time Callback System for Strategies and Analytics
+    
+    def register_strategy_callback(self, strategy_name: str, instruments: List[str], callback):
+        """Register a strategy for real-time price updates on specific instruments"""
+        try:
+            # Store strategy callback with instrument list
+            self._strategy_callbacks[strategy_name] = {
+                'instruments': set(instruments),
+                'callback': callback,
+                'registered_at': datetime.now(),
+                'call_count': 0,
+                'last_called': None
+            }
+            
+            # Add to instrument subscribers for fast lookup
+            for instrument_key in instruments:
+                if instrument_key not in self._instrument_subscribers:
+                    self._instrument_subscribers[instrument_key] = []
+                self._instrument_subscribers[instrument_key].append({
+                    'type': 'strategy',
+                    'name': strategy_name,
+                    'callback': callback
+                })
+                
+                # Mark as hot instrument for optimization
+                self._hot_instruments.add(instrument_key)
+            
+            logger.info(f"✅ Strategy '{strategy_name}' registered for {len(instruments)} instruments")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error registering strategy callback for {strategy_name}: {e}")
+            return False
+    
+    def register_analytics_callback(self, callback, callback_name: str = "analytics"):
+        """Register analytics callback for batch price updates"""
+        try:
+            self._analytics_callbacks.append({
+                'callback': callback,
+                'name': callback_name,
+                'registered_at': datetime.now(),
+                'call_count': 0,
+                'last_called': None
+            })
+            
+            logger.info(f"✅ Analytics callback '{callback_name}' registered")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error registering analytics callback: {e}")
+            return False
+    
+    def register_ui_broadcast_callback(self, callback, callback_name: str = "ui_broadcast"):
+        """Register UI broadcast callback for WebSocket updates"""
+        try:
+            self._ui_broadcast_callbacks.append({
+                'callback': callback,
+                'name': callback_name,
+                'registered_at': datetime.now(),
+                'call_count': 0,
+                'last_called': None
+            })
+            
+            logger.info(f"✅ UI broadcast callback '{callback_name}' registered")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error registering UI broadcast callback: {e}")
+            return False
+    
+    def get_real_time_price(self, instrument_key: str) -> Optional[float]:
+        """🚀 ULTRA-FAST: Get current price for strategy use - zero latency"""
+        try:
+            # Check strategy cache first (fastest)
+            if instrument_key in self._strategy_price_cache:
+                cache_data = self._strategy_price_cache[instrument_key]
+                # Cache is valid for 1 second for ultra-fast trading
+                if time.time() - cache_data['timestamp'] < 1.0:
+                    return cache_data['ltp']
+            
+            # Check live prices
+            if instrument_key in self._live_prices:
+                price_data = self._live_prices[instrument_key]
+                ltp = price_data.get('ltp') or price_data.get('last_price', 0)
+                
+                # Update strategy cache
+                self._strategy_price_cache[instrument_key] = {
+                    'ltp': ltp,
+                    'timestamp': time.time()
+                }
+                
+                return float(ltp) if ltp else None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting real-time price for {instrument_key}: {e}")
+            return None
+    
+    def get_strategy_prices(self, instrument_keys: List[str]) -> Dict[str, float]:
+        """🚀 ULTRA-FAST: Get multiple prices for strategy portfolio - batch optimized"""
+        try:
+            prices = {}
+            current_time = time.time()
+            
+            for instrument_key in instrument_keys:
+                # Check strategy cache first
+                if instrument_key in self._strategy_price_cache:
+                    cache_data = self._strategy_price_cache[instrument_key]
+                    if current_time - cache_data['timestamp'] < 1.0:
+                        prices[instrument_key] = cache_data['ltp']
+                        continue
+                
+                # Check live prices
+                if instrument_key in self._live_prices:
+                    price_data = self._live_prices[instrument_key]
+                    ltp = price_data.get('ltp') or price_data.get('last_price', 0)
+                    
+                    if ltp:
+                        ltp = float(ltp)
+                        prices[instrument_key] = ltp
+                        
+                        # Update cache
+                        self._strategy_price_cache[instrument_key] = {
+                            'ltp': ltp,
+                            'timestamp': current_time
+                        }
+                    
+            return prices
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting strategy prices: {e}")
+            return {}
+    
+    def is_price_fresh(self, instrument_key: str, max_age_seconds: int = 30) -> bool:
+        """Check if price data is recent enough for trading decisions"""
+        try:
+            if instrument_key not in self._live_prices:
+                return False
+            
+            price_data = self._live_prices[instrument_key]
+            timestamp = price_data.get('timestamp')
+            
+            if not timestamp:
+                return False
+            
+            # Handle different timestamp formats
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                except:
+                    return False
+            elif isinstance(timestamp, (int, float)):
+                timestamp = datetime.fromtimestamp(timestamp)
+            elif not isinstance(timestamp, datetime):
+                return False
+            
+            age = (datetime.now() - timestamp).total_seconds()
+            return age <= max_age_seconds
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking price freshness for {instrument_key}: {e}")
+            return False
+
+    def get_spot_price_by_key(self, instrument_key: str) -> Optional[Dict[str, Any]]:
+        """🚀 ULTRA-FAST: Get complete spot price data by instrument key"""
+        try:
+            # Direct access to live prices (fastest path)
+            if instrument_key in self._live_prices:
+                return dict(self._live_prices[instrument_key])
+            
+            # Check enriched prices as fallback
+            if instrument_key in self._enriched_prices:
+                return dict(self._enriched_prices[instrument_key])
+                
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting spot price by key for {instrument_key}: {e}")
+            return None
 
     def get_top_gainers(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get top gaining stocks by percentage change"""

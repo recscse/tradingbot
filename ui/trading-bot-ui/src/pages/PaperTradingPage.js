@@ -31,6 +31,7 @@ import {
   Timeline,
 } from "@mui/icons-material";
 import axios from "axios";
+import SelectedStocksPanel from "../components/trading/SelectedStocksPanel";
 
 const PaperTradingDashboard = () => {
   const [activeTab, setActiveTab] = useState(0);
@@ -42,6 +43,7 @@ const PaperTradingDashboard = () => {
   const [isTrading, setIsTrading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [startTradingDialog, setStartTradingDialog] = useState(false);
+  const [selectedTradingStocks, setSelectedTradingStocks] = useState([]);
 
   const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
@@ -125,22 +127,42 @@ const PaperTradingDashboard = () => {
     setLoading(false);
   }, [API_BASE]);
 
-  const startTrading = async () => {
-    if (selectedStocks.length === 0) {
-      alert("Please select at least one stock");
+  // Handle selected stocks from SelectedStocksPanel
+  const handleSelectedStocksFromPanel = (stocks) => {
+    setSelectedTradingStocks(stocks);
+    // Update the symbols for the original selectedStocks array format
+    setSelectedStocks(stocks.map(stock => stock.symbol));
+  };
+
+  // Enhanced start trading with selected stocks from today's selection
+  const startTradingWithSelectedStocks = async (stocks, mode = "PAPER") => {
+    if (!stocks || stocks.length === 0) {
+      alert("Please select at least one stock from today's selection");
       return;
     }
 
     setLoading(true);
     try {
-      // Removed unused response variable
-      await axios.post(
-        `${API_BASE}/api/paper-trading/start`,
-        {
-          selected_stocks: selectedStocks,
-          strategy_config: strategyConfig,
-          initial_balance: 1000000,
+      const tradingRequest = {
+        selected_stocks: stocks.map(stock => ({
+          symbol: stock.symbol,
+          instrument_key: stock.instrument_key,
+          price_at_selection: stock.price_at_selection,
+          option_contract: stock.option_contract,
+          option_type: stock.option_type,
+          sector: stock.sector,
+        })),
+        strategy_config: {
+          ...strategyConfig,
+          trade_mode: mode,
+          enable_option_trading: true, // Enable options for selected stocks
         },
+        initial_balance: 1000000, // 10L for paper trading
+      };
+
+      const response = await axios.post(
+        `${API_BASE}/api/paper-trading/start`,
+        tradingRequest,
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("access_token")}`,
@@ -148,15 +170,58 @@ const PaperTradingDashboard = () => {
         }
       );
 
-      setIsTrading(true);
-      setStartTradingDialog(false);
-      alert("Paper trading started successfully!");
-      fetchPortfolio();
+      if (response.data.success !== false) {
+        setIsTrading(true);
+        setStartTradingDialog(false);
+        alert(`Paper trading started successfully with ${stocks.length} selected stocks!`);
+        fetchPortfolio();
+      } else {
+        alert("Failed to start trading: " + (response.data.message || "Unknown error"));
+      }
     } catch (error) {
       console.error("Error starting trading:", error);
-      alert("Failed to start trading");
+      alert("Failed to start trading: " + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+  };
+
+  // Legacy start trading function (for backward compatibility)
+  const startTrading = async () => {
+    if (selectedTradingStocks.length > 0) {
+      // Use selected stocks from panel
+      await startTradingWithSelectedStocks(selectedTradingStocks);
+    } else if (selectedStocks.length === 0) {
+      alert("Please select at least one stock");
+      return;
+    } else {
+      // Use manually selected stocks (legacy)
+      setLoading(true);
+      try {
+        await axios.post(
+          `${API_BASE}/api/paper-trading/start`,
+          {
+            selected_stocks: selectedStocks,
+            strategy_config: strategyConfig,
+            initial_balance: 1000000,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            },
+          }
+        );
+
+        setIsTrading(true);
+        setStartTradingDialog(false);
+        alert("Paper trading started successfully!");
+        fetchPortfolio();
+      } catch (error) {
+        console.error("Error starting trading:", error);
+        alert("Failed to start trading");
+      }
+      setLoading(false);
+    }
   };
 
   const stopTrading = async () => {
@@ -267,6 +332,18 @@ const PaperTradingDashboard = () => {
               </Box>
             </CardContent>
           </Card>
+        </Grid>
+      </Grid>
+
+      {/* Selected Stocks Panel */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12}>
+          <SelectedStocksPanel
+            onStockSelect={handleSelectedStocksFromPanel}
+            onStartTrading={startTradingWithSelectedStocks}
+            tradingMode="PAPER"
+            showTradingControls={true}
+          />
         </Grid>
       </Grid>
 

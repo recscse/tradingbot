@@ -120,6 +120,8 @@ from router.auth_router import auth_router
 from router.broker_router import broker_router
 from router.stock_list_router import stock_list_router
 from router.dhan_router import dhan_router
+
+# from router.trading_config_router import router as trading_config_router
 from router.upstox_router import upstox_router
 from router.fyers_router import fyers_router
 
@@ -137,6 +139,41 @@ from router.heatmap_router import router as heatmap_router
 from router.unified_websocket_routes import router as unified_ws_router
 from router.option_routes import option_router
 from services.unified_websocket_manager import unified_manager, start_unified_websocket
+from services.market_data_hub import market_data_hub, start_market_hub
+
+# Import Enhanced Breakout Engine (replaces old breakout services)
+try:
+    from services.enhanced_breakout_engine import (
+        enhanced_breakout_engine,
+        start_enhanced_breakout_engine,
+    )
+    from router.breakout_router import router as breakout_router
+
+    ENHANCED_BREAKOUT_AVAILABLE = True
+    logger.info("✅ Enhanced Breakout Engine imported successfully (vectorized)")
+except ImportError as e:
+    ENHANCED_BREAKOUT_AVAILABLE = False
+    logger.warning(f"⚠️ Enhanced Breakout Engine not available: {e}")
+    from fastapi import APIRouter
+
+    breakout_router = APIRouter()  # Dummy router
+
+# Legacy breakout scanner for compatibility
+BREAKOUT_SCANNER_AVAILABLE = ENHANCED_BREAKOUT_AVAILABLE
+
+# Import gap analysis service
+try:
+    from services.gap_analysis_service import gap_analysis_service, start_gap_analysis
+    from router.gap_analysis_router import router as gap_analysis_router
+
+    GAP_ANALYSIS_AVAILABLE = True
+    logger.info("✅ Gap analysis service imported successfully")
+except ImportError as e:
+    GAP_ANALYSIS_AVAILABLE = False
+    logger.warning(f"⚠️ Gap analysis service not available: {e}")
+    from fastapi import APIRouter
+
+    gap_analysis_router = APIRouter()  # Dummy router
 
 # Import from market_analytics_router safely
 try:
@@ -466,56 +503,83 @@ async def lifespan(app: FastAPI):
 
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
-        # 5. Start Unified WebSocket System
+        # 5. 🚀 NEW: Start Market Data Hub FIRST (ultra-fast processing)
+        logger.info("🚀 Starting Market Data Hub...")
+        try:
+            await start_market_hub()
+            logger.info("✅ Market Data Hub started with NumPy/Pandas acceleration")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Market Data Hub: {e}")
+
+        # 6. Start Unified WebSocket System (will connect to hub)
         logger.info("🔌 Starting Unified WebSocket System...")
         await start_unified_websocket()
 
-        # 6. NEW: Initialize Centralized WebSocket System
+        # 7. 🚀 NEW: Start Enhanced Breakout Engine (vectorized processing)
+        if ENHANCED_BREAKOUT_AVAILABLE:
+            logger.info("🚀 Starting Enhanced Breakout Engine (vectorized)...")
+            try:
+                await start_enhanced_breakout_engine()
+                logger.info(
+                    "✅ Enhanced Breakout Engine started with NumPy/Numba acceleration"
+                )
+            except Exception as e:
+                logger.error(f"❌ Failed to start Enhanced Breakout Engine: {e}")
+
+        # 7b. 🚨 NEW: Start Gap Analysis Service (uses Market Data Hub)
+        if GAP_ANALYSIS_AVAILABLE:
+            logger.info("📊 Starting Gap Analysis Service...")
+            try:
+                await start_gap_analysis()
+                logger.info("✅ Gap Analysis Service started successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to start Gap Analysis Service: {e}")
+
+        # 8. NEW: Initialize Centralized WebSocket System
         if CENTRALIZED_WS_AVAILABLE:
             logger.info("🔌 Initializing NEW Centralized WebSocket System...")
             try:
                 if await centralized_manager.initialize():
                     await centralized_manager.start_connection()
 
-                    # FIXED: Register the WebSocket broadcast function
+                    # 🚀 NEW: Initialize optimized real-time trading system (ZERO DELAY)
                     try:
-                        from router.websocket_routes import broadcast_market_data
+                        from services.startup_integration import (
+                            initialize_realtime_trading_system,
+                        )
 
-                        centralized_manager.register_callback(
-                            "price_update",
-                            lambda data: asyncio.create_task(
-                                broadcast_market_data(data.get("data", {}))
-                            ),
-                        )
-                        logger.info(
-                            "✅ WebSocket broadcast function registered with centralized manager"
-                        )
+                        success = await initialize_realtime_trading_system()
+                        if success:
+                            logger.info(
+                                "✅ Real-time trading system initialized (ZERO DELAY ARCHITECTURE)"
+                            )
+                        else:
+                            logger.warning(
+                                "⚠️ Real-time trading system initialization incomplete"
+                            )
+                    except ImportError:
+                        logger.debug("Startup integration not available")
+
+                    # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
+                    try:
+                        from services.realtime_data_streamer import realtime_streamer
+
+                        realtime_streamer.start_streaming()
+                        logger.info("🚀 ZERO-DELAY real-time streaming ACTIVATED")
+                    except ImportError as e:
+                        logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
+
                     except Exception as e:
-                        logger.error(f"❌ Failed to register WebSocket broadcast: {e}")
-
-                        # FIXED: Only try to connect analytics manager if available
-                        try:
-                            from router.market_analytics_router import (
-                                analytics_manager,
-                            )
-
-                            if analytics_manager:
-                                # Register callbacks from processor to analytics manager
-                                logger.info(
-                                    "✅ Analytics manager connected to processor"
-                                )
-                        except Exception as e:
-                            logger.error(
-                                f"❌ Error connecting analytics manager to processor: {e}"
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"❌ Error connecting processor to centralized manager: {e}"
-                            )
-                    else:
-                        logger.info(
-                            "⚠️ Analytics processor not available - skipping callback registration"
+                        logger.error(
+                            f"❌ Error initializing real-time trading system: {e}"
                         )
+
+                    # ✅ REMOVED: Old redundant callback registrations
+                    # The new system uses instrument_registry callbacks for maximum performance:
+                    # - Strategy callbacks: ZERO DELAY (direct function calls)
+                    # - Analytics callbacks: Background processing (non-blocking)
+                    # - UI callbacks: Batched updates (optimized WebSocket)
+                    logger.info("🗑️ Cleaned up redundant callback architecture")
 
                     status = await centralized_manager.health_check()
                     logger.info(
@@ -558,10 +622,12 @@ async def lifespan(app: FastAPI):
         logger.info("🔄 Starting Upstox Token Automation (2GB RAM)...")
         try:
             from services.upstox_automation_service import start_upstox_automation
-            
+
             upstox_automation = start_upstox_automation()
             if upstox_automation:
-                logger.info("✅ Upstox token automation started - will refresh tokens daily at 4:00 AM")
+                logger.info(
+                    "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
+                )
             else:
                 logger.warning("⚠️ Upstox token automation failed to start")
         except Exception as e:
@@ -576,11 +642,15 @@ async def lifespan(app: FastAPI):
         logger.info("📅 Starting MarketScheduleService...")
         try:
             from services.market_schedule_service import MarketScheduleService
-            
+
             market_scheduler = MarketScheduleService()
             # Start as background task to avoid blocking startup
-            market_scheduler_task = asyncio.create_task(market_scheduler.start_daily_scheduler())
-            logger.info("✅ MarketScheduleService started - will handle daily FNO refresh, instrument updates, and market timing coordination")
+            market_scheduler_task = asyncio.create_task(
+                market_scheduler.start_daily_scheduler()
+            )
+            logger.info(
+                "✅ MarketScheduleService started - will handle daily FNO refresh, instrument updates, and market timing coordination"
+            )
         except Exception as e:
             logger.warning(
                 f"⚠️ MarketScheduleService failed to start: {e} - continuing without market scheduling"
@@ -601,16 +671,20 @@ async def lifespan(app: FastAPI):
             engine_task = asyncio.create_task(start_enhanced_trading_engine())
             logger.info("⚡ Enhanced Trading Engine background task started.")
 
-        broadcast_task = asyncio.create_task(broadcast_trading_updates())
-        logger.info("📡 Background broadcast service started.")
+        # 🚀 REMOVED: Redundant broadcast task
+        # Broadcasting now handled by instrument_registry callbacks (ZERO DELAY)
+        logger.info("🗑️ Removed redundant broadcast task - using optimized callbacks")
 
-        # 10. Start analytics processor
-        # analytics_task = asyncio.create_task(start_analytics_processor())
-        # logger.info("📊 Analytics processor started")
+        # 🚀 REMOVED: Redundant analytics processor
+        # Analytics now handled by instrument_registry analytics callbacks (background processing)
+        logger.info(
+            "🗑️ Removed redundant analytics processor - using optimized callback system"
+        )
 
         # 11. Start gap detection service
         try:
             from services.gap_detection_service import start_gap_detection_monitor
+
             gap_task = asyncio.create_task(start_gap_detection_monitor())
             logger.info("🕘 Gap detection service started.")
         except Exception as e:
@@ -619,6 +693,7 @@ async def lifespan(app: FastAPI):
         # 12. Start breakout detection service
         try:
             from services.breakout_detection_service import start_breakout_monitor
+
             breakout_task = asyncio.create_task(start_breakout_monitor())
             logger.info("⚡ Breakout detection service started.")
         except Exception as e:
@@ -653,6 +728,22 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error stopping centralized WebSocket: {e}")
 
+        # Stop Enhanced Breakout Engine
+        if ENHANCED_BREAKOUT_AVAILABLE and enhanced_breakout_engine:
+            try:
+                await enhanced_breakout_engine.stop()
+                logger.info("✅ Enhanced Breakout Engine stopped")
+            except Exception as e:
+                logger.error(f"Error stopping Enhanced Breakout Engine: {e}")
+
+        # Stop gap analysis service
+        if GAP_ANALYSIS_AVAILABLE and gap_analysis_service:
+            try:
+                await gap_analysis_service.stop()
+                logger.info("✅ Gap Analysis Service stopped")
+            except Exception as e:
+                logger.error(f"Error stopping gap analysis service: {e}")
+
         # Stop trading engine
         if trading_engine:
             try:
@@ -679,6 +770,7 @@ async def lifespan(app: FastAPI):
         # Stop gap detection service
         try:
             from services.gap_detection_service import get_gap_detection_service
+
             gap_service = get_gap_detection_service()
             await gap_service.shutdown()
             logger.info("✅ Gap detection service stopped")
@@ -687,7 +779,10 @@ async def lifespan(app: FastAPI):
 
         # Stop breakout detection service
         try:
-            from services.breakout_detection_service import get_breakout_detection_service
+            from services.breakout_detection_service import (
+                get_breakout_detection_service,
+            )
+
             breakout_service = get_breakout_detection_service()
             await breakout_service.shutdown()
             logger.info("✅ Breakout detection service stopped")
@@ -697,7 +792,7 @@ async def lifespan(app: FastAPI):
         # Stop Upstox automation
         try:
             from services.upstox_automation_service import stop_upstox_automation
-            
+
             stop_upstox_automation()
             logger.info("✅ Upstox token automation stopped")
         except Exception as e:
@@ -747,7 +842,12 @@ async def start_enhanced_trading_engine():
 
 # FIXED: Analytics processor startup
 async def start_analytics_processor():
-    """Start the analytics processor for real-time updates"""
+    """🗑️ REDUNDANT: Start the analytics processor for real-time updates - NOW DISABLED"""
+    # This function is now redundant as analytics processing is handled by instrument_registry callbacks
+    logger.info(
+        "🗑️ start_analytics_processor() called but disabled - using optimized callbacks"
+    )
+    return  # Early return - function disabled
     while True:
         try:
             if ANALYTICS_SERVICE_AVAILABLE and enhanced_analytics:
@@ -834,20 +934,50 @@ app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
 app.include_router(dhan_router, prefix="/api/dhan", tags=["Dhan API"])
 app.include_router(analytics_router.router, tags=["Analytics"])
 app.include_router(order_router.router, tags=["Orders"])
-app.include_router(ws_upstox_router, tags=["Legacy WebSocket"])
+app.include_router(ws_upstox_router, tags=["🗑️ Legacy WebSocket (REDUNDANT)"])
 app.include_router(backtesting_router, prefix="/api/backtesting", tags=["Backtesting"])
 app.include_router(stock_router, tags=["Stocks"])
 app.include_router(profile_router, tags=["Profile"])
-app.include_router(paper_trading_router, tags=["Paper Trading"])
+app.include_router(
+    paper_trading_router, tags=["Paper Trading"]
+)  # app.include_router(trading_config_router, prefix="/api", tags=["Trading Configuration"])
 app.include_router(notification_router, tags=["Notifications"])
 app.include_router(dashboard_router, tags=["Dashboard & Trading Engine"])
 app.include_router(instrument_router, tags=["Instruments"])
-app.include_router(websocket_router, tags=["WebSocket Management"])
+app.include_router(websocket_router, tags=["🗑️ WebSocket Management (REDUNDANT)"])
 app.include_router(debug_router, tags=["Debug"])
 app.include_router(market_analytics_router, tags=["Market Analytics"])
 app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
-app.include_router(unified_ws_router, tags=["Unified WebSocket"])
+app.include_router(unified_ws_router, tags=["🗑️ Unified WebSocket (REDUNDANT)"])
 app.include_router(option_router, tags=["Options & Futures"])
+
+# ✅ NEW: Trading Stock Selection with Options Integration
+from router.trading_stock_selection_router import router as trading_selection_router
+
+app.include_router(trading_selection_router, tags=["Trading Stock Selection"])
+# Test data router for development
+
+
+# 🚀 NEW: Add ZERO-DELAY real-time streaming routes
+try:
+    from router.realtime_stream_router import router as realtime_stream_router
+
+    app.include_router(
+        realtime_stream_router, tags=["🚀 ZERO-DELAY Real-time Streaming"]
+    )
+    logger.info("✅ 🚀 ZERO-DELAY real-time streaming routes registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Real-time streaming routes not available: {e}")
+
+# NEW: Add breakout scanner routes
+if BREAKOUT_SCANNER_AVAILABLE:
+    app.include_router(breakout_router, tags=["Breakout Scanner"])
+    logger.info("✅ Breakout scanner routes registered")
+
+# NEW: Add gap analysis routes
+if GAP_ANALYSIS_AVAILABLE:
+    app.include_router(gap_analysis_router, tags=["Gap Analysis"])
+    logger.info("✅ Gap analysis routes registered")
 
 # NEW: Add centralized WebSocket routes
 if CENTRALIZED_ROUTES_AVAILABLE:
@@ -866,6 +996,15 @@ if LEGACY_MARKET_WS_AVAILABLE:
     logger.info(
         "✅ Legacy market WebSocket routes available for backward compatibility"
     )
+
+# 🚀 NEW: Real-Time Strategy System API
+try:
+    from router.realtime_strategy_router import get_realtime_strategy_router
+
+    app.include_router(get_realtime_strategy_router(), tags=["Real-Time Strategies"])
+    logger.info("✅ Real-time strategy API routes registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Real-time strategy router not available: {e}")
 
 
 # Preflight handler
@@ -1471,7 +1610,12 @@ async def subscribe_to_analytics(sid, data):
 
 # Enhanced broadcast function for analytics
 async def broadcast_analytics_updates():
-    """Enhanced broadcast with market analytics data"""
+    """🗑️ REDUNDANT: Enhanced broadcast with market analytics data - NOW DISABLED"""
+    # This function is now redundant as analytics broadcasting is handled by instrument_registry callbacks
+    logger.info(
+        "🗑️ broadcast_analytics_updates() called but disabled - using optimized callbacks"
+    )
+    return  # Early return - function disabled
     while True:
         try:
             # Broadcast analytics updates every 60 seconds
@@ -1869,7 +2013,12 @@ async def restart_trading_engine():
 
 # Enhanced broadcast function
 async def broadcast_trading_updates():
-    """Enhanced broadcast with market analytics included"""
+    """🗑️ REDUNDANT: Enhanced broadcast with market analytics included - NOW DISABLED"""
+    # This function is now redundant as broadcasting is handled by instrument_registry callbacks
+    logger.info(
+        "🗑️ broadcast_trading_updates() called but disabled - using optimized callbacks"
+    )
+    return  # Early return - function disabled
     global trading_engine, trading_scheduler, market_scheduler, instrument_service_instance
 
     while True:
@@ -1940,7 +2089,7 @@ async def broadcast_trading_updates():
                                 market_scheduler.is_running
                                 if market_scheduler
                                 else False
-                            )
+                            ),
                         },
                         "new_centralized_websocket_system": {
                             "available": CENTRALIZED_WS_AVAILABLE,
