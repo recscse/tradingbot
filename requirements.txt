@@ -22,6 +22,7 @@ bidict==0.23.1
 blinker==1.9.0
 boto3==1.37.20
 botocore==1.37.20
+Bottleneck==1.5.0
 cachetools==5.5.2
 certifi==2025.1.31
 cffi==1.17.1
@@ -30,6 +31,7 @@ click==8.1.8
 colorama==0.4.6
 constantly==23.10.4
 contourpy==1.3.1
+coverage==7.10.4
 cryptography==44.0.2
 cycler==0.12.1
 dateutils==0.6.12
@@ -38,6 +40,7 @@ dhanhq==2.0.2
 dnspython==2.7.0
 ecdsa==0.19.0
 email_validator==2.2.0
+execnet==2.1.1
 fastapi==0.115.8
 fastjsonschema==2.21.1
 filelock==3.17.0
@@ -89,6 +92,7 @@ matplotlib==3.10.0
 mdurl==0.1.2
 ml_dtypes==0.5.1
 mpmath==1.3.0
+msgpack==1.1.1
 multidict==6.1.0
 multitasking==0.0.11
 mypy-extensions==1.0.0
@@ -96,10 +100,12 @@ namex==0.0.8
 networkx==3.4.2
 nsetools==1.0.11
 numba==0.61.2
+numexpr==2.11.0
 numpy==2.1.3
 oauthlib==3.2.2
 opt_einsum==3.4.0
 optree==0.14.1
+orjson==3.11.2
 packaging==24.2
 pandas==2.2.3
 pandas_ta==0.3.14b0
@@ -110,10 +116,12 @@ pillow==11.1.0
 platformdirs==4.3.6
 playwright==1.54.0
 pluggy==1.6.0
+polars==1.32.2
 propcache==0.2.1
 protobuf==5.29.3
 psutil==7.0.0
 psycopg2-binary==2.9.10
+pyarrow==21.0.0
 pyasn1==0.4.8
 pyasn1_modules==0.4.1
 pycparser==2.22
@@ -128,8 +136,12 @@ pyOpenSSL==25.0.0
 pyotp==2.9.0
 pyparsing==3.2.1
 pytest==8.4.1
+pytest-asyncio==1.1.0
 pytest-base-url==2.1.0
+pytest-cov==6.2.1
+pytest-mock==3.14.1
 pytest-playwright==0.7.0
+pytest-xdist==3.8.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 python-engineio==4.11.2

@@ -382,11 +382,98 @@ class UpstoxOptionService:
         except Exception:
             return ""
 
+    def get_expiry_dates(self, instrument_key: str, db: Session) -> Optional[List[str]]:
+        """Get available expiry dates for an instrument using Upstox API"""
+        try:
+            cache_key = f"expiry_dates_{instrument_key}"
+
+            # Check cache (cache for 1 hour since expiries don't change often)
+            if cache_key in self.cache:
+                cached_data, timestamp = self.cache[cache_key]
+                if datetime.now() - timestamp < timedelta(seconds=3600):  # 1 hour cache
+                    logger.info(f"Returning cached expiry dates for {instrument_key}")
+                    return cached_data
+
+            # Make API call to get expiry dates - exactly as per documentation
+            endpoint = "/expired-instruments/expiries"
+            params = {"instrument_key": instrument_key}
+
+            logger.info(f"Fetching expiry dates for instrument: {instrument_key}")
+            response_data = self._make_upstox_request(endpoint, params, db)
+            
+            if not response_data:
+                logger.warning(f"No expiry data received for {instrument_key}")
+                return None
+
+            expiry_dates = []
+            
+            # Parse response - API returns array of expiry date strings
+            if isinstance(response_data, list):
+                expiry_dates = response_data
+            elif isinstance(response_data, dict) and 'expiry_dates' in response_data:
+                expiry_dates = response_data['expiry_dates']
+            else:
+                logger.warning(f"Unexpected expiry data format for {instrument_key}: {response_data}")
+                return None
+
+            # Filter out past dates and sort
+            current_date = datetime.now().date()
+            valid_expiries = []
+            
+            for expiry_str in expiry_dates:
+                try:
+                    # Parse expiry date (expecting YYYY-MM-DD format)
+                    expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                    if expiry_date >= current_date:
+                        valid_expiries.append(expiry_str)
+                except ValueError:
+                    logger.warning(f"Invalid expiry date format: {expiry_str}")
+                    continue
+
+            # Sort expiries (nearest first)
+            valid_expiries.sort()
+
+            # Cache the results
+            self.cache[cache_key] = (valid_expiries, datetime.now())
+
+            logger.info(f"Found {len(valid_expiries)} valid expiry dates for {instrument_key}: {valid_expiries[:3]}...")
+            return valid_expiries
+
+        except Exception as e:
+            logger.error(f"Error fetching expiry dates for {instrument_key}: {e}")
+            return None
+
+    def get_nearest_expiry(self, instrument_key: str, db: Session) -> Optional[str]:
+        """Get the nearest (current week/month) expiry date for an instrument"""
+        try:
+            expiry_dates = self.get_expiry_dates(instrument_key, db)
+            if expiry_dates and len(expiry_dates) > 0:
+                # Return the nearest expiry (first in sorted list)
+                nearest_expiry = expiry_dates[0]
+                logger.info(f"Nearest expiry for {instrument_key}: {nearest_expiry}")
+                return nearest_expiry
+            else:
+                logger.warning(f"No valid expiry dates found for {instrument_key}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting nearest expiry for {instrument_key}: {e}")
+            return None
+
     def get_option_contracts(
         self, instrument_key: str, db: Session, expiry_date: str = None
     ) -> Optional[List[OptionContract]]:
         """Get option contracts using Upstox API with instrument_key from UI"""
         try:
+            # If no expiry_date provided, get the nearest expiry first
+            if not expiry_date:
+                logger.info(f"No expiry provided, fetching nearest expiry for {instrument_key}")
+                expiry_date = self.get_nearest_expiry(instrument_key, db)
+                if not expiry_date:
+                    logger.warning(f"Could not get valid expiry date for {instrument_key}")
+                    # Continue anyway, API might still return some data
+                else:
+                    logger.info(f"Using nearest expiry: {expiry_date} for {instrument_key}")
+
             cache_key = f"contracts_{instrument_key}_{expiry_date or 'all'}"
 
             # Check cache
@@ -401,6 +488,9 @@ class UpstoxOptionService:
             params = {"instrument_key": instrument_key}
             if expiry_date:
                 params["expiry_date"] = expiry_date
+                logger.info(f"Fetching option contracts for {instrument_key} with expiry {expiry_date}")
+            else:
+                logger.info(f"Fetching option contracts for {instrument_key} (all expiries)")
 
             response_data = self._make_upstox_request(endpoint, params, db)
             if not response_data:
@@ -563,10 +653,20 @@ class UpstoxOptionService:
             return None
 
     def get_option_chain(
-        self, instrument_key: str, expiry_date: str, db: Session = None
+        self, instrument_key: str, expiry_date: str = None, db: Session = None
     ) -> Optional[OptionChainData]:
         """Get option chain using Upstox API - EXACTLY as per documentation"""
         try:
+            # If no expiry_date provided, get the nearest expiry first
+            if not expiry_date:
+                logger.info(f"No expiry provided for option chain, fetching nearest expiry for {instrument_key}")
+                expiry_date = self.get_nearest_expiry(instrument_key, db)
+                if not expiry_date:
+                    logger.error(f"Could not get valid expiry date for option chain {instrument_key}")
+                    return None
+                else:
+                    logger.info(f"Using nearest expiry for option chain: {expiry_date}")
+
             cache_key = f"chain_{instrument_key}_{expiry_date}"
 
             # Check cache (shorter timeout for chain data)
@@ -582,6 +682,8 @@ class UpstoxOptionService:
                 "instrument_key": instrument_key,
                 "expiry_date": expiry_date  # Required parameter as per docs
             }
+            
+            logger.info(f"Fetching option chain for {instrument_key} with expiry {expiry_date}")
 
             api_response = self._make_upstox_request(endpoint, params, db)
             if not api_response:
@@ -902,3 +1004,21 @@ def is_symbol_fno_eligible(symbol: str, db: Session = None) -> bool:
         db = SessionLocal()
 
     return upstox_option_service.is_fno_stock(symbol, db)
+
+
+def get_instrument_expiry_dates(instrument_key: str, db: Session = None) -> List[str]:
+    """Get available expiry dates for an instrument"""
+    if not db:
+        from database.connection import SessionLocal
+        db = SessionLocal()
+
+    return upstox_option_service.get_expiry_dates(instrument_key, db) or []
+
+
+def get_instrument_nearest_expiry(instrument_key: str, db: Session = None) -> str:
+    """Get the nearest expiry date for an instrument"""
+    if not db:
+        from database.connection import SessionLocal
+        db = SessionLocal()
+
+    return upstox_option_service.get_nearest_expiry(instrument_key, db)

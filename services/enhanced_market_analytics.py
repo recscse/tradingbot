@@ -19,6 +19,11 @@ class EnhancedMarketAnalyticsService:
         self.cache_ttl = 2  # TRADING SAFETY: Reduced to 2 seconds for better accuracy
         self.max_cache_size = 1000  # Maximum cached items
         self.cache_access_times = {}  # Track access times for LRU cleanup
+        
+        # 🚀 NEW: Single enriched data cache to avoid multiple fetches
+        self._enriched_data_cache = None
+        self._enriched_data_cache_time = 0
+        self._enriched_data_cache_ttl = 1  # 1 second cache for enriched data
 
     def _cleanup_cache(self):
         """Clean up old cache entries using LRU strategy"""
@@ -86,6 +91,36 @@ class EnhancedMarketAnalyticsService:
             logger.error(f"Error computing {cache_key}: {e}")
             return None
 
+    def _get_cached_enriched_data(self) -> Dict[str, Any]:
+        """🚀 OPTIMIZED: Get enriched data with caching to avoid multiple fetches"""
+        import time
+        current_time = time.time()
+        
+        # Check if cached data is still valid
+        if (self._enriched_data_cache and 
+            current_time - self._enriched_data_cache_time < self._enriched_data_cache_ttl):
+            return self._enriched_data_cache
+        
+        # Fetch fresh data
+        try:
+            from services.instrument_registry import instrument_registry
+            enriched_data = instrument_registry.get_enriched_prices()
+            
+            # Update cache
+            self._enriched_data_cache = enriched_data or {}
+            self._enriched_data_cache_time = current_time
+            
+            return self._enriched_data_cache
+            
+        except Exception as e:
+            logger.error(f"❌ Error fetching enriched data: {e}")
+            return self._enriched_data_cache or {}
+
+    def _invalidate_enriched_data_cache(self):
+        """Invalidate enriched data cache to force refresh"""
+        self._enriched_data_cache = None
+        self._enriched_data_cache_time = 0
+
     def get_complete_analytics(self) -> Dict[str, Any]:
         """COMPLETE: Get all analytics with enriched data - optimized for real-time"""
         try:
@@ -146,10 +181,8 @@ class EnhancedMarketAnalyticsService:
     def get_all_live_stocks(self) -> List[Dict[str, Any]]:
         """COMPLETE: Get enriched stock data"""
         try:
-            from services.instrument_registry import instrument_registry
-
-            # Get enriched data directly
-            enriched_data = instrument_registry.get_enriched_prices()
+            # 🚀 OPTIMIZED: Use cached enriched data to avoid multiple fetches
+            enriched_data = self._get_cached_enriched_data()
 
             stocks = []
             for instrument_key, data in enriched_data.items():
@@ -213,6 +246,7 @@ class EnhancedMarketAnalyticsService:
                 logger.warning("⚠️ No enriched stocks found - checking fallback data sources")
                 # Try to get any available live prices data
                 try:
+                    from services.instrument_registry import instrument_registry
                     live_data = instrument_registry._live_prices
                     if live_data:
                         logger.info(f"📊 Found {len(live_data)} live prices as fallback")
@@ -316,8 +350,8 @@ class EnhancedMarketAnalyticsService:
             # FIXED: Use direct enriched prices instead of registry method
             logger.info("📊 Starting sector heatmap calculation")
 
-            # Get all enriched data directly
-            enriched_data = instrument_registry.get_enriched_prices()
+            # 🚀 OPTIMIZED: Use cached enriched data
+            enriched_data = self._get_cached_enriched_data()
 
             if not enriched_data:
                 logger.warning("⚠️ No enriched data available for sector heatmap")
@@ -553,8 +587,8 @@ class EnhancedMarketAnalyticsService:
             sector_indices = []
             major_market_indices = []
 
-            # Get enriched prices data
-            enriched_data = instrument_registry.get_enriched_prices()
+            # 🚀 OPTIMIZED: Use cached enriched data
+            enriched_data = self._get_cached_enriched_data()
 
             if not enriched_data:
                 logger.warning("⚠️ No enriched data available for indices")
@@ -1070,7 +1104,7 @@ class EnhancedMarketAnalyticsService:
 
             # Analyze volume patterns
             try:
-                all_stocks = list(instrument_registry.get_enriched_prices().values())
+                all_stocks = list(self._get_cached_enriched_data().values())
             except AttributeError:
                 all_stocks = []
 
@@ -1166,10 +1200,77 @@ class EnhancedMarketAnalyticsService:
     # MISSING METHODS - ADD THESE:
 
     def get_gap_analysis(self) -> Dict[str, Any]:
-        """Gap analysis for stocks"""
+        """Enhanced gap analysis using dedicated gap analysis service"""
         if not self._should_recalculate("gap_analysis"):
             return self.cache.get("gap_analysis", {"gap_up": [], "gap_down": []})
 
+        try:
+            # Use the comprehensive gap analysis service if available
+            try:
+                from services.gap_analysis_service import get_gap_data
+                
+                # Get comprehensive gap data from the dedicated service
+                gap_service_data = get_gap_data()
+                
+                # Extract data for analytics compatibility
+                result = {
+                    "gap_up": gap_service_data.get("gap_up", {}).get("all", [])[:20],
+                    "gap_down": gap_service_data.get("gap_down", {}).get("all", [])[:20],
+                    "gap_up_small": gap_service_data.get("gap_up", {}).get("small", []),
+                    "gap_up_medium": gap_service_data.get("gap_up", {}).get("medium", []),
+                    "gap_up_large": gap_service_data.get("gap_up", {}).get("large", []),
+                    "gap_down_small": gap_service_data.get("gap_down", {}).get("small", []),
+                    "gap_down_medium": gap_service_data.get("gap_down", {}).get("medium", []),
+                    "gap_down_large": gap_service_data.get("gap_down", {}).get("large", []),
+                    "recent_gaps": gap_service_data.get("recent_gaps", [])[:15],
+                    "top_gap_up": gap_service_data.get("top_gap_up", []),
+                    "top_gap_down": gap_service_data.get("top_gap_down", []),
+                    "summary": {
+                        "total_gap_up": gap_service_data.get("statistics", {}).get("gap_up_total", 0),
+                        "total_gap_down": gap_service_data.get("statistics", {}).get("gap_down_total", 0),
+                        "total_gaps_today": gap_service_data.get("statistics", {}).get("total_gaps_today", 0),
+                        "market_status": gap_service_data.get("statistics", {}).get("market_status", "unknown"),
+                        # Calculate averages from the service data
+                        "avg_gap_up": self._calculate_avg_gap(gap_service_data.get("gap_up", {}).get("all", []), positive=True),
+                        "avg_gap_down": self._calculate_avg_gap(gap_service_data.get("gap_down", {}).get("all", []), positive=False),
+                    },
+                    "sustainability": gap_service_data.get("sustainability", {}),
+                    "sector_analysis": gap_service_data.get("sector_analysis", {}),
+                    "statistics": gap_service_data.get("statistics", {}),
+                    "timestamp": datetime.now().isoformat(),
+                    "data_source": "gap_analysis_service",
+                }
+                
+                self.cache["gap_analysis"] = result
+                self._mark_calculated("gap_analysis")
+                
+                logger.info(f"📊 Enhanced gap analysis: {result['summary']['total_gaps_today']} gaps detected")
+                return result
+                
+            except ImportError:
+                logger.warning("⚠️ Gap analysis service not available, using fallback method")
+                return self._calculate_gap_analysis_fallback()
+                
+        except Exception as e:
+            logger.error(f"Error getting enhanced gap analysis: {e}")
+            # Fallback to basic calculation
+            return self._calculate_gap_analysis_fallback()
+
+    def _calculate_avg_gap(self, gaps: list, positive: bool = True) -> float:
+        """Calculate average gap percentage"""
+        if not gaps:
+            return 0.0
+        
+        gap_percentages = [g.get("gap_percent", 0) for g in gaps]
+        if positive:
+            gap_percentages = [g for g in gap_percentages if g > 0]
+        else:
+            gap_percentages = [g for g in gap_percentages if g < 0]
+        
+        return sum(gap_percentages) / len(gap_percentages) if gap_percentages else 0.0
+
+    def _calculate_gap_analysis_fallback(self) -> Dict[str, Any]:
+        """Fallback gap analysis method"""
         try:
             stocks = self.get_all_live_stocks()
             gap_up = []
@@ -1177,9 +1278,9 @@ class EnhancedMarketAnalyticsService:
 
             for stock in stocks:
                 gap_percent = stock.get("gap_percent", 0)
-                if gap_percent > 2:  # Gap up > 2%
+                if gap_percent > 1.0:  # Reduced threshold for better detection
                     gap_up.append(stock)
-                elif gap_percent < -2:  # Gap down < -2%
+                elif gap_percent < -1.0:  # Reduced threshold for better detection
                     gap_down.append(stock)
 
             # Sort by gap percentage
@@ -1204,6 +1305,7 @@ class EnhancedMarketAnalyticsService:
                     ),
                 },
                 "timestamp": datetime.now().isoformat(),
+                "data_source": "fallback_calculation",
             }
 
             self.cache["gap_analysis"] = result
@@ -1211,8 +1313,8 @@ class EnhancedMarketAnalyticsService:
             return result
 
         except Exception as e:
-            logger.error(f"Error calculating gap analysis: {e}")
-            return {"gap_up": [], "gap_down": [], "error": str(e)}
+            logger.error(f"Error in fallback gap analysis: {e}")
+            return {"gap_up": [], "gap_down": [], "error": str(e), "data_source": "error"}
 
     def get_breakout_analysis(self) -> Dict[str, Any]:
         """Get breakout analysis using the proper breakout detection service"""
@@ -1501,7 +1603,7 @@ class EnhancedMarketAnalyticsService:
             # Get all enriched prices from registry
             from services.instrument_registry import instrument_registry
 
-            all_stocks = list(instrument_registry.get_enriched_prices().values())
+            all_stocks = list(self._get_cached_enriched_data().values())
 
             if not all_stocks:
                 logger.warning("⚠️ No enriched prices available for sector analysis")
@@ -1780,49 +1882,79 @@ class EnhancedMarketAnalyticsService:
     # ADD to END of enhanced_market_analytics_service.py
 
 
-# Add this function at the end of enhanced_market_analytics_service.py
+# 🚀 OPTIMIZED: Enhanced analytics with new callback system
 def setup_analytics_events():
-    """Connect enhanced analytics to price updates"""
+    """🚀 NEW: Connect enhanced analytics using optimized callback system"""
     try:
         from services.instrument_registry import instrument_registry
 
-        def on_price_update(data):
-            # Clear cache for fresh calculation
-            enhanced_analytics.cache.clear()
-            enhanced_analytics.last_calculated.clear()
-
-            # OPTIONAL: Generate fresh analytics if needed
+        def optimized_analytics_callback(analytics_payload):
+            """🚀 NEW: Optimized analytics callback with selective processing"""
             try:
-                logger.info("🔄 Refreshing analytics after price update")
-                enhanced_analytics.get_complete_analytics()
+                updated_instruments = analytics_payload.get('updated_instruments', [])
+                stats = analytics_payload.get('stats', {})
+                
+                # Only process significant updates (avoid unnecessary calculations)
+                enriched_count = stats.get('enriched', 0)
+                if enriched_count < 5:  # Skip minor updates
+                    return
+                
+                logger.debug(f"🔄 Analytics processing: {len(updated_instruments)} instruments, {enriched_count} enriched")
+                
+                # Selective cache clearing instead of full clear
+                cache_keys_to_remove = []
+                for instrument_key in updated_instruments:
+                    # Remove cache entries related to updated instruments
+                    for cache_key in list(enhanced_analytics.cache.keys()):
+                        if instrument_key in str(cache_key) or "top_movers" in str(cache_key):
+                            cache_keys_to_remove.append(cache_key)
+                
+                # Clear selective cache entries
+                for key in cache_keys_to_remove:
+                    enhanced_analytics.cache.pop(key, None)
+                    enhanced_analytics.last_calculated.pop(key, None)
+                
+                # 🚀 NEW: Invalidate enriched data cache to force refresh
+                enhanced_analytics._invalidate_enriched_data_cache()
+                
+                # Background analytics refresh (non-blocking)
+                if enriched_count > 20:  # Only for significant updates
+                    import asyncio
+                    asyncio.create_task(background_analytics_refresh())
+                
             except Exception as e:
-                logger.error(f"❌ Error refreshing analytics: {e}")
+                logger.error(f"❌ Error in optimized analytics callback: {e}")
 
-        # Subscribe to both instrument registry and unified manager events
-        instrument_registry.subscribe("price_update", on_price_update)
+        # 🚀 NEW: Register with optimized callback system (ZERO DELAY for strategies)
+        success = instrument_registry.register_analytics_callback(
+            optimized_analytics_callback, 
+            "enhanced_market_analytics_optimized"
+        )
 
-        try:
-            from services.unified_websocket_manager import unified_manager
+        if success:
+            logger.info("✅ Enhanced analytics connected to OPTIMIZED callback system")
+        else:
+            logger.error("❌ Failed to register optimized analytics callback")
 
-            # Also subscribe to direct trigger events
-            def on_trigger_analytics(data):
-                logger.info("🔄 Manually triggered analytics refresh")
-                enhanced_analytics.cache.clear()
-                enhanced_analytics.last_calculated.clear()
-                enhanced_analytics.get_complete_analytics()
-
-            unified_manager.register_handler("trigger_analytics", on_trigger_analytics)
-            logger.info("✅ Enhanced analytics connected to unified events")
-        except Exception as e:
-            logger.error(f"❌ Error connecting to unified manager: {e}")
-
-        logger.info("✅ Enhanced analytics connected to price events")
     except Exception as e:
-        logger.error(f"❌ Analytics event setup failed: {e}")
+        logger.error(f"❌ Optimized analytics setup failed: {e}")
 
+async def background_analytics_refresh():
+    """Background analytics refresh to avoid blocking real-time data"""
+    try:
+        logger.debug("🔄 Background analytics refresh started")
+        # Refresh analytics in background without blocking strategies
+        enhanced_analytics.get_complete_analytics()
+        logger.debug("✅ Background analytics refresh completed")
+    except Exception as e:
+        logger.error(f"❌ Background analytics refresh failed: {e}")
 
-# Actually call the setup function to connect events
+# Create service instance
 enhanced_analytics = EnhancedMarketAnalyticsService()
 
+# ✅ REMOVED: Old redundant event setup
+# Old system called get_complete_analytics() on EVERY price update (performance killer)
+# New system uses selective cache clearing and background processing
 
+# Setup optimized analytics events
 setup_analytics_events()

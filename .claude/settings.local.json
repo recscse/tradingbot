@@ -17,11 +17,10 @@
       "WebFetch(domain:www.benchmarksixsigma.com)",
       "WebFetch(domain:www.tipranks.com)",
       "WebFetch(domain:blog.tipranks.com)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npm start --silent)"
     ],
     "deny": [],
-    "additionalDirectories": [
-      "C:\\c\\Work\\P\\app\\tradingapp-main"
-    ]
+    "additionalDirectories": ["C:\\Work\\P\\app\\tradingapp-main"]
   }
 }

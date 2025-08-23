@@ -66,6 +66,9 @@ class User(Base):
     trade_performance = relationship(
         "TradePerformance", back_populates="user", cascade="all, delete"
     )
+    trading_config = relationship(
+        "UserTradingConfig", back_populates="user", cascade="all, delete", uselist=False
+    )
     trading_reports = relationship(
         "TradingReport", back_populates="user", cascade="all, delete"
     )
@@ -481,6 +484,63 @@ class UserCapital(Base):
     user = relationship("User", back_populates="user_capital")
 
 
+class UserTradingConfig(Base):
+    """User-specific trading configuration and preferences"""
+
+    __tablename__ = "user_trading_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+
+    # Trading Mode and Basic Settings
+    trade_mode = Column(String(20), default="PAPER")  # LIVE, PAPER, SIMULATION
+    default_qty = Column(Integer, default=1)  # Default quantity for trades
+
+    # Risk Management Settings
+    stop_loss_percent = Column(Float, default=2.0)  # Default stop loss percentage
+    target_percent = Column(Float, default=4.0)  # Default target percentage
+    max_positions = Column(Integer, default=3)  # Maximum concurrent positions
+    risk_per_trade_percent = Column(Float, default=1.0)  # Risk per trade percentage
+
+    # Trading Strategy Settings
+    default_strategy = Column(
+        String(50), default="MOMENTUM"
+    )  # Default trading strategy
+    default_timeframe = Column(String(10), default="5M")  # Default chart timeframe
+
+    # Option Trading Settings
+    option_strategy = Column(String(20), default="BUY")  # BUY, SELL, STRADDLE, STRANGLE
+    option_expiry_preference = Column(
+        String(20), default="NEAREST"
+    )  # NEAREST, WEEKLY, MONTHLY
+    enable_option_trading = Column(
+        Boolean, default=True
+    )  # Enable/disable option trading
+
+    # Advanced Settings
+    enable_auto_square_off = Column(
+        Boolean, default=True
+    )  # Auto square off at market close
+    enable_bracket_orders = Column(Boolean, default=False)  # Enable bracket orders
+    enable_trailing_stop = Column(Boolean, default=False)  # Enable trailing stop loss
+
+    # Notification Settings
+    enable_trade_notifications = Column(
+        Boolean, default=True
+    )  # Enable trade notifications
+    enable_profit_loss_alerts = Column(Boolean, default=True)  # Enable P&L alerts
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="trading_config")
+
+    # Indexes
+    __table_args__ = (Index("idx_user_trading_config_user_id", "user_id"),)
+
+
 class TradeSignal(Base):
     __tablename__ = "trade_signals"
 
@@ -708,6 +768,15 @@ class SelectedStock(Base):
 
     # Status
     is_active = Column(Boolean, default=True)
+
+    option_type = Column(String)  # CE / PE / NEUTRAL
+    option_contract = Column(Text)  # JSON string - Single ATM contract
+    option_contracts_available = Column(
+        Integer, default=0
+    )  # Count of available contracts
+    option_chain_data = Column(Text)  # JSON string - Complete option chain
+    option_expiry_date = Column(String)  # Selected expiry date (YYYY-MM-DD)
+    option_expiry_dates = Column(Text)  # JSON array - All available expiry dates
 
     # Performance Tracking (optional)
     max_price_achieved = Column(Float)

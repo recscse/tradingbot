@@ -10,6 +10,15 @@ import re
 import time
 import pytz
 
+# Import sector mapping
+try:
+    from services.sector_mapping import SYMBOL_TO_SECTOR, get_sector_for_stock
+except ImportError:
+    # Fallback if import fails
+    SYMBOL_TO_SECTOR = {}
+    def get_sector_for_stock(symbol):
+        return None
+
 logger = logging.getLogger(__name__)
 
 
@@ -325,13 +334,36 @@ class FnoStockListService:
         return result
 
     def get_categorized_fno_data(self) -> Dict[str, any]:
-        """Get F&O data separated into indices and stocks with metadata"""
+        """Get F&O data separated into indices and stocks with metadata and sector mapping"""
         all_data = self.get_fno_stocks()
         
+        # Enhance data with sector information
+        enhanced_data = []
+        for item in all_data:
+            enhanced_item = item.copy()
+            symbol = item.get('symbol')
+            
+            if symbol:
+                # Get sector from mapping
+                sector = get_symbol_sector(symbol)
+                if sector:
+                    enhanced_item['sector'] = sector
+                else:
+                    # Determine sector based on symbol for indices
+                    if symbol in self.actual_indices:
+                        enhanced_item['sector'] = 'INDEX'
+                    else:
+                        enhanced_item['sector'] = 'F&O'  # Default for F&O stocks without mapping
+            else:
+                enhanced_item['sector'] = 'UNKNOWN'
+                
+            enhanced_data.append(enhanced_item)
+        
+        # Separate into indices and stocks
         indices = []
         stocks = []
         
-        for item in all_data:
+        for item in enhanced_data:
             if item["symbol"] in self.actual_indices:
                 indices.append(item)
             else:
@@ -341,11 +373,11 @@ class FnoStockListService:
             "indices": indices,
             "stocks": stocks,
             "metadata": {
-                "total_count": len(all_data),
+                "total_count": len(enhanced_data),
                 "indices_count": len(indices),
                 "stocks_count": len(stocks),
                 "last_updated": datetime.now().isoformat(),
-                "data_quality": self._assess_data_quality(all_data)
+                "data_quality": self._assess_data_quality(enhanced_data)
             }
         }
 
@@ -1339,13 +1371,37 @@ def update_fno_stock_list() -> Dict[str, any]:
 
 
 def get_fno_stocks_from_file() -> List[Dict[str, str]]:
-    """Get F&O stocks from saved JSON file"""
+    """Get F&O stocks from saved JSON file with sector mapping"""
     service = FnoStockListService()
-    return service.load_from_json()
+    stocks = service.load_from_json()
+    
+    # Enhance each stock with sector information
+    enhanced_stocks = []
+    for stock in stocks:
+        enhanced_stock = stock.copy()
+        symbol = stock.get('symbol')
+        
+        if symbol:
+            # Get sector from mapping
+            sector = get_sector_for_stock(symbol)
+            if sector:
+                enhanced_stock['sector'] = sector
+            else:
+                # Determine sector based on symbol for indices
+                if symbol in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTY-NEXT50']:
+                    enhanced_stock['sector'] = 'INDEX'
+                else:
+                    enhanced_stock['sector'] = 'F&O'  # Default for F&O stocks without mapping
+        else:
+            enhanced_stock['sector'] = 'UNKNOWN'
+            
+        enhanced_stocks.append(enhanced_stock)
+    
+    return enhanced_stocks
 
 
 def get_categorized_fno_data() -> Dict[str, any]:
-    """Get F&O data separated into indices and stocks with metadata"""
+    """Get F&O data separated into indices and stocks with metadata and sector mapping"""
     service = FnoStockListService()
     return service.get_categorized_fno_data()
 

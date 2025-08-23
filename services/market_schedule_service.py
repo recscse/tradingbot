@@ -10,6 +10,7 @@ from database.connection import get_db
 from database.models import User, BrokerConfig
 from services.stock_analyzer import StockAnalyzer
 from services.instrument_refresh_service import TradingInstrumentService
+from services.trading_stock_selector import TradingStockSelector
 
 # Import the optimized service
 
@@ -27,6 +28,20 @@ class MarketScheduleService:
 
         self.stock_analyzer = StockAnalyzer()
         self.instrument_service = TradingInstrumentService()
+        
+        # ✅ ENHANCED: Initialize TradingStockSelector with optimized settings for options trading
+        from services.enhanced_market_analytics import enhanced_analytics
+        from database.connection import SessionLocal
+        
+        self.stock_selector = TradingStockSelector(
+            analytics=enhanced_analytics,  # Use enhanced analytics with real-time data
+            db_session_factory=SessionLocal,  # Use proper session factory
+            option_service=None,  # Will use default upstox_option_service
+            sectors_to_pick=1,  # Pick only the TOP performing sector
+            per_sector_limit=2,  # Exactly 2 stocks per sector
+            max_total_stocks=2,  # Maximum 2 stocks total for focused trading
+            user_id=1,  # Default admin user - will be parameterized later
+        )
         # Initialize the optimized service
         self.selected_stocks = {}
         self.is_running = False
@@ -98,40 +113,52 @@ class MarketScheduleService:
             # Check if it's Monday (weekday 0) for weekly FNO refresh
             current_weekday = datetime.now(self.ist).weekday()
             should_refresh_fno = current_weekday == 0  # Monday only
-            
+
             # FIXED: ALWAYS run FNO service first (either refresh or verify existing data)
             logger.info("🔧 Step 1: FNO stock list preparation...")
             from services.fno_stock_service import FnoStockListService
 
             fno_service = FnoStockListService()
-            
+
             if should_refresh_fno:
                 # WEEKLY: Full refresh on Mondays
                 logger.info("📊 Running weekly FNO stock list refresh (Monday)...")
                 fno_result = fno_service.update_fno_list()
 
                 if fno_result["status"] == "success":
-                    logger.info(f"✅ Weekly FNO refresh: {fno_result['total_stocks']} stocks")
+                    logger.info(
+                        f"✅ Weekly FNO refresh: {fno_result['total_stocks']} stocks"
+                    )
                 else:
-                    logger.error(f"❌ Weekly FNO refresh failed: {fno_result.get('error')}")
+                    logger.error(
+                        f"❌ Weekly FNO refresh failed: {fno_result.get('error')}"
+                    )
                     # Don't continue if FNO data is corrupted
                     return
             else:
                 # DAILY: Verify existing FNO data is available
                 logger.info(f"🔍 Verifying existing FNO data (Tuesday-Sunday)...")
                 existing_stocks = fno_service.load_from_json()
-                
+
                 if not existing_stocks:
-                    logger.warning("⚠️ No existing FNO data found, running emergency refresh...")
+                    logger.warning(
+                        "⚠️ No existing FNO data found, running emergency refresh..."
+                    )
                     fno_result = fno_service.update_fno_list()
                     if fno_result["status"] != "success":
-                        logger.error(f"❌ Emergency FNO refresh failed: {fno_result.get('error')}")
+                        logger.error(
+                            f"❌ Emergency FNO refresh failed: {fno_result.get('error')}"
+                        )
                         return
                 else:
-                    logger.info(f"✅ FNO data verified: {len(existing_stocks)} stocks available")
+                    logger.info(
+                        f"✅ FNO data verified: {len(existing_stocks)} stocks available"
+                    )
 
             # FIXED: Step 2 now ALWAYS runs AFTER FNO service has completed successfully
-            logger.info("🔧 Step 2: Building instrument service (depends on FNO data)...")
+            logger.info(
+                "🔧 Step 2: Building instrument service (depends on FNO data)..."
+            )
             from services.instrument_refresh_service import get_trading_service
 
             instrument_service = get_trading_service()
@@ -313,43 +340,162 @@ class MarketScheduleService:
             return {}
 
     async def _select_trading_stocks(self, market_analysis: Dict) -> Dict:
-        """Select stocks for trading based on analysis"""
+        """🚀 ENHANCED: Select stocks using TradingStockSelector with OPTIONS INTEGRATION"""
         try:
-            # Get all available stocks
-            all_stocks = await self.stock_analyzer.get_all_tradeable_stocks()
-
+            logger.info("🔍 Running advanced stock selection with options integration...")
+            
+            # ✅ STEP 1: Use the advanced TradingStockSelector with options support
+            # This selector integrates with enhanced analytics and includes option chain data
+            selected_candidates = self.stock_selector.run_selection_sync()
+            
+            if not selected_candidates:
+                logger.warning("❌ No stocks selected by TradingStockSelector")
+                return {}
+            
+            logger.info(f"✅ TradingStockSelector found {len(selected_candidates)} candidates")
+            
+            # ✅ STEP 2: Convert to the expected format with enhanced data
             selected = {}
-
-            for stock in all_stocks:
+            
+            for candidate in selected_candidates:
                 try:
-                    # Analyze individual stock
-                    stock_score = await self.stock_analyzer.analyze_stock_for_trading(
-                        stock, market_analysis
-                    )
-
-                    # Select top scoring stocks
-                    if stock_score["score"] > 0.7:  # Threshold for selection
-                        selected[stock["symbol"]] = {
-                            "stock_data": stock,
-                            "analysis": stock_score,
-                            "instruments": await self._get_stock_instruments(
-                                stock["symbol"]
-                            ),
-                        }
-
-                    # Limit to top 20 stocks
-                    if len(selected) >= 20:
-                        break
-
+                    symbol = candidate.get("symbol")
+                    if not symbol:
+                        continue
+                    
+                    # ✅ STEP 3: Prepare comprehensive stock data with options
+                    stock_data = {
+                        "symbol": symbol,
+                        "instrument_key": candidate.get("instrument_key"),
+                        "sector": candidate.get("sector"),
+                        "price_at_selection": candidate.get("price_at_selection"),
+                        "selection_score": candidate.get("selection_score"),
+                        "selection_reason": candidate.get("selection_reason"),
+                        
+                        # ✅ OPTIONS DATA - Ready for trading
+                        "option_type": candidate.get("option_type"),  # CE/PE based on market sentiment
+                        "option_contract": candidate.get("option_contract"),  # ATM contract details
+                        "option_chain_data": candidate.get("option_chain_data"),  # Complete chain
+                        "option_expiry_date": candidate.get("option_expiry_date"),  # Nearest expiry
+                        "option_expiry_dates": candidate.get("option_expiry_dates", []),  # All expiries
+                        "option_contracts_available": candidate.get("option_contracts_available", 0),
+                        
+                        # Enhanced metadata
+                        "strategy_score": candidate.get("strategy_score", 0),
+                        "strategy_details": candidate.get("strategy_details", {}),
+                        "has_option_chain": candidate.get("option_chain_data") is not None,
+                        "selected_at": datetime.now(self.ist).isoformat(),
+                    }
+                    
+                    # ✅ STEP 4: Get instrument keys for both stock and options
+                    stock_instruments = await self._get_stock_instruments(symbol)
+                    stock_data["instruments"] = stock_instruments
+                    
+                    # ✅ STEP 5: Add option instrument keys if available
+                    if candidate.get("option_contract"):
+                        option_instrument_key = candidate["option_contract"].get("instrument_key")
+                        if option_instrument_key:
+                            stock_data["option_instrument_key"] = option_instrument_key
+                            stock_data["instruments"]["option"] = option_instrument_key
+                            logger.info(f"✅ {symbol}: Stock + Option instruments ready")
+                    
+                    selected[symbol] = {
+                        "stock_data": stock_data,
+                        "analysis": {
+                            "score": candidate.get("selection_score", 0),
+                            "sector_performance": candidate.get("sector"),
+                            "market_sentiment_aligned": True,  # Selected based on sentiment
+                            "has_options": stock_data["has_option_chain"],
+                            "option_type_recommendation": candidate.get("option_type"),
+                        },
+                        "instruments": stock_instruments,
+                        "options_ready": stock_data["has_option_chain"],
+                    }
+                    
+                    logger.info(f"📊 {symbol}: Selected with {candidate.get('option_contracts_available', 0)} option contracts")
+                    
                 except Exception as e:
-                    logger.error(f"❌ Error analyzing {stock.get('symbol')}: {e}")
+                    logger.error(f"❌ Error processing selected stock {candidate.get('symbol')}: {e}")
                     continue
-
+            
+            # ✅ STEP 6: Store selection results for later access
+            self._store_selection_results(selected_candidates)
+            
+            logger.info(f"🎯 SELECTION COMPLETE: {len(selected)} stocks with options integration")
+            for symbol, data in selected.items():
+                option_status = "✅ Options Ready" if data["options_ready"] else "❌ No Options"
+                logger.info(f"  📈 {symbol} ({data['stock_data']['sector']}) - {option_status}")
+            
             return selected
 
         except Exception as e:
-            logger.error(f"❌ Stock selection failed: {e}")
+            logger.error(f"❌ Enhanced stock selection failed: {e}")
+            # Fallback to empty selection rather than crash
             return {}
+
+    def _store_selection_results(self, selected_candidates: List[Dict]):
+        """🗃️ Store selection results in Redis for easy access"""
+        try:
+            if not selected_candidates:
+                return
+            
+            # Store individual stock data
+            for candidate in selected_candidates:
+                symbol = candidate.get("symbol")
+                if symbol:
+                    key = f"selected_stock:{symbol}:{datetime.now(self.ist).date().isoformat()}"
+                    self.redis_client.setex(key, 86400, json.dumps(candidate))  # 24 hour expiry
+            
+            # Store summary data
+            summary_data = {
+                "selection_date": datetime.now(self.ist).date().isoformat(),
+                "selection_time": datetime.now(self.ist).time().isoformat(),
+                "total_selected": len(selected_candidates),
+                "stocks": [c.get("symbol") for c in selected_candidates],
+                "sectors": list(set(c.get("sector") for c in selected_candidates if c.get("sector"))),
+                "options_ready_count": sum(1 for c in selected_candidates if c.get("option_chain_data")),
+            }
+            
+            summary_key = f"stock_selection_summary:{datetime.now(self.ist).date().isoformat()}"
+            self.redis_client.setex(summary_key, 86400, json.dumps(summary_data))
+            
+            logger.info(f"✅ Stored selection results in Redis: {len(selected_candidates)} stocks")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to store selection results: {e}")
+
+    def get_selected_stocks_from_storage(self, date_str: str = None) -> List[Dict]:
+        """📖 Retrieve stored selection results from Redis"""
+        try:
+            if not date_str:
+                date_str = datetime.now(self.ist).date().isoformat()
+            
+            # Get summary first
+            summary_key = f"stock_selection_summary:{date_str}"
+            summary_data = self.redis_client.get(summary_key)
+            
+            if not summary_data:
+                logger.warning(f"No selection summary found for {date_str}")
+                return []
+            
+            summary = json.loads(summary_data)
+            stocks = summary.get("stocks", [])
+            
+            # Get individual stock data
+            selected_stocks = []
+            for symbol in stocks:
+                stock_key = f"selected_stock:{symbol}:{date_str}"
+                stock_data = self.redis_client.get(stock_key)
+                
+                if stock_data:
+                    selected_stocks.append(json.loads(stock_data))
+            
+            logger.info(f"📖 Retrieved {len(selected_stocks)} selected stocks from storage")
+            return selected_stocks
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve selection results: {e}")
+            return []
 
     async def _prepare_selected_stock_instruments_enhanced(self):
         """ENHANCED: Use instrument registry for comprehensive instrument keys"""
