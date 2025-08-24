@@ -21,8 +21,8 @@ const useOptionChain = (symbolOrInstrumentKey) => {
   const resolveInstrumentKey = useCallback(async (input) => {
     if (!input) return null;
     
-    // If it's already an instrument_key (contains |), use it directly
-    if (input.includes('|')) {
+    // If it's already a valid instrument_key (contains | and not a fake _KEY), use it directly
+    if (input.includes('|') && !input.endsWith('_KEY')) {
       return input;
     }
     
@@ -439,26 +439,68 @@ const useOptionChain = (symbolOrInstrumentKey) => {
     }
   }, [selectedExpiry, resolvedInstrumentKey, fetchOptionChain]);
 
-  // Effect to update live prices
+  // Effect to update live prices and subscribe to option instruments
   useEffect(() => {
     if (getAllInstrumentKeys.length > 0 && isConnected) {
+      // Request subscription to option instrument keys for real-time data
+      console.log('🔔 Subscribing to option instruments for real-time data:', getAllInstrumentKeys.slice(0, 5), '...');
+      
+      // Initial price update
       updateLivePrices();
-      // Set up interval for periodic updates
+      
+      // Set up interval for periodic updates (fallback)
       const interval = setInterval(updateLivePrices, 1000); // Update every second
-      return () => clearInterval(interval);
+      return () => {
+        clearInterval(interval);
+        console.log('🔕 Unsubscribed from option instruments');
+      };
+    }
+    
+    // Clear prices when disconnected
+    if (!isConnected) {
+      setLivePrices({});
     }
   }, [getAllInstrumentKeys, isConnected, updateLivePrices]);
 
-  // Refresh function
-  const refresh = useCallback(() => {
+  // Enhanced refresh function with real-time status
+  const refresh = useCallback(async () => {
+    console.log('🔄 Refreshing option chain data...');
+    
     if (resolvedInstrumentKey) {
-      if (selectedExpiry) {
-        fetchOptionChain(resolvedInstrumentKey, selectedExpiry);
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Refresh option chain data
+        if (selectedExpiry) {
+          await fetchOptionChain(resolvedInstrumentKey, selectedExpiry);
+        }
+        
+        // Refresh futures data
+        await fetchFuturesData(resolvedInstrumentKey);
+        
+        // Force live price update
+        if (isConnected) {
+          updateLivePrices();
+        }
+        
+        console.log('✅ Option chain data refreshed successfully');
+      } catch (err) {
+        console.error('❌ Option chain refresh failed:', err);
+        setError('Failed to refresh option chain data. Please try again.');
+      } finally {
+        setLoading(false);
       }
-      fetchFuturesData(resolvedInstrumentKey);
     }
-  }, [resolvedInstrumentKey, selectedExpiry, fetchOptionChain, fetchFuturesData]);
+  }, [resolvedInstrumentKey, selectedExpiry, fetchOptionChain, fetchFuturesData, updateLivePrices, isConnected]);
 
+  // Calculate connection status details
+  const wsConnected = isConnected;
+  const spotPrice = optionChainData?.spot_price || optionChainData?.underlying_price;
+  const expiryDates = optionChainData?.expiry_dates || [];
+  const totalInstruments = getAllInstrumentKeys.length;
+  const liveInstruments = Object.keys(livePrices).length;
+  
   return {
     // Data
     optionChainData,
@@ -466,10 +508,15 @@ const useOptionChain = (symbolOrInstrumentKey) => {
     livePrices,
     selectedExpiry,
     instrumentKey: resolvedInstrumentKey, // The resolved instrument_key
+    spotPrice, // Current spot price for easy access
+    expiryDates, // Available expiry dates
     // Status
     loading,
     error,
     isConnected,
+    wsConnected, // Enhanced connection status
+    totalInstruments, // Total option instruments tracked
+    liveInstruments, // Instruments with live data
     // Actions - Updated API methods
     setSelectedExpiry,
     refresh,
@@ -486,14 +533,9 @@ const useOptionChain = (symbolOrInstrumentKey) => {
     getOptionMetrics,
     // Computed values
     allInstrumentKeys: getAllInstrumentKeys,
-    spotPrice:
-      optionChainData?.underlying_spot_price || optionChainData?.spot_price,
-    expiryDates: optionChainData?.expiry_dates || [],
     strikePrice: optionChainData?.strike_prices || [],
     totalStrikes: optionChainData?.total_strikes || 0,
     totalExpiries: optionChainData?.total_expiries || 0,
-    // WebSocket status
-    wsConnected: isConnected,
   };
 };
 

@@ -120,11 +120,15 @@ const EnhancedOptionChainPage = () => {
   };
 
   // Calculate strike color
-  const getStrikeColor = (strike, currentSpotPrice) => {
+  const getStrikeColor = (strike, currentSpotPrice, allStrikes) => {
     if (!currentSpotPrice) return colors.otm;
     
-    const diff = Math.abs(strike - currentSpotPrice);
-    if (diff <= currentSpotPrice * 0.01) return colors.atm; // Within 1%
+    // Find the exact ATM strike (closest to spot price)
+    const atmStrike = allStrikes?.reduce((prev, curr) => 
+      Math.abs(curr - currentSpotPrice) < Math.abs(prev - currentSpotPrice) ? curr : prev
+    );
+    
+    if (strike === atmStrike) return colors.atm; // Exact ATM strike
     if (strike < currentSpotPrice) return colors.itm; // In the money for calls
     return colors.otm; // Out of the money
   };
@@ -325,33 +329,46 @@ const EnhancedOptionChainPage = () => {
                 {}
               ) : null;
               
-              const strikeColor = getStrikeColor(strike, spotPrice);
+              const strikeColor = getStrikeColor(strike, spotPrice, strikes);
+              const isATM = strikeColor === colors.atm;
               
               return (
                 <TableRow 
                   key={strike}
                   sx={{
-                    backgroundColor: index % 2 === 0 
-                      ? strikeColor.bg 
-                      : theme.palette.mode === 'dark' 
-                        ? 'rgba(255, 255, 255, 0.02)' 
-                        : 'rgba(0, 0, 0, 0.02)',
-                    borderLeft: `2px solid ${strikeColor.border || 'transparent'}`,
-                    borderRight: `2px solid ${strikeColor.border || 'transparent'}`,
-                    borderBottom: `1px solid ${theme.palette.mode === 'dark' 
+                    backgroundColor: isATM 
+                      ? colors.atm.bg 
+                      : index % 2 === 0 
+                        ? strikeColor.bg 
+                        : theme.palette.mode === 'dark' 
+                          ? 'rgba(255, 255, 255, 0.02)' 
+                          : 'rgba(0, 0, 0, 0.02)',
+                    borderLeft: isATM ? `3px solid ${colors.atm.border}` : `2px solid ${strikeColor.border || 'transparent'}`,
+                    borderRight: isATM ? `3px solid ${colors.atm.border}` : `2px solid ${strikeColor.border || 'transparent'}`,
+                    borderTop: isATM ? `3px solid ${colors.atm.border}` : 'none',
+                    borderBottom: isATM ? `3px solid ${colors.atm.border}` : `1px solid ${theme.palette.mode === 'dark' 
                       ? 'rgba(255, 255, 255, 0.1)' 
                       : 'rgba(0, 0, 0, 0.1)'}`,
                     '&:hover': {
-                      backgroundColor: theme.palette.mode === 'dark' 
-                        ? 'rgba(255, 255, 255, 0.12)' 
-                        : 'rgba(0, 0, 0, 0.06)',
+                      backgroundColor: isATM 
+                        ? colors.atm.bg 
+                        : theme.palette.mode === 'dark' 
+                          ? 'rgba(255, 255, 255, 0.12)' 
+                          : 'rgba(0, 0, 0, 0.06)',
                       transform: 'scale(1.002)',
                       transition: 'all 0.15s ease',
                       boxShadow: theme.palette.mode === 'dark' 
                         ? '0 4px 12px rgba(255, 255, 255, 0.15)' 
                         : '0 4px 12px rgba(0, 0, 0, 0.15)',
                       zIndex: 1
-                    }
+                    },
+                    ...(isATM && {
+                      fontWeight: 'bold',
+                      '& .MuiTableCell-root': {
+                        color: colors.atm.text,
+                        fontWeight: 'bold'
+                      }
+                    })
                   }}
                 >
                   {/* Call data */}
@@ -402,7 +419,7 @@ const EnhancedOptionChainPage = () => {
                     }}
                   >
                     <Typography variant="body1" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                      {strike.toLocaleString('en-IN')}
+                      {strike.toLocaleString('en-IN')}{isATM && ' (ATM)'}
                     </Typography>
                   </TableCell>
                   
