@@ -646,7 +646,7 @@ const EnhancedStocksList = memo(
         <OptionChainModal
           open={optionModalOpen}
           onClose={() => setOptionModalOpen(false)}
-          symbol={selectedStock?.instrument_key}
+          symbol={selectedStock?.symbol}
           stockData={selectedStock}
         />
       </>

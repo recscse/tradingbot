@@ -1,5 +1,5 @@
 // components/options/OptionChainModal.js - Professional Bloomberg-style Option Chain Modal
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -21,7 +21,6 @@ import {
   Grid,
   Card,
   CardContent,
-  Divider,
   CircularProgress,
   Alert,
   ToggleButtonGroup,
@@ -30,12 +29,9 @@ import {
   useMediaQuery,
   Tooltip,
   IconButton,
-  Stack
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
   ShowChart as ShowChartIcon,
   Timeline as TimelineIcon,
   Refresh as RefreshIcon
@@ -50,9 +46,10 @@ const OptionChainModal = ({
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
   
-  // Use option chain hook
+  // Use option chain hook - only use valid instrument_key, fallback to symbol
+  const isValidInstrumentKey = stockData?.instrument_key && stockData.instrument_key.includes('|') && !stockData.instrument_key.endsWith('_KEY');
+  const instrumentKeyOrSymbol = open ? (isValidInstrumentKey ? stockData.instrument_key : symbol) : null;
   const {
     optionChainData,
     futuresData,
@@ -67,7 +64,7 @@ const OptionChainModal = ({
     wsConnected,
     expiryDates,
     spotPrice
-  } = useOptionChain(open ? symbol : null);
+  } = useOptionChain(instrumentKeyOrSymbol);
   
   // State
   const [activeTab, setActiveTab] = useState(0);
@@ -87,7 +84,8 @@ const OptionChainModal = ({
     atm: {
       bg: '#fff3e0',
       border: '#ff9800',
-      text: '#e65100'
+      text: '#e65100',
+      highlight: '#ffecb3'
     },
     itm: {
       bg: '#f3e5f5',
@@ -103,11 +101,15 @@ const OptionChainModal = ({
   const optionMetrics = getOptionMetrics();
 
   // Calculate strike color based on spot price
-  const getStrikeColor = (strike, currentSpotPrice) => {
+  const getStrikeColor = (strike, currentSpotPrice, allStrikes) => {
     if (!currentSpotPrice) return colors.otm;
     
-    const diff = Math.abs(strike - currentSpotPrice);
-    if (diff <= currentSpotPrice * 0.01) return colors.atm; // Within 1%
+    // Find the exact ATM strike (closest to spot price)
+    const atmStrike = allStrikes?.reduce((prev, curr) => 
+      Math.abs(curr - currentSpotPrice) < Math.abs(prev - currentSpotPrice) ? curr : prev
+    );
+    
+    if (strike === atmStrike) return colors.atm; // Exact ATM strike
     if (strike < currentSpotPrice) return colors.itm; // In the money for calls
     return colors.otm; // Out of the money
   };
@@ -116,12 +118,6 @@ const OptionChainModal = ({
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return '–';
     return `₹${Number(value).toFixed(2)}`;
-  };
-
-  // Format percentage
-  const formatPercent = (value) => {
-    if (value === null || value === undefined) return '–';
-    return `${Number(value).toFixed(2)}%`;
   };
 
   // Render option chain table
@@ -226,16 +222,29 @@ const OptionChainModal = ({
               const callIV = callOption?.option_greeks?.iv || 0;
               const putIV = putOption?.option_greeks?.iv || 0;
               
-              const strikeColor = getStrikeColor(strike, currentSpotPrice);
+              const strikeColor = getStrikeColor(strike, currentSpotPrice, strikes);
+              
+              const isATM = strikeColor === colors.atm;
               
               return (
                 <TableRow 
                   key={strike}
                   sx={{
-                    backgroundColor: strikeColor.bg,
+                    backgroundColor: isATM ? colors.atm.highlight : strikeColor.bg,
+                    borderTop: isATM ? `3px solid ${colors.atm.border}` : 'none',
+                    borderBottom: isATM ? `3px solid ${colors.atm.border}` : 'none',
+                    borderLeft: isATM ? `2px solid ${colors.atm.border}` : 'none',
+                    borderRight: isATM ? `2px solid ${colors.atm.border}` : 'none',
                     '&:hover': {
-                      backgroundColor: theme.palette.action.hover
-                    }
+                      backgroundColor: isATM ? colors.atm.highlight : theme.palette.action.hover
+                    },
+                    ...(isATM && {
+                      fontWeight: 'bold',
+                      '& .MuiTableCell-root': {
+                        color: colors.atm.text,
+                        fontWeight: 'bold'
+                      }
+                    })
                   }}
                 >
                   {/* Call data */}
@@ -274,13 +283,15 @@ const OptionChainModal = ({
                   <TableCell 
                     align="center"
                     sx={{ 
-                      fontWeight: 'bold',
+                      fontWeight: isATM ? 'bolder' : 'bold',
                       borderLeft: `2px solid ${strikeColor.border || 'transparent'}`,
                       borderRight: `2px solid ${strikeColor.border || 'transparent'}`,
-                      fontSize: '0.875rem'
+                      fontSize: isATM ? '1rem' : '0.875rem',
+                      backgroundColor: isATM ? colors.atm.highlight : 'inherit',
+                      color: isATM ? colors.atm.text : 'inherit'
                     }}
                   >
-                    {strike}
+                    {strike}{isATM && ' (ATM)'}
                   </TableCell>
                   
                   {/* Put data */}

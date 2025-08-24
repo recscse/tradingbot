@@ -886,7 +886,7 @@ const DashboardPage = () => {
             volume: safeNumber(item.volume || item.daily_volume),
             sector: item.sector || "OTHER",
             exchange: item.exchange || "NSE",
-            instrument_key: item.instrument_key || `${item.symbol}_KEY`,
+            instrument_key: item.instrument_key && item.instrument_key.includes('|') ? item.instrument_key : null,
             ...item,
           }))
           .slice(0, limit);
@@ -968,7 +968,7 @@ const DashboardPage = () => {
               volume: realtimeData.volume || item.volume || 0,
               sector: item.sector || "OTHER",
               exchange: item.exchange || "NSE",
-              instrument_key: item.instrument_key || `${item.symbol}_KEY`,
+              instrument_key: item.instrument_key && item.instrument_key.includes('|') ? item.instrument_key : null,
               // Gap-specific fields
               gap_type: item.gap_type || arrayKey,
               gap_percentage: gapPercentage,
@@ -1084,7 +1084,7 @@ const DashboardPage = () => {
               volume: realtimeData.volume || item.volume || 0,
               sector: item.sector || "OTHER",
               exchange: item.exchange || "NSE",
-              instrument_key: item.instrument_key || `${item.symbol}_KEY`,
+              instrument_key: item.instrument_key && item.instrument_key.includes('|') ? item.instrument_key : null,
               // Breakout-specific fields
               breakout_type: item.breakout_type || "breakout",
               breakout_strength: item.breakout_strength || 0,
@@ -2058,12 +2058,13 @@ const DashboardPage = () => {
             data={intradayBoosters}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={!isMobile} // Hide volume on mobile
+            showOptionChain={true} // Enable option chain for boosters
             showSector={false} // Generally hide sector for these lists
             maxItems={isMobile ? 5 : 10} // Show fewer items on mobile
             isLoading={!isConnected}
             density="compact" // Use compact density
             compact={true}
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             // containerHeight={isMobile ? "55vh" : "60vh"}
           />
         </Paper>
@@ -2084,12 +2085,13 @@ const DashboardPage = () => {
             data={volumeLeaders}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={!isMobile} // Hide volume on mobile
+            showOptionChain={true} // Enable option chain for volume leaders
             showSector={false} // Generally hide sector for these lists
             maxItems={isMobile ? 5 : 10} // Show fewer items on mobile
             isLoading={!isConnected}
             density="compact" // Use compact density
             compact={true}
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             // containerHeight={isMobile ? "55vh" : "60vh"}
           />
         </Paper>
@@ -2148,12 +2150,13 @@ const DashboardPage = () => {
             data={searchResults}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={!isMobile} // Hide volume on mobile
+            showOptionChain={true} // Enable option chain for search results
             showName={true}
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={50} // Keep maxItems for search results
             isLoading={!isConnected}
             density="standard" // Use standard density for search results
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             // containerHeight="70vh"
           />
         </Paper>
@@ -2394,7 +2397,7 @@ const DashboardPage = () => {
               isLoading={!isConnected}
               enhanceWithLivePrices={true}
               showLiveIndicator={true}
-              // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             />
           </Paper>
         )}
@@ -2422,7 +2425,7 @@ const DashboardPage = () => {
               isLoading={!isConnected}
               enhanceWithLivePrices={true}
               showLiveIndicator={true}
-              // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             />
           </Paper>
         )}
@@ -2629,7 +2632,7 @@ const DashboardPage = () => {
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={!isConnected}
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
           />
         ) : (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -2669,7 +2672,7 @@ const DashboardPage = () => {
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={!isConnected}
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
           />
         ) : (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -2714,7 +2717,7 @@ const DashboardPage = () => {
             showTimestamp={true} // Enable timestamp display for breakouts
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={!isConnected}
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
           />
         ) : (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -2754,7 +2757,7 @@ const DashboardPage = () => {
             showTimestamp={true} // Enable timestamp display for breakdowns
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={!isConnected}
-            // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
           />
         ) : (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -3365,7 +3368,7 @@ const DashboardPage = () => {
                 compact={true}
                 enhanceWithLivePrices={true}
                 showLiveIndicator={true}
-                // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
               />
             </Box>
           )}
@@ -3383,7 +3386,8 @@ const DashboardPage = () => {
               emptyMessage="No F&O stocks found"
               density="compact" // Use compact density
               compact={true}
-              // Remove fixed containerHeight to allow natural flow
+              showOptionChain={true} // Enable option chain integration for F&O stocks
+          // Remove fixed containerHeight to allow natural flow
               // containerHeight={isMobile ? "55vh" : "60vh"}
             />
           )}
@@ -3548,7 +3552,7 @@ const DashboardPage = () => {
               showSector={!isMobile} // Show sector on larger screens if table
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
-              // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             />
           ) : (
             <Box sx={{ textAlign: "center", py: 2 }}>
@@ -3587,7 +3591,7 @@ const DashboardPage = () => {
               showSector={!isMobile} // Show sector on larger screens if table
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
-              // Remove fixed containerHeight to allow natural flow
+          // Remove fixed containerHeight to allow natural flow
             />
           ) : (
             <Box sx={{ textAlign: "center", py: 2 }}>
