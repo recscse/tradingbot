@@ -21,6 +21,7 @@ import StockAnalysisPage from "./pages/StockAnalysisPage";
 import ProfilePage from "./pages/ProfilePage";
 import BacktestingPage from "./pages/BacktestingPage";
 import PaperTradingPage from "./pages/PaperTradingPage";
+import AutoTradingPage from "./pages/AutoTradingPage";
 import { MarketProvider } from "./context/MarketProvider";
 import EnhancedOptionChainPage from "./pages/EnhancedOptionChainPage";
 import AboutPage from "./pages/AboutPage";
@@ -139,6 +140,14 @@ const App = () => {
               element={
                 <ProtectedLayout>
                   <ProfilePage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/auto-trading"
+              element={
+                <ProtectedLayout>
+                  <AutoTradingPage />
                 </ProtectedLayout>
               }
             />

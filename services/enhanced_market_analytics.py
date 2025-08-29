@@ -164,6 +164,7 @@ class EnhancedMarketAnalyticsService:
             analytics = {
                 "top_movers": self.get_top_gainers_losers(force_refresh=True),
                 "intraday_stocks": self.get_intraday_stocks(force_refresh=True),
+                "volume_analysis": self.get_volume_analysis(force_refresh=True),  # Added for real-time volume updates
                 "market_sentiment": self.get_market_sentiment(),
                 "indices_data": self.get_indices_data(),
                 "generated_at": datetime.now().isoformat(),
@@ -1087,9 +1088,9 @@ class EnhancedMarketAnalyticsService:
             logger.error(f"Error calculating market sentiment: {e}")
             return {"sentiment": "unknown", "error": str(e)}
 
-    def get_volume_analysis(self) -> Dict[str, Any]:
+    def get_volume_analysis(self, force_refresh: bool = False) -> Dict[str, Any]:
         """COMPLETE: Volume analysis with enriched data"""
-        if not self._should_recalculate("volume_analysis"):
+        if not force_refresh and not self._should_recalculate("volume_analysis"):
             return self.cache.get("volume_analysis", {"volume_leaders": []})
 
         try:

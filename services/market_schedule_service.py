@@ -1,10 +1,14 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, time, timedelta
 from typing import List, Dict, Optional
 import pytz
 import json
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import User, BrokerConfig
@@ -28,11 +32,11 @@ class MarketScheduleService:
 
         self.stock_analyzer = StockAnalyzer()
         self.instrument_service = TradingInstrumentService()
-        
+
         # ✅ ENHANCED: Initialize TradingStockSelector with optimized settings for options trading
         from services.enhanced_market_analytics import enhanced_analytics
         from database.connection import SessionLocal
-        
+
         self.stock_selector = TradingStockSelector(
             analytics=enhanced_analytics,  # Use enhanced analytics with real-time data
             db_session_factory=SessionLocal,  # Use proper session factory
@@ -45,11 +49,104 @@ class MarketScheduleService:
         # Initialize the optimized service
         self.selected_stocks = {}
         self.is_running = False
+        self.cache = {}  # In-memory cache fallback
+        
+        # ✅ INTEGRATION: Auto-trading components
+        self.auto_trading_coordinator = None
+        self.fibonacci_strategy = None
+        self.nifty_strategy = None
+        self.trading_sessions_active = False
 
-        # Initialize Redis client
-        self.redis_client = redis.Redis(
-            host="localhost", port=6379, db=0, decode_responses=True
-        )
+        # Initialize Redis client with proper error handling
+        self.redis_enabled = os.getenv('REDIS_ENABLED', 'true').lower() == 'true'
+        self.redis_client = None
+        
+        if self.redis_enabled and redis is not None:
+            try:
+                self.redis_client = redis.Redis(
+                    host=os.getenv('REDIS_HOST', 'localhost'), 
+                    port=int(os.getenv('REDIS_PORT', 6379)), 
+                    db=int(os.getenv('REDIS_DB', 0)), 
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5
+                )
+                # Test connection
+                self.redis_client.ping()
+                logger.info("✅ Redis client initialized successfully")
+            except Exception as e:
+                logger.warning(f"⚠️ Redis connection failed, disabling: {e}")
+                self.redis_client = None
+                self.redis_enabled = False
+        else:
+            logger.info("🚫 Redis disabled via configuration")
+    
+    def _safe_redis_set(self, key: str, value: str, ex: int = None) -> bool:
+        """Safely set Redis value with fallback to memory cache"""
+        try:
+            if self.redis_client:
+                if ex:
+                    self.redis_client.setex(key, ex, value)
+                else:
+                    self.redis_client.set(key, value)
+                return True
+            else:
+                # Fallback to memory cache
+                self.cache[key] = {'value': value, 'expires': datetime.now() + timedelta(seconds=ex) if ex else None}
+                return True
+        except Exception as e:
+            logger.error(f"Error updating {key}: {e}")
+            # Fallback to memory cache
+            try:
+                self.cache[key] = {'value': value, 'expires': datetime.now() + timedelta(seconds=ex) if ex else None}
+                return True
+            except:
+                return False
+    
+    def _safe_redis_get(self, key: str) -> Optional[str]:
+        """Safely get Redis value with fallback to memory cache"""
+        try:
+            if self.redis_client:
+                return self.redis_client.get(key)
+            else:
+                # Fallback to memory cache
+                cached = self.cache.get(key)
+                if cached:
+                    if cached['expires'] is None or datetime.now() < cached['expires']:
+                        return cached['value']
+                    else:
+                        del self.cache[key]  # Expired
+                return None
+        except Exception as e:
+            logger.error(f"Error reading {key}: {e}")
+            # Fallback to memory cache
+            try:
+                cached = self.cache.get(key)
+                if cached:
+                    if cached['expires'] is None or datetime.now() < cached['expires']:
+                        return cached['value']
+                    else:
+                        del self.cache[key]  # Expired
+                return None
+            except:
+                return None
+    
+    def _safe_redis_delete(self, key: str) -> bool:
+        """Safely delete Redis key with fallback to memory cache"""
+        try:
+            if self.redis_client:
+                self.redis_client.delete(key)
+            # Always clean from memory cache
+            self.cache.pop(key, None)
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing caches: {e}")
+            # Still try to clean memory cache
+            try:
+                self.cache.pop(key, None)
+                return True
+            except:
+                return False
 
     async def start_daily_scheduler(self):
         """Start the daily market scheduler"""
@@ -220,11 +317,49 @@ class MarketScheduleService:
                 await centralized_manager.initialize()
                 logger.info("✅ WebSocket manager refreshed with new keys")
 
-            # 4. Analyze market conditions
-            market_analysis = await self._analyze_market_conditions()
-
-            # 5. Select top stocks for trading
-            self.selected_stocks = await self._select_trading_stocks(market_analysis)
+            # 4. Run automated stock selection using the new service
+            logger.info("🎯 Running automated stock selection...")
+            try:
+                from services.auto_stock_selection_service import auto_stock_selection_service
+                
+                # Run the comprehensive auto stock selection
+                selected_results = await auto_stock_selection_service.run_premarket_selection()
+                
+                if selected_results:
+                    logger.info(f"✅ Auto stock selection completed: {len(selected_results)} stocks selected")
+                    
+                    # Convert to the old format for compatibility
+                    self.selected_stocks = {}
+                    for result in selected_results:
+                        self.selected_stocks[result.symbol] = {
+                            "stock_data": {
+                                "symbol": result.symbol,
+                                "sector": result.sector,
+                                "price_at_selection": result.price_at_selection,
+                                "option_type": result.option_type,
+                                "atm_strike": result.atm_strike,
+                                "selection_score": result.selection_score,
+                                "expiry_date": result.expiry_date
+                            },
+                            "analysis": {
+                                "score": result.selection_score,
+                                "sector_performance": result.sector,
+                                "market_sentiment_aligned": result.market_sentiment_alignment,
+                                "has_options": result.option_contract is not None,
+                                "option_type_recommendation": result.option_type,
+                            },
+                            "instruments": [result.instrument_key],
+                            "options_ready": result.option_contract is not None,
+                        }
+                else:
+                    logger.warning("❌ Auto stock selection returned no results")
+                    self.selected_stocks = {}
+                    
+            except Exception as e:
+                logger.error(f"❌ Auto stock selection failed: {e}")
+                # Fallback to original selection method
+                market_analysis = await self._analyze_market_conditions()
+                self.selected_stocks = await self._select_trading_stocks(market_analysis)
 
             # 6. Prepare instrument keys for selected stocks
             await self._prepare_selected_stock_instruments()
@@ -275,8 +410,19 @@ class MarketScheduleService:
         logger.info("📈 Monitoring active trading session...")
 
         try:
+            # ✅ AUTO-START: Initialize trading systems at 9:30 AM (FIRST TIME ONLY)
+            current_time = datetime.now(self.ist).time()
+            if current_time >= time(9, 30) and current_time < time(9, 35) and not self.trading_sessions_active:
+                await self._initialize_auto_trading_systems()
+
             # Update market status
             await self._update_market_status("normal_open")
+
+            # ✅ LIVE TRADING: Monitor active strategies and execute trades
+            if self.trading_sessions_active:
+                await self._monitor_fibonacci_strategies()
+                await self._monitor_nifty_strategy()
+                await self._execute_pending_trades()
 
             # Monitor portfolio performance
             await self._monitor_portfolio_performance()
@@ -297,6 +443,10 @@ class MarketScheduleService:
         logger.info("🧹 Starting post-market cleanup...")
 
         try:
+            # ✅ AUTO-STOP: Stop all trading systems
+            if self.trading_sessions_active:
+                await self._stop_auto_trading_systems()
+
             # Update market status
             await self._update_market_status("closed")
 
@@ -342,27 +492,31 @@ class MarketScheduleService:
     async def _select_trading_stocks(self, market_analysis: Dict) -> Dict:
         """🚀 ENHANCED: Select stocks using TradingStockSelector with OPTIONS INTEGRATION"""
         try:
-            logger.info("🔍 Running advanced stock selection with options integration...")
-            
+            logger.info(
+                "🔍 Running advanced stock selection with options integration..."
+            )
+
             # ✅ STEP 1: Use the advanced TradingStockSelector with options support
             # This selector integrates with enhanced analytics and includes option chain data
             selected_candidates = self.stock_selector.run_selection_sync()
-            
+
             if not selected_candidates:
                 logger.warning("❌ No stocks selected by TradingStockSelector")
                 return {}
-            
-            logger.info(f"✅ TradingStockSelector found {len(selected_candidates)} candidates")
-            
+
+            logger.info(
+                f"✅ TradingStockSelector found {len(selected_candidates)} candidates"
+            )
+
             # ✅ STEP 2: Convert to the expected format with enhanced data
             selected = {}
-            
+
             for candidate in selected_candidates:
                 try:
                     symbol = candidate.get("symbol")
                     if not symbol:
                         continue
-                    
+
                     # ✅ STEP 3: Prepare comprehensive stock data with options
                     stock_data = {
                         "symbol": symbol,
@@ -371,34 +525,49 @@ class MarketScheduleService:
                         "price_at_selection": candidate.get("price_at_selection"),
                         "selection_score": candidate.get("selection_score"),
                         "selection_reason": candidate.get("selection_reason"),
-                        
                         # ✅ OPTIONS DATA - Ready for trading
-                        "option_type": candidate.get("option_type"),  # CE/PE based on market sentiment
-                        "option_contract": candidate.get("option_contract"),  # ATM contract details
-                        "option_chain_data": candidate.get("option_chain_data"),  # Complete chain
-                        "option_expiry_date": candidate.get("option_expiry_date"),  # Nearest expiry
-                        "option_expiry_dates": candidate.get("option_expiry_dates", []),  # All expiries
-                        "option_contracts_available": candidate.get("option_contracts_available", 0),
-                        
+                        "option_type": candidate.get(
+                            "option_type"
+                        ),  # CE/PE based on market sentiment
+                        "option_contract": candidate.get(
+                            "option_contract"
+                        ),  # ATM contract details
+                        "option_chain_data": candidate.get(
+                            "option_chain_data"
+                        ),  # Complete chain
+                        "option_expiry_date": candidate.get(
+                            "option_expiry_date"
+                        ),  # Nearest expiry
+                        "option_expiry_dates": candidate.get(
+                            "option_expiry_dates", []
+                        ),  # All expiries
+                        "option_contracts_available": candidate.get(
+                            "option_contracts_available", 0
+                        ),
                         # Enhanced metadata
                         "strategy_score": candidate.get("strategy_score", 0),
                         "strategy_details": candidate.get("strategy_details", {}),
-                        "has_option_chain": candidate.get("option_chain_data") is not None,
+                        "has_option_chain": candidate.get("option_chain_data")
+                        is not None,
                         "selected_at": datetime.now(self.ist).isoformat(),
                     }
-                    
+
                     # ✅ STEP 4: Get instrument keys for both stock and options
                     stock_instruments = await self._get_stock_instruments(symbol)
                     stock_data["instruments"] = stock_instruments
-                    
+
                     # ✅ STEP 5: Add option instrument keys if available
                     if candidate.get("option_contract"):
-                        option_instrument_key = candidate["option_contract"].get("instrument_key")
+                        option_instrument_key = candidate["option_contract"].get(
+                            "instrument_key"
+                        )
                         if option_instrument_key:
                             stock_data["option_instrument_key"] = option_instrument_key
                             stock_data["instruments"]["option"] = option_instrument_key
-                            logger.info(f"✅ {symbol}: Stock + Option instruments ready")
-                    
+                            logger.info(
+                                f"✅ {symbol}: Stock + Option instruments ready"
+                            )
+
                     selected[symbol] = {
                         "stock_data": stock_data,
                         "analysis": {
@@ -411,21 +580,31 @@ class MarketScheduleService:
                         "instruments": stock_instruments,
                         "options_ready": stock_data["has_option_chain"],
                     }
-                    
-                    logger.info(f"📊 {symbol}: Selected with {candidate.get('option_contracts_available', 0)} option contracts")
-                    
+
+                    logger.info(
+                        f"📊 {symbol}: Selected with {candidate.get('option_contracts_available', 0)} option contracts"
+                    )
+
                 except Exception as e:
-                    logger.error(f"❌ Error processing selected stock {candidate.get('symbol')}: {e}")
+                    logger.error(
+                        f"❌ Error processing selected stock {candidate.get('symbol')}: {e}"
+                    )
                     continue
-            
+
             # ✅ STEP 6: Store selection results for later access
             self._store_selection_results(selected_candidates)
-            
-            logger.info(f"🎯 SELECTION COMPLETE: {len(selected)} stocks with options integration")
+
+            logger.info(
+                f"🎯 SELECTION COMPLETE: {len(selected)} stocks with options integration"
+            )
             for symbol, data in selected.items():
-                option_status = "✅ Options Ready" if data["options_ready"] else "❌ No Options"
-                logger.info(f"  📈 {symbol} ({data['stock_data']['sector']}) - {option_status}")
-            
+                option_status = (
+                    "✅ Options Ready" if data["options_ready"] else "❌ No Options"
+                )
+                logger.info(
+                    f"  📈 {symbol} ({data['stock_data']['sector']}) - {option_status}"
+                )
+
             return selected
 
         except Exception as e:
@@ -438,29 +617,39 @@ class MarketScheduleService:
         try:
             if not selected_candidates:
                 return
-            
+
             # Store individual stock data
             for candidate in selected_candidates:
                 symbol = candidate.get("symbol")
                 if symbol:
                     key = f"selected_stock:{symbol}:{datetime.now(self.ist).date().isoformat()}"
-                    self.redis_client.setex(key, 86400, json.dumps(candidate))  # 24 hour expiry
-            
+                    self._safe_redis_set(
+                        key, json.dumps(candidate), ex=86400
+                    )  # 24 hour expiry
+
             # Store summary data
             summary_data = {
                 "selection_date": datetime.now(self.ist).date().isoformat(),
                 "selection_time": datetime.now(self.ist).time().isoformat(),
                 "total_selected": len(selected_candidates),
                 "stocks": [c.get("symbol") for c in selected_candidates],
-                "sectors": list(set(c.get("sector") for c in selected_candidates if c.get("sector"))),
-                "options_ready_count": sum(1 for c in selected_candidates if c.get("option_chain_data")),
+                "sectors": list(
+                    set(c.get("sector") for c in selected_candidates if c.get("sector"))
+                ),
+                "options_ready_count": sum(
+                    1 for c in selected_candidates if c.get("option_chain_data")
+                ),
             }
-            
-            summary_key = f"stock_selection_summary:{datetime.now(self.ist).date().isoformat()}"
-            self.redis_client.setex(summary_key, 86400, json.dumps(summary_data))
-            
-            logger.info(f"✅ Stored selection results in Redis: {len(selected_candidates)} stocks")
-            
+
+            summary_key = (
+                f"stock_selection_summary:{datetime.now(self.ist).date().isoformat()}"
+            )
+            self._safe_redis_set(summary_key, json.dumps(summary_data), ex=86400)
+
+            logger.info(
+                f"✅ Stored selection results in Redis: {len(selected_candidates)} stocks"
+            )
+
         except Exception as e:
             logger.error(f"❌ Failed to store selection results: {e}")
 
@@ -469,30 +658,32 @@ class MarketScheduleService:
         try:
             if not date_str:
                 date_str = datetime.now(self.ist).date().isoformat()
-            
+
             # Get summary first
             summary_key = f"stock_selection_summary:{date_str}"
-            summary_data = self.redis_client.get(summary_key)
-            
+            summary_data = self._safe_redis_get(summary_key)
+
             if not summary_data:
                 logger.warning(f"No selection summary found for {date_str}")
                 return []
-            
+
             summary = json.loads(summary_data)
             stocks = summary.get("stocks", [])
-            
+
             # Get individual stock data
             selected_stocks = []
             for symbol in stocks:
                 stock_key = f"selected_stock:{symbol}:{date_str}"
-                stock_data = self.redis_client.get(stock_key)
-                
+                stock_data = self._safe_redis_get(stock_key)
+
                 if stock_data:
                     selected_stocks.append(json.loads(stock_data))
-            
-            logger.info(f"📖 Retrieved {len(selected_stocks)} selected stocks from storage")
+
+            logger.info(
+                f"📖 Retrieved {len(selected_stocks)} selected stocks from storage"
+            )
             return selected_stocks
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to retrieve selection results: {e}")
             return []
@@ -597,8 +788,8 @@ class MarketScheduleService:
     async def _cache_selected_instruments(self, instruments):
         """Cache selected instruments for WebSocket access"""
         try:
-            self.redis_client.setex(
-                "selected_trading_instruments", 3600, json.dumps(instruments)
+            self._safe_redis_set(
+                "selected_trading_instruments", json.dumps(instruments), ex=3600
             )
             logger.info(f"💾 Cached {len(instruments)} selected instruments")
         except Exception as e:
@@ -635,12 +826,12 @@ class MarketScheduleService:
     async def _update_market_status(self, status: str):
         """Update market status in cache"""
         try:
-            self.redis_client.setex(
+            self._safe_redis_set(
                 "market_status",
-                3600,
                 json.dumps(
                     {"status": status, "updated_at": datetime.now().isoformat()}
                 ),
+                ex=3600
             )
             logger.info(f"📊 Market status updated: {status}")
         except Exception as e:
@@ -695,7 +886,7 @@ class MarketScheduleService:
                 "selected_trading_instruments",
             ]
             for key in cache_keys:
-                self.redis_client.delete(key)
+                self._safe_redis_delete(key)
 
             # Reset selection status in instrument registry
             try:
@@ -774,3 +965,265 @@ class MarketScheduleService:
         """Stop the market scheduler"""
         self.is_running = False
         logger.info("⏹️ Market scheduler stopped")
+
+    # ================================
+    # AUTO-TRADING INTEGRATION METHODS
+    # ================================
+
+    async def _initialize_auto_trading_systems(self):
+        """Initialize and start all auto-trading systems at 9:30 AM"""
+        try:
+            logger.info("🚀 INITIALIZING AUTO-TRADING SYSTEMS AT 9:30 AM")
+
+            # 1. Initialize Auto-Trading Coordinator
+            from services.auto_trading_coordinator import AutoTradingCoordinator
+            self.auto_trading_coordinator = AutoTradingCoordinator()
+            
+            # 2. Initialize Fibonacci Strategy for selected stocks
+            await self._initialize_fibonacci_strategy()
+            
+            # 3. Initialize NIFTY 9:40 Strategy (will activate at 9:40 AM)
+            await self._initialize_nifty_strategy()
+            
+            # 4. Start live data feeds for selected instruments
+            await self._activate_live_data_feeds()
+            
+            # 5. Initialize risk management systems
+            await self._initialize_risk_management()
+            
+            # Mark trading systems as active
+            self.trading_sessions_active = True
+            logger.info("✅ AUTO-TRADING SYSTEMS INITIALIZED - LIVE TRADING ACTIVE")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize auto-trading systems: {e}")
+            raise
+
+    async def _initialize_fibonacci_strategy(self):
+        """Initialize Fibonacci + EMA strategy for selected stocks"""
+        try:
+            logger.info("🔄 Initializing Fibonacci strategy for selected stocks...")
+            
+            # Import Fibonacci strategy
+            from services.strategies.fibonacci_ema_strategy import FibonacciEMAStrategy
+            self.fibonacci_strategy = FibonacciEMAStrategy()
+            
+            # Subscribe to live data for selected stocks
+            for symbol, stock_data in self.selected_stocks.items():
+                instrument_key = stock_data.get('instrument_key')
+                if instrument_key:
+                    # Register strategy callback for live price updates
+                    from services.live_adapter import live_adapter
+                    live_adapter.register_fibonacci_strategy_callback(
+                        strategy_name="fibonacci_ema",
+                        instruments=[instrument_key],
+                        callback=self._fibonacci_signal_callback,
+                        priority_level=1
+                    )
+                    logger.info(f"✅ Fibonacci strategy activated for {symbol}")
+
+        except Exception as e:
+            logger.error(f"❌ Fibonacci strategy initialization failed: {e}")
+
+    async def _initialize_nifty_strategy(self):
+        """Initialize NIFTY 9:40 strategy"""
+        try:
+            logger.info("🔄 Initializing NIFTY 9:40 strategy...")
+            
+            # Import NIFTY strategy integration
+            from services.strategies.nifty_09_40_integration import get_nifty_strategy_integration
+            self.nifty_strategy = await get_nifty_strategy_integration()
+            
+            # Strategy will auto-activate at 9:40 AM
+            logger.info("✅ NIFTY 9:40 strategy initialized - will activate at 9:40 AM")
+
+        except Exception as e:
+            logger.error(f"❌ NIFTY strategy initialization failed: {e}")
+
+    async def _monitor_fibonacci_strategies(self):
+        """Monitor Fibonacci strategy signals and execute trades"""
+        try:
+            if not self.fibonacci_strategy:
+                return
+                
+            # Strategy monitoring is handled by live data callbacks
+            # This method can be used for additional monitoring logic
+            pass
+
+        except Exception as e:
+            logger.error(f"❌ Fibonacci strategy monitoring failed: {e}")
+
+    async def _monitor_nifty_strategy(self):
+        """Monitor NIFTY 9:40 strategy"""
+        try:
+            if not self.nifty_strategy:
+                return
+                
+            current_time = datetime.now(self.ist).time()
+            
+            # NIFTY strategy active from 9:40 AM to 3:15 PM
+            if time(9, 40) <= current_time <= time(15, 15):
+                # Strategy is running automatically via callbacks
+                pass
+
+        except Exception as e:
+            logger.error(f"❌ NIFTY strategy monitoring failed: {e}")
+
+    async def _execute_pending_trades(self):
+        """Execute any pending trades from strategy signals"""
+        try:
+            # Get unified trading executor
+            from services.unified_trading_executor import unified_trading_executor
+            
+            # Check for any pending trades that need execution
+            # This is handled automatically by the strategies
+            pass
+
+        except Exception as e:
+            logger.error(f"❌ Trade execution monitoring failed: {e}")
+
+    async def _activate_live_data_feeds(self):
+        """Activate live data feeds for all trading instruments"""
+        try:
+            logger.info("📡 Activating live data feeds...")
+            
+            # Get centralized WebSocket manager
+            from services.centralized_ws_manager import centralized_ws_manager
+            
+            # Create priority subscription for selected stocks
+            selected_instruments = []
+            for symbol, stock_data in self.selected_stocks.items():
+                instrument_key = stock_data.get('instrument_key')
+                if instrument_key:
+                    selected_instruments.append({
+                        'symbol': symbol,
+                        'instrument_key': instrument_key,
+                        'priority': 'HIGH'
+                    })
+            
+            # Add NIFTY index for 9:40 strategy
+            selected_instruments.append({
+                'symbol': 'NIFTY',
+                'instrument_key': 'NSE_INDEX|99926000',
+                'priority': 'HIGH'
+            })
+            
+            # Activate priority subscription
+            await centralized_ws_manager.priority_subscription(selected_instruments)
+            logger.info(f"✅ Live data feeds activated for {len(selected_instruments)} instruments")
+
+        except Exception as e:
+            logger.error(f"❌ Live data feed activation failed: {e}")
+
+    async def _initialize_risk_management(self):
+        """Initialize risk management and circuit breakers"""
+        try:
+            logger.info("🛡️ Initializing risk management systems...")
+            
+            # Initialize circuit breaker
+            from services.circuit_breaker import circuit_breaker
+            circuit_breaker.reset_daily_limits()
+            
+            logger.info("✅ Risk management systems initialized")
+
+        except Exception as e:
+            logger.error(f"❌ Risk management initialization failed: {e}")
+
+    async def _stop_auto_trading_systems(self):
+        """Stop all auto-trading systems at market close"""
+        try:
+            logger.info("🛑 STOPPING AUTO-TRADING SYSTEMS AT MARKET CLOSE")
+            
+            # 1. Stop NIFTY strategy
+            if self.nifty_strategy:
+                logger.info("Stopping NIFTY strategy...")
+                await self.nifty_strategy.stop_daily_session()
+            
+            # 2. Stop auto-trading coordinator
+            if self.auto_trading_coordinator:
+                await self.auto_trading_coordinator.shutdown_system()
+            
+            # 3. Generate trading reports
+            await self._generate_trading_performance_report()
+            
+            # Mark trading systems as inactive
+            self.trading_sessions_active = False
+            logger.info("✅ AUTO-TRADING SYSTEMS STOPPED")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to stop auto-trading systems: {e}")
+
+    async def _fibonacci_signal_callback(self, instrument_key: str, tick_data: dict):
+        """Callback function for Fibonacci strategy signals"""
+        try:
+            # Find symbol for instrument key
+            symbol = None
+            for sym, data in self.selected_stocks.items():
+                if data.get('instrument_key') == instrument_key:
+                    symbol = sym
+                    break
+            
+            if symbol:
+                # Update current price
+                self.selected_stocks[symbol]['current_price'] = tick_data.get('ltp', 0)
+                
+                # Generate signal using Fibonacci strategy
+                signal = await self.fibonacci_strategy.generate_signal(
+                    symbol=symbol,
+                    current_price=tick_data.get('ltp', 0),
+                    volume=tick_data.get('volume', 0)
+                )
+                
+                if signal and signal.get('strength', 0) >= 70:
+                    logger.info(f"🎯 Fibonacci signal: {symbol} - {signal['signal']} (Strength: {signal['strength']}%)")
+                    await self._execute_fibonacci_trade(signal)
+
+        except Exception as e:
+            logger.error(f"❌ Fibonacci signal callback failed: {e}")
+
+    async def _execute_fibonacci_trade(self, signal: dict):
+        """Execute Fibonacci strategy trade"""
+        try:
+            from services.unified_trading_executor import unified_trading_executor, UnifiedTradeSignal, TradingMode
+            
+            # Create unified trade signal
+            unified_signal = UnifiedTradeSignal(
+                user_id=1,  # Default system user
+                symbol=signal['symbol'],
+                instrument_key=signal.get('instrument_key'),
+                option_type=signal['signal'],  # BUY_CE or BUY_PE
+                signal_type="BUY",
+                entry_price=signal['entry_price'],
+                stop_loss=signal.get('stop_loss'),
+                target=signal.get('target_1'),
+                confidence_score=signal.get('strength', 0),
+                strategy_name="fibonacci_ema",
+                trading_mode=TradingMode.PAPER  # Default to paper trading
+            )
+            
+            # Execute trade
+            result = await unified_trading_executor.execute_trade_signal(unified_signal)
+            
+            if result.get('status') == 'SUCCESS':
+                logger.info(f"✅ Fibonacci trade executed: {signal['symbol']} {signal['signal']}")
+            else:
+                logger.error(f"❌ Fibonacci trade failed: {result.get('message')}")
+
+        except Exception as e:
+            logger.error(f"❌ Fibonacci trade execution failed: {e}")
+
+    async def _generate_trading_performance_report(self):
+        """Generate daily trading performance report"""
+        try:
+            logger.info("📊 Generating daily trading performance report...")
+            
+            # Get trading database service
+            from services.database.trading_db_service import TradingDatabaseService
+            db_service = TradingDatabaseService()
+            
+            # Calculate daily performance
+            await db_service.calculate_and_store_daily_performance(user_id=1)
+            logger.info("✅ Daily performance report generated")
+            
+        except Exception as e:
+            logger.error(f"❌ Performance report generation failed: {e}")

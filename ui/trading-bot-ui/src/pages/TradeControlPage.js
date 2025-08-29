@@ -88,7 +88,7 @@ const TradeControlForm = () => {
   const loadTradingConfig = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get("/api/trading/config");
+      const response = await apiClient.get("/config/current");
       if (response.data) {
         setTradingConfig(prev => ({ ...prev, ...response.data }));
       }
@@ -104,7 +104,7 @@ const TradeControlForm = () => {
   const saveTradingConfig = async () => {
     try {
       setLoading(true);
-      await apiClient.post("/trading/config", tradingConfig);
+      await apiClient.post("/config/save", tradingConfig);
       alert("Trading configuration saved successfully!");
     } catch (error) {
       console.error("Error saving trading config:", error);

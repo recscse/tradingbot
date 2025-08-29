@@ -24,103 +24,97 @@ router = APIRouter()
 @router.websocket("/ws/unified")
 async def unified_websocket_endpoint(websocket: WebSocket):
     """
-    ENHANCED: Single WebSocket endpoint for ALL features with better error handling
+    ENHANCED: Single WebSocket endpoint with user-based connection deduplication
     """
     client_id = None
+    user_id = None
 
     try:
         # FIXED: Accept the WebSocket connection directly in the route handler
         await websocket.accept()
         logger.info("✅ WebSocket connection accepted")
 
-        # Generate client ID
-        client_id = f"dashboard_{uuid.uuid4().hex[:8]}"
+        # Extract user information from query parameters
+        query_params = dict(websocket.query_params)
+        user_id = query_params.get('user_id')
+        session_id = query_params.get('session_id')
+        client_type = query_params.get('client_type', 'dashboard')
+        
+        logger.info(f"🔍 Connection params: user_id={user_id}, session_id={session_id}, client_type={client_type}")
+        logger.info(f"🔍 All query params: {query_params}")
+
+        # Enhanced client ID generation with better fallback handling
+        if user_id and session_id:
+            # Extract last part of session_id for shorter client_id
+            session_suffix = session_id.split('_')[-1] if '_' in session_id else session_id[:8]
+            client_id = f"{client_type}_{user_id.replace('user_', '')}_{session_suffix}"
+            logger.info(f"✅ Generated user-specific client_id: {client_id}")
+        else:
+            # Enhanced fallback: Generate temporary user ID and track it
+            temp_user_id = f"temp_{uuid.uuid4().hex[:8]}"
+            client_id = f"{client_type}_{temp_user_id}"
+            user_id = temp_user_id  # Set user_id so deduplication can work
+            logger.warning(f"⚠️ Generated fallback client_id: {client_id} (missing query params)")
+
+        # CRITICAL: Close existing connections for this user to prevent duplicates
+        if user_id:  # Only cleanup if we have a valid user_id
+            await _cleanup_user_connections(user_id, client_type, client_id)
+        else:
+            logger.warning(f"⚠️ Connection without user_id - cannot deduplicate!")
 
         # Register with the unified manager
         unified_manager.connections[client_id] = websocket
-        unified_manager.client_types[client_id] = "dashboard"
+        unified_manager.client_types[client_id] = client_type
         unified_manager.client_subscriptions[client_id] = set()
+        
+        # Track user-to-client mapping for deduplication
+        if not hasattr(unified_manager, 'user_connections'):
+            unified_manager.user_connections = {}
+        if user_id:
+            if user_id not in unified_manager.user_connections:
+                unified_manager.user_connections[user_id] = {}
+            unified_manager.user_connections[user_id][client_type] = client_id
 
-        # Send welcome message directly
-        await websocket.send_json(
-            {
+        # Send welcome message directly with connection state check
+        try:
+            welcome_message = {
                 "type": "connection_established",
                 "client_id": client_id,
-                "client_type": "dashboard",
+                "client_type": client_type,
+                "user_id": user_id,
                 "available_events": unified_manager.get_available_events(),
                 "timestamp": datetime.now().isoformat(),
             }
-        )
+            
+            # Ensure message is JSON serializable
+            import json
+            json.dumps(welcome_message)  # Test serialization
+            
+            await websocket.send_json(welcome_message)
+            logger.info(f"🔌 Sent welcome message to {client_id}")
+        except Exception as welcome_error:
+            logger.error(f"❌ Error sending welcome message: {welcome_error}")
+            # Connection might be closed, cleanup and return
+            return
 
-        logger.info(f"🔌 New client connected: {client_id}")
+        logger.info(f"🔌 New client connected: {client_id} (user: {user_id}, type: {client_type})")
 
-        # Send initial data with better error handling
-        try:
-            from services.enhanced_market_analytics import enhanced_analytics
-            from services.instrument_registry import instrument_registry
+        # DON'T send initial data immediately - let client request it
+        # This prevents premature connection closure during setup
+        logger.info(f"✅ Client {client_id} ready for subscriptions and requests")
 
-            # Force analytics calculation to ensure fresh data
-            try:
-                if unified_manager.is_running and unified_manager.analytics_service:
-                    await unified_manager._calculate_all_analytics()
-            except Exception as analytics_error:
-                logger.warning(f"⚠️ Could not force analytics update: {analytics_error}")
-
-            # Send analytics data
-            initial_data = enhanced_analytics.get_complete_analytics()
-            if isinstance(initial_data, dict) and initial_data:
-                await websocket.send_json(
-                    {
-                        "type": "initial_data",
-                        "data": initial_data,
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-                logger.info(f"📊 Sent initial analytics data to {client_id}")
-            else:
-                # Send minimal data if analytics not available
-                await websocket.send_json(
-                    {
-                        "type": "initial_data",
-                        "data": {"message": "Analytics initializing, please wait for updates"},
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-                logger.info(f"📊 Sent minimal initial data to {client_id}")
-
-            # Send enriched live prices
-            enriched_prices = instrument_registry.get_enriched_prices()
-            if enriched_prices:
-                await websocket.send_json(
-                    {
-                        "type": "live_prices_enriched",
-                        "data": enriched_prices,
-                        "total_instruments": len(enriched_prices),
-                        "data_format": "enriched",
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
-                logger.info(f"💰 Sent initial enriched prices to {client_id}: {len(enriched_prices)} instruments")
-            else:
-                logger.info(f"💰 No enriched prices available for {client_id}")
-
-        except Exception as e:
-            logger.error(f"❌ Error sending initial data: {e}")
-            # Send error notification to client
-            try:
-                await websocket.send_json(
-                    {
-                        "type": "error", 
-                        "message": "Initial data loading error, real-time updates will continue",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                )
-            except Exception as send_error:
-                logger.error(f"❌ Could not send error notification: {send_error}")
-
-        # Message handling loop
+        # Message handling loop with connection validation
         while True:
             try:
+                # Validate connection is still active before waiting for message
+                if client_id not in unified_manager.connections:
+                    logger.info(f"🔌 Client {client_id} no longer in connections, exiting loop")
+                    break
+                
+                if not _is_websocket_connected(websocket):
+                    logger.info(f"🔌 WebSocket for {client_id} is no longer connected, exiting loop")
+                    break
+                
                 # Receive message from client with timeout
                 data = await asyncio.wait_for(
                     websocket.receive_text(), timeout=300.0
@@ -144,11 +138,11 @@ async def unified_websocket_endpoint(websocket: WebSocket):
 
             except asyncio.TimeoutError:
                 # Send ping to check if client is still alive
-                try:
-                    await websocket.send_json(
-                        {"type": "ping", "timestamp": datetime.now().isoformat()}
-                    )
-                except:
+                success = await _safe_send_json(websocket, client_id, {
+                    "type": "ping", 
+                    "timestamp": datetime.now().isoformat()
+                })
+                if not success:
                     logger.info(f"❌ Ping failed for {client_id}, closing connection")
                     break  # Client is dead
 
@@ -158,19 +152,19 @@ async def unified_websocket_endpoint(websocket: WebSocket):
 
             except Exception as e:
                 logger.error(f"❌ Message handling error for {client_id}: {e}")
-                try:
-                    await websocket.send_json(
-                        {
-                            "type": "error",
-                            "message": f"Message processing error: {str(e)}",
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                    )
-                except:
-                    logger.info(
-                        f"❌ Cannot send error message to {client_id}, closing connection"
-                    )
-                    break  # Can't send error, connection is probably dead
+                # Only try to send error if connection is still tracked
+                if client_id in unified_manager.connections:
+                    success = await _safe_send_json(websocket, client_id, {
+                        "type": "error",
+                        "message": f"Message processing error: {str(e)}",
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    if not success:
+                        logger.info(f"❌ Cannot send error message to {client_id}, closing connection")
+                        break  # Can't send error, connection is probably dead
+                else:
+                    # Connection already cleaned up, just break
+                    break
 
     except WebSocketDisconnect:
         logger.info(f"🔌 Client disconnected during setup")
@@ -187,8 +181,96 @@ async def unified_websocket_endpoint(websocket: WebSocket):
                 del unified_manager.client_types[client_id]
             if client_id in unified_manager.client_subscriptions:
                 del unified_manager.client_subscriptions[client_id]
-            logger.info(f"🧹 Cleaned up client: {client_id}")
+            
+            # Clean up user connection mapping
+            if user_id and hasattr(unified_manager, 'user_connections'):
+                user_connections = unified_manager.user_connections.get(user_id, {})
+                if client_type in user_connections and user_connections[client_type] == client_id:
+                    del user_connections[client_type]
+                    if not user_connections:  # Remove user entry if no connections left
+                        del unified_manager.user_connections[user_id]
+            
+            logger.info(f"🧹 Cleaned up client: {client_id} (user: {user_id})")
 
+
+async def _cleanup_user_connections(user_id: str, client_type: str, new_client_id: str):
+    """Clean up existing connections for a user and client type to prevent duplicates"""
+    if not user_id:
+        return
+        
+    try:
+        # Initialize user_connections if it doesn't exist
+        if not hasattr(unified_manager, 'user_connections'):
+            unified_manager.user_connections = {}
+            
+        user_connections = unified_manager.user_connections.get(user_id, {})
+        existing_client_id = user_connections.get(client_type)
+        
+        # Only cleanup if there's an existing connection that's different from the new one
+        if existing_client_id and existing_client_id != new_client_id and existing_client_id in unified_manager.connections:
+            logger.info(f"🧹 Closing existing {client_type} connection for user {user_id}: {existing_client_id}")
+            
+            try:
+                existing_ws = unified_manager.connections[existing_client_id]
+                if _is_websocket_connected(existing_ws):
+                    await existing_ws.close(code=1000, reason=f"New {client_type} connection established")
+                
+                # Clean up immediately
+                del unified_manager.connections[existing_client_id]
+                if existing_client_id in unified_manager.client_types:
+                    del unified_manager.client_types[existing_client_id]
+                if existing_client_id in unified_manager.client_subscriptions:
+                    del unified_manager.client_subscriptions[existing_client_id]
+                
+                logger.info(f"✅ Successfully closed existing connection: {existing_client_id}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error closing existing connection {existing_client_id}: {e}")
+        
+        # Also cleanup any dangling connections for the same user that may have lost tracking
+        connections_to_remove = []
+        for conn_id, conn_ws in list(unified_manager.connections.items()):
+            # Check if this connection belongs to the same user but different client_id
+            if (user_id in conn_id and 
+                conn_id != new_client_id and 
+                conn_id.startswith(client_type) and
+                not _is_websocket_connected(conn_ws)):
+                connections_to_remove.append(conn_id)
+        
+        for conn_id in connections_to_remove:
+            logger.info(f"🧹 Removing dangling connection: {conn_id}")
+            unified_manager.connections.pop(conn_id, None)
+            unified_manager.client_types.pop(conn_id, None)
+            unified_manager.client_subscriptions.pop(conn_id, None)
+    
+    except Exception as e:
+        logger.error(f"❌ Error cleaning up connections for user {user_id}: {e}")
+
+def _is_websocket_connected(websocket: WebSocket) -> bool:
+    """Check if WebSocket is still connected and ready to send"""
+    try:
+        return (
+            websocket is not None and 
+            hasattr(websocket, 'client_state') and 
+            websocket.client_state.value <= 1  # CONNECTING or CONNECTED
+        )
+    except:
+        return False
+
+async def _safe_send_json(websocket: WebSocket, client_id: str, data: dict) -> bool:
+    """Safely send JSON data with connection validation"""
+    try:
+        if not _is_websocket_connected(websocket):
+            logger.warning(f"⚠️ Attempted to send to disconnected client {client_id}")
+            return False
+        
+        # Validate JSON serializability
+        json.dumps(data, default=str)
+        await websocket.send_json(data)
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to send message to {client_id}: {e}")
+        return False
 
 async def handle_unified_message(
     client_id: str, websocket: WebSocket, message: Dict[str, Any]
@@ -198,13 +280,13 @@ async def handle_unified_message(
         message_type = message.get("type")
 
         if not message_type:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": "Missing message type",
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
+            success = await _safe_send_json(websocket, client_id, {
+                "type": "error",
+                "message": "Missing message type",
+                "timestamp": datetime.now().isoformat(),
+            })
+            if not success:
+                return  # Connection is dead
             return
 
         if message_type == "subscribe":
@@ -213,13 +295,13 @@ async def handle_unified_message(
             real_time_mode = message.get("real_time", False)  # NEW: Real-time mode flag
             
             if not isinstance(events, list):
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": "Events must be a list",
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+                success = await _safe_send_json(websocket, client_id, {
+                    "type": "error",
+                    "message": "Events must be a list",
+                    "timestamp": datetime.now().isoformat(),
+                })
+                if not success:
+                    return  # Connection is dead
                 return
 
             unified_manager.subscribe_to_events(client_id, events)
@@ -249,15 +331,13 @@ async def handle_unified_message(
                 except Exception as e:
                     logger.error(f"❌ Error activating real-time mode: {e}")
 
-            await websocket.send_json(
-                {
-                    "type": "subscription_confirmed",
-                    "events": events,
-                    "real_time_mode": real_time_mode,
-                    "available_events": unified_manager.get_available_events(),
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
+            await _safe_send_json(websocket, client_id, {
+                "type": "subscription_confirmed",
+                "events": events,
+                "real_time_mode": real_time_mode,
+                "available_events": unified_manager.get_available_events(),
+                "timestamp": datetime.now().isoformat(),
+            })
 
         elif message_type == "get_dashboard_data":
             # FIXED: Enhanced dashboard data with proper error handling
@@ -344,8 +424,11 @@ async def handle_unified_message(
                     "cache_status": complete_dashboard_data.get("cache_status", {}),
                 }
 
-                await websocket.send_json(dashboard_data)
-                logger.info(f"✅ Sent enhanced dashboard data to {client_id}")
+                success = await _safe_send_json(websocket, client_id, dashboard_data)
+                if success:
+                    logger.info(f"✅ Sent enhanced dashboard data to {client_id}")
+                else:
+                    return  # Connection is dead
 
             except Exception as e:
                 logger.error(f"❌ Error getting dashboard data: {e}")
@@ -353,13 +436,11 @@ async def handle_unified_message(
 
                 logger.error(f"Full traceback: {traceback.format_exc()}")
 
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": f"Error getting dashboard data: {str(e)}",
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+                await _safe_send_json(websocket, client_id, {
+                    "type": "error",
+                    "message": f"Error getting dashboard data: {str(e)}",
+                    "timestamp": datetime.now().isoformat(),
+                })
 
         elif message_type == "get_live_prices":
             try:

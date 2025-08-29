@@ -18,9 +18,12 @@
       "WebFetch(domain:www.tipranks.com)",
       "WebFetch(domain:blog.tipranks.com)",
       "Bash(grep:*)",
-      "Bash(npm start --silent)"
+      "Bash(npm start --silent)",
+      "Bash(alembic upgrade:*)"
     ],
     "deny": [],
-    "additionalDirectories": ["C:\\Work\\P\\app\\tradingapp-main"]
+    "additionalDirectories": [
+      "C:\\Work\\P\\app\\tradingapp-main"
+    ]
   }
 }

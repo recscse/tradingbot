@@ -5,7 +5,7 @@ Fixed Unified Event-Driven WebSocket Manager
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Set, Any, Callable, Optional
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
@@ -51,6 +51,7 @@ class UnifiedWebSocketManager:
         self.connections: Dict[str, WebSocket] = {}
         self.client_subscriptions: Dict[str, Set[str]] = {}
         self.client_types: Dict[str, str] = {}
+        self.is_active: bool = True  # Manager status
 
         # Event system
         self.event_handlers: Dict[str, List[Callable]] = defaultdict(list)
@@ -62,7 +63,7 @@ class UnifiedWebSocketManager:
         self.last_event_time = {}
         self.event_rate_limits = {
             "price_update": 0.0,  # ✅ ZERO DELAY: Instant price updates
-            "dashboard_update": 0.0,  # ✅ ZERO DELAY: Instant dashboard updates  
+            "dashboard_update": 0.0,  # ✅ ZERO DELAY: Instant dashboard updates
             "live_prices_enriched": 0.0,  # ✅ ZERO DELAY: Instant enriched price data
             "index_update": 0.0,  # ✅ ZERO DELAY: Instant index updates
             "top_movers_update": 0.0,  # ✅ ZERO DELAY: Instant momentum updates
@@ -93,7 +94,7 @@ class UnifiedWebSocketManager:
         # FIXED: Add analytics service
         self.analytics_service = None
         self._init_analytics_service()
-        
+
         # 🚀 NEW: Market Data Hub integration
         self.market_hub = None
         self._init_market_hub()
@@ -117,14 +118,14 @@ class UnifiedWebSocketManager:
             logger.info("✅ Analytics service initialized")
         except ImportError as e:
             logger.warning(f"⚠️ Analytics service not available: {e}")
-    
+
     def _init_market_hub(self):
         """🚀 Initialize Market Data Hub integration"""
         try:
             from services.market_data_hub import market_data_hub
-            
+
             self.market_hub = market_data_hub
-            
+
             # Register as a consumer for ultra-fast price updates
             def hub_price_callback(data):
                 """Ultra-fast callback from market hub"""
@@ -133,22 +134,28 @@ class UnifiedWebSocketManager:
                     if "prices" in data:
                         # Send immediately with highest priority
                         self.emit_event("price_update", data["prices"], priority=0)
-                        
+
                         # Also send as dashboard_update for compatibility
-                        self.emit_event("dashboard_update", {
-                            "data": data["prices"],
-                            "source": "market_hub_direct",
-                            "timestamp": data.get("timestamp"),
-                            "count": data.get("count", 0)
-                        }, priority=0)
-                        
-                        logger.debug(f"⚡ Hub -> UI: {data.get('count', 0)} instruments")
-                    
+                        self.emit_event(
+                            "dashboard_update",
+                            {
+                                "data": data["prices"],
+                                "source": "market_hub_direct",
+                                "timestamp": data.get("timestamp"),
+                                "count": data.get("count", 0),
+                            },
+                            priority=0,
+                        )
+
+                        logger.debug(
+                            f"⚡ Hub -> UI: {data.get('count', 0)} instruments"
+                        )
+
                     # Handle indices updates
                     elif data.get("type") == "indices_data_update" and "data" in data:
                         # Send indices data immediately
                         self.emit_event("indices_data_update", data["data"], priority=0)
-                        
+
                         # Also update individual index prices in market data
                         if data["data"].get("indices"):
                             index_prices = {}
@@ -161,22 +168,26 @@ class UnifiedWebSocketManager:
                                     "change": index["change"],
                                     "change_percent": index["change_percent"],
                                     "timestamp": index["timestamp"],
-                                    "type": "INDEX"
+                                    "type": "INDEX",
                                 }
-                            
+
                             if index_prices:
-                                self.emit_event("index_update", index_prices, priority=0)
-                        
-                        logger.debug(f"📊 Hub -> UI: {len(data['data']['indices'])} indices")
-                        
+                                self.emit_event(
+                                    "index_update", index_prices, priority=0
+                                )
+
+                        logger.debug(
+                            f"📊 Hub -> UI: {len(data['data']['indices'])} indices"
+                        )
+
                 except Exception as e:
                     logger.error(f"❌ Error in hub callback: {e}")
-            
+
             # Register callback (will be called when hub starts)
             self.market_hub_callback = hub_price_callback
-            
+
             logger.info("✅ Market Data Hub integration initialized")
-            
+
         except ImportError as e:
             logger.warning(f"⚠️ Market Data Hub not available: {e}")
             self.market_hub = None
@@ -187,6 +198,7 @@ class UnifiedWebSocketManager:
             return
 
         self.is_running = True
+        self.is_active = True  # Set active state when starting
 
         # Start event processor
         processor_task = asyncio.create_task(self._process_events())
@@ -204,21 +216,23 @@ class UnifiedWebSocketManager:
         pending_task.add_done_callback(lambda t: self.background_tasks.discard(t))
 
         # 🚀 NEW: Register with Market Data Hub for ultra-fast updates
-        if self.market_hub and hasattr(self, 'market_hub_callback'):
+        if self.market_hub and hasattr(self, "market_hub_callback"):
             try:
                 success = self.market_hub.register_consumer(
                     consumer_name="unified_websocket_manager",
                     callback=self.market_hub_callback,
                     topics=["prices", "indices", "all"],  # Include indices
                     priority=1,  # Highest priority for UI updates
-                    max_queue_size=2000  # Large queue for high throughput
+                    max_queue_size=2000,  # Large queue for high throughput
                 )
-                
+
                 if success:
-                    logger.info("🚀 Registered with Market Data Hub for ultra-fast updates")
+                    logger.info(
+                        "🚀 Registered with Market Data Hub for ultra-fast updates"
+                    )
                 else:
                     logger.warning("⚠️ Failed to register with Market Data Hub")
-                    
+
             except Exception as e:
                 logger.error(f"❌ Error registering with Market Data Hub: {e}")
 
@@ -227,6 +241,7 @@ class UnifiedWebSocketManager:
     async def stop(self):
         """Stop the unified WebSocket system"""
         self.is_running = False
+        self.is_active = False  # Set inactive state when stopping
 
         # Cancel all background tasks
         for task in self.background_tasks:
@@ -328,10 +343,27 @@ class UnifiedWebSocketManager:
 
     # ===== EVENT SYSTEM =====
     def subscribe_to_events(self, client_id: str, events: List[str]):
-        """Subscribe client to specific events"""
+        """Subscribe client to specific events with deduplication"""
         if client_id in self.client_subscriptions:
-            self.client_subscriptions[client_id].update(events)
-            logger.info(f"📡 Client {client_id} subscribed to {len(events)} events")
+            # Check if already subscribed to prevent spam
+            existing_events = self.client_subscriptions[client_id]
+            new_events = set(events) - existing_events
+
+            if new_events:
+                existing_events.update(new_events)
+                logger.info(
+                    f"📡 Client {client_id} subscribed to {len(new_events)} new events (total: {len(existing_events)})"
+                )
+            else:
+                logger.debug(
+                    f"📡 Client {client_id} already subscribed to all requested events"
+                )
+        else:
+            # First time subscription
+            self.client_subscriptions[client_id] = set(events)
+            logger.info(
+                f"📡 Client {client_id} subscribed to {len(events)} events (first time)"
+            )
 
     async def emit_realtime_price(self, enriched_tick: Dict[str, Any]):
         """
@@ -340,32 +372,34 @@ class UnifiedWebSocketManager:
         """
         if not enriched_tick or not self.connections:
             return
-            
+
         try:
             # Create optimized price update message
             price_message = {
                 "type": "price_update",
                 "data": enriched_tick,
                 "timestamp": datetime.now().isoformat(),
-                "realtime": True
+                "realtime": True,
             }
-            
+
             # Broadcast directly to all connected clients (bypass queue)
             message_str = json.dumps(price_message, default=str)
-            
+
             # Send to all clients concurrently for maximum speed
             tasks = []
             for client_id, websocket in list(self.connections.items()):
                 if websocket.client_state == WebSocketState.CONNECTED:
-                    tasks.append(self._send_direct_message(client_id, websocket, message_str))
-            
+                    tasks.append(
+                        self._send_direct_message(client_id, websocket, message_str)
+                    )
+
             if tasks:
                 # Execute all sends concurrently for minimum latency
                 await asyncio.gather(*tasks, return_exceptions=True)
-                
+
         except Exception as e:
             logger.error(f"❌ Real-time price broadcast error: {e}")
-    
+
     async def emit_direct_price_batch(self, price_batch: Dict[str, Dict[str, Any]]):
         """
         🚀 ULTRA-FAST: Direct batch price broadcast to ALL UI sections
@@ -374,23 +408,23 @@ class UnifiedWebSocketManager:
         """
         if not price_batch or not self.connections:
             return
-            
+
         try:
             timestamp = datetime.now().isoformat()
-            
+
             # 🚀 SECTION 1: Individual price updates for Zustand store (ultra-fast component updates)
             individual_price_messages = []
             for instrument_key, price_data in price_batch.items():
-                if price_data and price_data.get('ltp'):
+                if price_data and price_data.get("ltp"):
                     individual_message = {
                         "type": "price_update",
                         "data": price_data,  # Single price for Zustand
                         "timestamp": timestamp,
                         "realtime": True,
-                        "direct_feed": True
+                        "direct_feed": True,
                     }
                     individual_price_messages.append(individual_message)
-            
+
             # 🚀 SECTION 2: Batch update for legacy components (Dashboard overview)
             batch_price_message = {
                 "type": "price_update",
@@ -399,20 +433,20 @@ class UnifiedWebSocketManager:
                 "count": len(price_batch),
                 "direct_feed": True,
                 "realtime": True,
-                "batch_update": True
+                "batch_update": True,
             }
-            
-            # 🚀 SECTION 3: Dashboard update for analytics sections 
+
+            # 🚀 SECTION 3: Dashboard update for analytics sections
             dashboard_message = {
-                "type": "dashboard_update", 
+                "type": "dashboard_update",
                 "data": price_batch,
                 "timestamp": timestamp,
                 "count": len(price_batch),
                 "source": "direct_feed",
                 "market_open": True,
-                "update_sections": ["overview", "movers", "sectors", "analytics"]
+                "update_sections": ["overview", "movers", "sectors", "analytics"],
             }
-            
+
             # 🚀 SECTION 4: Enhanced format for Trading components
             trading_message = {
                 "type": "live_prices_enriched",
@@ -421,19 +455,29 @@ class UnifiedWebSocketManager:
                 "count": len(price_batch),
                 "enriched": True,
                 "direct_feed": True,
-                "trading_ready": True
+                "trading_ready": True,
             }
-            
+
             # 🚀 SECTION 5: Indices extraction for index tracking
             indices_data = {}
             stocks_data = {}
-            
+
             for instrument_key, price_data in price_batch.items():
-                if any(idx in instrument_key.upper() for idx in ["NIFTY", "SENSEX", "BANKEX", "INDEX", "FINNIFTY", "MIDCPNIFTY"]):
+                if any(
+                    idx in instrument_key.upper()
+                    for idx in [
+                        "NIFTY",
+                        "SENSEX",
+                        "BANKEX",
+                        "INDEX",
+                        "FINNIFTY",
+                        "MIDCPNIFTY",
+                    ]
+                ):
                     indices_data[instrument_key] = price_data
                 else:
                     stocks_data[instrument_key] = price_data
-            
+
             # Send indices update if we have index data
             indices_message = None
             if indices_data:
@@ -442,64 +486,216 @@ class UnifiedWebSocketManager:
                     "data": indices_data,
                     "timestamp": timestamp,
                     "count": len(indices_data),
-                    "direct_feed": True
+                    "direct_feed": True,
                 }
-            
+
             # Convert all messages to JSON for efficiency
             messages_to_send = []
-            
+
             # Add batch message (most important - processed by useUnifiedMarketData)
             messages_to_send.append(json.dumps(batch_price_message, default=str))
-            
+
             # Add dashboard message (for analytics sections)
             messages_to_send.append(json.dumps(dashboard_message, default=str))
-            
+
             # Add trading message (for trading components)
             messages_to_send.append(json.dumps(trading_message, default=str))
-            
+
             # Add indices message if available
             if indices_message:
                 messages_to_send.append(json.dumps(indices_message, default=str))
-            
+
             # 🚀 ULTRA-FAST BROADCAST: Send all message types to all clients
             tasks = []
             for client_id, websocket in list(self.connections.items()):
                 if websocket.client_state == WebSocketState.CONNECTED:
                     # Send all critical messages concurrently
                     for message_str in messages_to_send:
-                        tasks.append(self._send_direct_message(client_id, websocket, message_str))
-            
+                        tasks.append(
+                            self._send_direct_message(client_id, websocket, message_str)
+                        )
+
             if tasks:
                 # Execute all sends concurrently for minimum latency
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 successful = sum(1 for r in results if r is True)
                 total_messages = len(messages_to_send) * len(self.connections)
-                
-                logger.debug(f"⚡ COMPREHENSIVE BROADCAST: {len(price_batch)} prices → {len(self.connections)} clients")
-                logger.debug(f"⚡ Messages sent: {len(messages_to_send)} types × {len(self.connections)} clients = {total_messages} total")
+
+                logger.debug(
+                    f"⚡ COMPREHENSIVE BROADCAST: {len(price_batch)} prices → {len(self.connections)} clients"
+                )
+                logger.debug(
+                    f"⚡ Messages sent: {len(messages_to_send)} types × {len(self.connections)} clients = {total_messages} total"
+                )
                 logger.debug(f"⚡ Success rate: {successful}/{len(tasks)} sends OK")
-                
+
                 # Log section coverage
-                sections_covered = ["Zustand_Store", "Dashboard", "Trading", "Analytics"]
+                sections_covered = [
+                    "Zustand_Store",
+                    "Dashboard",
+                    "Trading",
+                    "Analytics",
+                ]
                 if indices_data:
                     sections_covered.append("Indices")
-                    
-                logger.info(f"🎯 REAL-TIME COVERAGE: {', '.join(sections_covered)} sections updated with {len(price_batch)} instruments")
-                
+
+                logger.info(
+                    f"🎯 REAL-TIME COVERAGE: {', '.join(sections_covered)} sections updated with {len(price_batch)} instruments"
+                )
+
         except Exception as e:
             logger.error(f"❌ Direct batch price broadcast error: {e}")
-    
-    async def _send_direct_message(self, client_id: str, websocket: WebSocket, message: str):
-        """Send message directly to WebSocket client"""
+
+    async def _send_direct_message(
+        self, client_id: str, websocket: WebSocket, message: str
+    ):
+        """Send message directly to WebSocket client with proper state checking"""
         try:
+            # Check WebSocket state before sending
+            if hasattr(websocket, "client_state"):
+                if websocket.client_state in [
+                    WebSocketState.DISCONNECTED,
+                    WebSocketState.CLOSED,
+                ]:
+                    logger.debug(f"🔌 Skipping send to disconnected client {client_id}")
+                    await self.remove_client(client_id)
+                    return False
+
+            # Check connection state using application_state
+            if hasattr(websocket, "application_state"):
+                if websocket.application_state in [
+                    WebSocketState.DISCONNECTED,
+                    WebSocketState.CLOSED,
+                ]:
+                    logger.debug(f"🔌 Skipping send to closed client {client_id}")
+                    await self.remove_client(client_id)
+                    return False
+
             await websocket.send_text(message)
             return True
+
+        except RuntimeError as e:
+            if "close message has been sent" in str(e) or "Connection is closed" in str(
+                e
+            ):
+                logger.debug(f"🔌 Client {client_id} connection already closed")
+            else:
+                logger.error(f"❌ Runtime error sending to {client_id}: {e}")
+            await self.remove_client(client_id)
         except Exception as e:
-            logger.debug(f"Failed to send to client {client_id}: {e}")
-            # Remove disconnected client
-            if client_id in self.connections:
-                del self.connections[client_id]
-            return False
+            logger.error(f"❌ Failed to send to client {client_id}: {e}")
+            await self.remove_client(client_id)
+
+        return False
+
+    async def emit_to_all(self, event: str, data: Dict[str, Any]):
+        """Enhanced emit with circuit breaker integration"""
+        if not self.connections:
+            # Update circuit breaker about lack of connections
+            try:
+                from services.circuit_breaker import circuit_breaker
+
+                await circuit_breaker.update_system_health(
+                    {"websocket_connected": False, "api_failure": True}
+                )
+            except ImportError:
+                pass
+            return
+
+        try:
+            message = {
+                "type": event,
+                "data": data,
+                "timestamp": datetime.now().isoformat(),
+                "sequence_number": getattr(self, "_seq_num", 0),
+            }
+
+            # Increment sequence number for message ordering
+            self._seq_num = getattr(self, "_seq_num", 0) + 1
+
+            disconnected_clients = []
+            successful_sends = 0
+
+            # Create a copy of connections to avoid modification during iteration
+            connections_copy = list(self.connections.items())
+
+            for client_id, websocket in connections_copy:
+                try:
+                    # Check WebSocket state before sending
+                    is_connected = True
+
+                    if hasattr(websocket, "client_state"):
+                        if websocket.client_state in [
+                            WebSocketState.DISCONNECTED,
+                            WebSocketState.CLOSED,
+                        ]:
+                            is_connected = False
+
+                    if hasattr(websocket, "application_state") and is_connected:
+                        if websocket.application_state in [
+                            WebSocketState.DISCONNECTED,
+                            WebSocketState.CLOSED,
+                        ]:
+                            is_connected = False
+
+                    if not is_connected:
+                        logger.debug(
+                            f"🔌 Skipping broadcast to disconnected client {client_id}"
+                        )
+                        disconnected_clients.append(client_id)
+                        continue
+
+                    await websocket.send_text(json.dumps(message))
+                    successful_sends += 1
+
+                except RuntimeError as e:
+                    if "close message has been sent" in str(
+                        e
+                    ) or "Connection is closed" in str(e):
+                        logger.debug(
+                            f"🔌 Client {client_id} connection already closed during broadcast"
+                        )
+                    else:
+                        logger.warning(f"Failed to send to client {client_id}: {e}")
+                    disconnected_clients.append(client_id)
+                except Exception as e:
+                    logger.warning(f"Failed to send to client {client_id}: {e}")
+                    disconnected_clients.append(client_id)
+
+            # Clean up disconnected clients
+            for client_id in disconnected_clients:
+                self.connections.pop(client_id, None)
+
+            # Update circuit breaker with connection health
+            connection_health = successful_sends > 0
+            try:
+                from services.circuit_breaker import circuit_breaker
+
+                await circuit_breaker.update_system_health(
+                    {
+                        "websocket_connected": connection_health,
+                        "last_price_update": (
+                            datetime.now(timezone.utc)
+                            if event == "price_update"
+                            else None
+                        ),
+                        "api_success": True,
+                    }
+                )
+            except ImportError:
+                pass
+
+        except Exception as e:
+            logger.error(f"❌ Error emitting to all clients: {e}")
+            # Notify circuit breaker of system failure
+            try:
+                from services.circuit_breaker import circuit_breaker
+
+                await circuit_breaker.update_system_health(
+                    {"websocket_connected": False, "api_failure": True}
+                )
+            except ImportError:
+                pass
 
     def emit_event(self, event_type: str, data: Dict[str, Any], priority: int = 5):
         """Emit an event to the queue with ZERO rate limiting for real-time trading (1=highest, 10=lowest)"""
@@ -520,8 +716,15 @@ class UnifiedWebSocketManager:
         #     priority = pending["priority"]
 
         # ⚡ ULTRA-FAST: Use priority 1 for ALL critical trading events
-        if event_type in ["price_update", "dashboard_update", "live_prices_enriched", "index_update", 
-                         "top_movers_update", "intraday_stocks_update", "indices_data_update"]:
+        if event_type in [
+            "price_update",
+            "dashboard_update",
+            "live_prices_enriched",
+            "index_update",
+            "top_movers_update",
+            "intraday_stocks_update",
+            "indices_data_update",
+        ]:
             priority = 1  # Highest priority for all market data
 
         # Determine priority based on event type and data content
@@ -540,30 +743,47 @@ class UnifiedWebSocketManager:
 
         try:
             self.event_queue.put_nowait(event)
-            
+
             # 🚀 ENHANCED LOGGING: Track critical events with zero delay confirmation
-            if normalized_event_type in ["price_update", "dashboard_update", "live_prices_enriched", "index_update"]:
+            if normalized_event_type in [
+                "price_update",
+                "dashboard_update",
+                "live_prices_enriched",
+                "index_update",
+            ]:
                 data_size = 0
                 if isinstance(data, dict):
                     data_size = len(data)
                 elif isinstance(data, list):
                     data_size = len(data)
-                logger.info(f"⚡ ZERO-DELAY queued {normalized_event_type} (priority: {priority}, data: {data_size} items, queue: {self.event_queue.qsize()})")
+                logger.info(
+                    f"⚡ ZERO-DELAY queued {normalized_event_type} (priority: {priority}, data: {data_size} items, queue: {self.event_queue.qsize()})"
+                )
             else:
-                logger.debug(f"✅ Queued {normalized_event_type} (priority: {priority})")
+                logger.debug(
+                    f"✅ Queued {normalized_event_type} (priority: {priority})"
+                )
         except asyncio.QueueFull:
             # ⚡ CRITICAL: For trading data, FORCE queue space by dropping oldest non-critical event
             if priority == 1:  # Critical trading data
-                logger.warning(f"🚨 FORCE-QUEUING critical trading event: {normalized_event_type}")
+                logger.warning(
+                    f"🚨 FORCE-QUEUING critical trading event: {normalized_event_type}"
+                )
                 try:
                     # Drop oldest event to make space for critical trading data
                     dropped_event = self.event_queue.get_nowait()
                     self.event_queue.put_nowait(event)
-                    logger.info(f"🔄 Dropped {dropped_event.get('type', 'unknown')} for critical {normalized_event_type}")
+                    logger.info(
+                        f"🔄 Dropped {dropped_event.get('type', 'unknown')} for critical {normalized_event_type}"
+                    )
                 except asyncio.QueueEmpty:
-                    logger.error(f"❌ Queue empty but still full - critical error for {normalized_event_type}")
+                    logger.error(
+                        f"❌ Queue empty but still full - critical error for {normalized_event_type}"
+                    )
             else:
-                logger.warning(f"⚠️ Event queue full, dropping non-critical event: {normalized_event_type}")
+                logger.warning(
+                    f"⚠️ Event queue full, dropping non-critical event: {normalized_event_type}"
+                )
 
     def _normalize_event_type(self, event_type: str) -> str:
         """Normalize event types to prevent duplicates from typos"""
@@ -866,7 +1086,11 @@ class UnifiedWebSocketManager:
                 event_type = f"{feature}_update"
 
                 # Mark as priority update and emit with high priority
-                priority = 1 if feature in ["top_movers", "intraday_stocks"] else 2
+                priority = (
+                    1
+                    if feature in ["top_movers", "intraday_stocks", "volume_analysis"]
+                    else 2
+                )
                 self.emit_event(event_type, data, priority=priority)
 
                 # ✅ Minimal yield to maintain responsiveness
@@ -1034,7 +1258,7 @@ class UnifiedWebSocketManager:
 
     # ===== BROADCASTING =====
     async def _broadcast_event(self, event: Dict[str, Any]):
-        """Broadcast event to subscribed clients"""
+        """Broadcast event to subscribed clients and SSE connections"""
         event_type = event["type"]
         clients_to_notify = []
 
@@ -1049,8 +1273,10 @@ class UnifiedWebSocketManager:
                 data_size = len(event["data"])
             elif isinstance(event.get("data"), list):
                 data_size = len(event["data"])
-                
-            logger.info(f"⚡ Broadcasting {event_type} to {len(clients_to_notify)} clients (data: {data_size} items)")
+
+            logger.info(
+                f"⚡ Broadcasting {event_type} to {len(clients_to_notify)} clients (data: {data_size} items)"
+            )
 
         # Send to all subscribed clients
         if clients_to_notify:
@@ -1061,20 +1287,26 @@ class UnifiedWebSocketManager:
                 ],
                 return_exceptions=True,
             )
-            
+
             # Count successful sends for debugging
             successful_sends = sum(1 for result in results if result is True)
-            if successful_sends != len(clients_to_notify):
-                logger.warning(f"⚠️ Only {successful_sends}/{len(clients_to_notify)} clients received {event_type}")
+            if successful_sends == 0 and len(clients_to_notify) > 0:
+                logger.warning(
+                    f"⚠️ No clients received {event_type} (attempted {len(clients_to_notify)})"
+                )
         elif event_type in ["price_update", "dashboard_update", "live_prices_enriched"]:
-            logger.warning(f"⚠️ No clients subscribed to {event_type}! Available clients: {len(self.client_subscriptions)}")
+            logger.warning(
+                f"⚠️ No clients subscribed to {event_type}! Available clients: {len(self.client_subscriptions)}"
+            )
             if len(self.client_subscriptions) > 0:
-                logger.info(f"📋 Client subscriptions: {dict(self.client_subscriptions)}")
+                logger.info(
+                    f"📋 Client subscriptions: {dict(self.client_subscriptions)}"
+                )
 
     async def send_to_client(self, client_id: str, data: Dict[str, Any]) -> bool:
         """⚡ ZERO-DELAY: Send data to client with ultra-fast error handling"""
         if client_id not in self.connections:
-            logger.warning(f"⚠️ Client {client_id} not found in connections")
+            # Silently skip - client was cleaned up, this is normal
             return False
 
         websocket = self.connections[client_id]
@@ -1189,6 +1421,15 @@ class UnifiedWebSocketManager:
             "options_chain_update",
             "market_status_update",
             "live_prices_enriched",
+            # Auto-trading events
+            "auto_trading_update",
+            "fibonacci_signal",
+            "position_update",
+            "performance_update",
+            "system_status",
+            "emergency_alert",
+            "session_update",
+            "fno_selection_update",
         ]
 
     def get_status(self) -> Dict[str, Any]:
