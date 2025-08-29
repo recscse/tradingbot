@@ -16,7 +16,7 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# Import Enhanced Breakout Engine with fallback to legacy
+# Import ONLY Enhanced Breakout Engine (remove all legacy services)
 try:
     from services.enhanced_breakout_engine import (
         enhanced_breakout_engine,
@@ -25,27 +25,15 @@ try:
         BreakoutType
     )
     ENHANCED_BREAKOUT_AVAILABLE = True
-    BREAKOUT_SERVICE_AVAILABLE = True
+    BREAKOUT_SERVICE_AVAILABLE = True  # Compatibility variable
     breakout_scanner = enhanced_breakout_engine  # Compatibility alias
     get_breakouts_data = get_enhanced_breakouts_data  # Compatibility alias
     logger.info("✅ Enhanced Breakout Engine imported successfully (vectorized)")
-except ImportError:
-    logger.warning("Enhanced Breakout Engine not available, trying legacy...")
-    try:
-        from services.breakout_scanner_service import (
-            breakout_scanner,
-            get_breakouts_data,
-            health_check,
-            BreakoutType
-        )
-        ENHANCED_BREAKOUT_AVAILABLE = False
-        BREAKOUT_SERVICE_AVAILABLE = True
-        logger.info("✅ Legacy breakout scanner service imported")
-    except ImportError as e:
-        logger.error(f"❌ No breakout service available: {e}")
-        ENHANCED_BREAKOUT_AVAILABLE = False
-        BREAKOUT_SERVICE_AVAILABLE = False
-        breakout_scanner = None
+except ImportError as e:
+    logger.error(f"❌ Enhanced Breakout Engine not available: {e}")
+    ENHANCED_BREAKOUT_AVAILABLE = False
+    BREAKOUT_SERVICE_AVAILABLE = False  # Compatibility variable
+    breakout_scanner = None
 
 router = APIRouter(prefix="/api/v1/breakout", tags=["Breakout Scanner"])
 
@@ -90,10 +78,10 @@ class HealthCheckResponse(BaseModel):
 
 def check_service_available():
     """Dependency to check if breakout service is available"""
-    if not BREAKOUT_SERVICE_AVAILABLE or not breakout_scanner:
+    if not ENHANCED_BREAKOUT_AVAILABLE or not breakout_scanner:
         raise HTTPException(
             status_code=503,
-            detail="Breakout scanner service is not available"
+            detail="Enhanced breakout engine service is not available"
         )
     return True
 
@@ -107,14 +95,60 @@ async def get_health_status(service_check: bool = Depends(check_service_availabl
         logger.error(f"❌ Error getting health status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/", response_model=BreakoutSummaryResponse)
 @router.get("/summary", response_model=BreakoutSummaryResponse)
 async def get_breakouts_summary(service_check: bool = Depends(check_service_available)):
     """Get comprehensive summary of today's breakouts"""
     try:
         summary_data = get_breakouts_data()
+        logger.info(f"📊 Returning {summary_data.get('total_breakouts_today', 0)} breakouts")
         return JSONResponse(content=summary_data)
     except Exception as e:
         logger.error(f"❌ Error getting breakouts summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/broadcast")
+async def trigger_broadcast(service_check: bool = Depends(check_service_available)):
+    """Manually trigger breakout data broadcast to frontend"""
+    try:
+        if ENHANCED_BREAKOUT_AVAILABLE and breakout_scanner:
+            await breakout_scanner.broadcast_complete_analysis()
+            return {
+                "status": "success",
+                "message": "Breakout analysis broadcast triggered",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=503, detail="Breakout service not available")
+    except Exception as e:
+        logger.error(f"❌ Error triggering broadcast: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/test-data")
+async def inject_test_data(
+    count: int = Query(default=15, ge=5, le=50, description="Number of test data points"),
+    service_check: bool = Depends(check_service_available)
+):
+    """Inject test market data to simulate breakouts (for testing)"""
+    try:
+        if ENHANCED_BREAKOUT_AVAILABLE and breakout_scanner:
+            await breakout_scanner.inject_test_data(count)
+            
+            # Get results immediately
+            summary = breakout_scanner.get_breakouts_summary()
+            
+            return {
+                "status": "success",
+                "message": f"Injected {count} test data points",
+                "breakouts_detected": summary.get('total_breakouts_today', 0),
+                "breakouts": len(summary.get('breakouts', [])),
+                "breakdowns": len(summary.get('breakdowns', [])),
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=503, detail="Breakout service not available")
+    except Exception as e:
+        logger.error(f"❌ Error injecting test data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/recent")

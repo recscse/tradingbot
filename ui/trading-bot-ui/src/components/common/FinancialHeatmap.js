@@ -61,6 +61,48 @@ const FinancialHeatmap = memo(
 
     // Process sectors and extract stocks for each sector from marketData
     const processedData = useMemo(() => {
+      // FALLBACK: If no sectors data provided but we have marketData, generate sectors from marketData
+      if ((!data || !Array.isArray(data) || data.length === 0) && marketData && Object.keys(marketData).length > 0) {
+        console.log('🔥 Generating sector data from marketData for heatmap');
+        const sectorGroups = {};
+        
+        // Group stocks by sector
+        Object.values(marketData).forEach(stock => {
+          if (!stock || typeof stock.change_percent !== 'number') return;
+          
+          const sector = stock.sector || 'OTHER';
+          if (!sectorGroups[sector]) {
+            sectorGroups[sector] = [];
+          }
+          sectorGroups[sector].push(stock);
+        });
+        
+        // Convert sector groups to sector objects
+        const generatedSectors = Object.entries(sectorGroups)
+          .map(([sectorName, stocks]) => {
+            const totalMarketCap = stocks.reduce((sum, stock) => sum + (stock.market_cap || 1000000), 0);
+            const avgChange = stocks.reduce((sum, stock) => sum + (stock.change_percent || 0), 0) / stocks.length;
+            
+            return {
+              sector: sectorName,
+              sector_name: sectorName,
+              change_percent: avgChange,
+              avg_change_percent: avgChange,
+              stocks_count: stocks.length,
+              market_weight: totalMarketCap / 1000000, // Convert to millions
+              total_market_cap: totalMarketCap,
+              stocks: stocks
+            };
+          })
+          .filter(sector => sector.stocks_count > 0)
+          .sort((a, b) => Math.abs(b.change_percent) - Math.abs(a.change_percent))
+          .slice(0, maxItems);
+        
+        console.log('🔥 Generated', generatedSectors.length, 'sectors from marketData:', generatedSectors.map(s => s.sector_name));
+        return generatedSectors;
+      }
+      
+      // Use provided sectors data
       if (!data || !Array.isArray(data) || !marketData) return [];
 
       const sectors = data

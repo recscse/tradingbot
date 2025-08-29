@@ -15,7 +15,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import logging
 
-from services.gap_analysis_service import gap_analysis_service, get_gap_data, health_check
+from services.enhanced_gap_detection import enhanced_gap_detection, get_gap_data, health_check
 
 logger = logging.getLogger(__name__)
 
@@ -27,18 +27,21 @@ async def get_complete_gap_analysis() -> Dict[str, Any]:
     """
     Get comprehensive gap analysis data including gap up and gap down stocks
     
+    Uses ONLY the enhanced gap detection service (numpy/pandas optimized)
+    
     Returns:
     - All gap up stocks (categorized by size)
     - All gap down stocks (categorized by size) 
     - Recent gap activity
     - Sector analysis
-    - Sustainability statistics
+    - Performance statistics
     """
     try:
         gap_data = get_gap_data()
         return {
             "status": "success",
             "data": gap_data,
+            "service": "enhanced",
             "message": "Gap analysis data retrieved successfully"
         }
     except Exception as e:
@@ -489,12 +492,15 @@ async def get_gaps_by_time_range(
 async def get_gap_analysis_health() -> Dict[str, Any]:
     """
     Get gap analysis service health status and performance metrics
+    
+    Uses ONLY the enhanced service (numpy/pandas optimized)
     """
     try:
         health_data = health_check()
         return {
             "status": "success",
             "data": health_data,
+            "service": "enhanced",
             "message": "Gap analysis service health check completed"
         }
     except Exception as e:
@@ -507,22 +513,23 @@ async def trigger_gap_analysis() -> Dict[str, Any]:
     Manually trigger gap analysis refresh (for testing/debugging)
     """
     try:
-        if not gap_analysis_service.is_running:
-            raise HTTPException(status_code=503, detail="Gap analysis service is not running")
+        if not enhanced_gap_detection.is_running:
+            raise HTTPException(status_code=503, detail="Enhanced gap detection service is not running")
         
-        # Force a data refresh by clearing any caches if needed
-        # This would typically trigger re-processing of current market data
+        # Force a data refresh - trigger morning capture if within window
+        if enhanced_gap_detection.is_morning_capture_active:
+            await enhanced_gap_detection._capture_all_instruments()
         
         current_stats = get_gap_data()
         
         return {
             "status": "success",
             "data": {
-                "message": "Gap analysis refresh triggered",
+                "message": "Enhanced gap analysis refresh triggered",
                 "current_statistics": current_stats.get("statistics", {}),
                 "timestamp": datetime.now().isoformat()
             },
-            "message": "Gap analysis refresh completed successfully"
+            "message": "Enhanced gap analysis refresh completed successfully"
         }
     except Exception as e:
         logger.error(f"Error triggering gap analysis: {e}")

@@ -141,3 +141,4 @@ Each broker has standardized interface in `brokers/base_broker.py`:
 - **Database**: Alembic migrations must be run on deployment (`alembic upgrade head`)
 - **Token Automation**: Playwright browser installed automatically via `start.sh` for token refresh automation
 - **Monitoring**: Comprehensive health endpoints and logging for production monitoring
+- Add to memory do not write the emojies in the code and always follow the ceal code best practices

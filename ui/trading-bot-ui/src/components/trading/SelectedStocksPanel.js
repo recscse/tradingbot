@@ -52,7 +52,7 @@ const SelectedStocksPanel = ({
     setError(null);
     
     try {
-      const response = await apiClient.get("/api/v1/trading/stocks/selected", {
+      const response = await apiClient.get("/stocks/selected", {
         params: {
           include_options: true,
         }

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock, UserTradingConfig
 from services.enhanced_market_analytics import enhanced_analytics  # your singleton
-from services.upstox_option_service import upstox_option_service, OptionContract
+from services.upstox_option_service import upstox_option_service
 from services.strategy_engine import strategy_score
 
 logger = logging.getLogger(__name__)
@@ -337,12 +337,12 @@ class TradingStockSelector:
 
         return final_selection
 
-    def _get_atm_contract(
-        self, contracts: List[OptionContract], spot_price: float
-    ) -> OptionContract:
-        """Get the At-The-Money (ATM) option contract closest to spot price"""
-        if not contracts or spot_price <= 0:
-            return None
+        # def _get_atm_contract(
+        #     self, contracts: List[], spot_price: float
+        # ) -> OptionContract:
+        #     """Get the At-The-Money (ATM) option contract closest to spot price"""
+        #     if not contracts or spot_price <= 0:
+        #         return None
 
         # Find the contract with strike price closest to spot price
         closest_contract = min(

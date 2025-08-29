@@ -42,6 +42,7 @@ import {
   MarkEmailRead,
   AccountBalance,
   Speed,
+  AutoFixHigh,
 } from "@mui/icons-material";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "react-hot-toast";
@@ -130,6 +131,13 @@ const Navbar = () => {
       icon: <Description />,
       color: "#d32f2f",
       shortName: "Paper",
+    },
+    {
+      name: "Auto Trading",
+      path: "/auto-trading",
+      icon: <AutoFixHigh />,
+      color: "#00796b",
+      shortName: "Auto",
     },
     {
       name: "Settings",

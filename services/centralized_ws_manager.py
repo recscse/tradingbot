@@ -18,6 +18,7 @@ from typing import Dict, Set, List, Optional, Callable, Any, Union
 import aiohttp
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
+import sqlalchemy.exc
 from core.config import ADMIN_EMAIL
 
 # Configure logging first
@@ -144,18 +145,6 @@ except ImportError:
 
     email_service = DummyEmailService()
 
-# Import market data service with error handling
-try:
-    from services.live_market_data_service import LiveMarketDataService
-except ImportError:
-    logger.warning("⚠️ LiveMarketDataService not available")
-
-    class DummyMarketDataService:
-        def __init__(self):
-            pass
-
-    LiveMarketDataService = DummyMarketDataService
-
 # Callback type definition
 CallbackFunction = Callable[[Dict[str, Any]], Any]
 
@@ -194,6 +183,14 @@ class CentralizedWebSocketManager:
         self.active_instrument_keys: Set[str] = set()
         self.primary_instruments: Set[str] = set()
         self.connection_ready = asyncio.Event()
+
+        # Auto-trading specific subscriptions
+        self.fno_stocks_keys: Set[str] = set()
+        self.priority_instruments: Set[str] = (
+            set()
+        )  # High-frequency updates for selected stocks
+        self.auto_trading_active = False
+        self.selected_stocks_for_trading: Dict[str, Dict] = {}  # symbol -> metadata
 
         # Data caching
         self.market_data_cache: Dict[str, dict] = {}
@@ -234,8 +231,6 @@ class CentralizedWebSocketManager:
         self.background_tasks = set()
 
         # Initialize market data service
-        self.market_data = LiveMarketDataService()
-
         self._initialized = True
         logger.info("✅ Centralized WebSocket manager initialized")
 
@@ -329,165 +324,212 @@ class CentralizedWebSocketManager:
         try:
             now = datetime.now()
             expiry = broker_config.access_token_expiry
-            
+
             if not expiry:
                 return {
                     "valid": False,
                     "reason": "no_expiry_info",
-                    "message": "Token expiry information not available"
+                    "message": "Token expiry information not available",
                 }
-            
+
             if expiry <= now:
                 minutes_expired = int((now - expiry).total_seconds() / 60)
                 return {
                     "valid": False,
                     "reason": "expired",
                     "message": f"Token expired {minutes_expired} minutes ago",
-                    "expired_minutes": minutes_expired
+                    "expired_minutes": minutes_expired,
                 }
-            
+
             minutes_until_expiry = int((expiry - now).total_seconds() / 60)
-            
+
             if minutes_until_expiry <= 10:
                 return {
                     "valid": False,
                     "reason": "expiring_soon",
                     "message": f"Token expires in {minutes_until_expiry} minutes",
-                    "minutes_remaining": minutes_until_expiry
+                    "minutes_remaining": minutes_until_expiry,
                 }
-            
+
             return {
                 "valid": True,
                 "reason": "valid",
                 "message": f"Token valid for {minutes_until_expiry} minutes",
-                "minutes_remaining": minutes_until_expiry
+                "minutes_remaining": minutes_until_expiry,
             }
-            
+
         except Exception as e:
             return {
                 "valid": False,
                 "reason": "validation_error",
-                "message": f"Error validating token: {str(e)}"
+                "message": f"Error validating token: {str(e)}",
             }
 
     async def _load_admin_token(self) -> bool:
-        """Load admin token from database"""
-        try:
-            db = next(get_db())
-            if db is None:
-                logger.error("❌ Database not available")
-                return False
+        """Load admin token from database with retry logic"""
+        max_retries = 3
+        retry_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                db = next(get_db())
+                if db is None:
+                    logger.error("❌ Database not available")
+                    if attempt < max_retries - 1:
+                        logger.info(f"🔄 Retrying database connection in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    return False
 
-            # Find admin user with Upstox broker config
-            admin_broker = (
-                db.query(BrokerConfig)
-                .join(User, BrokerConfig.user_id == User.id)
-                .filter(
-                    User.role == "admin",
-                    BrokerConfig.broker_name.ilike("upstox"),
-                    BrokerConfig.access_token.isnot(None),
+                # Find admin user with Upstox broker config
+                admin_broker = (
+                    db.query(BrokerConfig)
+                    .join(User, BrokerConfig.user_id == User.id)
+                    .filter(
+                        User.role == "admin",
+                        BrokerConfig.broker_name.ilike("upstox"),
+                        BrokerConfig.access_token.isnot(None),
+                    )
+                    .first()
                 )
-                .first()
-            )
 
-            if not admin_broker:
-                logger.error("❌ No admin user with Upstox access token found!")
-                return False
+                if not admin_broker:
+                    logger.error("❌ No admin user with Upstox access token found!")
+                    return False
 
-            # Validate token format
-            token = admin_broker.access_token
-            if not token or len(token.strip()) < 20:
-                logger.error(
-                    f"❌ Invalid token format in database (length: {len(token) if token else 0})"
-                )
-                return False
+                # Validate token format
+                token = admin_broker.access_token
+                if not token or len(token.strip()) < 20:
+                    logger.error(
+                        f"❌ Invalid token format in database (length: {len(token) if token else 0})"
+                    )
+                    return False
 
-            # Validate token expiry BEFORE storing
-            validation_result = await self._validate_token_expiry(admin_broker)
-            
-            # If token is expired or expiring soon, refresh it BEFORE storing
-            if not validation_result["valid"] and validation_result["reason"] in ["expired", "expiring_soon"]:
-                reason = validation_result["reason"]
-                message = validation_result["message"]
-                
-                if reason == "expired":
-                    logger.error(f"❌ Admin token expired: {message}")
-                elif reason == "expiring_soon":
-                    logger.warning(f"⚠️ Admin token expiring soon: {message}")
-                
-                logger.info(f"🤖 Attempting automated token refresh for {reason} token BEFORE storing...")
-                
-                try:
-                    refresh_success = await self._try_automated_refresh()
-                    if refresh_success:
-                        logger.info("✅ Automated token refresh completed - reloading fresh token")
-                        # Recursively reload to get the fresh token
-                        return await self._load_admin_token()
-                    else:
-                        logger.warning("⚠️ Automated token refresh failed - will store expired token and retry on connection failure")
+                # Validate token expiry BEFORE storing
+                validation_result = await self._validate_token_expiry(admin_broker)
+
+                # If token is expired or expiring soon, refresh it BEFORE storing
+                if not validation_result["valid"] and validation_result["reason"] in [
+                    "expired",
+                    "expiring_soon",
+                ]:
+                    reason = validation_result["reason"]
+                    message = validation_result["message"]
+
+                    if reason == "expired":
+                        logger.error(f"❌ Admin token expired: {message}")
+                    elif reason == "expiring_soon":
+                        logger.warning(f"⚠️ Admin token expiring soon: {message}")
+
+                    logger.info(
+                        f"🤖 Attempting automated token refresh for {reason} token BEFORE storing..."
+                    )
+
+                    try:
+                        refresh_success = await self._try_automated_refresh()
+                        if refresh_success:
+                            logger.info(
+                                "✅ Automated token refresh completed - reloading fresh token"
+                            )
+                            # Recursively reload to get the fresh token
+                            return await self._load_admin_token()
+                        else:
+                            logger.warning(
+                                "⚠️ Automated token refresh failed - will store expired token and retry on connection failure"
+                            )
+                            # Fall through to store the expired token as fallback
+                    except Exception as refresh_error:
+                        logger.error(
+                            f"❌ Error during automated token refresh: {refresh_error}"
+                        )
                         # Fall through to store the expired token as fallback
-                except Exception as refresh_error:
-                    logger.error(f"❌ Error during automated token refresh: {refresh_error}")
-                    # Fall through to store the expired token as fallback
-            
-            # Store token and user ID (only reached if valid OR refresh failed)
-            self.admin_token = token.strip()
-            self.admin_user_id = admin_broker.user_id
-            self._token_validation_status = validation_result
 
-            # Log with masked token for security
-            token_preview = (
-                f"{self.admin_token[:5]}...{self.admin_token[-5:]}"
-                if len(self.admin_token) > 10
-                else "***"
-            )
-            
-            if validation_result["valid"]:
-                logger.info(
-                    f"✅ Admin token loaded for user ID: {self.admin_user_id} - Token: {token_preview}"
+                # Store token and user ID (only reached if valid OR refresh failed)
+                self.admin_token = token.strip()
+                self.admin_user_id = admin_broker.user_id
+                self._token_validation_status = validation_result
+
+                # Log with masked token for security
+                token_preview = (
+                    f"{self.admin_token[:5]}...{self.admin_token[-5:]}"
+                    if len(self.admin_token) > 10
+                    else "***"
                 )
-                logger.info(f"ℹ️ {validation_result['message']}")
-            else:
-                reason = validation_result["reason"]
-                message = validation_result["message"]
-                logger.info(f"⚠️ Admin token loaded with issues for user ID: {self.admin_user_id} - {message}")
-                
-            # Set automation trigger flag for future cycles
-            if not validation_result["valid"] and validation_result["reason"] in ["expired", "expiring_soon"]:
-                self._needs_token_refresh = True
-                if validation_result["reason"] == "expired":
-                    logger.info("🔄 Token expired but loaded for refresh attempt")
-            else:
-                self._needs_token_refresh = False
-                
-            return True
 
-        except Exception as e:
-            logger.error(f"❌ Failed to load admin token: {e}")
-            traceback.print_exc()
-            return False
-            
+                if validation_result["valid"]:
+                    logger.info(
+                        f"✅ Admin token loaded for user ID: {self.admin_user_id} - Token: {token_preview}"
+                    )
+                    logger.info(f"ℹ️ {validation_result['message']}")
+                else:
+                    reason = validation_result["reason"]
+                    message = validation_result["message"]
+                    logger.info(
+                        f"⚠️ Admin token loaded with issues for user ID: {self.admin_user_id} - {message}"
+                    )
+
+                # Set automation trigger flag for future cycles
+                if not validation_result["valid"] and validation_result["reason"] in [
+                    "expired",
+                    "expiring_soon",
+                ]:
+                    self._needs_token_refresh = True
+                    if validation_result["reason"] == "expired":
+                        logger.info("🔄 Token expired but loaded for refresh attempt")
+                else:
+                    self._needs_token_refresh = False
+
+                return True
+                
+            except (sqlalchemy.exc.TimeoutError, sqlalchemy.exc.OperationalError) as db_error:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ Database connection failed (attempt {attempt + 1}/{max_retries}): {db_error}")
+                    logger.info(f"🔄 Retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    logger.error(f"❌ Database connection failed after {max_retries} attempts: {db_error}")
+                    return False
+                    
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ Token loading failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.info(f"🔄 Retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    logger.error(f"❌ Failed to load admin token after {max_retries} attempts: {e}")
+                    traceback.print_exc()
+                    return False
+                    
+        logger.error(f"❌ Failed to load admin token after {max_retries} attempts")
+        return False
+
     async def _try_automated_refresh(self) -> bool:
         """
         Attempt automated token refresh using the automation service
         """
         try:
             logger.info("🤖 Attempting automated token refresh...")
-            
+
             # Import automation service dynamically to avoid circular imports
             from services.upstox_automation_service import UpstoxAutomationService
-            
+
             automation_service = UpstoxAutomationService()
             # ✅ FIX: Add emergency bypass for expired tokens
-            result = await automation_service.refresh_admin_upstox_token(emergency_bypass=True)
-            
+            result = await automation_service.refresh_admin_upstox_token(
+                emergency_bypass=True
+            )
+
             if result.get("success", False):
                 logger.info("✅ Automated token refresh completed successfully")
-                
+
                 # ✅ FIX: Add delay before reloading to ensure database is updated
                 logger.info("⏳ Waiting for database update to complete...")
                 await asyncio.sleep(2)
-                
+
                 # Reload the admin token after successful refresh
                 token_reloaded = await self._load_admin_token()
                 if token_reloaded:
@@ -500,11 +542,10 @@ class CentralizedWebSocketManager:
                 error_msg = result.get("error", "Unknown error")
                 logger.error(f"❌ Automated token refresh failed: {error_msg}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ Error during automated token refresh: {e}")
             return False
-
 
     async def _validate_and_refresh_token(self) -> bool:
         """Proactively validate token and refresh if needed"""
@@ -512,31 +553,38 @@ class CentralizedWebSocketManager:
             if not self.admin_token:
                 logger.warning("⚠️ No admin token available, loading...")
                 return await self._load_admin_token()
-            
+
             # Check token expiry from database
             from database.connection import SessionLocal
             from database.models import BrokerConfig
             from core.config import ADMIN_EMAIL
-            
+
             with SessionLocal() as db:
-                admin_user = db.query(BrokerConfig).filter(
-                    BrokerConfig.user.has(email=ADMIN_EMAIL),
-                    BrokerConfig.broker_name.ilike("upstox"),
-                    BrokerConfig.is_active == True,
-                ).first()
-                
+                admin_user = (
+                    db.query(BrokerConfig)
+                    .filter(
+                        BrokerConfig.user.has(email=ADMIN_EMAIL),
+                        BrokerConfig.broker_name.ilike("upstox"),
+                        BrokerConfig.is_active == True,
+                    )
+                    .first()
+                )
+
                 if not admin_user or not admin_user.access_token_expiry:
                     logger.warning("⚠️ No admin broker config found")
                     return await self._load_admin_token()
-                
+
                 # Check if token is expired or expires soon (within 10 minutes)
                 from datetime import datetime, timedelta
+
                 now = datetime.now()
                 buffer_time = timedelta(minutes=10)
-                
+
                 if admin_user.access_token_expiry <= (now + buffer_time):
-                    logger.info(f"🔄 Token expires soon ({admin_user.access_token_expiry}), refreshing...")
-                    
+                    logger.info(
+                        f"🔄 Token expires soon ({admin_user.access_token_expiry}), refreshing..."
+                    )
+
                     # Try automatic refresh
                     refresh_success = await self._try_automated_refresh()
                     if refresh_success:
@@ -545,10 +593,10 @@ class CentralizedWebSocketManager:
                     else:
                         logger.error("❌ Proactive token refresh failed")
                         return False
-                
+
                 logger.debug(f"✅ Token valid until {admin_user.access_token_expiry}")
                 return True
-                
+
         except Exception as e:
             logger.error(f"❌ Error validating token: {e}")
             return False
@@ -560,32 +608,34 @@ class CentralizedWebSocketManager:
         """
         try:
             logger.info("🔄 Reloading admin token after successful refresh...")
-            
+
             # Clear current token
             old_token = self.admin_token
             self.admin_token = None
             self.admin_user_id = None
-            
+
             # Load fresh token from database
             token_loaded = await self._load_admin_token()
-            
+
             if token_loaded and self.admin_token != old_token:
                 logger.info("✅ Admin token successfully reloaded with new value")
-                
+
                 # Stop existing WebSocket connection if any
                 if self.ws_client:
-                    logger.info("🔄 Stopping existing WebSocket connection to use new token...")
+                    logger.info(
+                        "🔄 Stopping existing WebSocket connection to use new token..."
+                    )
                     self.ws_client.stop()
-                    
+
                 # Clear connection ready flag to trigger reconnection
                 self.connection_ready.clear()
-                
+
                 # Reset reconnect attempts to allow fresh connection with new token
                 self.reconnect_attempts = 0
-                
+
                 # Start fresh connection with new token
                 await self.start_connection()
-                
+
                 return True
             elif token_loaded:
                 logger.warning("⚠️ Token reloaded but value unchanged")
@@ -593,35 +643,35 @@ class CentralizedWebSocketManager:
             else:
                 logger.error("❌ Failed to reload admin token")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ Error reloading admin token: {e}")
             return False
-    
+
     async def force_reconnect(self) -> bool:
         """
         Force reconnection with current token - useful after token refresh
         """
         try:
             logger.info("🔄 Forcing WebSocket reconnection...")
-            
+
             # Stop existing connection
             if self.ws_client:
                 self.ws_client.stop()
-            
+
             # Clear connection state
             self.connection_ready.clear()
             self.reconnect_attempts = 0
-            
+
             # Wait a moment for cleanup
             await asyncio.sleep(1)
-            
+
             # Start fresh connection
             await self.start_connection()
-            
+
             logger.info("✅ Force reconnection initiated")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Error during force reconnection: {e}")
             return False
@@ -632,16 +682,23 @@ class CentralizedWebSocketManager:
             logger.info("🔄 Loading focused instrument keys...")
 
             # Ensure instrument service is initialized first
-            from services.instrument_refresh_service import get_trading_service, get_focused_instrument_keys
-            
+            from services.instrument_refresh_service import (
+                get_trading_service,
+                get_focused_instrument_keys,
+            )
+
             service = get_trading_service()
-            if not getattr(service, '_service_initialized', False):
+            if not getattr(service, "_service_initialized", False):
                 logger.info("🔧 Initializing instrument service for WebSocket...")
                 try:
                     init_result = await service.initialize_service()
-                    logger.info(f"✅ Service initialization: {init_result.status if hasattr(init_result, 'status') else 'completed'}")
+                    logger.info(
+                        f"✅ Service initialization: {init_result.status if hasattr(init_result, 'status') else 'completed'}"
+                    )
                 except Exception as init_error:
-                    logger.warning(f"⚠️ Service initialization failed, continuing with available data: {init_error}")
+                    logger.warning(
+                        f"⚠️ Service initialization failed, continuing with available data: {init_error}"
+                    )
 
             # Get all focused keys (now with initialized service)
             focused_data = get_focused_instrument_keys()
@@ -686,23 +743,34 @@ class CentralizedWebSocketManager:
 
             # Emergency fallback - Include FNO stocks and indices
             from services.fno_stock_service import get_fno_stocks_from_file
-            emergency_keys = ["NSE_INDEX|Nifty 50", "NSE_INDEX|Nifty Bank", "BSE_INDEX|SENSEX"]
-            
+
+            emergency_keys = [
+                "NSE_INDEX|Nifty 50",
+                "NSE_INDEX|Nifty Bank",
+                "BSE_INDEX|SENSEX",
+            ]
+
             # Add top FNO stocks for better data coverage
             try:
                 fno_stocks = get_fno_stocks_from_file()
                 if fno_stocks:
                     # Add top 50 FNO stocks by volume/activity
-                    top_fno = [stock for stock in fno_stocks if stock.get('symbol') and stock.get('exchange') == 'NSE'][:50]
+                    top_fno = [
+                        stock
+                        for stock in fno_stocks
+                        if stock.get("symbol") and stock.get("exchange") == "NSE"
+                    ][:50]
                     for stock in top_fno:
-                        if stock.get('symbol'):
+                        if stock.get("symbol"):
                             # Use NSE_EQ format for equity stocks
                             emergency_keys.append(f"NSE_EQ|{stock['symbol']}")
-                    
-                    logger.info(f"✅ Added {len(top_fno)} top FNO stocks to emergency fallback")
+
+                    logger.info(
+                        f"✅ Added {len(top_fno)} top FNO stocks to emergency fallback"
+                    )
             except Exception as e:
                 logger.warning(f"⚠️ Could not load FNO stocks for fallback: {e}")
-            
+
             self.all_instrument_keys = set(emergency_keys)
             logger.warning(
                 f"⚠️ Emergency fallback: {len(self.all_instrument_keys)} keys (indices + FNO stocks)"
@@ -733,16 +801,29 @@ class CentralizedWebSocketManager:
         return True
 
     async def _check_network_connectivity(self) -> bool:
-        """Check if basic network connectivity is available"""
-        try:
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=5)
-            ) as session:
-                async with session.get("https://www.google.com") as response:
-                    return response.status == 200
-        except Exception as e:
-            logger.warning(f"⚠️ Network connectivity check failed: {e}")
-            return False
+        """Check if basic network connectivity is available with multiple fallbacks"""
+        test_urls = [
+            "https://api.upstox.com",  # Primary broker API
+            "https://www.google.com",   # Google DNS
+            "https://1.1.1.1",          # Cloudflare DNS  
+            "https://httpbin.org/status/200"  # HTTP testing service
+        ]
+        
+        for url in test_urls:
+            try:
+                async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as session:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            logger.debug(f"✅ Network connectivity confirmed via {url}")
+                            return True
+            except Exception as e:
+                logger.debug(f"⚠️ Connectivity check failed for {url}: {e}")
+                continue
+                
+        logger.warning("⚠️ All network connectivity checks failed")
+        return False
 
     async def _maintain_connection(self):
         """Maintain WebSocket connection with auto-reconnect"""
@@ -809,7 +890,7 @@ class CentralizedWebSocketManager:
         try:
             # Validate and refresh token before starting connection
             await self._validate_and_refresh_token()
-            
+
             # Stop existing client
             if self.ws_client:
                 self.ws_client.stop()
@@ -993,6 +1074,7 @@ class CentralizedWebSocketManager:
             # 🚀 CRITICAL: ZERO-DELAY real-time streaming to UI FIRST (before any processing)
             try:
                 from services.realtime_data_streamer import realtime_streamer
+
                 # This bypasses ALL processing and sends raw data directly to UI
                 await realtime_streamer.stream_raw_market_data(data)
             except ImportError:
@@ -1002,9 +1084,14 @@ class CentralizedWebSocketManager:
 
             # 🚨 CRITICAL: ZERO-DELAY breakout detection (parallel with UI streaming)
             try:
-                from services.realtime_breakout_detector import realtime_breakout_detector
+                from services.realtime_breakout_detector import (
+                    realtime_breakout_detector,
+                )
+
                 # Process breakouts in parallel (non-blocking)
-                asyncio.create_task(realtime_breakout_detector.process_realtime_data(data))
+                asyncio.create_task(
+                    realtime_breakout_detector.process_realtime_data(data)
+                )
             except ImportError:
                 logger.debug("Real-time breakout detector not available")
             except Exception as e:
@@ -1022,11 +1109,17 @@ class CentralizedWebSocketManager:
 
             # 🚀 BACKGROUND: All data processing happens in parallel (non-blocking)
             # This includes enrichment, analytics, caching - UI already got raw data above
-            asyncio.create_task(self._background_data_processing(feeds, is_snapshot, data))
-                
-            logger.debug(f"✅ ZERO-DELAY streaming + background processing initiated for {len(feeds)} instruments")
+            asyncio.create_task(
+                self._background_data_processing(feeds, is_snapshot, data)
+            )
 
-    async def _background_data_processing(self, feeds: dict, is_snapshot: bool, data: dict):
+            logger.debug(
+                f"✅ ZERO-DELAY streaming + background processing initiated for {len(feeds)} instruments"
+            )
+
+    async def _background_data_processing(
+        self, feeds: dict, is_snapshot: bool, data: dict
+    ):
         """Background processing that doesn't block the main data flow"""
         try:
             # Legacy cache and registry updates (background only)
@@ -1034,7 +1127,7 @@ class CentralizedWebSocketManager:
                 self._update_cache(feeds),
                 self._legacy_registry_update(feeds),
                 self._broadcast_live_data(feeds, is_snapshot),
-                return_exceptions=True
+                return_exceptions=True,
             )
 
             # Execute callbacks (background)
@@ -1045,7 +1138,7 @@ class CentralizedWebSocketManager:
                     "is_snapshot": is_snapshot,
                     "update_count": self.update_count,
                     "timestamp": data.get("currentTs", datetime.now().isoformat()),
-                    "source": "centralized_background"
+                    "source": "centralized_background",
                 },
             )
         except Exception as e:
@@ -1057,7 +1150,7 @@ class CentralizedWebSocketManager:
             self._update_cache(feeds),
             self._update_instrument_registry(feeds),
             self._broadcast_live_data(feeds, is_snapshot),
-            return_exceptions=True
+            return_exceptions=True,
         )
 
         await self._execute_callbacks(
@@ -1067,7 +1160,7 @@ class CentralizedWebSocketManager:
                 "is_snapshot": is_snapshot,
                 "update_count": self.update_count,
                 "timestamp": data.get("currentTs", datetime.now().isoformat()),
-                "source": "centralized_legacy"
+                "source": "centralized_legacy",
             },
         )
 
@@ -1075,6 +1168,7 @@ class CentralizedWebSocketManager:
         """Legacy registry update (background only)"""
         try:
             from services.instrument_registry import instrument_registry
+
             normalized_data = self._normalize_market_data(feeds)
             if normalized_data:
                 instrument_registry.update_live_prices(normalized_data)
@@ -1094,6 +1188,7 @@ class CentralizedWebSocketManager:
             # 🚀 CRITICAL: ZERO-DELAY streaming FIRST
             try:
                 from services.realtime_data_streamer import realtime_streamer
+
                 await realtime_streamer.stream_raw_market_data(data)
             except Exception as e:
                 logger.debug(f"Real-time streaming error: {e}")
@@ -1112,7 +1207,7 @@ class CentralizedWebSocketManager:
                 self._update_cache(feeds),
                 self._update_instrument_registry(feeds),
                 self._broadcast_live_data(feeds, is_snapshot),
-                return_exceptions=True  # Don't let one failure block others
+                return_exceptions=True,  # Don't let one failure block others
             )
 
             await self._execute_callbacks(
@@ -1135,6 +1230,7 @@ class CentralizedWebSocketManager:
         # 🚀 CRITICAL: ZERO-DELAY streaming FIRST
         try:
             from services.realtime_data_streamer import realtime_streamer
+
             await realtime_streamer.stream_raw_market_data(data)
         except Exception as e:
             logger.debug(f"Real-time streaming error: {e}")
@@ -1166,23 +1262,25 @@ class CentralizedWebSocketManager:
             # 🚀 REMOVED: Redundant unified manager calls
             # These are now handled by instrument_registry.update_live_prices() callbacks
             # which provide ZERO DELAY for strategies and optimized UI batching
-            logger.debug(f"⚡ OPTIMIZED: Data will be broadcast via instrument registry callbacks")
-                
+            logger.debug(
+                f"⚡ OPTIMIZED: Data will be broadcast via instrument registry callbacks"
+            )
+
         except Exception as e:
             logger.error(f"❌ Error in optimized broadcast: {e}")
-                
+
             # Original registry update (background)
             try:
                 from services.instrument_registry import instrument_registry
+
                 normalized_data = self._normalize_market_data(feed_data)
                 if normalized_data:
                     instrument_registry.update_live_prices(normalized_data)
             except Exception as e:
                 logger.warning(f"⚠️ Registry update error: {e}")
-                
+
         except Exception as e:
             logger.error(f"❌ Error in _update_instrument_registry: {e}")
-
 
     def _normalize_market_data(self, feed_data: dict) -> dict:
         """COMPLETE: Handle all Upstox formats with full error handling"""
@@ -1374,7 +1472,9 @@ class CentralizedWebSocketManager:
                 # Price data with frontend-compatible field names
                 **extracted_data,
                 # CRITICAL FIX: Add frontend-compatible field mapping
-                "last_price": extracted_data.get("ltp", 0),  # Map ltp → last_price for frontend
+                "last_price": extracted_data.get(
+                    "ltp", 0
+                ),  # Map ltp → last_price for frontend
                 # Metadata
                 "timestamp": datetime.now().isoformat(),
                 "data_source": "upstox_live",
@@ -1878,20 +1978,22 @@ class CentralizedWebSocketManager:
             try:
                 # Extract data based on Upstox feed structure
                 extracted_data = self._extract_market_data(instrument_key, raw_data)
-                
+
                 if extracted_data and extracted_data.get("ltp", 0) > 0:
                     # CRITICAL FIX: Add frontend-compatible field mapping
                     processed_data = {
                         **extracted_data,
-                        "last_price": extracted_data.get("ltp", 0),  # Map ltp → last_price for frontend
+                        "last_price": extracted_data.get(
+                            "ltp", 0
+                        ),  # Map ltp → last_price for frontend
                         "symbol": self._extract_symbol_from_key(instrument_key),
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
-                    
+
                     # Update cache with processed data
                     self.market_data_cache[instrument_key] = processed_data
                     processed_count += 1
-                    
+
                     # Count by type
                     if "INDEX|" in instrument_key:
                         indices_count += 1
@@ -1905,7 +2007,7 @@ class CentralizedWebSocketManager:
                         "ltp": 0,
                         "last_price": 0,
                         "status": "incomplete",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
                     self.market_data_cache[instrument_key] = incomplete_data
 
@@ -1914,7 +2016,9 @@ class CentralizedWebSocketManager:
 
         # Log processing stats
         if processed_count > 0:
-            logger.info(f"📊 Processed {processed_count} instruments ({indices_count} indices, {stocks_count} stocks)")
+            logger.info(
+                f"📊 Processed {processed_count} instruments ({indices_count} indices, {stocks_count} stocks)"
+            )
 
         # Store in Redis if available
         if redis_manager and processed_count > 0:
@@ -1924,11 +2028,15 @@ class CentralizedWebSocketManager:
                     if isinstance(data, dict) and data.get("ltp", 0) > 0:
                         essential_data[key] = {
                             "ltp": data.get("ltp", 0),
-                            "last_price": data.get("last_price", 0),  # Include frontend field
+                            "last_price": data.get(
+                                "last_price", 0
+                            ),  # Include frontend field
                             "ltq": data.get("ltq"),
                             "cp": data.get("cp"),
                             "symbol": data.get("symbol"),
-                            "timestamp": data.get("timestamp", datetime.now().isoformat()),
+                            "timestamp": data.get(
+                                "timestamp", datetime.now().isoformat()
+                            ),
                         }
 
                 redis_manager.set("market_data_cache", essential_data, ttl=3600)
@@ -1939,11 +2047,11 @@ class CentralizedWebSocketManager:
         """Extract market data from Upstox feed structure"""
         try:
             extracted = {}
-            
+
             # Handle different Upstox data structures
             if isinstance(raw_data, dict):
                 full_feed = raw_data.get("fullFeed", {})
-                
+
                 # For indices: indexFF -> ltpc
                 if "indexFF" in full_feed:
                     ltpc_data = full_feed["indexFF"].get("ltpc", {})
@@ -1953,19 +2061,24 @@ class CentralizedWebSocketManager:
                             "ltt": ltpc_data.get("ltt"),
                             "cp": ltpc_data.get("cp", 0),
                             "change": ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0),
-                            "type": "index"
+                            "type": "index",
                         }
                         # Calculate change percentage
                         if ltpc_data.get("cp", 0) > 0:
                             extracted["change_percent"] = round(
-                                ((ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0)) / ltpc_data.get("cp", 0)) * 100, 2
+                                (
+                                    (ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0))
+                                    / ltpc_data.get("cp", 0)
+                                )
+                                * 100,
+                                2,
                             )
-                
+
                 # For stocks: marketFF -> ltpc
                 elif "marketFF" in full_feed:
                     ltpc_data = full_feed["marketFF"].get("ltpc", {})
                     market_level = full_feed["marketFF"].get("marketLevel", {})
-                    
+
                     # Sometimes stock data is in ltpc
                     if ltpc_data and ltpc_data.get("ltp"):
                         extracted = {
@@ -1974,32 +2087,49 @@ class CentralizedWebSocketManager:
                             "cp": ltpc_data.get("cp", 0),
                             "ltq": ltpc_data.get("ltq", 0),
                             "change": ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0),
-                            "type": "stock"
+                            "type": "stock",
                         }
                         # Calculate change percentage
                         if ltpc_data.get("cp", 0) > 0:
                             extracted["change_percent"] = round(
-                                ((ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0)) / ltpc_data.get("cp", 0)) * 100, 2
+                                (
+                                    (ltpc_data.get("ltp", 0) - ltpc_data.get("cp", 0))
+                                    / ltpc_data.get("cp", 0)
+                                )
+                                * 100,
+                                2,
                             )
-                    
+
                     # Sometimes data is in marketLevel
                     elif market_level:
                         bid_ask = market_level.get("bidAsk", {})
                         if bid_ask:
                             # Use bid/ask as fallback
-                            bid_price = bid_ask.get("bid", [{}])[0].get("price", 0) if bid_ask.get("bid") else 0
-                            ask_price = bid_ask.get("ask", [{}])[0].get("price", 0) if bid_ask.get("ask") else 0
-                            
+                            bid_price = (
+                                bid_ask.get("bid", [{}])[0].get("price", 0)
+                                if bid_ask.get("bid")
+                                else 0
+                            )
+                            ask_price = (
+                                bid_ask.get("ask", [{}])[0].get("price", 0)
+                                if bid_ask.get("ask")
+                                else 0
+                            )
+
                             if bid_price > 0 or ask_price > 0:
-                                ltp = (bid_price + ask_price) / 2 if bid_price > 0 and ask_price > 0 else (bid_price or ask_price)
+                                ltp = (
+                                    (bid_price + ask_price) / 2
+                                    if bid_price > 0 and ask_price > 0
+                                    else (bid_price or ask_price)
+                                )
                                 extracted = {
                                     "ltp": ltp,
                                     "bid": bid_price,
                                     "ask": ask_price,
                                     "type": "stock",
-                                    "source": "bid_ask"
+                                    "source": "bid_ask",
                                 }
-                
+
                 # Direct data format (fallback)
                 elif raw_data.get("ltp"):
                     extracted = {
@@ -2007,11 +2137,11 @@ class CentralizedWebSocketManager:
                         "ltt": raw_data.get("ltt"),
                         "cp": raw_data.get("cp", 0),
                         "ltq": raw_data.get("ltq", 0),
-                        "type": "direct"
+                        "type": "direct",
                     }
-                    
+
             return extracted
-            
+
         except Exception as e:
             logger.warning(f"⚠️ Error extracting data for {instrument_key}: {e}")
             return {}
@@ -2200,7 +2330,7 @@ class CentralizedWebSocketManager:
         # First try to trigger automated token refresh
         logger.info("🔄 Attempting automated token refresh...")
         refresh_success = await self._try_automated_refresh()
-        
+
         if refresh_success:
             logger.info("✅ Automated token refresh successful, reloading token...")
             token_refreshed = await self._load_admin_token()
@@ -2211,7 +2341,7 @@ class CentralizedWebSocketManager:
                 # Clear any connection ready flag to force reconnect
                 self.connection_ready.clear()
                 return
-        
+
         # Fallback: Try to reload token from database (in case it was manually refreshed)
         token_refreshed = await self._load_admin_token()
 
@@ -2604,9 +2734,9 @@ class CentralizedWebSocketManager:
         # Calculate active instruments (those with recent valid data)
         active_instruments = 0
         for data in self.market_data_cache.values():
-            if isinstance(data, dict) and data.get('last_price'):
+            if isinstance(data, dict) and data.get("last_price"):
                 active_instruments += 1
-        
+
         return {
             "market_status": self.market_status,
             "last_updated": (
@@ -2791,64 +2921,76 @@ class CentralizedWebSocketManager:
         """🚀 FAST: Enrich price data with metadata (sector, symbol, etc.) in <3ms"""
         try:
             from services.instrument_registry import instrument_registry
-            
+
             # Update and get enriched data in one operation (fast)
             enriched_data = instrument_registry.update_and_enrich_prices(feeds)
             return enriched_data if enriched_data else feeds
-            
+
         except Exception as e:
             logger.debug(f"Price enrichment error: {e}")
             # Return original feeds if enrichment fails
             return feeds
-    
+
     async def _broadcast_realtime_prices(self, enriched_feeds: dict):
         """🚀 REMOVED: Redundant price broadcasting - now handled by instrument registry callbacks"""
         # This method is now redundant as price broadcasting is handled by:
         # instrument_registry.update_live_prices() -> _execute_real_time_callbacks() -> UI callbacks
-        logger.debug(f"⚡ OPTIMIZED: Price broadcasting handled by instrument registry ({len(enriched_feeds)} feeds)")
+        logger.debug(
+            f"⚡ OPTIMIZED: Price broadcasting handled by instrument registry ({len(enriched_feeds)} feeds)"
+        )
         return  # Early return - no processing needed
-    
-    async def _process_analytics_background(self, feeds: dict, enriched_feeds: dict, is_snapshot: bool, data: dict):
+
+    async def _process_analytics_background(
+        self, feeds: dict, enriched_feeds: dict, is_snapshot: bool, data: dict
+    ):
         """Background processing for analytics (non-blocking, can have slight delay)"""
         try:
             from services.unified_websocket_manager import unified_manager
-            
+
             # Update market data hub (background)
             try:
                 from services.market_data_hub import market_data_hub
+
                 market_data_hub.update_market_data_batch(feeds)
-                logger.debug(f"📊 Hub updated with {len(feeds)} instruments (background)")
+                logger.debug(
+                    f"📊 Hub updated with {len(feeds)} instruments (background)"
+                )
             except Exception as e:
                 logger.debug(f"Hub update error: {e}")
-            
+
             # Update cache (background)
             await self._update_cache(feeds)
-            
-            # Update registry (background) 
+
+            # Update registry (background)
             await self._legacy_registry_update(feeds)
-            
+
             # Queue analytics dashboard update (can have delay)
             dashboard_data = {
                 "data": enriched_feeds,
                 "market_open": self.market_status == "open",
                 "timestamp": data.get("currentTs", datetime.now().isoformat()),
                 "update_count": self.update_count,
-                "is_snapshot": is_snapshot
+                "is_snapshot": is_snapshot,
             }
-            
-            logger.debug(f"📊 BACKGROUND: Analytics processing started for {len(enriched_feeds)} instruments")
-            
+
+            logger.debug(
+                f"📊 BACKGROUND: Analytics processing started for {len(enriched_feeds)} instruments"
+            )
+
             # 🚀 REMOVED: Redundant unified manager call
             # Dashboard updates now handled by instrument registry UI callbacks
-            
+
             # Execute other callbacks
-            await self._execute_callbacks("price_update", {
-                "data": enriched_feeds,
-                "is_snapshot": is_snapshot,
-                "timestamp": datetime.now().isoformat(),
-                "source": "background_analytics"
-            })
-            
+            await self._execute_callbacks(
+                "price_update",
+                {
+                    "data": enriched_feeds,
+                    "is_snapshot": is_snapshot,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "background_analytics",
+                },
+            )
+
         except Exception as e:
             logger.debug(f"Background analytics processing error: {e}")
 
@@ -2857,16 +2999,379 @@ class CentralizedWebSocketManager:
         try:
             # Import instrument registry
             from services.instrument_registry import instrument_registry
-            
+
             # Update registry with live feeds
             if feeds and isinstance(feeds, dict):
                 stats = instrument_registry.update_live_prices(feeds)
                 logger.debug(f"📊 Updated instrument registry: {stats}")
-                
+
         except ImportError:
             logger.warning("⚠️ Instrument registry not available - data not stored")
         except Exception as e:
             logger.error(f"❌ Error updating instrument registry: {e}")
+
+    # ===== AUTO-TRADING SPECIFIC METHODS =====
+
+    def get_fno_stocks_list(self) -> List[str]:
+        """Get only F&O stocks from 5 indices for auto-trading"""
+        try:
+            fno_stocks = []
+            indices = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]
+
+            # Get all instrument keys and filter for F&O stocks
+            for instrument_key in self.all_instrument_keys:
+                try:
+                    # Parse instrument key format: NSE_EQ|INE002A01018
+                    if "NSE_FO|" in instrument_key:  # F&O instruments
+                        # Extract symbol from F&O instrument key
+                        symbol_part = (
+                            instrument_key.split("|")[1]
+                            if "|" in instrument_key
+                            else instrument_key
+                        )
+
+                        # Check if it belongs to our 5 indices
+                        # This is a simplified check - in practice, you'd have a mapping
+                        if any(
+                            idx in symbol_part.upper()
+                            for idx in ["NIFTY", "BANK", "FINN", "MIDCAP", "SENSEX"]
+                        ):
+                            fno_stocks.append(instrument_key)
+
+                except Exception as e:
+                    logger.debug(f"Error parsing instrument key {instrument_key}: {e}")
+                    continue
+
+            logger.info(f"📊 Found {len(fno_stocks)} F&O stocks from 5 indices")
+            self.fno_stocks_keys = set(fno_stocks)
+            return fno_stocks
+
+        except Exception as e:
+            logger.error(f"❌ Error getting F&O stocks list: {e}")
+            return []
+
+    async def priority_subscription(
+        self, selected_stocks: List[Dict[str, Any]]
+    ) -> bool:
+        """Subscribe with higher frequency for selected auto-trading stocks"""
+        try:
+            logger.info(
+                f"🔥 Setting up priority subscription for {len(selected_stocks)} selected stocks"
+            )
+
+            # Clear previous priority instruments
+            self.priority_instruments.clear()
+            self.selected_stocks_for_trading.clear()
+
+            # Add selected stocks to priority subscription
+            for stock_data in selected_stocks:
+                instrument_key = stock_data.get("instrument_key")
+                symbol = stock_data.get("symbol")
+
+                if instrument_key and symbol:
+                    self.priority_instruments.add(instrument_key)
+                    self.selected_stocks_for_trading[symbol] = {
+                        "instrument_key": instrument_key,
+                        "selection_score": stock_data.get("selection_score", 0),
+                        "option_type": stock_data.get("option_type", "NEUTRAL"),
+                        "sector": stock_data.get("sector", "OTHER"),
+                        "fibonacci_levels": stock_data.get("fibonacci_levels", {}),
+                        "ema_values": stock_data.get("ema_values", {}),
+                    }
+
+            # If we have an active WebSocket connection, update subscription
+            if (
+                self.ws_client
+                and hasattr(self.ws_client, "is_connected")
+                and self.ws_client.is_connected()
+            ):
+                # Note: This would require WebSocket client to support dynamic subscription updates
+                # For now, we'll prioritize these instruments in our data processing
+                logger.info(
+                    "🔄 WebSocket connection active - priority instruments will receive enhanced processing"
+                )
+
+            self.auto_trading_active = True
+            logger.info(
+                f"✅ Priority subscription activated for {len(self.priority_instruments)} instruments"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Error setting up priority subscription: {e}")
+            return False
+
+    def add_option_chain_data_processing(
+        self, symbol: str, option_contracts: List[Dict]
+    ) -> bool:
+        """Add option chain data processing for CE/PE contracts"""
+        try:
+            if symbol not in self.selected_stocks_for_trading:
+                logger.warning(f"Symbol {symbol} not in selected stocks for trading")
+                return False
+
+            # Add option contracts to monitoring
+            option_keys = []
+            for contract in option_contracts:
+                option_key = contract.get("instrument_key")
+                if option_key:
+                    option_keys.append(option_key)
+                    self.priority_instruments.add(option_key)
+
+            # Update stock metadata with option contracts
+            self.selected_stocks_for_trading[symbol][
+                "option_contracts"
+            ] = option_contracts
+            self.selected_stocks_for_trading[symbol]["option_keys"] = option_keys
+
+            logger.info(f"✅ Added {len(option_keys)} option contracts for {symbol}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Error adding option chain data processing: {e}")
+            return False
+
+    def fast_tick_processing(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process ticks with < 5ms latency for priority instruments"""
+        start_time = time.perf_counter()
+
+        try:
+            processed_data = {}
+            priority_updates = {}
+
+            for instrument_key, data in market_data.items():
+                # Check if this is a priority instrument
+                is_priority = instrument_key in self.priority_instruments
+
+                if is_priority:
+                    # Enhanced processing for priority instruments
+                    processed_data[instrument_key] = {
+                        "ltp": data.get("ltp", 0),
+                        "change": data.get("net_change", 0),
+                        "change_percent": data.get("percentage_change", 0),
+                        "volume": data.get("volume", 0),
+                        "high": data.get("day_high", 0),
+                        "low": data.get("day_low", 0),
+                        "open": data.get("day_open", 0),
+                        "timestamp": datetime.now(),
+                        "is_priority": True,
+                        "processing_latency_ms": 0,  # Will be calculated below
+                    }
+
+                    # Find associated symbol
+                    associated_symbol = None
+                    for symbol, stock_data in self.selected_stocks_for_trading.items():
+                        if stock_data["instrument_key"] == instrument_key:
+                            associated_symbol = symbol
+                            break
+
+                    if associated_symbol:
+                        priority_updates[associated_symbol] = processed_data[
+                            instrument_key
+                        ]
+                else:
+                    # Standard processing for non-priority instruments
+                    processed_data[instrument_key] = {
+                        "ltp": data.get("ltp", 0),
+                        "timestamp": datetime.now(),
+                        "is_priority": False,
+                    }
+
+            # Calculate processing latency
+            end_time = time.perf_counter()
+            processing_latency_ms = (end_time - start_time) * 1000
+
+            # Update latency for priority updates
+            for update in priority_updates.values():
+                update["processing_latency_ms"] = processing_latency_ms
+
+            # Log performance for HFT monitoring
+            if processing_latency_ms > 5:  # Alert if latency > 5ms
+                logger.warning(
+                    f"⚠️ High processing latency: {processing_latency_ms:.2f}ms for {len(market_data)} instruments"
+                )
+
+            # Update performance metrics
+            self.performance_metrics["last_latency_ms"] = processing_latency_ms
+            self.performance_metrics["messages_received"] += len(market_data)
+            self.performance_metrics["updates_processed"] += len(processed_data)
+
+            return {
+                "processed_data": processed_data,
+                "priority_updates": priority_updates,
+                "processing_latency_ms": processing_latency_ms,
+                "total_instruments": len(market_data),
+                "priority_instruments": len(priority_updates),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error in fast tick processing: {e}")
+            return {
+                "processed_data": {},
+                "priority_updates": {},
+                "processing_latency_ms": 999,  # Error indicator
+                "error": str(e),
+            }
+
+    def market_hours_validation(self) -> Dict[str, Any]:
+        """Validate F&O trading hours and market session status"""
+        try:
+            now = datetime.now()
+            current_time = now.time()
+            current_day = now.weekday()  # 0=Monday, 6=Sunday
+
+            # F&O trading hours: 9:15 AM to 3:30 PM, Monday to Friday
+            fno_start_time = datetime.strptime("09:15:00", "%H:%M:%S").time()
+            fno_end_time = datetime.strptime("15:30:00", "%H:%M:%S").time()
+
+            # Pre-market preparation time: 8:45 AM to 9:15 AM
+            pre_market_start = datetime.strptime("08:45:00", "%H:%M:%S").time()
+
+            # Post-market processing time: 3:30 PM to 4:00 PM
+            post_market_end = datetime.strptime("16:00:00", "%H:%M:%S").time()
+
+            is_weekday = current_day < 5  # Monday to Friday
+            is_fno_hours = fno_start_time <= current_time <= fno_end_time
+            is_pre_market = pre_market_start <= current_time < fno_start_time
+            is_post_market = fno_end_time < current_time <= post_market_end
+
+            market_session = "closed"
+            auto_trading_allowed = False
+
+            if is_weekday:
+                if is_fno_hours:
+                    market_session = "active"
+                    auto_trading_allowed = True
+                elif is_pre_market:
+                    market_session = "pre_market"
+                    auto_trading_allowed = False  # Stock selection only
+                elif is_post_market:
+                    market_session = "post_market"
+                    auto_trading_allowed = False
+                else:
+                    market_session = "closed"
+                    auto_trading_allowed = False
+
+            return {
+                "market_session": market_session,
+                "auto_trading_allowed": auto_trading_allowed,
+                "is_weekday": is_weekday,
+                "is_fno_hours": is_fno_hours,
+                "is_pre_market": is_pre_market,
+                "is_post_market": is_post_market,
+                "current_time": current_time.strftime("%H:%M:%S"),
+                "fno_start": fno_start_time.strftime("%H:%M:%S"),
+                "fno_end": fno_end_time.strftime("%H:%M:%S"),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error in market hours validation: {e}")
+            return {
+                "market_session": "unknown",
+                "auto_trading_allowed": False,
+                "error": str(e),
+            }
+
+    async def emergency_disconnection_handling(self, reason: str = "emergency") -> bool:
+        """Emergency disconnect for system safety during trading"""
+        try:
+            logger.critical(f"🚨 EMERGENCY DISCONNECTION TRIGGERED: {reason}")
+
+            # Immediately stop auto-trading
+            self.auto_trading_active = False
+
+            # Clear priority subscriptions
+            self.priority_instruments.clear()
+            self.selected_stocks_for_trading.clear()
+
+            # Stop WebSocket connection
+            if self.ws_client:
+                try:
+                    self.ws_client.stop()
+                    logger.info("✅ WebSocket connection stopped")
+                except Exception as e:
+                    logger.error(f"❌ Error stopping WebSocket: {e}")
+
+            # Send emergency notifications to all connected clients
+            emergency_message = {
+                "type": "emergency_disconnect",
+                "reason": reason,
+                "timestamp": datetime.now().isoformat(),
+                "action_required": "manual_restart",
+            }
+
+            # Broadcast to all clients
+            await self._broadcast_to_all_clients(emergency_message)
+
+            # Update connection status
+            self.is_running = False
+            self.connection_ready.clear()
+
+            logger.critical(f"🚨 Emergency disconnection completed: {reason}")
+            return True
+
+        except Exception as e:
+            logger.critical(f"❌ Error in emergency disconnection: {e}")
+            return False
+
+    def get_auto_trading_status(self) -> Dict[str, Any]:
+        """Get current auto-trading status and metrics"""
+        try:
+            return {
+                "auto_trading_active": self.auto_trading_active,
+                "priority_instruments_count": len(self.priority_instruments),
+                "selected_stocks_count": len(self.selected_stocks_for_trading),
+                "fno_stocks_count": len(self.fno_stocks_keys),
+                "market_validation": self.market_hours_validation(),
+                "performance_metrics": self.performance_metrics.copy(),
+                "websocket_connected": (
+                    self.ws_client
+                    and hasattr(self.ws_client, "is_connected")
+                    and self.ws_client.is_connected()
+                ),
+                "last_data_received": (
+                    self.last_data_received.isoformat()
+                    if self.last_data_received
+                    else None
+                ),
+            }
+        except Exception as e:
+            logger.error(f"❌ Error getting auto-trading status: {e}")
+            return {"error": str(e)}
+
+    async def _broadcast_to_all_clients(self, message: Dict[str, Any]) -> None:
+        """Broadcast message to all connected clients"""
+        try:
+            message_json = json.dumps(message)
+
+            # Broadcast to dashboard clients
+            for client_id, websocket in list(self.dashboard_clients.items()):
+                try:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text(message_json)
+                except Exception as e:
+                    logger.debug(
+                        f"Error broadcasting to dashboard client {client_id}: {e}"
+                    )
+                    # Remove disconnected client
+                    if client_id in self.dashboard_clients:
+                        del self.dashboard_clients[client_id]
+
+            # Broadcast to trading clients
+            for client_id, websocket in list(self.trading_clients.items()):
+                try:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text(message_json)
+                except Exception as e:
+                    logger.debug(
+                        f"Error broadcasting to trading client {client_id}: {e}"
+                    )
+                    # Remove disconnected client
+                    if client_id in self.trading_clients:
+                        del self.trading_clients[client_id]
+
+        except Exception as e:
+            logger.error(f"❌ Error broadcasting to all clients: {e}")
 
 
 # Create singleton instance
@@ -2941,6 +3446,44 @@ def get_centralized_websocket_status() -> Dict[str, Any]:
 async def stop_centralized_websocket() -> bool:
     """Stop the centralized WebSocket manager"""
     return await centralized_manager.stop()
+
+
+# ===== AUTO-TRADING CONVENIENCE FUNCTIONS =====
+
+
+def get_fno_stocks() -> List[str]:
+    """Get F&O stocks from 5 indices"""
+    return centralized_manager.get_fno_stocks_list()
+
+
+async def setup_priority_subscription(selected_stocks: List[Dict[str, Any]]) -> bool:
+    """Setup priority subscription for auto-trading stocks"""
+    return await centralized_manager.priority_subscription(selected_stocks)
+
+
+def add_option_contracts(symbol: str, contracts: List[Dict]) -> bool:
+    """Add option contracts for monitoring"""
+    return centralized_manager.add_option_chain_data_processing(symbol, contracts)
+
+
+def get_market_hours_status() -> Dict[str, Any]:
+    """Get F&O market hours validation"""
+    return centralized_manager.market_hours_validation()
+
+
+async def emergency_stop(reason: str = "manual") -> bool:
+    """Emergency stop auto-trading system"""
+    return await centralized_manager.emergency_disconnection_handling(reason)
+
+
+def get_auto_trading_metrics() -> Dict[str, Any]:
+    """Get auto-trading status and performance metrics"""
+    return centralized_manager.get_auto_trading_status()
+
+
+def process_priority_ticks(market_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process market data with priority for selected stocks"""
+    return centralized_manager.fast_tick_processing(market_data)
 
 
 # For any existing imports that might be looking for these

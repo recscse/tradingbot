@@ -546,6 +546,67 @@ class EnhancedBreakoutEngine:
         self.background_tasks.clear()
         logger.info("🛑 Enhanced Breakout Engine stopped")
     
+    async def _process_market_data_hub(self, data: Dict[str, Any]):
+        """Process data from Market Data Hub"""
+        try:
+            # Process different data types from hub
+            if isinstance(data, dict):
+                data_type = data.get('type', 'unknown')
+                
+                if data_type == 'price_update':
+                    # Handle single price update
+                    instrument_key = data.get('instrument_key')
+                    price_data = data.get('data', {})
+                    
+                    if instrument_key and price_data:
+                        await self._process_single_update(instrument_key, price_data)
+                
+                elif data_type == 'batch_update':
+                    # Handle batch of price updates
+                    updates = data.get('updates', [])
+                    await self._process_feed_batch(updates)
+                
+                elif data_type == 'market_data':
+                    # Handle general market data
+                    feeds = data.get('feeds', [])
+                    if feeds:
+                        await self._process_feed_batch(feeds)
+                
+                else:
+                    # Try to process as direct feed data
+                    await self._process_centralized_data(data)
+        
+        except Exception as e:
+            logger.error(f"❌ Error processing market data hub data: {e}")
+    
+    async def _process_single_update(self, instrument_key: str, price_data: Dict[str, Any]):
+        """Process a single price update efficiently"""
+        try:
+            # Extract price information
+            current_price = float(price_data.get('ltp', price_data.get('last_price', 0)))
+            volume = int(price_data.get('volume', 0))
+            
+            # Basic validation
+            if current_price <= 0:
+                return
+            
+            # Update storage
+            with self.data_lock:
+                success = self.storage.update_instrument_data(
+                    instrument_key=instrument_key,
+                    price=current_price,
+                    volume=volume,
+                    timestamp=time.time()
+                )
+                
+                if success:
+                    logger.debug(f"Updated {instrument_key}: ₹{current_price:.2f}")
+        
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Data validation error for {instrument_key}: {e}")
+        except Exception as e:
+            logger.error(f"Error processing single update for {instrument_key}: {e}")
+    
     async def _process_centralized_data(self, data: Dict[str, Any]):
         """Process real-time data from Centralized WebSocket Manager"""
         start_time = time.perf_counter()
@@ -755,24 +816,107 @@ class EnhancedBreakoutEngine:
     async def _broadcast_breakouts(self, breakouts: List[BreakoutSignal]):
         """Broadcast breakout signals to UI"""
         try:
-            if not self.unified_manager or not breakouts:
+            if not breakouts:
                 return
             
+            # Get complete summary for broadcast
+            complete_summary = self.get_breakouts_summary()
+            
             broadcast_data = {
-                "type": "enhanced_breakout_update",
-                "data": {
-                    "breakouts": [b.to_dict() for b in breakouts],
-                    "total_today": len(self.daily_breakouts),
-                    "engine_metrics": self.get_metrics(),
-                    "timestamp": datetime.now().isoformat()
-                }
+                "type": "breakout_analysis_update",
+                "data": complete_summary
             }
             
-            self.unified_manager.emit_event("breakout_update", broadcast_data, priority=1)
-            logger.info(f"📡 Broadcasted {len(breakouts)} enhanced breakouts")
+            # Try unified manager first, then centralized manager
+            broadcasted = False
+            
+            if self.unified_manager:
+                try:
+                    self.unified_manager.emit_event("breakout_analysis_update", broadcast_data, priority=1)
+                    broadcasted = True
+                    logger.info(f"📡 Broadcasted breakout analysis via unified manager")
+                except Exception as e:
+                    logger.debug(f"Unified manager broadcast failed: {e}")
+            
+            if not broadcasted and self.centralized_manager:
+                try:
+                    await self.centralized_manager.broadcast_to_clients(broadcast_data)
+                    broadcasted = True
+                    logger.info(f"📡 Broadcasted breakout analysis via centralized manager")
+                except Exception as e:
+                    logger.debug(f"Centralized manager broadcast failed: {e}")
+            
+            if not broadcasted:
+                logger.warning("❌ No WebSocket managers available for breakout broadcast")
             
         except Exception as e:
             logger.error(f"❌ Error broadcasting breakouts: {e}")
+    
+    async def broadcast_complete_analysis(self):
+        """Broadcast complete breakout analysis (can be called manually)"""
+        try:
+            complete_summary = self.get_breakouts_summary()
+            
+            broadcast_data = {
+                "type": "breakout_analysis_update", 
+                "data": complete_summary
+            }
+            
+            if self.unified_manager:
+                self.unified_manager.emit_event("breakout_analysis_update", broadcast_data, priority=1)
+                logger.info("📡 Manual broadcast of complete breakout analysis")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in manual broadcast: {e}")
+    
+    async def inject_test_data(self, count: int = 10):
+        """Inject test market data to simulate breakouts (for testing)"""
+        try:
+            import random
+            
+            test_instruments = [
+                "NSE_EQ|INE002A01018-EQ",  # RELIANCE
+                "NSE_EQ|INE009A01021-EQ",  # INFOSYS  
+                "NSE_EQ|INE040A01034-EQ",  # HDFC
+                "NSE_EQ|INE467B01029-EQ",  # ASIANPAINT
+                "NSE_EQ|INE001A01036-EQ",  # EICHER
+            ]
+            
+            logger.info(f"🧪 Injecting {count} test data points...")
+            
+            for i in range(count):
+                instrument = random.choice(test_instruments)
+                base_price = random.uniform(100, 3000)
+                
+                # Create breakout scenario
+                if i % 3 == 0:  # Every 3rd will be a breakout
+                    price_change = random.uniform(2.5, 8.0)  # 2.5% to 8% breakout
+                    volume_multiplier = random.uniform(3, 8)  # High volume
+                else:
+                    price_change = random.uniform(-1.0, 1.5)  # Normal movement
+                    volume_multiplier = random.uniform(0.8, 2.0)  # Normal volume
+                
+                current_price = base_price * (1 + price_change / 100)
+                volume = int(random.uniform(50000, 500000) * volume_multiplier)
+                
+                # Update storage
+                with self.data_lock:
+                    success = self.storage.update_instrument_data(
+                        instrument_key=instrument,
+                        price=current_price,
+                        volume=volume,
+                        timestamp=time.time()
+                    )
+                
+                await asyncio.sleep(0.1)  # Small delay
+            
+            # Force a detection run
+            await self._detect_breakouts_vectorized()
+            
+            logger.info(f"✅ Test data injection completed. Total breakouts: {len(self.daily_breakouts)}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error injecting test data: {e}")
     
     async def _analytics_loop(self):
         """Background analytics and optimization loop"""
@@ -785,6 +929,16 @@ class EnhancedBreakoutEngine:
                 
                 # Optimize parameters based on market conditions
                 await self._optimize_parameters()
+                
+                # Periodic broadcast to frontend (every 5 minutes)
+                if hasattr(self, '_last_broadcast_time'):
+                    time_since_broadcast = datetime.now() - self._last_broadcast_time
+                    if time_since_broadcast.total_seconds() >= 300:  # 5 minutes
+                        await self.broadcast_complete_analysis()
+                        self._last_broadcast_time = datetime.now()
+                else:
+                    await self.broadcast_complete_analysis()
+                    self._last_broadcast_time = datetime.now()
                 
             except Exception as e:
                 logger.error(f"❌ Error in analytics loop: {e}")
@@ -906,14 +1060,50 @@ class EnhancedBreakoutEngine:
                 reverse=True
             )[:10]
             
+            # Separate breakouts and breakdowns for frontend compatibility
+            breakouts = []
+            breakdowns = []
+            
+            for breakout in self.daily_breakouts:
+                breakout_dict = breakout.to_dict()
+                
+                # Classify as breakout (upward) or breakdown (downward) based on type and percentage
+                is_breakdown = (
+                    breakout.breakout_type in [
+                        BreakoutType.SUPPORT_BREAKDOWN, 
+                        BreakoutType.LOW_BREAKDOWN,
+                        BreakoutType.GAP_DOWN
+                    ] or 
+                    breakout.percentage_move < 0
+                )
+                
+                if is_breakdown:
+                    breakdowns.append(breakout_dict)
+                else:
+                    breakouts.append(breakout_dict)
+            
             return {
+                # Frontend compatibility format
+                "breakouts": breakouts,
+                "breakdowns": breakdowns,
+                "summary": {
+                    "total_breakouts": len(breakouts),
+                    "total_breakdowns": len(breakdowns),
+                    "total_today": len(self.daily_breakouts),
+                    "is_trading_hours": self.is_market_open,
+                    "detection_active": self.is_running,
+                    "last_update": current_time.isoformat()
+                },
+                
+                # Enhanced format (additional data)
                 "total_breakouts_today": len(self.daily_breakouts),
                 "breakouts_by_type": dict(breakouts_by_type),
                 "top_breakouts": [b.to_dict() for b in top_breakouts],
                 "recent_breakouts": [b.to_dict() for b in recent_breakouts],
                 "engine_metrics": self.get_metrics(),
                 "timestamp": current_time.isoformat(),
-                "generated_at": current_time.strftime("%I:%M:%S %p")
+                "generated_at": current_time.strftime("%I:%M:%S %p"),
+                "service": "enhanced_breakout_engine"
             }
 
 # Global instance
