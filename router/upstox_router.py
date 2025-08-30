@@ -15,6 +15,8 @@ from services.upstox_service import (
     calculate_upstox_expiry,
     exchange_code_for_token,
     generate_upstox_auth_url,
+    get_upstox_user_profile,
+    get_upstox_funds_and_margin,
 )
 from services.upstox_temp_store import (
     store_upstox_credentials_temp,
@@ -315,3 +317,127 @@ async def get_automation_status(db: Session = Depends(get_db)):
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+
+@upstox_router.get("/profile")
+async def get_user_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get Upstox user profile information including exchanges, products, and order types
+    """
+    try:
+        # Find the user's Upstox broker configuration
+        upstox_config = db.query(BrokerConfig).filter(
+            BrokerConfig.user_id == current_user.id,
+            BrokerConfig.broker_name.ilike("upstox"),
+            BrokerConfig.is_active == True
+        ).first()
+        
+        if not upstox_config:
+            raise HTTPException(
+                status_code=404, 
+                detail="Upstox broker configuration not found or inactive"
+            )
+        
+        if not upstox_config.access_token:
+            raise HTTPException(
+                status_code=400, 
+                detail="Upstox access token not available. Please re-authenticate."
+            )
+        
+        # Check if token is expired
+        if upstox_config.access_token_expiry and upstox_config.access_token_expiry <= datetime.now():
+            raise HTTPException(
+                status_code=401, 
+                detail="Access token expired. Please re-authenticate."
+            )
+        
+        # Get profile from Upstox API
+        profile_data = get_upstox_user_profile(upstox_config.access_token)
+        
+        return {
+            "success": True,
+            "data": profile_data,
+            "broker_config_id": upstox_config.id,
+            "last_updated": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching Upstox profile for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch user profile: {str(e)}"
+        )
+
+
+@upstox_router.get("/funds-and-margin")
+async def get_funds_and_margin(
+    segment: Optional[str] = Query(None, description="Market segment: SEC for Equity, COM for Commodity"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get Upstox user funds and margin information
+    
+    Query Parameters:
+    - segment: Optional. Use 'SEC' for equity, 'COM' for commodity. 
+               If not specified, returns both equity and commodity data.
+    """
+    try:
+        # Validate segment parameter
+        if segment and segment not in ["SEC", "COM"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid segment. Use 'SEC' for Equity or 'COM' for Commodity"
+            )
+        
+        # Find the user's Upstox broker configuration
+        upstox_config = db.query(BrokerConfig).filter(
+            BrokerConfig.user_id == current_user.id,
+            BrokerConfig.broker_name.ilike("upstox"),
+            BrokerConfig.is_active == True
+        ).first()
+        
+        if not upstox_config:
+            raise HTTPException(
+                status_code=404, 
+                detail="Upstox broker configuration not found or inactive"
+            )
+        
+        if not upstox_config.access_token:
+            raise HTTPException(
+                status_code=400, 
+                detail="Upstox access token not available. Please re-authenticate."
+            )
+        
+        # Check if token is expired
+        if upstox_config.access_token_expiry and upstox_config.access_token_expiry <= datetime.now():
+            raise HTTPException(
+                status_code=401, 
+                detail="Access token expired. Please re-authenticate."
+            )
+        
+        # Get funds and margin from Upstox API
+        funds_data = get_upstox_funds_and_margin(upstox_config.access_token, segment)
+        
+        return {
+            "success": True,
+            "data": funds_data,
+            "segment": segment or "both",
+            "broker_config_id": upstox_config.id,
+            "last_updated": datetime.now().isoformat(),
+            "note": "Fund service may be down for maintenance from 12:00 AM to 5:30 AM IST daily"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching Upstox funds for user {current_user.id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch funds and margin: {str(e)}"
+        )

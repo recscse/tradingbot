@@ -155,9 +155,10 @@ class UnifiedTradingExecutor:
                     return {"valid": False, "reason": paper_validation["reason"]}
             
             else:  # LIVE mode
-                # Add live trading validations here
-                # Check broker connection, margin, etc.
-                pass
+                # Comprehensive live trading validations
+                live_validation = await self._validate_live_trading(signal)
+                if not live_validation["valid"]:
+                    return {"valid": False, "reason": live_validation["reason"]}
             
             return {"valid": True}
             
@@ -330,6 +331,248 @@ class UnifiedTradingExecutor:
             
         except Exception as e:
             logger.error(f"❌ Error emitting execution update: {e}")
+    
+    async def _validate_live_trading(self, signal: UnifiedTradeSignal) -> Dict[str, Any]:
+        """
+        Comprehensive live trading validation
+        Checks broker connection, margin, market conditions, and risk limits
+        """
+        try:
+            from database.connection import SessionLocal
+            from database.models import BrokerConfig
+            
+            # 1. Check if user has active broker configuration
+            db = SessionLocal()
+            try:
+                broker_config = db.query(BrokerConfig).filter(
+                    BrokerConfig.user_id == signal.user_id,
+                    BrokerConfig.is_active == True
+                ).first()
+                
+                if not broker_config:
+                    return {"valid": False, "reason": "No active broker configuration found"}
+                
+                if not broker_config.access_token:
+                    return {"valid": False, "reason": "Broker access token not available"}
+                
+                # 2. Check broker connection status
+                broker_status = await self._check_broker_connection(broker_config)
+                if not broker_status["connected"]:
+                    return {"valid": False, "reason": f"Broker connection failed: {broker_status.get('error', 'Unknown error')}"}
+                
+                # 3. Validate margin requirements
+                margin_check = await self._validate_margin_requirements(signal, broker_config, db)
+                if not margin_check["sufficient"]:
+                    return {"valid": False, "reason": f"Insufficient margin: {margin_check.get('reason', 'Margin check failed')}"}
+                
+                # 4. Check market hours and conditions
+                market_check = await self._check_market_conditions()
+                if not market_check["trading_allowed"]:
+                    return {"valid": False, "reason": f"Trading not allowed: {market_check.get('reason', 'Market closed')}"}
+                
+                # 5. Validate instrument and contract details
+                instrument_check = await self._validate_instrument(signal)
+                if not instrument_check["valid"]:
+                    return {"valid": False, "reason": f"Invalid instrument: {instrument_check.get('reason', 'Instrument validation failed')}"}
+                
+                # 6. Check user risk limits and daily limits
+                risk_check = await self._validate_risk_limits(signal, db)
+                if not risk_check["within_limits"]:
+                    return {"valid": False, "reason": f"Risk limits exceeded: {risk_check.get('reason', 'Risk validation failed')}"}
+                
+                return {"valid": True, "broker": broker_config.broker_name}
+                
+            finally:
+                db.close()
+            
+        except Exception as e:
+            logger.error(f"❌ Error in live trading validation: {e}")
+            return {"valid": False, "reason": f"Validation error: {str(e)}"}
+    
+    async def _check_broker_connection(self, broker_config) -> Dict[str, Any]:
+        """Check if broker API connection is active and working"""
+        try:
+            # Initialize broker manager if needed
+            if not self.broker_manager:
+                self.broker_manager = BrokerIntegrationManager()
+            
+            # Test broker connection with a simple API call
+            test_result = await self.broker_manager.test_connection(
+                broker_config.broker_name, 
+                broker_config.access_token
+            )
+            
+            return {
+                "connected": test_result.get("success", False),
+                "error": test_result.get("error")
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking broker connection: {e}")
+            return {"connected": False, "error": str(e)}
+    
+    async def _validate_margin_requirements(self, signal: UnifiedTradeSignal, broker_config, db) -> Dict[str, Any]:
+        """Validate margin requirements for the trade"""
+        try:
+            from services.margin_aware_trading_service import MarginAwareTradingService
+            
+            # Initialize margin service
+            margin_service = MarginAwareTradingService(db)
+            
+            # Calculate required margin for this trade
+            required_margin = signal.invested_amount * 1.2  # Assume 20% margin requirement
+            
+            # Check available margin
+            margin_status = margin_service.get_user_margin_summary(signal.user_id)
+            available_margin = margin_status.get("available_margin", 0)
+            
+            if available_margin < required_margin:
+                return {
+                    "sufficient": False,
+                    "reason": f"Required: ₹{required_margin:,.2f}, Available: ₹{available_margin:,.2f}"
+                }
+            
+            # Check margin utilization after trade
+            current_utilization = margin_status.get("utilization_percentage", 0)
+            post_trade_utilization = (margin_status.get("used_margin", 0) + required_margin) / margin_status.get("total_margin", 1) * 100
+            
+            if post_trade_utilization > 85:  # Max 85% utilization for safety
+                return {
+                    "sufficient": False,
+                    "reason": f"Post-trade utilization would be {post_trade_utilization:.1f}% (max 85%)"
+                }
+            
+            return {
+                "sufficient": True,
+                "required_margin": required_margin,
+                "available_margin": available_margin,
+                "post_trade_utilization": post_trade_utilization
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error validating margin requirements: {e}")
+            return {"sufficient": False, "reason": f"Margin validation error: {str(e)}"}
+    
+    async def _check_market_conditions(self) -> Dict[str, Any]:
+        """Check market hours and trading conditions"""
+        try:
+            import pytz
+            from datetime import datetime, time
+            
+            # Indian market timezone
+            ist = pytz.timezone('Asia/Kolkata')
+            now = datetime.now(ist)
+            
+            # Check if it's a weekday (Monday=0, Sunday=6)
+            if now.weekday() >= 5:  # Saturday or Sunday
+                return {"trading_allowed": False, "reason": "Market closed on weekends"}
+            
+            # Check trading hours (9:15 AM to 3:30 PM IST)
+            market_open = time(9, 15)
+            market_close = time(15, 30)
+            current_time = now.time()
+            
+            if current_time < market_open or current_time > market_close:
+                return {"trading_allowed": False, "reason": f"Market closed. Current time: {current_time}, Trading hours: 9:15 AM - 3:30 PM IST"}
+            
+            # Check if market is in closing phase (last 30 minutes - reduce activity)
+            closing_phase_start = time(15, 0)
+            if current_time >= closing_phase_start:
+                return {"trading_allowed": True, "reason": "Market in closing phase - reduced activity recommended", "closing_phase": True}
+            
+            return {"trading_allowed": True, "market_phase": "active"}
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking market conditions: {e}")
+            return {"trading_allowed": False, "reason": f"Market condition check error: {str(e)}"}
+    
+    async def _validate_instrument(self, signal: UnifiedTradeSignal) -> Dict[str, Any]:
+        """Validate instrument and contract details"""
+        try:
+            # Basic instrument validation
+            if not signal.instrument_key or not signal.symbol:
+                return {"valid": False, "reason": "Missing instrument key or symbol"}
+            
+            # Validate option contract format for F&O
+            if signal.option_type in ['CE', 'PE']:
+                if signal.strike_price <= 0:
+                    return {"valid": False, "reason": "Invalid strike price for option contract"}
+                
+                # Check if strike price is reasonable relative to entry price
+                if signal.option_type == 'CE' and signal.strike_price < signal.entry_price * 0.8:
+                    return {"valid": False, "reason": "Call option strike too low relative to entry price"}
+                elif signal.option_type == 'PE' and signal.strike_price > signal.entry_price * 1.2:
+                    return {"valid": False, "reason": "Put option strike too high relative to entry price"}
+            
+            # Validate quantity and lot size
+            if signal.quantity <= 0 or signal.lot_size <= 0:
+                return {"valid": False, "reason": "Invalid quantity or lot size"}
+            
+            # Validate investment amount
+            if signal.invested_amount <= 0:
+                return {"valid": False, "reason": "Invalid investment amount"}
+            
+            return {"valid": True}
+            
+        except Exception as e:
+            logger.error(f"❌ Error validating instrument: {e}")
+            return {"valid": False, "reason": f"Instrument validation error: {str(e)}"}
+    
+    async def _validate_risk_limits(self, signal: UnifiedTradeSignal, db) -> Dict[str, Any]:
+        """Validate user risk limits and daily trading limits"""
+        try:
+            from database.models import User, TradeHistory
+            from datetime import datetime, timezone
+            
+            # Get user details
+            user = db.query(User).filter(User.id == signal.user_id).first()
+            if not user:
+                return {"within_limits": False, "reason": "User not found"}
+            
+            # Check daily trading limits
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # Count today's trades
+            today_trades = db.query(TradeHistory).filter(
+                TradeHistory.user_id == signal.user_id,
+                TradeHistory.created_at >= today_start
+            ).count()
+            
+            max_daily_trades = 20  # Configurable limit
+            if today_trades >= max_daily_trades:
+                return {"within_limits": False, "reason": f"Daily trade limit reached ({today_trades}/{max_daily_trades})"}
+            
+            # Check daily investment limit
+            today_investment = db.query(
+                db.func.sum(TradeHistory.invested_amount)
+            ).filter(
+                TradeHistory.user_id == signal.user_id,
+                TradeHistory.created_at >= today_start
+            ).scalar() or 0
+            
+            max_daily_investment = 500000  # ₹5L daily limit
+            if today_investment + signal.invested_amount > max_daily_investment:
+                return {
+                    "within_limits": False, 
+                    "reason": f"Daily investment limit would be exceeded. Current: ₹{today_investment:,.2f}, Adding: ₹{signal.invested_amount:,.2f}, Limit: ₹{max_daily_investment:,.2f}"
+                }
+            
+            # Check individual trade size limit
+            max_single_trade = 100000  # ₹1L per trade
+            if signal.invested_amount > max_single_trade:
+                return {"within_limits": False, "reason": f"Single trade limit exceeded: ₹{signal.invested_amount:,.2f} > ₹{max_single_trade:,.2f}"}
+            
+            return {
+                "within_limits": True,
+                "today_trades": today_trades,
+                "today_investment": today_investment,
+                "remaining_trades": max_daily_trades - today_trades,
+                "remaining_investment": max_daily_investment - today_investment
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error validating risk limits: {e}")
+            return {"within_limits": False, "reason": f"Risk validation error: {str(e)}"}
     
     async def close_position(self, position_id: str, user_id: int, trading_mode: TradingMode, exit_price: float) -> UnifiedTradeResult:
         """

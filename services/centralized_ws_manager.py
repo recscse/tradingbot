@@ -369,14 +369,16 @@ class CentralizedWebSocketManager:
         """Load admin token from database with retry logic"""
         max_retries = 3
         retry_delay = 5
-        
+
         for attempt in range(max_retries):
             try:
                 db = next(get_db())
                 if db is None:
                     logger.error("❌ Database not available")
                     if attempt < max_retries - 1:
-                        logger.info(f"🔄 Retrying database connection in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                        logger.info(
+                            f"🔄 Retrying database connection in {retry_delay}s (attempt {attempt + 1}/{max_retries})"
+                        )
                         await asyncio.sleep(retry_delay)
                         continue
                     return False
@@ -480,30 +482,41 @@ class CentralizedWebSocketManager:
                     self._needs_token_refresh = False
 
                 return True
-                
-            except (sqlalchemy.exc.TimeoutError, sqlalchemy.exc.OperationalError) as db_error:
+
+            except (
+                sqlalchemy.exc.TimeoutError,
+                sqlalchemy.exc.OperationalError,
+            ) as db_error:
                 if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ Database connection failed (attempt {attempt + 1}/{max_retries}): {db_error}")
+                    logger.warning(
+                        f"⚠️ Database connection failed (attempt {attempt + 1}/{max_retries}): {db_error}"
+                    )
                     logger.info(f"🔄 Retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                     continue
                 else:
-                    logger.error(f"❌ Database connection failed after {max_retries} attempts: {db_error}")
+                    logger.error(
+                        f"❌ Database connection failed after {max_retries} attempts: {db_error}"
+                    )
                     return False
-                    
+
             except Exception as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"⚠️ Token loading failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.warning(
+                        f"⚠️ Token loading failed (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
                     logger.info(f"🔄 Retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                     continue
                 else:
-                    logger.error(f"❌ Failed to load admin token after {max_retries} attempts: {e}")
+                    logger.error(
+                        f"❌ Failed to load admin token after {max_retries} attempts: {e}"
+                    )
                     traceback.print_exc()
                     return False
-                    
+
         logger.error(f"❌ Failed to load admin token after {max_retries} attempts")
         return False
 
@@ -804,11 +817,11 @@ class CentralizedWebSocketManager:
         """Check if basic network connectivity is available with multiple fallbacks"""
         test_urls = [
             "https://api.upstox.com",  # Primary broker API
-            "https://www.google.com",   # Google DNS
-            "https://1.1.1.1",          # Cloudflare DNS  
-            "https://httpbin.org/status/200"  # HTTP testing service
+            "https://www.google.com",  # Google DNS
+            "https://1.1.1.1",  # Cloudflare DNS
+            "https://httpbin.org/status/200",  # HTTP testing service
         ]
-        
+
         for url in test_urls:
             try:
                 async with aiohttp.ClientSession(
@@ -821,7 +834,7 @@ class CentralizedWebSocketManager:
             except Exception as e:
                 logger.debug(f"⚠️ Connectivity check failed for {url}: {e}")
                 continue
-                
+
         logger.warning("⚠️ All network connectivity checks failed")
         return False
 
@@ -869,9 +882,21 @@ class CentralizedWebSocketManager:
                         f"⏳ Reconnecting in {backoff_delay}s (attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})"
                     )
 
+                    # Enhanced reconnection recovery strategies
+                    await self._apply_reconnection_strategy()
+
                     # Send warning email if approaching max attempts
                     if self.reconnect_attempts == self.max_reconnect_attempts - 2:
                         await self._send_reconnection_warning_email()
+
+                    # Broadcast reconnection attempt status
+                    await self._broadcast_connection_status(
+                        {
+                            "status": "reconnecting",
+                            "message": f"Attempting reconnection {self.reconnect_attempts}/{self.max_reconnect_attempts}",
+                            "backoff_delay": backoff_delay,
+                        }
+                    )
 
                     await asyncio.sleep(backoff_delay)
                 else:

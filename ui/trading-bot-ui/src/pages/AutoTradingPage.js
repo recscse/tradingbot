@@ -39,7 +39,6 @@ import {
   Speed as SpeedIcon,
 } from "@mui/icons-material";
 import api from "../services/api";
-import io from "socket.io-client";
 
 const AutoTradingPage = () => {
   // State management
@@ -195,35 +194,68 @@ const AutoTradingPage = () => {
   // ---------- WebSocket (memoized) ----------
   const initializeWebSocket = useCallback(() => {
     try {
-      const s = io(`${process.env.REACT_APP_API_URL}`, {
-        transports: ["websocket"],
-      });
+      // Create WebSocket URL for unified endpoint
+      const baseUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
+      const wsUrl = baseUrl.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/unified';
+      
+      console.log("Connecting to WebSocket:", wsUrl);
+      const ws = new WebSocket(wsUrl);
 
-      s.on("connect", () => {
-        console.log("Connected to WebSocket for auto-trading updates");
-        s.emit("join_auto_trading_room");
-      });
+      ws.onopen = () => {
+        console.log("Connected to unified WebSocket for auto-trading updates");
+        // Send a connection message to identify this client
+        ws.send(JSON.stringify({
+          type: "client_info",
+          client_type: "auto_trading",
+          timestamp: new Date().toISOString()
+        }));
+      };
 
-      s.on("auto_trading_update", (data) => {
-        if (data.type === "position_update") {
-          fetchActiveTrades();
-          fetchRealTimeData();
-        } else if (data.type === "trade_executed") {
-          setSuccess(`Trade executed: ${data.symbol} ${data.option_type}`);
-          fetchActiveTrades();
-          fetchTradeHistory();
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          // Handle auto trading updates
+          if (message.type === "auto_trading_update") {
+            const data = message.data;
+            if (data.type === "position_update") {
+              fetchActiveTrades();
+              fetchRealTimeData();
+            } else if (data.type === "trade_executed") {
+              setSuccess(`Trade executed: ${data.symbol} ${data.option_type}`);
+              fetchActiveTrades();
+              fetchTradeHistory();
+            } else if (data.type === "session_started" || data.type === "session_stopped") {
+              fetchTradingSession();
+            } else if (data.type === "stock_selection_started") {
+              fetchSelectedStocks();
+            }
+          }
+        } catch (parseError) {
+          console.error("Error parsing WebSocket message:", parseError);
         }
-      });
+      };
 
-      s.on("disconnect", () => {
-        console.log("Disconnected from WebSocket");
-      });
+      ws.onclose = (event) => {
+        console.log("WebSocket connection closed:", event.code, event.reason);
+        // Attempt to reconnect after 5 seconds
+        setTimeout(() => {
+          if (socketRef.current === ws) {
+            console.log("Attempting to reconnect WebSocket...");
+            initializeWebSocket();
+          }
+        }, 5000);
+      };
 
-      socketRef.current = s;
+      ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+      };
+
+      socketRef.current = ws;
     } catch (err) {
       console.error("WebSocket connection error:", err);
     }
-  }, [fetchActiveTrades, fetchRealTimeData, fetchTradeHistory]);
+  }, [fetchActiveTrades, fetchRealTimeData, fetchTradeHistory, fetchTradingSession, fetchSelectedStocks]);
 
   // ---------- Effects ----------
   // Load on mount
@@ -237,7 +269,7 @@ const AutoTradingPage = () => {
 
     return () => {
       if (socketRef.current) {
-        socketRef.current.disconnect();
+        socketRef.current.close();
         socketRef.current = null;
       }
     };
