@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+**MANDATORY**: This file contains STRICT coding standards that MUST be followed for ALL code written in this repository.
+
+**CRITICAL INSTRUCTION**: Before writing ANY code, read and follow the "Coding Standards and Best Practices" section below. These are NON-NEGOTIABLE requirements.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -141,4 +145,290 @@ Each broker has standardized interface in `brokers/base_broker.py`:
 - **Database**: Alembic migrations must be run on deployment (`alembic upgrade head`)
 - **Token Automation**: Playwright browser installed automatically via `start.sh` for token refresh automation
 - **Monitoring**: Comprehensive health endpoints and logging for production monitoring
-- Add to memory do not write the emojies in the code and always follow the ceal code best practices
+## Coding Standards and Best Practices
+
+**MANDATORY REQUIREMENTS**: All code written for this project MUST follow these standards:
+
+### Clean Code Principles (MANDATORY)
+1. **Single Responsibility Principle**: Each function/class has ONE clear purpose
+2. **DRY (Don't Repeat Yourself)**: Avoid code duplication
+3. **KISS (Keep It Simple, Stupid)**: Prefer simple, readable solutions
+4. **YAGNI (You Aren't Gonna Need It)**: Don't over-engineer
+5. **Separation of Concerns**: Business logic, data access, and presentation are separate
+
+### Naming Conventions (MANDATORY)
+
+#### Python Backend:
+- **Functions**: `snake_case` - `calculate_portfolio_value()`, `get_user_trades()`
+- **Variables**: `snake_case` - `user_balance`, `total_profit_loss`
+- **Classes**: `PascalCase` - `TradingEngine`, `MarketDataProcessor`
+- **Constants**: `UPPER_SNAKE_CASE` - `MAX_POSITIONS`, `DEFAULT_TIMEOUT`
+- **Private methods**: `_snake_case` - `_validate_credentials()`, `_process_data()`
+- **Modules/Files**: `snake_case` - `market_analytics.py`, `trading_engine.py`
+
+#### JavaScript/React Frontend:
+- **Functions**: `camelCase` - `calculateTotalValue()`, `handleUserLogin()`
+- **Variables**: `camelCase` - `userBalance`, `totalProfitLoss`
+- **Components**: `PascalCase` - `TradingDashboard`, `MarketChart`
+- **Constants**: `UPPER_SNAKE_CASE` - `API_ENDPOINTS`, `DEFAULT_CONFIG`
+- **Files**: `PascalCase` for components, `camelCase` for utilities
+- **CSS Classes**: `kebab-case` - `trading-panel`, `market-data-grid`
+
+### Code Structure Standards (MANDATORY)
+
+#### Function Design:
+```python
+def calculate_portfolio_metrics(user_id: int, date_range: DateRange) -> PortfolioMetrics:
+    """
+    Calculate comprehensive portfolio performance metrics.
+    
+    Args:
+        user_id: User identifier
+        date_range: Date range for calculation
+        
+    Returns:
+        PortfolioMetrics object with calculated values
+        
+    Raises:
+        ValueError: If user_id is invalid
+        DataNotFoundError: If no trades found for user
+    """
+    # Input validation
+    if not user_id or user_id <= 0:
+        raise ValueError("Invalid user_id provided")
+    
+    # Single responsibility - delegate to specialized functions
+    trades = get_user_trades(user_id, date_range)
+    return _compute_metrics_from_trades(trades)
+```
+
+### Error Handling Standards (MANDATORY)
+
+#### Python:
+```python
+def process_market_data(data: dict) -> ProcessedData:
+    if not data:
+        raise ValueError("Market data cannot be empty")
+    
+    try:
+        return MarketDataProcessor.process(data)
+    except ValidationError as e:
+        logger.error(f"Data validation failed: {e}")
+        raise ProcessingError(f"Invalid market data format: {e}") from e
+    except Exception as e:
+        logger.exception("Unexpected error processing market data")
+        raise ProcessingError("Failed to process market data") from e
+```
+
+### Documentation Standards (MANDATORY)
+
+#### Python Docstrings:
+```python
+def calculate_risk_metrics(
+    positions: List[Position],
+    market_data: MarketData,
+    confidence_level: float = 0.95
+) -> RiskMetrics:
+    """
+    Calculate comprehensive risk metrics for trading positions.
+    
+    Args:
+        positions: List of current trading positions
+        market_data: Historical market data for calculations
+        confidence_level: Confidence level for VaR calculation (default: 0.95)
+        
+    Returns:
+        RiskMetrics object containing var, expected_shortfall, max_drawdown
+        
+    Raises:
+        ValueError: If confidence_level not between 0.9 and 0.99
+        InsufficientDataError: If market_data has less than required history
+    """
+```
+
+### Security and Performance Standards (MANDATORY)
+
+1. **Never log sensitive data**: passwords, API keys, tokens
+2. **Use parameterized queries**: Prevent SQL injection
+3. **Validate all inputs**: Type hints, validation decorators
+4. **Use async/await**: For I/O operations
+5. **Environment variables**: Store all secrets in `.env`
+
+### Code Quality Checklist (MANDATORY)
+
+Before submitting any code, verify:
+- [ ] Functions have single responsibility
+- [ ] Proper naming conventions followed
+- [ ] Comprehensive error handling
+- [ ] Type hints provided (Python)
+- [ ] Documentation/docstrings complete
+- [ ] No hardcoded values (use constants)
+- [ ] Security considerations addressed
+- [ ] No emojis in code or logging
+- [ ] Tests written for new functionality
+
+## Additional Standards Documentation
+
+**MANDATORY READING**: Before writing ANY code, review these comprehensive guides:
+
+1. **LINE_BY_LINE_STANDARDS.md** - Standards for every single line of code
+2. **IMPLEMENTATION_MICRO_STANDARDS.md** - Micro-level implementation patterns  
+3. **CODE_REVIEW_CRITERIA.md** - Comprehensive review checklist
+4. **CODE_TEMPLATES.md** - Copy-paste templates for common patterns
+5. **CODING_CHECKLIST.md** - Quick verification before submission
+
+**CRITICAL REMINDERS:**
+- NEVER use emojis in code, comments, or logging
+- ALWAYS follow the naming conventions exactly as specified
+- ALWAYS write comprehensive docstrings
+- ALWAYS handle errors appropriately
+- ALWAYS validate inputs
+- ALWAYS use type hints in Python
+- ALWAYS follow single responsibility principle
+- ALWAYS reference the additional standards documentation above
+- ALWAYS use Decimal for financial calculations, never float
+- ALWAYS validate inputs at the start of functions
+- ALWAYS use specific exception types, not generic Exception
+
+# AUTOMATIC CODING STANDARDS ENFORCEMENT
+**CRITICAL**: Apply these standards to ALL code automatically, regardless of whether user mentions them:
+
+## Always Auto-Apply (No User Request Needed):
+1. **CLAUDE.md coding standards** - Follow for every piece of code
+2. **LINE_BY_LINE_STANDARDS.md** - Apply to every single line  
+3. **IMPLEMENTATION_MICRO_STANDARDS.md** - Use patterns for all implementations
+4. **CODE_REVIEW_CRITERIA.md** - Validate before submitting code
+5. **CODING_CHECKLIST.md** - Quick verification for all code
+6. **CODE_TEMPLATES.md** - Reference for structure
+
+## Default Code Behavior:
+- snake_case naming for Python functions/variables
+- Comprehensive docstrings with Args/Returns/Raises
+- Type hints for all parameters and returns
+- Specific exception handling (never generic Exception)
+- Decimal for financial calculations
+- Input validation for all functions
+- No emojis in code/comments/logging
+
+## SOLID Principles (Auto-Apply):
+- **Single Responsibility**: Each class/function has one reason to change
+- **Open/Closed**: Open for extension, closed for modification
+- **Liskov Substitution**: Derived classes must be substitutable for base classes
+- **Interface Segregation**: Clients shouldn't depend on unused interfaces
+- **Dependency Inversion**: Depend on abstractions, not concretions
+
+## Clean Code Principles (Auto-Apply):
+- **DRY**: Don't Repeat Yourself - extract common functionality
+- **KISS**: Keep It Simple, Stupid - avoid unnecessary complexity
+- **YAGNI**: You Aren't Gonna Need It - don't add premature features
+- **Boy Scout Rule**: Leave code cleaner than you found it
+
+## Separation of Concerns (Auto-Apply):
+- Business logic separate from data access
+- Validation separate from business operations
+- Configuration separate from implementation
+- UI logic separate from business logic
+- Error handling separate from business flow
+
+## Security Best Practices (Auto-Apply):
+- No hardcoded secrets, passwords, API keys
+- Parameterized database queries (prevent SQL injection)
+- Input validation and sanitization
+- Authentication and authorization checks
+- Sensitive data not logged or exposed
+- Rate limiting for API endpoints
+- HTTPS for all external communications
+
+## Logging Standards (Auto-Apply):
+- Log entry and exit of critical functions
+- Log business operations with context
+- Use appropriate log levels (DEBUG, INFO, WARNING, ERROR)
+- Include timestamp, user context, operation details
+- Never log sensitive data (passwords, tokens, PII)
+- Structured logging with consistent format
+- Error logs include full stack trace and context
+
+## Production-Grade Requirements (Auto-Apply):
+
+### Performance & Scalability:
+- Async/await for I/O operations
+- Connection pooling for databases
+- Pagination for large datasets
+- Memory-efficient data structures
+- Caching with TTL
+
+### Testing & Quality:
+- Unit tests (80%+ coverage)
+- Integration tests for APIs
+- Edge case testing
+- Performance benchmarks
+- Mock external dependencies
+
+### Monitoring & Observability:
+- Error tracking with context
+- Performance metrics logging
+- Health check endpoints
+- Distributed tracing
+- Business metrics tracking
+
+### Resilience & Reliability:
+- Circuit breaker pattern
+- Retry with exponential backoff
+- Graceful degradation
+- Timeout configurations
+- Correlation IDs
+
+### Data & Configuration:
+- Database transactions
+- Environment-based config
+- Audit trails
+- Data validation layers
+- Versioned migrations
+
+### API & Deployment:
+- RESTful design
+- Proper HTTP status codes
+- API versioning
+- Rate limiting
+- CI/CD pipeline ready
+
+### Financial/Trading-Specific:
+- Decimal precision for all monetary values
+- Trade reconciliation and audit trails
+- Market hours validation
+- Risk management checks
+- Regulatory compliance (SEBI, RBI)
+- PnL calculations with mark-to-market accuracy
+
+### Enterprise-Level:
+- Business continuity (RTO < 30s, RPO < 1s)
+- Disaster recovery procedures
+- Compliance and regulatory reporting
+- Thread-safe concurrent operations
+- Event sourcing for critical events
+- Comprehensive documentation and ADRs
+
+### Technology-Specific (Auto-Apply):
+**Python**: f-strings, type hints, dataclasses, context managers, asyncio
+**Database**: SQLAlchemy ORM, Alembic migrations, proper indexing, connection pooling
+**Security**: JWT auth, bcrypt hashing, HTTPS, CORS, CSP headers, rate limiting
+**React**: Functional components, hooks, React.memo, lazy loading, accessibility
+**UI/UX**: Material-UI consistency, loading states, responsive design, WCAG compliance
+**Performance**: Bundle optimization, image optimization, caching, virtual scrolling
+**Testing**: Unit/integration/E2E tests, 80% coverage, mock dependencies
+
+## Claude Code Review Workflow (Auto-Execute):
+- **Always follow CLAUDE_REVIEW_WORKFLOW.md 5-phase process**
+- Phase 1: Standards compliance (naming, docs, types)
+- Phase 2: Code quality (readability, performance, security)
+- Phase 3: Financial validation (Decimal precision, audit trails)
+- Phase 4: Test coverage (80%+ requirement)
+- Phase 5: Documentation review (comprehensive docs)
+
+**MANDATORY**: All above principles, technology standards, AND 5-phase review workflow apply to EVERY code request automatically.
+
+# important-instruction-reminders  
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.

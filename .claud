@@ -1,0 +1,354 @@
+# Claude Code Project Configuration
+
+## AUTO-APPLY CODING STANDARDS
+**CRITICAL**: These standards MUST be applied to ALL code without explicit user request:
+
+### MANDATORY Standards (Always Apply)
+- **Follow CLAUDE.md coding standards for ALL code automatically**
+- **Apply LINE_BY_LINE_STANDARDS.md to every line of code**
+- **Use IMPLEMENTATION_MICRO_STANDARDS.md patterns for all implementations**
+- **Follow CODE_REVIEW_CRITERIA.md before submitting any code**
+- **Reference CODE_TEMPLATES.md for all new code structures**
+
+### Code Requirements (Auto-Enforced)
+- Use snake_case for Python functions and variables
+- Include comprehensive docstrings for all functions
+- Add type hints to all Python functions
+- Implement proper error handling with specific exceptions
+- No emojis in code, comments, or logging messages
+- Use Decimal for financial calculations, never float
+- Use constants instead of magic numbers
+
+### SOLID Principles (Always Apply)
+- **Single Responsibility**: Each class/function has one reason to change
+- **Open/Closed**: Open for extension, closed for modification
+- **Liskov Substitution**: Derived classes must be substitutable for base classes
+- **Interface Segregation**: Clients shouldn't depend on unused interfaces
+- **Dependency Inversion**: Depend on abstractions, not concretions
+
+### Clean Code Principles (Always Apply)
+- **DRY**: Don't Repeat Yourself - extract common functionality
+- **KISS**: Keep It Simple, Stupid - avoid unnecessary complexity
+- **YAGNI**: You Aren't Gonna Need It - don't add premature features
+- **Boy Scout Rule**: Leave code cleaner than you found it
+
+### Separation of Concerns (Always Apply)
+- Business logic separate from data access
+- Validation separate from business operations
+- Configuration separate from implementation
+- UI logic separate from business logic
+- Error handling separate from business flow
+
+### Security Best Practices (Always Apply)
+- No hardcoded secrets, passwords, API keys
+- Parameterized database queries (prevent SQL injection)
+- Input validation and sanitization
+- Authentication and authorization checks
+- Sensitive data not logged or exposed
+- Rate limiting for API endpoints
+- HTTPS for all external communications
+
+### Logging Standards (Always Apply)
+- Log entry and exit of critical functions
+- Log business operations with context
+- Use appropriate log levels (DEBUG, INFO, WARNING, ERROR)
+- Include timestamp, user context, operation details
+- Never log sensitive data (passwords, tokens, PII)
+- Structured logging with consistent format
+- Error logs include full stack trace and context
+
+### Performance & Scalability (Always Apply)
+- Async/await for I/O operations (database, API calls, file operations)
+- Connection pooling for database and external services
+- Pagination for large datasets (never load all records)
+- Proper indexing considerations for database queries
+- Memory-efficient data structures
+- Lazy loading where appropriate
+- Cache frequently accessed data with TTL
+- Optimize N+1 query problems
+
+### Testing Standards (Always Apply)
+- Unit tests for all new functions (minimum 80% coverage)
+- Integration tests for API endpoints
+- Mock external dependencies in tests
+- Test both success and failure scenarios
+- Edge case testing (null, empty, boundary values)
+- Performance tests for critical operations
+- Test data setup and cleanup
+- Descriptive test names explaining what is tested
+
+### Monitoring & Observability (Always Apply)
+- Comprehensive error tracking with context
+- Performance metrics logging (execution time, memory usage)
+- Business metrics tracking (trades, orders, profits)
+- Health check endpoints for services
+- Distributed tracing for complex operations
+- Application performance monitoring (APM)
+- Resource utilization monitoring
+- Alert thresholds for critical operations
+
+### Configuration Management (Always Apply)
+- Environment-based configuration (dev, staging, prod)
+- No configuration in code - use environment variables
+- Configuration validation on startup
+- Sensitive config encrypted at rest
+- Feature flags for gradual rollouts
+- Version configuration for API compatibility
+- Database migration scripts versioned
+- Rollback procedures documented
+
+### Error Handling & Resilience (Always Apply)
+- Circuit breaker pattern for external services
+- Retry logic with exponential backoff
+- Graceful degradation when services are down
+- Timeout configurations for all external calls
+- Dead letter queues for failed operations
+- Idempotent operations where possible
+- Correlation IDs for request tracking
+- Proper exception hierarchy with business context
+
+### Data Management (Always Apply)
+- Database transactions for consistency
+- Data validation at multiple layers
+- Audit trails for critical operations
+- Data retention policies
+- Backup and recovery procedures
+- Data migration strategies
+- Referential integrity enforcement
+- Soft deletes for important records
+
+### API Design Standards (Always Apply)
+- RESTful design principles
+- Consistent response formats
+- Proper HTTP status codes
+- API versioning strategy
+- Request/response validation with Pydantic
+- Rate limiting and throttling
+- API documentation with OpenAPI/Swagger
+- Backward compatibility considerations
+
+### Financial/Trading-Specific Standards (Always Apply)
+- All monetary values use Decimal with proper precision (2-8 decimal places)
+- Financial calculations include rounding specifications
+- Trade reconciliation and audit trails for all transactions
+- Market hours validation for trading operations
+- Risk management checks before trade execution
+- Position sizing calculations with leverage limits
+- Stop-loss and take-profit validation
+- Regulatory compliance checks (margin requirements, position limits)
+- Price validation against market bounds (circuit breakers)
+- Order book integrity checks
+- Slippage and execution quality monitoring
+- PnL calculations with mark-to-market accuracy
+
+### Compliance & Regulatory (Always Apply)
+- Financial data retention policies (7+ years)
+- Audit logging for all financial transactions
+- Regulatory reporting capabilities
+- Know Your Customer (KYC) data handling
+- Anti-Money Laundering (AML) checks
+- Data privacy compliance (GDPR, CCPA)
+- Financial regulatory compliance (SEBI, RBI for India)
+- Trade reporting to regulatory bodies
+- Risk disclosure and user consent tracking
+- Market manipulation detection algorithms
+
+### Business Continuity & Disaster Recovery (Always Apply)
+- Hot standby systems for critical trading functions
+- Real-time data replication
+- Automated failover mechanisms
+- Recovery Time Objective (RTO) < 30 seconds for trading
+- Recovery Point Objective (RPO) < 1 second for trades
+- Geographic redundancy for critical systems
+- Regular disaster recovery testing
+- Business continuity procedures documented
+- Data backup verification and restore testing
+- Emergency contact procedures
+
+### Concurrency & Threading (Always Apply)
+- Thread-safe operations for shared resources
+- Proper locking mechanisms (avoid deadlocks)
+- Atomic operations for critical data updates
+- Queue-based processing for high-volume operations
+- Connection pooling with proper resource management
+- Race condition prevention in trade execution
+- Order processing serialization where needed
+- Parallel processing optimization
+- Memory synchronization in multi-threaded scenarios
+
+### Integration & External Services (Always Apply)
+- API versioning and backward compatibility
+- Service mesh architecture for microservices
+- Message queue reliability (RabbitMQ, Kafka)
+- Event sourcing for critical business events
+- CQRS (Command Query Responsibility Segregation) patterns
+- Webhook reliability with retry mechanisms
+- Third-party API rate limit handling
+- Service dependency mapping
+- Contract testing between services
+- API gateway implementation
+
+### Code Documentation & Maintenance (Always Apply)
+- Comprehensive README with setup instructions
+- API documentation with examples (Swagger/OpenAPI)
+- Architecture decision records (ADRs)
+- Database schema documentation
+- Code comments explaining business logic
+- Changelog maintenance for releases
+- Migration guides for breaking changes
+- Troubleshooting guides for common issues
+- Performance tuning documentation
+- Security incident response procedures
+
+### Deployment & DevOps (Always Apply)
+- Containerization with Docker
+- Infrastructure as Code (IaC)
+- Blue-green or rolling deployments
+- Database migration automation
+- Environment parity (dev/staging/prod)
+- Automated testing in CI/CD pipeline
+- Security scanning in build process
+- Monitoring and alerting setup
+- Secrets management (Vault, AWS Secrets Manager)
+- Load balancing and auto-scaling configuration
+
+### Python-Specific Standards (Always Apply)
+- Use f-strings for string formatting (not .format() or %)
+- Type hints with Union, Optional, Generic from typing module
+- Dataclasses or Pydantic models for data structures
+- Context managers (with statements) for resource management
+- List/dict comprehensions over loops where readable
+- Generators for memory-efficient iterations
+- Proper exception inheritance (custom exception classes)
+- Virtual environments and requirements.txt management
+- Black code formatting and isort import sorting
+- Mypy static type checking compliance
+- Pytest for testing with fixtures and parametrize
+- Asyncio patterns for concurrent operations
+
+### Database-Specific Standards (Always Apply)
+- SQLAlchemy ORM with proper relationship definitions
+- Database connection pooling with SQLAlchemy engine
+- Alembic migrations for schema changes
+- Proper indexing strategy (composite, partial, unique indexes)
+- Query optimization with explain plans
+- Connection timeout and retry logic
+- Database transactions with proper rollback handling
+- Soft deletes with is_active/deleted_at columns
+- Created_at and updated_at timestamps on all tables
+- Foreign key constraints and cascading rules
+- Database-level validations and constraints
+- Connection string security (no hardcoded passwords)
+- Read replicas for query optimization
+- Database backup and point-in-time recovery
+
+### Security-Specific Standards (Always Apply)
+- JWT tokens with proper expiration and refresh logic
+- Password hashing with bcrypt or Argon2
+- HTTPS enforcement (redirect HTTP to HTTPS)
+- CORS configuration with specific origins (not *)
+- CSP (Content Security Policy) headers
+- Rate limiting with Redis-based store
+- Input sanitization and validation at API gateway
+- SQL injection prevention with parameterized queries
+- XSS prevention with output encoding
+- CSRF protection with tokens
+- API key rotation and management
+- Encryption at rest for sensitive data
+- Secure session management
+- OAuth2/OpenID Connect for third-party auth
+- Security headers (HSTS, X-Frame-Options, etc.)
+- Vulnerability scanning in CI/CD pipeline
+
+### Frontend/React-Specific Standards (Always Apply)
+- Functional components with hooks (no class components)
+- Custom hooks for reusable logic
+- React.memo for performance optimization
+- useCallback and useMemo for expensive operations
+- Proper dependency arrays in useEffect
+- Error boundaries for component error handling
+- Lazy loading with React.lazy and Suspense
+- Code splitting at route level
+- PropTypes or TypeScript for component props
+- Context API for global state (avoid prop drilling)
+- React Query or SWR for server state management
+- Proper form validation with Formik or react-hook-form
+- Accessibility (ARIA labels, semantic HTML, keyboard navigation)
+- Responsive design with CSS Grid/Flexbox
+- Progressive Web App (PWA) features
+
+### UI/UX-Specific Standards (Always Apply)
+- Material-UI or Ant Design component library consistency
+- Design system with consistent spacing, colors, typography
+- Loading states for all async operations
+- Error states with user-friendly messages
+- Empty states with actionable guidance
+- Skeleton screens for content loading
+- Optimistic updates for user interactions
+- Toast notifications for user feedback
+- Modal dialogs with proper focus management
+- Keyboard accessibility (Tab navigation, Enter/Escape)
+- Screen reader compatibility (ARIA attributes)
+- Mobile-first responsive design
+- Touch targets minimum 44px for mobile
+- Color contrast ratios meeting WCAG 2.1 AA standards
+- Dark mode support with consistent theming
+- Internationalization (i18n) support for multi-language
+
+### Performance-Specific Standards (Always Apply)
+- Bundle size optimization (tree shaking, code splitting)
+- Image optimization (WebP format, lazy loading, responsive images)
+- CDN usage for static assets
+- Browser caching strategies
+- Service workers for offline functionality
+- Critical CSS inlining
+- Font optimization (preload, font-display: swap)
+- Database query optimization (N+1 prevention, proper indexing)
+- Redis caching with appropriate TTL values
+- Connection pooling for database and HTTP clients
+- Memory leak prevention (proper cleanup in useEffect)
+- Debouncing for search inputs and API calls
+- Virtual scrolling for large lists
+- Compression (gzip/brotli) for API responses
+
+### Testing-Specific Standards (Always Apply)
+- Unit tests with pytest (backend) and Jest (frontend)
+- Integration tests for API endpoints
+- End-to-end tests with Playwright or Cypress
+- Component testing with React Testing Library
+- Mock external dependencies (API calls, databases)
+- Test data factories for consistent test data
+- Test coverage reports (minimum 80% line coverage)
+- Performance testing for critical paths
+- Load testing for API endpoints
+- Security testing (OWASP ZAP, Bandit for Python)
+- Visual regression testing for UI components
+- Accessibility testing (axe-core, Pa11y)
+- Cross-browser testing for frontend
+- Mobile device testing (responsive design)
+
+### Claude Code Review Workflow (Auto-Execute)
+- **ALWAYS** follow CLAUDE_REVIEW_WORKFLOW.md 5-phase review process
+- **Phase 1**: Standards compliance check (naming, docstrings, type hints)
+- **Phase 2**: Code quality review (readability, performance, security)
+- **Phase 3**: Financial/trading-specific validation (Decimal precision, audit trails)
+- **Phase 4**: Test coverage analysis (80%+ coverage requirement)
+- **Phase 5**: Documentation review (comprehensive docs, ADRs)
+
+### Automatic Code Review Actions
+- Execute comprehensive review before presenting any code
+- Apply rejection criteria for critical violations
+- Validate against all technology-specific standards
+- Ensure production-ready code quality
+- Generate review comments using templates from CODE_REVIEW_CRITERIA.md
+
+### Default Behavior
+- When user requests ANY code modification/creation, automatically apply ALL standards
+- Execute CLAUDE_REVIEW_WORKFLOW.md review process automatically
+- No need for user to explicitly mention standards in prompts
+- Always validate code against CODING_CHECKLIST.md before delivery
+- Reference appropriate templates from CODE_TEMPLATES.md
+- Code must be production-ready with monitoring, testing, and resilience
+- Apply language/framework-specific best practices automatically
+
+**GOLDEN RULE**: Every piece of code must pass ALL standards AND the 5-phase Claude review workflow automatically, ensuring production-grade quality regardless of user prompt specificity.
