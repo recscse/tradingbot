@@ -102,3 +102,67 @@ def calculate_upstox_expiry():
         expiry_time += timedelta(days=1)
 
     return expiry_time
+
+
+def get_upstox_user_profile(access_token: str) -> dict:
+    """
+    Get Upstox user profile information
+    
+    Args:
+        access_token: User's access token
+        
+    Returns:
+        dict: User profile data including exchanges, products, order types, etc.
+    """
+    url = f"{UPSTOX_BASE_URL}/user/profile"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {access_token}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch user profile: {str(e)}"
+        )
+
+
+def get_upstox_funds_and_margin(access_token: str, segment: str = None) -> dict:
+    """
+    Get Upstox user funds and margin information
+    
+    Args:
+        access_token: User's access token
+        segment: Market segment (SEC for Equity, COM for Commodity). 
+                If None, returns both equity and commodity data.
+        
+    Returns:
+        dict: Funds and margin data
+    """
+    url = f"{UPSTOX_BASE_URL}/user/get-funds-and-margin"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {access_token}"
+    }
+    
+    params = {}
+    if segment:
+        params["segment"] = segment
+    
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch funds and margin: {str(e)}"
+        )

@@ -2,12 +2,9 @@
 import React, { useState, useEffect } from "react";
 import {
   Box,
-  Container,
-  /* CircularProgress, */ // Reserved for loading states
-  Typography,
-  /* Backdrop, */ // Reserved for modal backgrounds  
-  /* Card, */ // Reserved for card layouts
-  Button,
+  Container, // Reserved for loading states
+  /* CircularProgress, */ Typography, // Reserved for modal backgrounds // Reserved for card layouts
+  /* Backdrop, */ /* Card, */ Button,
   useTheme,
   alpha,
   Paper,
@@ -26,7 +23,8 @@ import ProfileOverview from "../components/profile/ProfileOverview";
 import ProfileSettings from "../components/profile/ProfileSettings";
 import ProfileSecurity from "../components/profile/ProfileSecurity";
 import ProfileNotifications from "../components/profile/ProfileNotifications";
-import BrokerManagement from "../components/profile/BrokerManagement";
+// import BrokerManagement from "../components/profile/BrokerManagement";
+import EnhancedBrokerManagement from "../components/profile/EnhancedBrokerManagement";
 import PerformanceTab from "../components/profile/PerformanceTab";
 import { profileService } from "../services/profileService";
 
@@ -54,7 +52,7 @@ const ProfilePage = () => {
 
       // Simulate loading progress for better UX
       const progressInterval = setInterval(() => {
-        setLoadingProgress(prev => Math.min(prev + 10, 90));
+        setLoadingProgress((prev) => Math.min(prev + 10, 90));
       }, 100);
 
       const [profile, stats, notifications] = await Promise.all([
@@ -70,7 +68,7 @@ const ProfilePage = () => {
       setTradingStats(stats.data);
       setBrokerAccounts(profile.data.brokerAccounts || []);
       setNotifications(notifications.data.notifications || []);
-      
+
       // Brief delay to show completion
       setTimeout(() => {
         setLoading(false);
@@ -121,7 +119,7 @@ const ProfilePage = () => {
       case "performance":
         return <PerformanceTab profile={profileData} loading={loading} />;
       case "brokers":
-        return <BrokerManagement />;
+        return <EnhancedBrokerManagement />;
       case "settings":
         return (
           <ProfileSettings
@@ -152,13 +150,13 @@ const ProfilePage = () => {
   // Enhanced Loading with progress
   if (loading) {
     return (
-      <Box 
-        sx={{ 
-          minHeight: "100vh", 
+      <Box
+        sx={{
+          minHeight: "100vh",
           bgcolor: "background.default",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center"
+          justifyContent: "center",
         }}
       >
         <Paper
@@ -173,27 +171,27 @@ const ProfilePage = () => {
             minWidth: 300,
           }}
         >
-          <TrendingUpIcon 
-            sx={{ 
-              fontSize: 48, 
-              color: "primary.main", 
+          <TrendingUpIcon
+            sx={{
+              fontSize: 48,
+              color: "primary.main",
               mb: 2,
-              animation: "pulse 2s infinite"
-            }} 
+              animation: "pulse 2s infinite",
+            }}
           />
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              mb: 3, 
+          <Typography
+            variant="h6"
+            sx={{
+              mb: 3,
               color: "text.primary",
-              fontWeight: 600
+              fontWeight: 600,
             }}
           >
             Loading Your Trading Profile
           </Typography>
           <Box sx={{ width: "100%", mb: 2 }}>
-            <LinearProgress 
-              variant="determinate" 
+            <LinearProgress
+              variant="determinate"
               value={loadingProgress}
               sx={{
                 height: 8,
@@ -201,27 +199,39 @@ const ProfilePage = () => {
                 bgcolor: alpha(theme.palette.primary.main, 0.1),
                 "& .MuiLinearProgress-bar": {
                   borderRadius: 4,
-                  background: `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`
-                }
+                  background: `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                },
               }}
             />
           </Box>
-          <Typography 
-            variant="body2" 
+          <Typography
+            variant="body2"
             color="text.secondary"
             sx={{ fontSize: "0.875rem" }}
           >
-            {loadingProgress < 30 ? "Connecting to servers..." :
-             loadingProgress < 60 ? "Fetching account data..." :
-             loadingProgress < 90 ? "Loading trading statistics..." :
-             "Almost ready..."}
+            {loadingProgress < 30
+              ? "Connecting to servers..."
+              : loadingProgress < 60
+              ? "Fetching account data..."
+              : loadingProgress < 90
+              ? "Loading trading statistics..."
+              : "Almost ready..."}
           </Typography>
         </Paper>
         <style jsx global>{`
           @keyframes pulse {
-            0% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.1); opacity: 0.7; }
-            100% { transform: scale(1); opacity: 1; }
+            0% {
+              transform: scale(1);
+              opacity: 1;
+            }
+            50% {
+              transform: scale(1.1);
+              opacity: 0.7;
+            }
+            100% {
+              transform: scale(1);
+              opacity: 1;
+            }
           }
         `}</style>
       </Box>
@@ -231,13 +241,13 @@ const ProfilePage = () => {
   // Enhanced Error State
   if (error) {
     return (
-      <Box 
-        sx={{ 
-          minHeight: "100vh", 
+      <Box
+        sx={{
+          minHeight: "100vh",
           bgcolor: "background.default",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center"
+          justifyContent: "center",
         }}
       >
         <Paper
@@ -253,30 +263,30 @@ const ProfilePage = () => {
             mx: 2,
           }}
         >
-          <ErrorIcon 
-            sx={{ 
-              fontSize: 64, 
-              color: "error.main", 
+          <ErrorIcon
+            sx={{
+              fontSize: 64,
+              color: "error.main",
               mb: 2,
-              opacity: 0.8
-            }} 
+              opacity: 0.8,
+            }}
           />
-          <Typography 
-            variant="h5" 
+          <Typography
+            variant="h5"
             gutterBottom
-            sx={{ 
+            sx={{
               fontWeight: 600,
-              color: "text.primary"
+              color: "text.primary",
             }}
           >
             Oops! Something went wrong
           </Typography>
-          <Typography 
-            color="text.secondary" 
-            sx={{ 
+          <Typography
+            color="text.secondary"
+            sx={{
               mb: 4,
               fontSize: "1rem",
-              lineHeight: 1.6
+              lineHeight: 1.6,
             }}
           >
             {error}
@@ -295,8 +305,11 @@ const ProfilePage = () => {
               boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}`,
               "&:hover": {
                 transform: "translateY(-2px)",
-                boxShadow: `0 6px 16px ${alpha(theme.palette.primary.main, 0.4)}`,
-              }
+                boxShadow: `0 6px 16px ${alpha(
+                  theme.palette.primary.main,
+                  0.4
+                )}`,
+              },
             }}
           >
             Try Again
@@ -308,12 +321,18 @@ const ProfilePage = () => {
 
   return (
     <Fade in={true} timeout={600}>
-      <Box 
-        sx={{ 
-          minHeight: "100vh", 
+      <Box
+        sx={{
+          minHeight: "100vh",
           bgcolor: "background.default",
-          backgroundImage: `radial-gradient(circle at 20% 80%, ${alpha(theme.palette.primary.main, 0.05)} 0%, transparent 50%),
-                           radial-gradient(circle at 80% 20%, ${alpha(theme.palette.secondary.main, 0.05)} 0%, transparent 50%)`
+          backgroundImage: `radial-gradient(circle at 20% 80%, ${alpha(
+            theme.palette.primary.main,
+            0.05
+          )} 0%, transparent 50%),
+                           radial-gradient(circle at 80% 20%, ${alpha(
+                             theme.palette.secondary.main,
+                             0.05
+                           )} 0%, transparent 50%)`,
         }}
       >
         <Container
@@ -344,11 +363,13 @@ const ProfilePage = () => {
             }}
           >
             <Box sx={{ p: { xs: 3, sm: 4 } }}>
-              <ProfileTabs 
-                activeTab={activeTab} 
+              <ProfileTabs
+                activeTab={activeTab}
                 onTabChange={setActiveTab}
                 brokerCount={brokerAccounts?.length || 0}
-                notificationCounts={{ unread: notifications?.filter(n => !n.read)?.length || 0 }}
+                notificationCounts={{
+                  unread: notifications?.filter((n) => !n.read)?.length || 0,
+                }}
                 securityAlerts={profileData?.securityAlerts || 0}
               />
 

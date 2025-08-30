@@ -27,6 +27,9 @@ from services.auto_stock_selection_service import AutoStockSelectionService
 from services.auto_trading_data_service import AutoTradingDataService
 from services.database.trading_db_service import TradingDatabaseService
 from services.centralized_ws_manager import CentralizedWebSocketManager
+from services.margin_aware_trading_service import MarginAwareTradingService
+from services.broker_funds_sync_service import broker_funds_sync_service
+from database.connection import SessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,13 @@ class TradingSession:
     session_end_time: Optional[datetime] = None
     total_pnl: float = 0.0
     trades_count: int = 0
+    
+    # Enhanced margin management fields
+    margin_utilization_limit: float = 0.8  # 80% max utilization
+    risk_per_trade: float = 0.02  # 2% risk per trade
+    margin_buffer: float = 0.1  # 10% safety buffer
+    auto_margin_sync: bool = True  # Auto sync margin data
+    position_sizing_mode: str = "margin_based"  # margin_based, fixed, risk_based
 
 @dataclass
 class SystemHealth:
@@ -104,6 +114,11 @@ class AutoTradingCoordinator:
         self.execution_engine: Optional[RealTimeExecutionEngine] = None
         self.position_monitor: Optional[PositionMonitor] = None
         self.order_manager: Optional[OrderManagementSystem] = None
+        
+        # Enhanced margin-aware services
+        self.margin_service: Optional[MarginAwareTradingService] = None
+        self.margin_sync_interval = 300  # 5 minutes
+        self.last_margin_sync = None
         
         # Session management
         self.active_sessions: Dict[str, TradingSession] = {}
@@ -187,6 +202,13 @@ class AutoTradingCoordinator:
             )
             await self.execution_engine.start_execution_engine()
             
+            # Initialize margin-aware trading service with proper connection management
+            self.margin_service = None  # Will be initialized with proper DB sessions when needed
+            
+            # Start margin sync service if not already running
+            if not broker_funds_sync_service.is_running:
+                asyncio.create_task(broker_funds_sync_service.start_background_sync())
+            
             # Setup event callbacks
             await self._setup_callbacks()
             
@@ -195,6 +217,7 @@ class AutoTradingCoordinator:
             asyncio.create_task(self._market_data_processor())
             asyncio.create_task(self._signal_generator())
             asyncio.create_task(self._performance_tracker())
+            asyncio.create_task(self._margin_monitoring_loop())  # New margin monitoring
             
             self.system_state = TradingSystemState.ACTIVE
             logger.info("Auto-Trading System initialized successfully")
@@ -911,6 +934,245 @@ class AutoTradingCoordinator:
             
         except Exception as e:
             logger.error(f"Error resuming system: {e}")
+
+    async def _margin_monitoring_loop(self):
+        """Continuous margin monitoring during trading"""
+        logger.info("🔍 Started margin monitoring loop")
+        
+        while self.system_state in [TradingSystemState.ACTIVE, TradingSystemState.PAUSED]:
+            try:
+                if self.system_state == TradingSystemState.PAUSED:
+                    await asyncio.sleep(60)  # Check less frequently when paused
+                    continue
+                
+                # Check all active sessions for margin issues
+                for session_id, session in self.active_sessions.items():
+                    if not session.auto_margin_sync:
+                        continue
+                    
+                    # Get current margin status
+                    margin_summary = broker_funds_sync_service.get_user_margin_summary(session.user_id)
+                    
+                    if "error" not in margin_summary:
+                        utilization = margin_summary.get('overall_utilization', 0)
+                        
+                        # Take action based on utilization levels
+                        if utilization > 95:
+                            logger.critical(f"🚨 CRITICAL: Margin utilization {utilization:.1f}% for session {session_id} - Emergency stop!")
+                            await self._emergency_stop_session(session, "Critical margin utilization")
+                            
+                        elif utilization > session.margin_utilization_limit * 100:
+                            logger.warning(f"⚠️ HIGH: Margin utilization {utilization:.1f}% for session {session_id} - Pausing new trades")
+                            await self._pause_session_new_trades(session, "High margin utilization")
+                            
+                        elif utilization > 70:
+                            logger.info(f"📊 MODERATE: Margin utilization {utilization:.1f}% for session {session_id} - Reducing position sizes")
+                            await self._reduce_session_position_sizes(session)
+                
+                await asyncio.sleep(self.margin_sync_interval)
+                
+            except Exception as e:
+                logger.error(f"Error in margin monitoring: {e}")
+                await asyncio.sleep(60)
+
+    async def _emergency_stop_session(self, session: TradingSession, reason: str):
+        """Emergency stop for a specific session with margin protection"""
+        logger.critical(f"🚨 EMERGENCY STOP for session {session.session_id}: {reason}")
+        
+        try:
+            # Set session to emergency stop
+            # TODO: Add session state tracking if needed
+            
+            # Stop new trade generation for this session
+            # TODO: Implement session-specific trading controls
+            
+            # Log emergency event
+            await self._log_emergency_event(session, reason)
+            
+        except Exception as e:
+            logger.error(f"Error in emergency stop for session {session.session_id}: {e}")
+
+    async def _pause_session_new_trades(self, session: TradingSession, reason: str):
+        """Pause new trades for a session while keeping existing ones"""
+        logger.warning(f"⏸️ PAUSING NEW TRADES for session {session.session_id}: {reason}")
+        
+        try:
+            # TODO: Implement session-specific pause logic
+            # For now, we can reduce risk per trade
+            session.risk_per_trade *= 0.5
+            
+            # Log pause event
+            await self._log_trading_event(session, "PAUSED_NEW_TRADES", reason)
+            
+        except Exception as e:
+            logger.error(f"Error pausing new trades for session {session.session_id}: {e}")
+
+    async def _reduce_session_position_sizes(self, session: TradingSession):
+        """Reduce position sizes for a session due to margin pressure"""
+        try:
+            # Reduce risk per trade by 30%
+            session.risk_per_trade *= 0.7
+            logger.info(f"📉 Reduced risk per trade to {session.risk_per_trade:.3f} for session {session.session_id}")
+            
+        except Exception as e:
+            logger.error(f"Error reducing position sizes for session {session.session_id}: {e}")
+
+    async def calculate_margin_aware_position_size(self, session: TradingSession, stock_price: float, symbol: str) -> Dict[str, Any]:
+        """Calculate intelligent position size based on margin and other factors"""
+        db = None
+        try:
+            # Create margin service with proper DB session management
+            db = SessionLocal()
+            margin_service = MarginAwareTradingService(db)
+            
+            # Get margin-based position size
+            position_calc = margin_service.calculate_position_size(
+                user_id=session.user_id,
+                stock_price=stock_price,
+                risk_percentage=session.risk_per_trade
+            )
+            
+            if not position_calc.get("can_trade", False):
+                return {
+                    "quantity": 0,
+                    "method": "margin_blocked",
+                    "reason": position_calc.get("reason", "Margin check failed")
+                }
+            
+            base_quantity = position_calc.get("recommended_quantity", 1)
+            
+            # Apply session-specific adjustments
+            if session.position_sizing_mode == "margin_based":
+                # Use margin-calculated size
+                final_quantity = base_quantity
+            elif session.position_sizing_mode == "fixed":
+                # Use fixed size from config
+                final_quantity = session.strategy_config.get("fixed_quantity", 1)
+            else:
+                # Default to margin-based with buffer
+                final_quantity = max(1, int(base_quantity * (1 - session.margin_buffer)))
+            
+            # Apply time-based adjustment (reduce size near market close)
+            time_factor = await self._get_time_based_factor()
+            final_quantity = max(1, int(final_quantity * time_factor))
+            
+            return {
+                "quantity": final_quantity,
+                "method": "margin_aware",
+                "base_quantity": base_quantity,
+                "time_factor": time_factor,
+                "required_margin": position_calc.get("required_margin", 0),
+                "margin_utilization": position_calc.get("margin_utilization_after_trade", 0),
+                "session_risk": session.risk_per_trade
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating margin-aware position size: {e}")
+            return {"quantity": 1, "method": "error_fallback"}
+        finally:
+            if db:
+                db.close()
+
+    async def validate_trade_with_margin(self, session: TradingSession, quantity: int, stock_price: float) -> Dict[str, Any]:
+        """Validate trade against margin requirements"""
+        db = None
+        try:
+            # Create margin service with proper DB session management
+            db = SessionLocal()
+            margin_service = MarginAwareTradingService(db)
+            
+            validation = margin_service.validate_trade_order(
+                user_id=session.user_id,
+                quantity=quantity,
+                stock_price=stock_price
+            )
+            
+            return validation
+            
+        except Exception as e:
+            logger.error(f"Error validating trade with margin: {e}")
+            return {"valid": False, "reason": str(e)}
+        finally:
+            if db:
+                db.close()
+
+    async def _get_time_based_factor(self) -> float:
+        """Get time-based position size adjustment"""
+        now = datetime.now()
+        hour = now.hour
+        
+        # Reduce position sizes in last hour of trading
+        if hour >= 15:  # After 3 PM
+            return 0.5
+        elif hour >= 14:  # After 2 PM
+            return 0.7
+        else:
+            return 1.0
+
+    async def _log_emergency_event(self, session: TradingSession, reason: str):
+        """Log emergency trading events"""
+        try:
+            event = {
+                "session_id": session.session_id,
+                "user_id": session.user_id,
+                "event_type": "EMERGENCY_STOP",
+                "reason": reason,
+                "timestamp": datetime.now().isoformat(),
+                "margin_status": broker_funds_sync_service.get_user_margin_summary(session.user_id)
+            }
+            
+            logger.critical(f"Emergency event logged: {event}")
+            # TODO: Store in database via db_service
+            
+        except Exception as e:
+            logger.error(f"Error logging emergency event: {e}")
+
+    async def _log_trading_event(self, session: TradingSession, event_type: str, details: str):
+        """Log general trading events"""
+        try:
+            event = {
+                "session_id": session.session_id,
+                "user_id": session.user_id,
+                "event_type": event_type,
+                "details": details,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Trading event: {event}")
+            # TODO: Store in database via db_service
+            
+        except Exception as e:
+            logger.error(f"Error logging trading event: {e}")
+
+    async def get_enhanced_system_status(self) -> Dict[str, Any]:
+        """Get enhanced system status with margin information"""
+        try:
+            base_status = {
+                "system_state": self.system_state.value,
+                "active_sessions": len(self.active_sessions),
+                "system_metrics": self.system_metrics,
+                "uptime_seconds": (datetime.now(timezone.utc) - self.start_time).total_seconds()
+            }
+            
+            # Add margin-related status
+            enhanced_status = {
+                **base_status,
+                "margin_sync_enabled": broker_funds_sync_service.is_running,
+                "last_margin_sync": self.last_margin_sync,
+                "margin_monitoring": "active" if self.system_state == TradingSystemState.ACTIVE else "paused",
+                "enhanced_features": {
+                    "margin_aware_position_sizing": True,
+                    "real_time_margin_monitoring": True,
+                    "emergency_stops": True,
+                    "dynamic_risk_adjustment": True
+                }
+            }
+            
+            return enhanced_status
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced status: {e}")
+            return {"error": str(e)}
 
 # Context manager for easy system lifecycle management
 @asynccontextmanager

@@ -171,9 +171,101 @@ class BrokerConfig(Base):
     last_error_message = Column(String, nullable=True)
     config = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=func.now())
+    
+    # Funds and Margin Fields (Equity)
+    available_margin = Column(Float, nullable=True, comment="Available margin for trading")
+    used_margin = Column(Float, nullable=True, comment="Currently used margin")
+    payin_amount = Column(Float, nullable=True, comment="Instant payin amount")
+    span_margin = Column(Float, nullable=True, comment="SPAN margin for F&O")
+    adhoc_margin = Column(Float, nullable=True, comment="Adhoc margin")
+    notional_cash = Column(Float, nullable=True, comment="Notional cash")
+    exposure_margin = Column(Float, nullable=True, comment="Exposure margin for F&O")
+    
+    # Commodity Funds (if applicable)
+    commodity_available_margin = Column(Float, nullable=True, comment="Commodity available margin")
+    commodity_used_margin = Column(Float, nullable=True, comment="Commodity used margin")
+    
+    # Calculated Fields
+    total_portfolio_value = Column(Float, nullable=True, comment="Total portfolio value")
+    margin_utilization_percent = Column(Float, nullable=True, comment="Margin utilization percentage")
+    funds_last_updated = Column(DateTime, nullable=True, comment="Last funds data update")
+    
+    # User Profile Fields (cached from broker API)
+    user_name = Column(String, nullable=True, comment="Broker account user name")
+    email = Column(String, nullable=True, comment="Broker account email")
+    user_type = Column(String, nullable=True, comment="User type (individual, etc.)")
+    exchanges = Column(JSON, nullable=True, comment="Enabled exchanges")
+    products = Column(JSON, nullable=True, comment="Enabled products")
+    order_types = Column(JSON, nullable=True, comment="Enabled order types")
+    poa_enabled = Column(Boolean, nullable=True, comment="Power of Attorney enabled")
+    ddpi_enabled = Column(Boolean, nullable=True, comment="DDPI enabled")
+    account_status = Column(String, nullable=True, comment="Account status")
+    profile_last_updated = Column(DateTime, nullable=True, comment="Last profile data update")
 
     # Relationships
     user = relationship("User", back_populates="broker_configs")
+    
+    def get_margin_utilization(self):
+        """Calculate margin utilization percentage"""
+        if self.available_margin and self.available_margin > 0:
+            return (self.used_margin or 0) / self.available_margin * 100
+        return 0.0
+    
+    def get_free_margin(self):
+        """Get available free margin"""
+        available = self.available_margin or 0
+        used = self.used_margin or 0
+        return max(0, available - used)
+    
+    def can_place_order(self, required_margin):
+        """Check if broker has enough margin for order"""
+        return self.get_free_margin() >= required_margin
+    
+    def update_funds_data(self, funds_data):
+        """Update funds data from API response"""
+        if not funds_data or 'data' not in funds_data:
+            return
+        
+        data = funds_data['data']
+        
+        # Update equity funds
+        if 'equity' in data:
+            equity = data['equity']
+            self.available_margin = equity.get('available_margin', 0)
+            self.used_margin = equity.get('used_margin', 0)
+            self.payin_amount = equity.get('payin_amount', 0)
+            self.span_margin = equity.get('span_margin', 0)
+            self.adhoc_margin = equity.get('adhoc_margin', 0)
+            self.notional_cash = equity.get('notional_cash', 0)
+            self.exposure_margin = equity.get('exposure_margin', 0)
+        
+        # Update commodity funds
+        if 'commodity' in data:
+            commodity = data['commodity']
+            self.commodity_available_margin = commodity.get('available_margin', 0)
+            self.commodity_used_margin = commodity.get('used_margin', 0)
+        
+        # Update calculated fields
+        self.margin_utilization_percent = self.get_margin_utilization()
+        self.funds_last_updated = datetime.now()
+    
+    def update_profile_data(self, profile_data):
+        """Update profile data from API response"""
+        if not profile_data or 'data' not in profile_data:
+            return
+        
+        data = profile_data['data']
+        
+        self.user_name = data.get('user_name')
+        self.email = data.get('email')
+        self.user_type = data.get('user_type', 'individual')
+        self.exchanges = data.get('exchanges', [])
+        self.products = data.get('products', [])
+        self.order_types = data.get('order_types', [])
+        self.poa_enabled = data.get('poa', False)
+        self.ddpi_enabled = data.get('ddpi', False)
+        self.account_status = 'active' if data.get('is_active', False) else 'inactive'
+        self.profile_last_updated = datetime.now()
 
 
 # =======================
