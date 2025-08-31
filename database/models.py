@@ -96,6 +96,9 @@ class User(Base):
     daily_trading_reports = relationship(
         "DailyTradingReport", back_populates="user", cascade="all, delete"
     )
+    notification_preferences = relationship(
+        "UserNotificationPreferences", back_populates="user", uselist=False, cascade="all, delete"
+    )
     
     # New Auto-Trading System Relationships
     auto_trade_executions = relationship(
@@ -838,6 +841,62 @@ class Notification(Base):
     read_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
 
+    # Relationships
+    user = relationship("User")
+
+
+class UserNotificationPreferences(Base):
+    __tablename__ = "user_notification_preferences"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    
+    # Channel preferences
+    email_enabled = Column(Boolean, default=True)
+    sms_enabled = Column(Boolean, default=False)
+    push_enabled = Column(Boolean, default=True)
+    
+    # Notification type preferences (JSON)
+    email_types = Column(JSON, default=lambda: {
+        "trading": True,
+        "token_expiry": True, 
+        "system": True,
+        "portfolio": True,
+        "alerts": True,
+        "risk_management": True
+    })
+    
+    sms_types = Column(JSON, default=lambda: {
+        "token_expiry": True,
+        "critical_trades": True,
+        "system_critical": True,
+        "margin_call": True,
+        "stop_loss_hit": True
+    })
+    
+    push_types = Column(JSON, default=lambda: {
+        "all": True
+    })
+    
+    # Quiet hours
+    quiet_hours_enabled = Column(Boolean, default=True)
+    quiet_start_time = Column(String, default="22:00")  # 10 PM
+    quiet_end_time = Column(String, default="07:00")    # 7 AM
+    
+    # Frequency limits
+    max_emails_per_hour = Column(Integer, default=10)
+    max_sms_per_day = Column(Integer, default=5)
+    max_push_per_hour = Column(Integer, default=50)
+    
+    # Priority overrides (critical notifications ignore quiet hours and limits)
+    critical_override_quiet_hours = Column(Boolean, default=True)
+    critical_override_limits = Column(Boolean, default=True)
+    
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    
     # Relationships
     user = relationship("User")
 

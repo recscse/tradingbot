@@ -6,8 +6,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 # ✅ Configure Logger (Console Only)
-logger = logging.getLogger("middleware_logger")
-logger.setLevel(logging.DEBUG)
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # ✅ Console Handler (Logs to Terminal)
 console_handler = logging.StreamHandler()

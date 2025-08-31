@@ -651,6 +651,23 @@ async def lifespan(app: FastAPI):
                 "💡 This means FNO stocks and instruments will not auto-refresh. Manual refresh required."
             )
 
+        # 7.3. Initialize Notification Scheduler - NEW comprehensive notification system
+        logger.info("📨 Starting Notification Scheduler...")
+        try:
+            from services.notification_scheduler import notification_scheduler
+            
+            notification_scheduler.start_scheduler()
+            logger.info(
+                "✅ Notification Scheduler started - handling token expiry, daily summaries, and system alerts"
+            )
+        except Exception as e:
+            logger.warning(
+                f"⚠️ Notification Scheduler failed to start: {e} - continuing without notification scheduling"
+            )
+            logger.warning(
+                "💡 This means automated token expiry alerts and daily summaries will not work"
+            )
+
         # 8. Initialize trading engine
         try:
             trading_engine = TradingEngine()
@@ -771,6 +788,16 @@ async def lifespan(app: FastAPI):
                 market_scheduler.stop_scheduler()
             except Exception as e:
                 logger.error(f"Error stopping market scheduler: {e}")
+
+        # Stop Notification Scheduler - NEW
+        try:
+            logger.info("🛑 Stopping Notification Scheduler...")
+            from services.notification_scheduler import notification_scheduler
+            notification_scheduler.stop_scheduler()
+            logger.info("✅ Notification Scheduler stopped")
+        except Exception as e:
+            logger.error(f"Error stopping notification scheduler: {e}")
+            
         logger.info(
             "🎯 Enhanced gap and breakout detection services shutdown completed"
         )

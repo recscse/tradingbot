@@ -15,7 +15,7 @@ import {
   Refresh as RefreshIcon,
   OpenInNew as ViewAllIcon,
 } from "@mui/icons-material";
-import { useNotifications } from "../../contexts/NotificationContext";
+import { useNotifications } from "../../context/NotificationContext";
 import NotificationItem from "./NotificationItem";
 import { useNavigate } from "react-router-dom";
 
@@ -35,8 +35,39 @@ const NotificationMenu = ({ anchorEl, open, onClose }) => {
   } = useNotifications();
 
   const handleNotificationClick = (notification) => {
+    // Mark as read when clicked
+    if (!notification.is_read) {
+      markAsRead(notification.id);
+    }
+
     // Navigate to relevant page based on notification type
     switch (notification.type) {
+      case "order_executed":
+      case "position_opened":
+      case "position_closed":
+        navigate("/trade-control");
+        break;
+      case "stop_loss_hit":
+      case "target_reached":
+      case "margin_call":
+        navigate("/analysis");
+        break;
+      case "price_alert_triggered":
+      case "ai_buy_signal":
+      case "ai_sell_signal":
+        navigate("/dashboard");
+        break;
+      case "token_expired":
+      case "token_expiring_soon":
+      case "broker_connected":
+      case "broker_disconnected":
+        navigate("/profile");
+        break;
+      case "daily_pnl_summary":
+      case "portfolio_milestone":
+        navigate("/analysis");
+        break;
+      // Legacy types for backward compatibility
       case "trade_executed":
         navigate("/trade-control");
         break;
@@ -47,6 +78,7 @@ const NotificationMenu = ({ anchorEl, open, onClose }) => {
         navigate("/analysis");
         break;
       default:
+        // For unknown types, stay on current page
         break;
     }
     onClose();

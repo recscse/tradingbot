@@ -14,6 +14,9 @@ const NOTIFICATION_ACTIONS = {
   SET_LOADING: "SET_LOADING",
   SET_ERROR: "SET_ERROR",
   CLEAR_ERROR: "CLEAR_ERROR",
+  SET_UNREAD_COUNT: "SET_UNREAD_COUNT",
+  SET_PREFERENCES: "SET_PREFERENCES",
+  SET_TOKEN_STATUS: "SET_TOKEN_STATUS",
 };
 
 // Initial state
@@ -23,6 +26,9 @@ const initialState = {
   loading: false,
   error: null,
   lastFetched: null,
+  preferences: null,
+  tokenStatus: null,
+  stats: null,
 };
 
 // Reducer
@@ -85,6 +91,15 @@ const notificationReducer = (state, action) => {
     case NOTIFICATION_ACTIONS.CLEAR_ERROR:
       return { ...state, error: null };
 
+    case NOTIFICATION_ACTIONS.SET_UNREAD_COUNT:
+      return { ...state, unreadCount: action.payload };
+
+    case NOTIFICATION_ACTIONS.SET_PREFERENCES:
+      return { ...state, preferences: action.payload };
+
+    case NOTIFICATION_ACTIONS.SET_TOKEN_STATUS:
+      return { ...state, tokenStatus: action.payload };
+
     default:
       return state;
   }
@@ -94,14 +109,31 @@ export const NotificationProvider = ({ children }) => {
   const [state, dispatch] = useReducer(notificationReducer, initialState);
 
   // Fetch notifications
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (options = {}) => {
     try {
       dispatch({ type: NOTIFICATION_ACTIONS.SET_LOADING, payload: true });
-      const response = await api.get("/notifications");
+
+      const params = new URLSearchParams({
+        limit: options.limit || 20,
+        page: options.page || 1,
+        ...(options.type && { type: options.type }),
+        ...(options.is_read !== undefined && { is_read: options.is_read }),
+        ...(options.priority && { priority: options.priority }),
+      });
+
+      const response = await api.get(`/notifications?${params}`);
+
       dispatch({
         type: NOTIFICATION_ACTIONS.SET_NOTIFICATIONS,
         payload: response.data.notifications || [],
       });
+
+      if (response.data.unread_count !== undefined) {
+        dispatch({
+          type: NOTIFICATION_ACTIONS.SET_UNREAD_COUNT,
+          payload: response.data.unread_count,
+        });
+      }
     } catch (error) {
       console.error("Error fetching notifications:", error);
       dispatch({
@@ -152,19 +184,14 @@ export const NotificationProvider = ({ children }) => {
     }
   };
 
-  // Add notification (for real-time updates)
+  // Add notification
   const addNotification = (notification) => {
     dispatch({
       type: NOTIFICATION_ACTIONS.ADD_NOTIFICATION,
       payload: notification,
     });
 
-    // Show toast for new notifications
-    const toastOptions = {
-      duration: 5000,
-      position: "top-right",
-    };
-
+    const toastOptions = { duration: 5000, position: "top-right" };
     switch (notification.type) {
       case "success":
         toast.success(notification.title, toastOptions);
@@ -182,12 +209,90 @@ export const NotificationProvider = ({ children }) => {
     }
   };
 
-  // Initial fetch and polling
+  // ✅ Safe fetchPreferences (no crash if backend 405)
+  const fetchPreferences = async () => {
+    try {
+      const response = await api.get("/notifications/preferences");
+      dispatch({
+        type: NOTIFICATION_ACTIONS.SET_PREFERENCES,
+        payload: response.data,
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching notification preferences:", error);
+      return null;
+    }
+  };
+
+  const updatePreferences = async (preferences) => {
+    try {
+      const response = await api.patch(
+        "/notifications/preferences",
+        preferences
+      );
+      await fetchPreferences();
+      toast.success("Notification preferences updated");
+      return response.data;
+    } catch (error) {
+      console.error("Error updating notification preferences:", error);
+      toast.error("Failed to update preferences");
+      return null;
+    }
+  };
+
+  // ✅ Safe fetchTokenStatus
+  const fetchTokenStatus = async () => {
+    try {
+      const response = await api.get("/notifications/tokens/status");
+      dispatch({
+        type: NOTIFICATION_ACTIONS.SET_TOKEN_STATUS,
+        payload: response.data,
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching token status:", error);
+      return null;
+    }
+  };
+
+  // Send test notification
+  const sendTestNotification = async (type, channel = "all") => {
+    try {
+      const response = await api.post("/notifications/test", {
+        type,
+        channel,
+      });
+      toast.success(`Test notification sent via ${channel}`);
+      await fetchNotifications();
+      return response.data;
+    } catch (error) {
+      console.error("Error sending test notification:", error);
+      toast.error("Failed to send test notification");
+      return null;
+    }
+  };
+
+  // Get stats
+  const getNotificationStats = async (days = 7) => {
+    try {
+      const response = await api.get(`/notifications/stats?days=${days}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+      return null;
+    }
+  };
+
+  // Polling
   useEffect(() => {
     fetchNotifications();
+    fetchPreferences();
+    fetchTokenStatus();
 
-    // Poll for new notifications every 30 seconds
-    const pollInterval = setInterval(fetchNotifications, 30000);
+    const pollInterval = setInterval(() => {
+      fetchNotifications();
+      fetchTokenStatus();
+    }, 30000);
 
     return () => clearInterval(pollInterval);
   }, []);
@@ -199,6 +304,11 @@ export const NotificationProvider = ({ children }) => {
     markAllAsRead,
     deleteNotification,
     addNotification,
+    fetchPreferences,
+    updatePreferences,
+    fetchTokenStatus,
+    sendTestNotification,
+    getNotificationStats,
     clearError: () => dispatch({ type: NOTIFICATION_ACTIONS.CLEAR_ERROR }),
   };
 
