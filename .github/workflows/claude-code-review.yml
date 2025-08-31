@@ -90,18 +90,22 @@ jobs:
         
     - name: Generate Claude review prompt
       id: claude-prompt
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        PR_BODY: ${{ github.event.pull_request.body }}
       run: |
-        cat << 'EOF' > claude_review_prompt.md
+        cat << EOF > claude_review_prompt.md
 # Code Review Request for Trading Bot Application
 
 ## Context
 This is a pull request for a full-stack algorithmic trading bot with Python FastAPI backend and React frontend. The system integrates with multiple Indian brokers (Angel One, Dhan, Upstox, Zerodha, Fyers) and handles real-time trading operations.
 
 ## PR Information
-**Title:** ${{ github.event.pull_request.title }}
-**Author:** ${{ github.event.pull_request.user.login }}
+**Title:** ${PR_TITLE}
+**Author:** ${PR_AUTHOR}
 **Description:** 
-${{ github.event.pull_request.body }}
+${PR_BODY}
 
 ## Changes Summary
 ${{ steps.pr-changes.outputs.total_changes }}

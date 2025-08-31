@@ -271,11 +271,11 @@ Before submitting any code, verify:
 
 **MANDATORY READING**: Before writing ANY code, review these comprehensive guides:
 
-1. **LINE_BY_LINE_STANDARDS.md** - Standards for every single line of code
-2. **IMPLEMENTATION_MICRO_STANDARDS.md** - Micro-level implementation patterns  
-3. **CODE_REVIEW_CRITERIA.md** - Comprehensive review checklist
-4. **CODE_TEMPLATES.md** - Copy-paste templates for common patterns
-5. **CODING_CHECKLIST.md** - Quick verification before submission
+1. **docs/standards/LINE_BY_LINE_STANDARDS.md** - Standards for every single line of code
+2. **docs/standards/IMPLEMENTATION_MICRO_STANDARDS.md** - Micro-level implementation patterns  
+3. **docs/standards/CODE_REVIEW_CRITERIA.md** - Comprehensive review checklist
+4. **docs/standards/CODE_TEMPLATES.md** - Copy-paste templates for common patterns
+5. **docs/standards/CODING_CHECKLIST.md** - Quick verification before submission
 
 **CRITICAL REMINDERS:**
 - NEVER use emojis in code, comments, or logging
@@ -295,11 +295,11 @@ Before submitting any code, verify:
 
 ## Always Auto-Apply (No User Request Needed):
 1. **CLAUDE.md coding standards** - Follow for every piece of code
-2. **LINE_BY_LINE_STANDARDS.md** - Apply to every single line  
-3. **IMPLEMENTATION_MICRO_STANDARDS.md** - Use patterns for all implementations
-4. **CODE_REVIEW_CRITERIA.md** - Validate before submitting code
-5. **CODING_CHECKLIST.md** - Quick verification for all code
-6. **CODE_TEMPLATES.md** - Reference for structure
+2. **docs/standards/LINE_BY_LINE_STANDARDS.md** - Apply to every single line  
+3. **docs/standards/IMPLEMENTATION_MICRO_STANDARDS.md** - Use patterns for all implementations
+4. **docs/standards/CODE_REVIEW_CRITERIA.md** - Validate before submitting code
+5. **docs/standards/CODING_CHECKLIST.md** - Quick verification for all code
+6. **docs/standards/CODE_TEMPLATES.md** - Reference for structure
 
 ## Default Code Behavior:
 - snake_case naming for Python functions/variables
@@ -418,7 +418,7 @@ Before submitting any code, verify:
 **Testing**: Unit/integration/E2E tests, 80% coverage, mock dependencies
 
 ## Claude Code Review Workflow (Auto-Execute):
-- **Always follow CLAUDE_REVIEW_WORKFLOW.md 5-phase process**
+- **Always follow docs/standards/CLAUDE_REVIEW_WORKFLOW.md 5-phase process**
 - Phase 1: Standards compliance (naming, docs, types)
 - Phase 2: Code quality (readability, performance, security)
 - Phase 3: Financial validation (Decimal precision, audit trails)
