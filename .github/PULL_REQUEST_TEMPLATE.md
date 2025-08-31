@@ -16,10 +16,10 @@ Brief description of changes and their purpose.
 ## ✅ Code Quality Checklist
 
 ### Naming & Documentation
-- [ ] Functions use `snake_case` naming
+- [ ] Functions use snake_case naming
 - [ ] Variables use descriptive names (no abbreviations)
-- [ ] Classes use `PascalCase`
-- [ ] Constants use `UPPER_SNAKE_CASE`
+- [ ] Classes use PascalCase
+- [ ] Constants use UPPER_SNAKE_CASE
 - [ ] All functions have comprehensive docstrings
 - [ ] Docstrings include Args, Returns, Raises sections
 - [ ] Complex logic has inline comments
