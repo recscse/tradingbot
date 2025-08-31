@@ -2,9 +2,9 @@ from datetime import datetime
 import logging
 from typing import Any, Dict, List
 
-# Import the correct breakout detection service
+# Import the NEW modular breakout detection service
 try:
-    from services.breakout_detection_service import get_breakout_detection_service
+    from services.breakout import get_breakout_system, get_breakout_system_statistics
     BREAKOUT_SERVICE_AVAILABLE = True
 except ImportError:
     BREAKOUT_SERVICE_AVAILABLE = False
@@ -1206,7 +1206,67 @@ class EnhancedMarketAnalyticsService:
             return self.cache.get("gap_analysis", {"gap_up": [], "gap_down": []})
 
         try:
-            # Use the comprehensive gap analysis service if available
+            # Try to use the NEW comprehensive gap detector service first
+            try:
+                from services.gap_detector_service import get_current_gaps, get_gap_detector_service
+                
+                # Get data from the new comprehensive gap detector
+                current_gaps = get_current_gaps()
+                service = get_gap_detector_service()
+                
+                # Always use our comprehensive gap detector (even with empty results)
+                gap_up_signals = [g for g in current_gaps if g.get('gap_type') == 'gap_up']
+                gap_down_signals = [g for g in current_gaps if g.get('gap_type') == 'gap_down']
+                
+                result = {
+                    "gap_up": gap_up_signals,
+                    "gap_down": gap_down_signals,
+                    "gap_up_small": [g for g in gap_up_signals if 0.5 <= g.get('gap_percentage', 0) < 2.5],
+                    "gap_up_medium": [g for g in gap_up_signals if 2.5 <= g.get('gap_percentage', 0) < 5.0],
+                    "gap_up_large": [g for g in gap_up_signals if g.get('gap_percentage', 0) >= 5.0],
+                    "gap_down_small": [g for g in gap_down_signals if -2.5 < g.get('gap_percentage', 0) <= -0.5],
+                    "gap_down_medium": [g for g in gap_down_signals if -5.0 < g.get('gap_percentage', 0) <= -2.5],
+                    "gap_down_large": [g for g in gap_down_signals if g.get('gap_percentage', 0) <= -5.0],
+                    "recent_gaps": current_gaps,
+                    "top_gap_up": sorted(gap_up_signals, key=lambda x: x.get('gap_percentage', 0), reverse=True)[:10],
+                    "top_gap_down": sorted(gap_down_signals, key=lambda x: abs(x.get('gap_percentage', 0)), reverse=True)[:10],
+                    "summary": {
+                        "total_gap_up": len(gap_up_signals),
+                        "total_gap_down": len(gap_down_signals),
+                        "total_gaps_today": len(current_gaps),
+                        "confirmed_gaps": len([g for g in current_gaps if g.get('confirmed', False)]),
+                        "market_status": "active" if service._is_market_hours() else "closed",
+                        "avg_gap_up": sum(g.get('gap_percentage', 0) for g in gap_up_signals) / len(gap_up_signals) if gap_up_signals else 0,
+                        "avg_gap_down": sum(g.get('gap_percentage', 0) for g in gap_down_signals) / len(gap_down_signals) if gap_down_signals else 0,
+                    },
+                    "cpr_data": {
+                        "symbols_with_cpr": [g['symbol'] for g in current_gaps if g.get('pivot')],
+                        "pivot_levels_available": len([g for g in current_gaps if g.get('pivot')])
+                    },
+                    "orb_data": {
+                        "confirmed_gaps": len([g for g in current_gaps if g.get('confirmed', False)]),
+                        "pending_confirmation": len([g for g in current_gaps if not g.get('confirmed', True)])
+                    },
+                    "bias_analysis": {
+                        "bullish_signals": len([g for g in current_gaps if g.get('bias') == 'bullish']),
+                        "bearish_signals": len([g for g in current_gaps if g.get('bias') == 'bearish']),
+                        "neutral_signals": len([g for g in current_gaps if g.get('bias') == 'neutral'])
+                    },
+                    "data_source": "comprehensive_gap_detector_with_cpr_orb",
+                    "service_metrics": service.get_performance_metrics(),
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                self.cache["gap_analysis"] = result
+                self._mark_calculated("gap_analysis")
+                
+                logger.info(f"📊 NEW Comprehensive gap analysis: {result['summary']['total_gaps_today']} gaps with CPR/ORB")
+                return result
+                    
+            except ImportError:
+                logger.info("📊 Comprehensive gap detector not available, trying legacy gap analysis service")
+            
+            # Fallback to original gap analysis service
             try:
                 from services.gap_analysis_service import get_gap_data
                 
@@ -1327,10 +1387,19 @@ class EnhancedMarketAnalyticsService:
         try:
             # Use the proper breakout detection service
             if BREAKOUT_SERVICE_AVAILABLE:
-                breakout_service = get_breakout_detection_service()
+                breakout_service = get_breakout_system()
                 
                 # Get active breakouts from the service
-                all_breakouts = breakout_service.get_active_breakouts()
+                if breakout_service and hasattr(breakout_service, 'get_active_breakouts'):
+                    all_breakouts = breakout_service.get_active_breakouts()
+                else:
+                    # Fallback to getting statistics if direct method not available
+                    statistics = get_breakout_system_statistics()
+                    all_breakouts = []
+                    # Extract breakouts from statistics
+                    breakouts_by_type = statistics.get("breakouts_by_type", {})
+                    for breakout_list in breakouts_by_type.values():
+                        all_breakouts.extend(breakout_list)
                 
                 # Separate breakouts and breakdowns
                 breakouts = [b for b in all_breakouts if b.get("breakout_type") == "breakout"]

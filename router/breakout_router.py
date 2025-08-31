@@ -16,24 +16,27 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# Import ONLY Enhanced Breakout Engine (remove all legacy services)
+# Import NEW Modular Breakout System (replacing enhanced engine)
 try:
-    from services.enhanced_breakout_engine import (
-        enhanced_breakout_engine,
-        get_enhanced_breakouts_data,
-        health_check,
-        BreakoutType
+    from services.breakout import (
+        get_breakout_system,
+        health_check_breakout_system,
+        get_breakout_system_statistics
     )
-    ENHANCED_BREAKOUT_AVAILABLE = True
+    MODULAR_BREAKOUT_AVAILABLE = True
     BREAKOUT_SERVICE_AVAILABLE = True  # Compatibility variable
-    breakout_scanner = enhanced_breakout_engine  # Compatibility alias
-    get_breakouts_data = get_enhanced_breakouts_data  # Compatibility alias
-    logger.info("✅ Enhanced Breakout Engine imported successfully (vectorized)")
+    breakout_scanner = get_breakout_system  # Compatibility alias - function that returns service
+    get_breakouts_data = get_breakout_system_statistics  # Compatibility alias
+    health_check = health_check_breakout_system  # Compatibility alias
+    logger.info("✅ NEW Modular Breakout System imported successfully")
 except ImportError as e:
-    logger.error(f"❌ Enhanced Breakout Engine not available: {e}")
-    ENHANCED_BREAKOUT_AVAILABLE = False
+    logger.error(f"❌ Modular Breakout System not available: {e}")
+    MODULAR_BREAKOUT_AVAILABLE = False
     BREAKOUT_SERVICE_AVAILABLE = False  # Compatibility variable
     breakout_scanner = None
+
+# Note: The enhanced breakout engine is replaced by the modular breakout system above
+# All breakout functionality is now handled through the modular system
 
 router = APIRouter(prefix="/api/v1/breakout", tags=["Breakout Scanner"])
 
@@ -77,11 +80,19 @@ class HealthCheckResponse(BaseModel):
     timestamp: str
 
 def check_service_available():
-    """Dependency to check if breakout service is available"""
-    if not ENHANCED_BREAKOUT_AVAILABLE or not breakout_scanner:
+    """Dependency to check if modular breakout service is available"""
+    if not MODULAR_BREAKOUT_AVAILABLE:
         raise HTTPException(
             status_code=503,
-            detail="Enhanced breakout engine service is not available"
+            detail="Modular breakout system is not available"
+        )
+    
+    # Check if the service is actually running
+    service = breakout_scanner()  # This calls get_breakout_system()
+    if not service:
+        raise HTTPException(
+            status_code=503,
+            detail="Modular breakout system is not initialized"
         )
     return True
 
@@ -111,7 +122,7 @@ async def get_breakouts_summary(service_check: bool = Depends(check_service_avai
 async def trigger_broadcast(service_check: bool = Depends(check_service_available)):
     """Manually trigger breakout data broadcast to frontend"""
     try:
-        if ENHANCED_BREAKOUT_AVAILABLE and breakout_scanner:
+        if MODULAR_BREAKOUT_AVAILABLE and breakout_scanner:
             await breakout_scanner.broadcast_complete_analysis()
             return {
                 "status": "success",
@@ -131,7 +142,7 @@ async def inject_test_data(
 ):
     """Inject test market data to simulate breakouts (for testing)"""
     try:
-        if ENHANCED_BREAKOUT_AVAILABLE and breakout_scanner:
+        if MODULAR_BREAKOUT_AVAILABLE and breakout_scanner:
             await breakout_scanner.inject_test_data(count)
             
             # Get results immediately
@@ -514,72 +525,39 @@ async def breakout_websocket(websocket):
     finally:
         logger.info("🔌 Breakout WebSocket client disconnected")
 
-# Enhanced endpoints for Enhanced Breakout Engine
-if ENHANCED_BREAKOUT_AVAILABLE:
-    
-    @router.get("/enhanced/metrics")
-    async def get_enhanced_metrics(service_check: bool = Depends(check_service_available)):
-        """Get comprehensive enhanced engine metrics"""
-        try:
-            metrics = enhanced_breakout_engine.get_metrics()
-            return JSONResponse(content={
-                "engine_version": "2.0_vectorized",
-                "capabilities": [
-                    "vectorized_processing",
-                    "16_breakout_types",
-                    "memory_efficient_storage", 
-                    "real_time_analytics"
-                ],
-                "metrics": metrics,
-                "timestamp": datetime.now().isoformat()
-            })
-        except Exception as e:
-            logger.error(f"❌ Error getting enhanced metrics: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    @router.get("/enhanced/performance")
-    async def get_performance_stats(service_check: bool = Depends(check_service_available)):
-        """Get detailed performance statistics"""
-        try:
-            metrics = enhanced_breakout_engine.get_metrics()
-            storage_stats = {
-                "memory_usage_mb": enhanced_breakout_engine.storage.get_memory_usage(),
-                "instruments_tracked": enhanced_breakout_engine.storage.next_index,
-                "max_instruments": enhanced_breakout_engine.storage.max_instruments,
-                "buffer_size": enhanced_breakout_engine.storage.buffer_size,
-                "storage_efficiency": f"{(enhanced_breakout_engine.storage.next_index / enhanced_breakout_engine.storage.max_instruments) * 100:.2f}%"
-            }
-            
-            return JSONResponse(content={
-                "performance_metrics": metrics,
-                "storage_statistics": storage_stats,
-                "processing_speed": {
-                    "target_latency_ms": 5.0,
-                    "actual_latency_ms": metrics.get("avg_processing_time_ms", 0),
-                    "performance_ratio": f"{(5.0 / max(0.1, metrics.get('avg_processing_time_ms', 5.0))) * 100:.1f}%"
-                },
-                "timestamp": datetime.now().isoformat()
-            })
-        except Exception as e:
-            logger.error(f"❌ Error getting performance stats: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+# Enhanced endpoints for metrics (optional enhanced engine features)
+if MODULAR_BREAKOUT_AVAILABLE:
     
     @router.get("/enhanced/types")
     async def get_all_breakout_types():
-        """Get all available breakout types in enhanced engine"""
-        types = [breakout_type.value for breakout_type in BreakoutType]
-        return JSONResponse(content={
-            "total_types": len(types),
-            "breakout_types": types,
-            "enhanced_types": [
+        """Get all available breakout types from the modular system"""
+        try:
+            # Use standard breakout types from the enum
+            standard_types = [
+                "volume_breakout", "price_breakout", "momentum_breakout", 
+                "resistance_breakout", "support_breakdown"
+            ]
+            
+            # Enhanced types from the modular system
+            enhanced_types = [
                 "volume_surge", "unusual_volume", "strong_momentum", 
                 "acceleration", "high_breakout", "low_breakdown",
                 "gap_up", "gap_down", "volatility_expansion", 
                 "price_squeeze", "triangular_breakout", "channel_breakout"
-            ],
-            "legacy_compatible": True,
-            "timestamp": datetime.now().isoformat()
-        })
+            ]
+            
+            return JSONResponse(content={
+                "total_standard_types": len(standard_types),
+                "total_enhanced_types": len(enhanced_types),
+                "standard_breakout_types": standard_types,
+                "enhanced_breakout_types": enhanced_types,
+                "system_type": "modular_breakout_system",
+                "legacy_compatible": True,
+                "timestamp": datetime.now().isoformat()
+            })
+        except Exception as e:
+            logger.error(f"❌ Error getting breakout types: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 # Fallback endpoints when service is not available
 if not BREAKOUT_SERVICE_AVAILABLE:

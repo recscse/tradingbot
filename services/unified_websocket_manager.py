@@ -1499,12 +1499,10 @@ def integrate_with_centralized_manager():
         breakout_service = None
         try:
             from services.gap_detection_service import get_gap_detection_service
-            from services.breakout_detection_service import (
-                get_breakout_detection_service,
-            )
+            from services.breakout import get_breakout_system
 
             gap_service = get_gap_detection_service()
-            breakout_service = get_breakout_detection_service()
+            breakout_service = get_breakout_system()
             logger.info("✅ Gap and breakout detection services loaded")
         except ImportError as e:
             logger.warning(f"⚠️ Detection services not available: {e}")

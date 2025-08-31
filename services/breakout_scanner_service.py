@@ -1,972 +1,1620 @@
-#!/usr/bin/env python3
+# services/breakout_scanner_service.py
 """
-Breakout Scanner Service - Real-time breakout detection using Market Data Hub
+Real-Time Breakout Detection Service for Intraday Trading
 
-Features:
-- Real-time breakout detection from live market data
-- Multiple breakout strategies (volume, price, momentum)
-- Daily reset for new trading sessions
-- High/low tracking with timestamps
-- Integration with unified WebSocket for UI updates
+This service provides comprehensive real-time breakout detection from live tick feed data
+with support for multiple timeframes, technical indicators, and confirmation filters.
+
+Key Features:
+- Live tick ingestion and OHLC candle aggregation
+- Multiple support/resistance level calculations
+- Volume, momentum, and EMA confirmation filters  
+- Real-time signal broadcasting via WebSocket and Redis
+- Scalable architecture supporting 225+ instruments
+- Production-grade error handling and logging
+
+Author: Claude Code
+Created: 2025-08-31
 """
 
 import asyncio
-import time
 import logging
-from datetime import datetime, timedelta, time as datetime_time
-from typing import Dict, List, Any, Optional, Set, Tuple
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
 import json
-import threading
-from enum import Enum
+from collections import defaultdict, deque
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone, timedelta, time
+from typing import Dict, List, Any, Optional, Deque, Tuple
+from decimal import Decimal, ROUND_HALF_UP
 
-import numpy as np
 import pandas as pd
+import numpy as np
+from pandas import DataFrame, Timestamp
+
+# Indian timezone
+from zoneinfo import ZoneInfo
+IST = ZoneInfo("Asia/Kolkata")
 
 logger = logging.getLogger(__name__)
 
-class BreakoutType(Enum):
-    """Types of breakouts detected"""
-    VOLUME_BREAKOUT = "volume_breakout"
-    PRICE_BREAKOUT = "price_breakout"
-    MOMENTUM_BREAKOUT = "momentum_breakout"
-    RESISTANCE_BREAKOUT = "resistance_breakout"
-    SUPPORT_BREAKDOWN = "support_breakdown"
 
 @dataclass
 class BreakoutSignal:
-    """Breakout signal data structure"""
-    instrument_key: str
+    """
+    Structured breakout signal with complete trading information
+    
+    Attributes:
+        symbol: Trading symbol (e.g., "RELIANCE")
+        strategy: Breakout strategy type ("ORB15", "Donchian", "PivotBreakout", etc.)
+        signal: Trading direction ("BUY" or "SELL")
+        breakout_level: Price level that was broken
+        entry_price: Recommended entry price
+        stop_loss: Stop loss price
+        target: Target price
+        volume: Current volume at breakout
+        timestamp: ISO 8601 timestamp string with timezone
+    """
     symbol: str
-    breakout_type: BreakoutType
-    current_price: float
-    breakout_price: float
+    strategy: str
+    signal: str  # "BUY" or "SELL"
+    breakout_level: float
+    entry_price: float
+    stop_loss: float
+    target: float
     volume: int
-    percentage_move: float
-    strength: float  # 1-10 scale
-    timestamp: datetime
-    market_cap_category: str = "unknown"
-    sector: str = "unknown"
+    timestamp: str  # ISO 8601 string
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
-        return {
-            "instrument_key": self.instrument_key,
-            "symbol": self.symbol,
-            "breakout_type": self.breakout_type.value,
-            "current_price": self.current_price,
-            "breakout_price": self.breakout_price,
-            "volume": self.volume,
-            "percentage_move": self.percentage_move,
-            "strength": self.strength,
-            "timestamp": self.timestamp.isoformat(),
-            "timestamp_formatted": self.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "date": self.timestamp.strftime("%Y-%m-%d"),
-            "time": self.timestamp.strftime("%H:%M:%S"),
-            "time_12h": self.timestamp.strftime("%I:%M:%S %p"),
-            "market_cap_category": self.market_cap_category,
-            "sector": self.sector,
-            "time_ago": self._calculate_time_ago(),
-            "epoch_timestamp": int(self.timestamp.timestamp())
-        }
+        return asdict(self)
     
-    def _calculate_time_ago(self) -> str:
-        """Calculate human readable time ago"""
-        now = datetime.now()
-        diff = now - self.timestamp
-        total_seconds = diff.total_seconds()
+    def to_json(self) -> str:
+        """Convert to JSON string"""
+        return json.dumps(self.to_dict(), default=str)
+
+
+class TickStore:
+    """
+    High-performance tick storage with rolling buffers
+    
+    Maintains recent tick history per instrument for candle building
+    and technical analysis calculations.
+    """
+    
+    def __init__(self, max_ticks: int = 5000):
+        """
+        Initialize tick storage
         
-        if total_seconds < 0:
-            return "just now"
-        elif total_seconds < 10:
-            return "just now"
-        elif total_seconds < 60:
-            return f"{int(total_seconds)}s ago"
-        elif total_seconds < 3600:
-            minutes = int(total_seconds / 60)
-            return f"{minutes}m ago"
-        elif total_seconds < 86400:  # 24 hours
-            hours = int(total_seconds / 3600)
-            minutes = int((total_seconds % 3600) / 60)
-            if minutes > 0:
-                return f"{hours}h {minutes}m ago"
-            else:
-                return f"{hours}h ago"
-        else:
-            days = int(total_seconds / 86400)
-            return f"{days}d ago"
+        Args:
+            max_ticks: Maximum ticks to store per instrument
+        """
+        self._ticks: Dict[str, Deque[Dict[str, Any]]] = defaultdict(
+            lambda: deque(maxlen=max_ticks)
+        )
+        self._last_prices: Dict[str, float] = {}
+        self._last_update: Dict[str, datetime] = {}
+        
+        logger.info(f"✅ TickStore initialized with max_ticks={max_ticks}")
+    
+    def add_tick(self, instrument_key: str, ltp: float, ltt: int, ltq: int) -> None:
+        """
+        Add new tick data for an instrument
+        
+        Args:
+            instrument_key: Unique instrument identifier
+            ltp: Last traded price
+            ltt: Last traded time (milliseconds timestamp)  
+            ltq: Last traded quantity
+            
+        Raises:
+            ValueError: If ltp is invalid or ltt is invalid timestamp
+        """
+        if not ltp or ltp <= 0:
+            raise ValueError(f"Invalid LTP for {instrument_key}: {ltp}")
+        
+        try:
+            # Convert milliseconds timestamp to datetime
+            tick_time = datetime.fromtimestamp(ltt / 1000.0, tz=IST)
+        except (ValueError, OSError) as e:
+            raise ValueError(f"Invalid timestamp {ltt} for {instrument_key}: {e}") from e
+        
+        tick_data = {
+            "price": Decimal(str(ltp)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
+            "quantity": ltq,
+            "timestamp": tick_time,
+            "unix_time": ltt
+        }
+        
+        self._ticks[instrument_key].append(tick_data)
+        self._last_prices[instrument_key] = float(tick_data["price"])
+        self._last_update[instrument_key] = tick_time
+    
+    def get_recent_ticks(self, instrument_key: str, count: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get recent ticks for an instrument
+        
+        Args:
+            instrument_key: Instrument identifier
+            count: Number of recent ticks to return
+            
+        Returns:
+            List of recent tick data dictionaries
+        """
+        if instrument_key not in self._ticks:
+            return []
+        
+        ticks = list(self._ticks[instrument_key])
+        return ticks[-count:] if count < len(ticks) else ticks
+    
+    def get_tick_count(self, instrument_key: str) -> int:
+        """Get total tick count for instrument"""
+        return len(self._ticks.get(instrument_key, []))
+    
+    def get_last_price(self, instrument_key: str) -> Optional[float]:
+        """Get last traded price for instrument"""
+        return self._last_prices.get(instrument_key)
+    
+    def get_price_range(self, instrument_key: str, minutes: int = 5) -> Tuple[float, float]:
+        """
+        Get price range (high, low) for specified minutes
+        
+        Args:
+            instrument_key: Instrument identifier
+            minutes: Time window in minutes
+            
+        Returns:
+            Tuple of (high, low) prices
+        """
+        if instrument_key not in self._ticks:
+            return (0.0, 0.0)
+        
+        cutoff_time = datetime.now(tz=IST) - timedelta(minutes=minutes)
+        recent_ticks = [
+            tick for tick in self._ticks[instrument_key] 
+            if tick["timestamp"] >= cutoff_time
+        ]
+        
+        if not recent_ticks:
+            return (0.0, 0.0)
+        
+        prices = [float(tick["price"]) for tick in recent_ticks]
+        return (max(prices), min(prices))
 
-@dataclass
-class InstrumentTracker:
-    """Track instrument data for breakout detection"""
-    instrument_key: str
-    symbol: str
-    
-    # Price tracking
-    current_price: float = 0.0
-    day_high: float = 0.0
-    day_low: float = float('inf')
-    open_price: float = 0.0
-    prev_close: float = 0.0
-    
-    # Volume tracking
-    current_volume: int = 0
-    avg_volume_20d: int = 0
-    volume_spike_threshold: float = 2.0  # 2x average volume
-    
-    # Price history for breakout detection
-    price_history: deque = field(default_factory=lambda: deque(maxlen=100))
-    volume_history: deque = field(default_factory=lambda: deque(maxlen=100))
-    
-    # Breakout levels
-    resistance_level: float = 0.0
-    support_level: float = 0.0
-    
-    # Timestamps
-    last_updated: datetime = field(default_factory=datetime.now)
-    session_start: datetime = field(default_factory=datetime.now)
-    
-    # Breakout tracking
-    breakouts_today: List[BreakoutSignal] = field(default_factory=list)
-    last_breakout_time: Optional[datetime] = None
 
-class BreakoutScannerService:
-    """Real-time breakout scanner using Market Data Hub"""
+class CandleBuilder:
+    """
+    OHLC candle aggregation using Pandas resample functionality
+    
+    Builds 1-minute and 5-minute candles from tick data for
+    technical analysis and breakout detection.
+    """
     
     def __init__(self):
-        # Core data structures
-        self.instruments: Dict[str, InstrumentTracker] = {}
-        self.active_breakouts: Dict[str, List[BreakoutSignal]] = defaultdict(list)
-        self.daily_breakouts: List[BreakoutSignal] = []
+        """Initialize candle builder with DataFrame storage"""
+        self._candles: Dict[str, Dict[str, DataFrame]] = defaultdict(
+            lambda: {"1min": DataFrame(), "5min": DataFrame()}
+        )
+        self._last_candle_time: Dict[str, Dict[str, datetime]] = defaultdict(dict)
         
-        # IMPROVED Configuration
-        self.min_price = 20.0   # Increased to avoid penny stocks
-        self.max_price = 10000.0  # Increased range
-        self.min_volume = 5000  # Increased minimum volume
-        self.breakout_threshold = 1.8  # Reduced to 1.8% (more sensitive)
-        self.volume_multiplier = 2.0  # Increased to 2.0x (more selective)
-        self.resistance_lookback = 20  # Days to look back for resistance
-        self.gap_threshold = 1.5  # Gap detection threshold
-        self.volume_z_threshold = 2.0  # Z-score threshold for volume spikes
+        logger.info("✅ CandleBuilder initialized with 1m and 5m timeframes")
+    
+    def build_candles(self, instrument_key: str, ticks: List[Dict[str, Any]]) -> Dict[str, DataFrame]:
+        """
+        Build OHLC candles from tick data using Pandas resample
         
-        # Service state
-        self.is_running = False
-        self.is_market_open = False
-        self.current_trading_day = datetime.now().date()
-        self.market_data_hub = None
-        self.unified_manager = None
-        self.centralized_manager = None
+        Args:
+            instrument_key: Instrument identifier
+            ticks: List of tick data with timestamp and price
+            
+        Returns:
+            Dictionary with "1T" and "5T" DataFrame candles
+            
+        Raises:
+            ValueError: If ticks data is invalid
+        """
+        if not ticks:
+            return self._candles[instrument_key]
+        
+        try:
+            # Convert ticks to DataFrame
+            df_data = []
+            for tick in ticks:
+                df_data.append({
+                    "timestamp": tick["timestamp"],
+                    "price": float(tick["price"]),
+                    "quantity": tick["quantity"]
+                })
+            
+            if not df_data:
+                return self._candles[instrument_key]
+            
+            df = DataFrame(df_data)
+            df.set_index("timestamp", inplace=True)
+            df.index = pd.to_datetime(df.index)
+            
+            # Build candles for both timeframes
+            timeframes = {"1min": "1min", "5min": "5min"}
+            
+            for tf_key, tf_name in timeframes.items():
+                try:
+                    # Resample to OHLC
+                    ohlc = df["price"].resample(tf_key).agg({
+                        "open": "first",
+                        "high": "max", 
+                        "low": "min",
+                        "close": "last"
+                    }).dropna()
+                    
+                    # Add volume (sum of quantities)
+                    volume = df["quantity"].resample(tf_key).sum()
+                    
+                    # Combine OHLC and volume
+                    candles_df = pd.concat([ohlc, volume.rename("volume")], axis=1)
+                    candles_df.dropna(inplace=True)
+                    
+                    if not candles_df.empty:
+                        # Update stored candles (keep last 200 candles for memory efficiency)
+                        self._candles[instrument_key][tf_key] = candles_df.tail(200).copy()
+                        self._last_candle_time[instrument_key][tf_key] = candles_df.index[-1].to_pydatetime()
+                        
+                        logger.debug(f"📊 Built {len(candles_df)} {tf_name} candles for {instrument_key}")
+                
+                except Exception as e:
+                    logger.error(f"❌ Error building {tf_name} candles for {instrument_key}: {e}")
+                    continue
+            
+            return self._candles[instrument_key]
+            
+        except Exception as e:
+            logger.error(f"❌ Error in build_candles for {instrument_key}: {e}")
+            raise ValueError(f"Failed to build candles for {instrument_key}: {e}") from e
+    
+    def get_candles(self, instrument_key: str, timeframe: str = "1T") -> DataFrame:
+        """
+        Get recent candles for instrument and timeframe
+        
+        Args:
+            instrument_key: Instrument identifier
+            timeframe: "1T" for 1-minute, "5T" for 5-minute
+            
+        Returns:
+            DataFrame with OHLC + volume candles
+        """
+        if timeframe not in ["1min", "5min"]:
+            raise ValueError(f"Invalid timeframe: {timeframe}. Use '1min' or '5min'")
+        
+        return self._candles[instrument_key][timeframe].copy()
+    
+    def get_latest_candle(self, instrument_key: str, timeframe: str = "1min") -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent completed candle
+        
+        Args:
+            instrument_key: Instrument identifier  
+            timeframe: Candle timeframe
+            
+        Returns:
+            Dictionary with OHLC data or None if no candles
+        """
+        candles = self.get_candles(instrument_key, timeframe)
+        
+        if candles.empty:
+            return None
+        
+        latest = candles.iloc[-1]
+        return {
+            "timestamp": latest.name,
+            "open": latest["open"],
+            "high": latest["high"], 
+            "low": latest["low"],
+            "close": latest["close"],
+            "volume": latest["volume"]
+        }
+
+
+class LevelCalculator:
+    """
+    Support and resistance level calculation engine
+    
+    Calculates various technical levels including:
+    - Yesterday's High & Low
+    - Opening Range Breakout (ORB 15m & 30m)
+    - Donchian Channel (20-period rolling)
+    - Pivot Points (Classic R1/R2/S1/S2)
+    - Central Pivot Range (CPR)
+    """
+    
+    def __init__(self):
+        """Initialize level calculator with cache storage"""
+        self._daily_levels: Dict[str, Dict[str, float]] = {}
+        self._orb_levels: Dict[str, Dict[str, float]] = {}
+        self._donchian_levels: Dict[str, Dict[str, float]] = {}
+        self._pivot_levels: Dict[str, Dict[str, float]] = {}
+        self._cpr_levels: Dict[str, Dict[str, float]] = {}
+        
+        # Market session timings (IST)
+        self.market_open = time(9, 15)
+        self.orb_15_end = time(9, 30)
+        self.orb_30_end = time(9, 45)
+        
+        logger.info("✅ LevelCalculator initialized with all level types")
+    
+    def calculate_yesterday_levels(
+        self, 
+        instrument_key: str, 
+        yesterday_high: float, 
+        yesterday_low: float
+    ) -> Dict[str, float]:
+        """
+        Calculate yesterday's high and low levels
+        
+        Args:
+            instrument_key: Instrument identifier
+            yesterday_high: Previous day's high price
+            yesterday_low: Previous day's low price
+            
+        Returns:
+            Dictionary with yesterday's levels
+            
+        Raises:
+            ValueError: If prices are invalid
+        """
+        if yesterday_high <= 0 or yesterday_low <= 0:
+            raise ValueError(f"Invalid yesterday prices: high={yesterday_high}, low={yesterday_low}")
+        
+        if yesterday_high < yesterday_low:
+            raise ValueError(f"Yesterday high ({yesterday_high}) cannot be less than low ({yesterday_low})")
+        
+        levels = {
+            "yesterday_high": yesterday_high,
+            "yesterday_low": yesterday_low,
+            "yesterday_range": yesterday_high - yesterday_low
+        }
+        
+        self._daily_levels[instrument_key] = levels
+        logger.debug(f"📈 Calculated yesterday levels for {instrument_key}: H={yesterday_high:.2f} L={yesterday_low:.2f}")
+        
+        return levels
+    
+    def calculate_orb_levels(
+        self, 
+        instrument_key: str, 
+        candles: DataFrame, 
+        orb_minutes: int = 15
+    ) -> Dict[str, float]:
+        """
+        Calculate Opening Range Breakout levels
+        
+        Args:
+            instrument_key: Instrument identifier
+            candles: 1-minute OHLC candles
+            orb_minutes: ORB period in minutes (15 or 30)
+            
+        Returns:
+            Dictionary with ORB high/low levels
+            
+        Raises:
+            ValueError: If insufficient data or invalid orb_minutes
+        """
+        if orb_minutes not in [15, 30]:
+            raise ValueError(f"ORB minutes must be 15 or 30, got: {orb_minutes}")
+        
+        if candles.empty:
+            logger.warning(f"⚠️ No candles available for ORB calculation: {instrument_key}")
+            return {}
+        
+        # Get today's candles starting from market open
+        today = datetime.now(tz=IST).date()
+        market_open_today = datetime.combine(today, self.market_open, tzinfo=IST)
+        orb_end_time = market_open_today + timedelta(minutes=orb_minutes)
+        
+        # Filter candles for ORB period
+        orb_candles = candles[
+            (candles.index >= market_open_today) & 
+            (candles.index < orb_end_time)
+        ]
+        
+        if orb_candles.empty:
+            logger.debug(f"📊 No ORB candles found for {instrument_key} (period: {orb_minutes}m)")
+            return {}
+        
+        orb_high = orb_candles["high"].max()
+        orb_low = orb_candles["low"].min()
+        orb_range = orb_high - orb_low
+        
+        levels = {
+            f"orb_{orb_minutes}_high": orb_high,
+            f"orb_{orb_minutes}_low": orb_low,
+            f"orb_{orb_minutes}_range": orb_range
+        }
+        
+        self._orb_levels[instrument_key] = levels
+        logger.debug(f"📈 Calculated ORB{orb_minutes} for {instrument_key}: H={orb_high:.2f} L={orb_low:.2f}")
+        
+        return levels
+    
+    def calculate_donchian_levels(
+        self, 
+        instrument_key: str, 
+        candles: DataFrame, 
+        period: int = 20
+    ) -> Dict[str, float]:
+        """
+        Calculate Donchian Channel levels (rolling high/low)
+        
+        Args:
+            instrument_key: Instrument identifier
+            candles: OHLC candles DataFrame
+            period: Rolling period for calculation
+            
+        Returns:
+            Dictionary with Donchian channel levels
+            
+        Raises:
+            ValueError: If insufficient data
+        """
+        if candles.empty or len(candles) < period:
+            logger.warning(f"⚠️ Insufficient candles for Donchian({period}): {instrument_key}")
+            return {}
+        
+        # Calculate rolling high and low
+        donchian_high = candles["high"].rolling(window=period, min_periods=period//2).max().iloc[-1]
+        donchian_low = candles["low"].rolling(window=period, min_periods=period//2).min().iloc[-1]
+        
+        if pd.isna(donchian_high) or pd.isna(donchian_low):
+            logger.warning(f"⚠️ NaN values in Donchian calculation for {instrument_key}")
+            return {}
+        
+        levels = {
+            f"donchian_{period}_high": donchian_high,
+            f"donchian_{period}_low": donchian_low,
+            f"donchian_{period}_mid": (donchian_high + donchian_low) / 2
+        }
+        
+        self._donchian_levels[instrument_key] = levels
+        logger.debug(f"📈 Calculated Donchian({period}) for {instrument_key}: H={donchian_high:.2f} L={donchian_low:.2f}")
+        
+        return levels
+    
+    def calculate_pivot_levels(
+        self, 
+        instrument_key: str, 
+        prev_high: float, 
+        prev_low: float, 
+        prev_close: float
+    ) -> Dict[str, float]:
+        """
+        Calculate classic pivot point levels
+        
+        Args:
+            instrument_key: Instrument identifier
+            prev_high: Previous period high
+            prev_low: Previous period low
+            prev_close: Previous period close
+            
+        Returns:
+            Dictionary with pivot levels (PP, R1, R2, S1, S2)
+            
+        Raises:
+            ValueError: If prices are invalid
+        """
+        if any(p <= 0 for p in [prev_high, prev_low, prev_close]):
+            raise ValueError(f"Invalid pivot prices: H={prev_high} L={prev_low} C={prev_close}")
+        
+        if prev_high < prev_low or prev_close < prev_low or prev_close > prev_high:
+            raise ValueError(f"Inconsistent pivot prices: H={prev_high} L={prev_low} C={prev_close}")
+        
+        # Calculate pivot point
+        pivot_point = (prev_high + prev_low + prev_close) / 3
+        
+        # Calculate resistance and support levels
+        r1 = (2 * pivot_point) - prev_low
+        r2 = pivot_point + (prev_high - prev_low)
+        s1 = (2 * pivot_point) - prev_high
+        s2 = pivot_point - (prev_high - prev_low)
+        
+        levels = {
+            "pivot_point": pivot_point,
+            "resistance_1": r1,
+            "resistance_2": r2,
+            "support_1": s1,
+            "support_2": s2
+        }
+        
+        self._pivot_levels[instrument_key] = levels
+        logger.debug(f"📈 Calculated Pivots for {instrument_key}: PP={pivot_point:.2f} R1={r1:.2f} S1={s1:.2f}")
+        
+        return levels
+    
+    def calculate_cpr_levels(
+        self, 
+        instrument_key: str, 
+        prev_high: float, 
+        prev_low: float, 
+        prev_close: float
+    ) -> Dict[str, float]:
+        """
+        Calculate Central Pivot Range (CPR) levels
+        
+        Args:
+            instrument_key: Instrument identifier
+            prev_high: Previous period high
+            prev_low: Previous period low  
+            prev_close: Previous period close
+            
+        Returns:
+            Dictionary with CPR levels (TC, PP, BC)
+            
+        Raises:
+            ValueError: If prices are invalid
+        """
+        if any(p <= 0 for p in [prev_high, prev_low, prev_close]):
+            raise ValueError(f"Invalid CPR prices: H={prev_high} L={prev_low} C={prev_close}")
+        
+        # Central Pivot Range calculation
+        pivot_point = (prev_high + prev_low + prev_close) / 3
+        top_central = (pivot_point - prev_low) + prev_close
+        bottom_central = prev_close - (prev_high - pivot_point)
+        
+        levels = {
+            "cpr_top": top_central,
+            "cpr_pivot": pivot_point,
+            "cpr_bottom": bottom_central,
+            "cpr_width": top_central - bottom_central
+        }
+        
+        self._cpr_levels[instrument_key] = levels
+        logger.debug(f"📈 Calculated CPR for {instrument_key}: TC={top_central:.2f} BC={bottom_central:.2f}")
+        
+        return levels
+    
+    def get_all_levels(self, instrument_key: str) -> Dict[str, Any]:
+        """
+        Get all calculated levels for an instrument
+        
+        Args:
+            instrument_key: Instrument identifier
+            
+        Returns:
+            Dictionary containing all level types
+        """
+        return {
+            "daily": self._daily_levels.get(instrument_key, {}),
+            "orb": self._orb_levels.get(instrument_key, {}),
+            "donchian": self._donchian_levels.get(instrument_key, {}),
+            "pivot": self._pivot_levels.get(instrument_key, {}),
+            "cpr": self._cpr_levels.get(instrument_key, {})
+        }
+
+
+class BreakoutStrategies:
+    """
+    Individual breakout detection strategy implementations
+    
+    Each strategy function analyzes candles and levels to detect
+    specific breakout patterns with appropriate confirmation.
+    """
+    
+    @staticmethod
+    def yesterday_breakout(
+        candles: DataFrame, 
+        levels: Dict[str, float], 
+        current_price: float
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect breakout above yesterday's high or below yesterday's low
+        
+        Args:
+            candles: Recent OHLC candles
+            levels: Yesterday's high/low levels
+            current_price: Current market price
+            
+        Returns:
+            Breakout signal dictionary or None
+        """
+        if candles.empty or not levels:
+            return None
+        
+        yesterday_high = levels.get("yesterday_high")
+        yesterday_low = levels.get("yesterday_low")
+        
+        if not yesterday_high or not yesterday_low:
+            return None
+        
+        latest_candle = candles.iloc[-1]
+        
+        # Bullish breakout above yesterday's high
+        if latest_candle["close"] > yesterday_high and current_price > yesterday_high:
+            return {
+                "type": "breakout",
+                "direction": "BUY",
+                "level": yesterday_high,
+                "strength": (current_price - yesterday_high) / yesterday_high,
+                "strategy": "YesterdayHigh"
+            }
+        
+        # Bearish breakdown below yesterday's low
+        elif latest_candle["close"] < yesterday_low and current_price < yesterday_low:
+            return {
+                "type": "breakdown", 
+                "direction": "SELL",
+                "level": yesterday_low,
+                "strength": (yesterday_low - current_price) / yesterday_low,
+                "strategy": "YesterdayLow"
+            }
+        
+        return None
+    
+    @staticmethod
+    def orb_breakout(
+        candles: DataFrame, 
+        levels: Dict[str, float], 
+        current_price: float,
+        orb_period: int = 15
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect Opening Range Breakout (ORB)
+        
+        Args:
+            candles: Recent OHLC candles
+            levels: ORB high/low levels
+            current_price: Current market price
+            orb_period: ORB period (15 or 30 minutes)
+            
+        Returns:
+            ORB breakout signal or None
+        """
+        if candles.empty or not levels:
+            return None
+        
+        orb_high = levels.get(f"orb_{orb_period}_high")
+        orb_low = levels.get(f"orb_{orb_period}_low")
+        
+        if not orb_high or not orb_low:
+            return None
+        
+        latest_candle = candles.iloc[-1]
+        
+        # Check if we're past ORB period (only trade after ORB is established)
+        current_time = datetime.now(tz=IST).time()
+        orb_end_time = time(9, 30) if orb_period == 15 else time(9, 45)
+        
+        if current_time < orb_end_time:
+            return None
+        
+        # Bullish ORB breakout
+        if latest_candle["close"] > orb_high and current_price > orb_high:
+            return {
+                "type": "breakout",
+                "direction": "BUY", 
+                "level": orb_high,
+                "strength": (current_price - orb_high) / orb_high,
+                "strategy": f"ORB{orb_period}"
+            }
+        
+        # Bearish ORB breakdown
+        elif latest_candle["close"] < orb_low and current_price < orb_low:
+            return {
+                "type": "breakdown",
+                "direction": "SELL",
+                "level": orb_low,
+                "strength": (orb_low - current_price) / orb_low,
+                "strategy": f"ORB{orb_period}"
+            }
+        
+        return None
+    
+    @staticmethod 
+    def donchian_breakout(
+        candles: DataFrame,
+        levels: Dict[str, float],
+        current_price: float,
+        period: int = 20
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect Donchian Channel breakout
+        
+        Args:
+            candles: Recent OHLC candles
+            levels: Donchian channel levels
+            current_price: Current market price
+            period: Donchian period
+            
+        Returns:
+            Donchian breakout signal or None
+        """
+        if candles.empty or not levels:
+            return None
+        
+        donchian_high = levels.get(f"donchian_{period}_high")
+        donchian_low = levels.get(f"donchian_{period}_low")
+        
+        if not donchian_high or not donchian_low:
+            return None
+        
+        latest_candle = candles.iloc[-1]
+        
+        # Bullish Donchian breakout
+        if latest_candle["close"] > donchian_high and current_price > donchian_high:
+            return {
+                "type": "breakout",
+                "direction": "BUY",
+                "level": donchian_high,
+                "strength": (current_price - donchian_high) / donchian_high,
+                "strategy": f"Donchian{period}"
+            }
+        
+        # Bearish Donchian breakdown  
+        elif latest_candle["close"] < donchian_low and current_price < donchian_low:
+            return {
+                "type": "breakdown",
+                "direction": "SELL",
+                "level": donchian_low,
+                "strength": (donchian_low - current_price) / donchian_low,
+                "strategy": f"Donchian{period}"
+            }
+        
+        return None
+    
+    @staticmethod
+    def pivot_breakout(
+        candles: DataFrame,
+        levels: Dict[str, float], 
+        current_price: float
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect pivot point breakout
+        
+        Args:
+            candles: Recent OHLC candles
+            levels: Pivot point levels
+            current_price: Current market price
+            
+        Returns:
+            Pivot breakout signal or None
+        """
+        if candles.empty or not levels:
+            return None
+        
+        r1 = levels.get("resistance_1")
+        r2 = levels.get("resistance_2")
+        s1 = levels.get("support_1")
+        s2 = levels.get("support_2")
+        
+        if not all([r1, r2, s1, s2]):
+            return None
+        
+        latest_candle = candles.iloc[-1]
+        
+        # R2 breakout (strongest bullish signal)
+        if latest_candle["close"] > r2 and current_price > r2:
+            return {
+                "type": "breakout",
+                "direction": "BUY",
+                "level": r2,
+                "strength": (current_price - r2) / r2,
+                "strategy": "PivotR2"
+            }
+        
+        # R1 breakout
+        elif latest_candle["close"] > r1 and current_price > r1:
+            return {
+                "type": "breakout", 
+                "direction": "BUY",
+                "level": r1,
+                "strength": (current_price - r1) / r1,
+                "strategy": "PivotR1"
+            }
+        
+        # S1 breakdown
+        elif latest_candle["close"] < s1 and current_price < s1:
+            return {
+                "type": "breakdown",
+                "direction": "SELL",
+                "level": s1,
+                "strength": (s1 - current_price) / s1,
+                "strategy": "PivotS1"
+            }
+        
+        # S2 breakdown (strongest bearish signal)
+        elif latest_candle["close"] < s2 and current_price < s2:
+            return {
+                "type": "breakdown",
+                "direction": "SELL",
+                "level": s2,
+                "strength": (s2 - current_price) / s2,
+                "strategy": "PivotS2"
+            }
+        
+        return None
+    
+    @staticmethod
+    def cpr_breakout(
+        candles: DataFrame,
+        levels: Dict[str, float],
+        current_price: float
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect Central Pivot Range (CPR) breakout
+        
+        Args:
+            candles: Recent OHLC candles
+            levels: CPR levels
+            current_price: Current market price
+            
+        Returns:
+            CPR breakout signal or None
+        """
+        if candles.empty or not levels:
+            return None
+        
+        cpr_top = levels.get("cpr_top")
+        cpr_bottom = levels.get("cpr_bottom")
+        
+        if not cpr_top or not cpr_bottom:
+            return None
+        
+        latest_candle = candles.iloc[-1]
+        
+        # CPR top breakout (bullish)
+        if latest_candle["close"] > cpr_top and current_price > cpr_top:
+            return {
+                "type": "breakout",
+                "direction": "BUY",
+                "level": cpr_top,
+                "strength": (current_price - cpr_top) / cpr_top,
+                "strategy": "CPRBreakout"
+            }
+        
+        # CPR bottom breakdown (bearish)
+        elif latest_candle["close"] < cpr_bottom and current_price < cpr_bottom:
+            return {
+                "type": "breakdown",
+                "direction": "SELL",
+                "level": cpr_bottom,
+                "strength": (cpr_bottom - current_price) / cpr_bottom,
+                "strategy": "CPRBreakdown"
+            }
+        
+        return None
+
+
+class ConfirmationFilters:
+    """
+    Multi-layer confirmation filters for breakout validation
+    
+    Applies volume, momentum, and EMA filters to improve
+    signal quality and reduce false breakouts.
+    """
+    
+    @staticmethod
+    def volume_filter(candles: DataFrame, volume_multiplier: float = 2.0) -> bool:
+        """
+        Check if current volume exceeds average volume threshold
+        
+        Args:
+            candles: OHLC candles with volume data
+            volume_multiplier: Multiplier for average volume threshold
+            
+        Returns:
+            True if volume filter passes, False otherwise
+        """
+        if candles.empty or len(candles) < 20:
+            return True  # Skip filter if insufficient data
+        
+        current_volume = candles.iloc[-1]["volume"]
+        avg_volume_20 = candles["volume"].tail(20).mean()
+        
+        if pd.isna(avg_volume_20) or avg_volume_20 == 0:
+            return True
+        
+        volume_ratio = current_volume / avg_volume_20
+        return volume_ratio >= volume_multiplier
+    
+    @staticmethod
+    def momentum_filter(candles: DataFrame, momentum_threshold: float = 0.015) -> bool:
+        """
+        Check if price momentum exceeds threshold (1.5% default)
+        
+        Args:
+            candles: OHLC candles
+            momentum_threshold: Minimum momentum percentage (0.015 = 1.5%)
+            
+        Returns:
+            True if momentum filter passes, False otherwise
+        """
+        if candles.empty or len(candles) < 2:
+            return True
+        
+        current_close = candles.iloc[-1]["close"]
+        prev_close = candles.iloc[-2]["close"]
+        
+        if prev_close == 0:
+            return True
+        
+        momentum = abs((current_close - prev_close) / prev_close)
+        return momentum >= momentum_threshold
+    
+    @staticmethod
+    def ema_filter(candles: DataFrame, fast_period: int = 20, slow_period: int = 50) -> Optional[str]:
+        """
+        Check EMA trend direction for trade bias
+        
+        Args:
+            candles: OHLC candles
+            fast_period: Fast EMA period
+            slow_period: Slow EMA period
+            
+        Returns:
+            "bullish" if EMA20 > EMA50, "bearish" if EMA20 < EMA50, None if unclear
+        """
+        if candles.empty or len(candles) < slow_period:
+            return None
+        
+        # Calculate EMAs
+        ema_fast = candles["close"].ewm(span=fast_period).mean()
+        ema_slow = candles["close"].ewm(span=slow_period).mean()
+        
+        if ema_fast.empty or ema_slow.empty:
+            return None
+        
+        current_fast = ema_fast.iloc[-1]
+        current_slow = ema_slow.iloc[-1]
+        
+        if pd.isna(current_fast) or pd.isna(current_slow):
+            return None
+        
+        if current_fast > current_slow:
+            return "bullish"
+        elif current_fast < current_slow:
+            return "bearish"
+        else:
+            return None
+    
+    @staticmethod
+    def apply_all_filters(
+        candles: DataFrame,
+        signal_direction: str,
+        volume_multiplier: float = 2.0,
+        momentum_threshold: float = 0.015
+    ) -> Dict[str, Any]:
+        """
+        Apply all confirmation filters to a breakout signal
+        
+        Args:
+            candles: OHLC candles
+            signal_direction: "BUY" or "SELL"
+            volume_multiplier: Volume confirmation threshold
+            momentum_threshold: Momentum confirmation threshold
+            
+        Returns:
+            Dictionary with filter results and overall confirmation
+        """
+        results = {
+            "volume_confirmed": ConfirmationFilters.volume_filter(candles, volume_multiplier),
+            "momentum_confirmed": ConfirmationFilters.momentum_filter(candles, momentum_threshold),
+            "ema_trend": ConfirmationFilters.ema_filter(candles),
+            "trend_aligned": False,
+            "overall_confirmed": False
+        }
+        
+        # Check trend alignment
+        if results["ema_trend"]:
+            if signal_direction == "BUY" and results["ema_trend"] == "bullish":
+                results["trend_aligned"] = True
+            elif signal_direction == "SELL" and results["ema_trend"] == "bearish":
+                results["trend_aligned"] = True
+        
+        # Overall confirmation logic
+        confirmed_filters = sum([
+            results["volume_confirmed"],
+            results["momentum_confirmed"], 
+            results["trend_aligned"] if results["ema_trend"] else True  # Skip trend if no data
+        ])
+        
+        # Require at least 2 out of 3 filters to confirm
+        total_filters = 3 if results["ema_trend"] else 2
+        results["overall_confirmed"] = confirmed_filters >= max(2, total_filters - 1)
+        
+        return results
+
+
+class BreakoutScannerService:
+    """
+    Main orchestrator for real-time breakout detection
+    
+    Coordinates tick ingestion, candle building, level calculation,
+    breakout detection, and signal broadcasting.
+    """
+    
+    def __init__(self, redis_client=None, websocket_manager=None):
+        """
+        Initialize breakout scanner service
+        
+        Args:
+            redis_client: Redis client for pub/sub broadcasting
+            websocket_manager: WebSocket manager for real-time updates
+        """
+        # Core components
+        self.tick_store = TickStore(max_ticks=5000)
+        self.candle_builder = CandleBuilder()
+        self.level_calculator = LevelCalculator()
+        
+        # External integrations
+        self.redis_client = redis_client
+        self.websocket_manager = websocket_manager
+        
+        # Signal tracking
+        self._recent_signals: Dict[str, List[BreakoutSignal]] = defaultdict(list)
+        self._signal_cooldown: Dict[str, datetime] = {}
+        self._processing_stats = {
+            "ticks_processed": 0,
+            "signals_generated": 0,
+            "last_update": None
+        }
         
         # Performance tracking
-        self.scan_count = 0
-        self.breakouts_detected = 0
-        self.last_scan_time = None
+        self._performance_metrics = {
+            "avg_processing_time": 0.0,
+            "max_processing_time": 0.0,
+            "error_count": 0,
+            "success_count": 0
+        }
         
-        # Threading
-        self.data_lock = threading.RLock()
-        self.background_tasks = set()
-        
-        # Initialize connections
-        self._init_market_data_hub()
-        self._init_centralized_manager()
-        
-    def _init_market_data_hub(self):
-        """Initialize connection to Market Data Hub"""
-        try:
-            from services.market_data_hub import market_data_hub
-            self.market_data_hub = market_data_hub
-            logger.info("✅ Breakout Scanner connected to Market Data Hub")
-        except ImportError as e:
-            logger.error(f"❌ Could not connect to Market Data Hub: {e}")
-            self.market_data_hub = None
+        logger.info("🚀 BreakoutScannerService initialized successfully")
     
-    def _init_unified_manager(self):
-        """Initialize connection to Unified WebSocket Manager"""
+    async def ingest_tick(
+        self, 
+        instrument_key: str, 
+        symbol: str,
+        ltp: float, 
+        ltt: int, 
+        ltq: int
+    ) -> None:
+        """
+        Ingest new tick data for processing
+        
+        Args:
+            instrument_key: Unique instrument identifier
+            symbol: Trading symbol (e.g., "RELIANCE")
+            ltp: Last traded price
+            ltt: Last traded time (milliseconds)
+            ltq: Last traded quantity
+            
+        Raises:
+            ValueError: If tick data is invalid
+        """
+        start_time = asyncio.get_event_loop().time()
+        
         try:
-            from services.unified_websocket_manager import unified_manager
-            self.unified_manager = unified_manager
-            logger.info("✅ Breakout Scanner connected to Unified WebSocket Manager")
-        except ImportError as e:
-            logger.error(f"❌ Could not connect to Unified Manager: {e}")
-            self.unified_manager = None
-    
-    def _init_centralized_manager(self):
-        """Initialize connection to Centralized WebSocket Manager"""
-        try:
-            from services.centralized_ws_manager import centralized_manager, register_market_data_callback
-            self.centralized_manager = centralized_manager
+            # Validate input data
+            if not instrument_key or not symbol:
+                raise ValueError("instrument_key and symbol cannot be empty")
             
-            # Register callback for real-time data
-            success = register_market_data_callback(self._process_centralized_data)
-            if success:
-                logger.info("✅ Breakout Scanner registered with Centralized WebSocket Manager")
-            else:
-                logger.warning("⚠️ Failed to register with Centralized WebSocket Manager")
-        except ImportError as e:
-            logger.error(f"❌ Could not connect to Centralized Manager: {e}")
-            self.centralized_manager = None
-    
-    async def start(self):
-        """Start the breakout scanner service"""
-        if self.is_running:
-            logger.info("🔍 Breakout Scanner already running")
-            return
+            if ltp <= 0:
+                raise ValueError(f"Invalid LTP: {ltp}")
             
-        self.is_running = True
-        logger.info("🚀 Starting Breakout Scanner Service...")
-        
-        # Initialize unified manager connection
-        self._init_unified_manager()
-        
-        # Initialize centralized manager connection
-        self._init_centralized_manager()
-        
-        # Register with Market Data Hub for real-time data
-        if self.market_data_hub:
-            try:
-                success = self.market_data_hub.register_consumer(
-                    consumer_name="breakout_scanner",
-                    callback=self._process_market_data,
-                    topics=["prices"],
-                    priority=2,  # Medium priority (after UI, before analytics)
-                    max_queue_size=1000
-                )
-                
-                if success:
-                    logger.info("🔍 Registered with Market Data Hub for real-time breakout scanning")
-                else:
-                    logger.warning("⚠️ Failed to register with Market Data Hub")
-                    
-            except Exception as e:
-                logger.error(f"❌ Error registering with Market Data Hub: {e}")
-        
-        # Start background tasks
-        scan_task = asyncio.create_task(self._scan_loop())
-        cleanup_task = asyncio.create_task(self._cleanup_loop())
-        market_status_task = asyncio.create_task(self._market_status_loop())
-        
-        self.background_tasks.update([scan_task, cleanup_task, market_status_task])
-        
-        logger.info("✅ Breakout Scanner Service started successfully")
-    
-    async def stop(self):
-        """Stop the breakout scanner service"""
-        if not self.is_running:
-            return
+            if ltt <= 0:
+                raise ValueError(f"Invalid timestamp: {ltt}")
             
-        self.is_running = False
-        
-        # Cancel background tasks
-        for task in self.background_tasks:
-            if not task.done():
-                task.cancel()
-        
-        # Wait for tasks to complete
-        if self.background_tasks:
-            await asyncio.gather(*self.background_tasks, return_exceptions=True)
+            # Store tick data
+            self.tick_store.add_tick(instrument_key, ltp, ltt, ltq)
+            self._processing_stats["ticks_processed"] += 1
             
-        self.background_tasks.clear()
-        
-        logger.info("🛑 Breakout Scanner Service stopped")
-    
-    def _process_market_data(self, data: Dict[str, Any]):
-        """Process real-time market data from Market Data Hub - FIXED FORMAT"""
-        try:
-            # FIXED: Handle different data formats from Market Data Hub
-            prices = None
-            
-            # Format 1: Direct prices data (from Hub)
-            if isinstance(data, dict) and any(key.startswith(('NSE_', 'BSE_')) for key in data.keys()):
-                prices = data
-                logger.debug(f"Processing direct prices format: {len(prices)} instruments")
-                
-            # Format 2: Wrapped in data structure
-            elif data.get("type") == "price_update":
-                market_data = data.get("data", {})
-                prices = market_data.get("prices", {})
-                logger.debug(f"Processing wrapped format: {len(prices)} instruments")
-                
-            # Format 3: Hub callback format
-            elif "data" in data and isinstance(data["data"], dict):
-                if "prices" in data["data"]:
-                    prices = data["data"]["prices"]
-                else:
-                    prices = data["data"]  # Direct price data
-                logger.debug(f"Processing hub callback format: {len(prices)} instruments")
-            
-            if not prices:
-                logger.debug("No price data found in callback")
-                return
-            
-            # Process each instrument update
-            instruments_processed = 0
-            new_breakouts = []
-            
-            with self.data_lock:
-                for instrument_key, price_data in prices.items():
-                    try:
-                        # FIXED: Add debug logging
-                        logger.debug(f"Processing instrument: {instrument_key}")
-                        
-                        # Update instrument tracker
-                        breakout = self._update_instrument(instrument_key, price_data)
-                        if breakout:
-                            new_breakouts.append(breakout)
-                            logger.info(f"🚨 BREAKOUT DETECTED: {breakout.symbol}")
-                            
-                        instruments_processed += 1
-                        
-                    except Exception as e:
-                        logger.debug(f"Error processing {instrument_key}: {e}")
-                        
-        except Exception as e:
-            logger.error(f"Error processing market data: {e}")
-            
-    async def _process_centralized_data(self, data: Dict[str, Any]):
-        """Process real-time market data from Centralized WebSocket Manager"""
-        try:
-            # Handle centralized manager feed format
-            feeds = None
-            
-            if isinstance(data, dict) and "feeds" in data:
-                feeds = data["feeds"]
-                logger.debug(f"Breakout Scanner: Processing centralized feed with {len(feeds)} updates")
-            elif isinstance(data, list):
-                feeds = data
-                logger.debug(f"Breakout Scanner: Processing direct feed list with {len(feeds)} updates")
-            
-            if not feeds:
-                logger.debug(f"Breakout Scanner: No feeds found in centralized data")
-                return
-            
-            # Convert feeds to price format for breakout analysis
-            prices = {}
-            for feed in feeds:
-                instrument_key = feed.get('instrument_key')
-                if instrument_key:
-                    # Convert to standard price format
-                    prices[instrument_key] = {
-                        'instrument_key': instrument_key,
-                        'ltp': feed.get('last_price', 0),
-                        'last_price': feed.get('last_price', 0),
-                        'volume': feed.get('volume', 0),
-                        'open': feed.get('open', 0),
-                        'high': feed.get('high', 0),
-                        'low': feed.get('low', 0),
-                        'prev_close': feed.get('prev_close', 0),
-                        'timestamp': feed.get('timestamp'),
-                        'symbol': feed.get('symbol', 'Unknown')
-                    }
-            
-            if prices:
-                # Process the converted data using existing breakout analysis logic
-                new_breakouts = []
-                processed_count = 0
-                
-                with self.data_lock:
-                    for instrument_key, price_data in prices.items():
-                        try:
-                            # Ensure instrument exists in our tracking
-                            if instrument_key not in self.instruments:
-                                self._add_instrument_for_tracking(instrument_key, price_data)
-                            
-                            breakout = self._update_instrument(instrument_key, price_data)
-                            if breakout:
-                                new_breakouts.append(breakout)
-                                logger.info(f"🚨 BREAKOUT DETECTED: {breakout.symbol} - {breakout.breakout_type.value}")
-                                
-                            processed_count += 1
-                            
-                        except Exception as e:
-                            logger.debug(f"Error processing centralized breakout for {instrument_key}: {e}")
-                
-                # Update processing stats
-                self.last_scan_time = datetime.now()
-                
-                # Add new breakouts to daily collection
-                if new_breakouts:
-                    self.daily_breakouts.extend(new_breakouts)
-                    self.breakouts_detected += len(new_breakouts)
-                    logger.info(f"🚀 Breakout Scanner: Detected {len(new_breakouts)} new breakouts from centralized feed")
-                
-        except Exception as e:
-            logger.error(f"❌ Error processing centralized data in breakout scanner: {e}")
-    
-    def _add_instrument_for_tracking(self, instrument_key: str, price_data: Dict[str, Any]):
-        """Add instrument to breakout tracking system"""
-        try:
-            symbol = price_data.get('symbol', instrument_key.split('|')[-1] if '|' in instrument_key else instrument_key)
-            
-            tracker = InstrumentTracker(
-                instrument_key=instrument_key,
-                symbol=symbol,
-                current_price=price_data.get('last_price', 0),
-                open_price=price_data.get('open', 0),
-                prev_close=price_data.get('prev_close', 0),
-                current_volume=price_data.get('volume', 0)
-            )
-            
-            self.instruments[instrument_key] = tracker
-            logger.debug(f"Added {symbol} to breakout tracking")
+            # Update performance metrics
+            processing_time = (asyncio.get_event_loop().time() - start_time) * 1000  # ms
+            self._update_performance_metrics(processing_time, success=True)
             
         except Exception as e:
-            logger.error(f"Error adding instrument {instrument_key} for breakout tracking: {e}")
+            logger.error(f"❌ Error ingesting tick for {instrument_key}: {e}")
+            self._update_performance_metrics(0, success=False)
+            raise
     
-    def _update_instrument(self, instrument_key: str, price_data: Dict[str, Any]) -> Optional[BreakoutSignal]:
-        """Update instrument data and check for breakouts - FIXED WITH DEBUG"""
-        try:
-            # FIXED: Add debug logging for troubleshooting
-            logger.debug(f"Updating instrument {instrument_key}: {price_data}")
-            
-            # Get or create instrument tracker
-            if instrument_key not in self.instruments:
-                self.instruments[instrument_key] = InstrumentTracker(
-                    instrument_key=instrument_key,
-                    symbol=price_data.get("symbol", instrument_key.split("|")[-1])
-                )
-                logger.debug(f"Created new tracker for {instrument_key}")
-            
-            tracker = self.instruments[instrument_key]
-            
-            # Extract price data with fallbacks
-            current_price = float(price_data.get("ltp", price_data.get("last_price", 0)))
-            volume = int(price_data.get("volume", 0))
-            change_percent = float(price_data.get("change_percent", price_data.get("chp", 0)))
-            
-            logger.debug(f"Extracted: price={current_price}, volume={volume}, change={change_percent}%")
-            
-            # FIXED: More lenient validation for testing
-            if current_price <= 0:
-                logger.debug(f"Skipping {instrument_key}: invalid price {current_price}")
-                return None
-                
-            if current_price < self.min_price:
-                logger.debug(f"Skipping {instrument_key}: price {current_price} < min {self.min_price}")
-                return None
-                
-            if current_price > self.max_price:
-                logger.debug(f"Skipping {instrument_key}: price {current_price} > max {self.max_price}")
-                return None
-            
-            if volume < self.min_volume:
-                logger.debug(f"Skipping {instrument_key}: volume {volume} < min {self.min_volume}")
-                return None
-            
-            logger.debug(f"Instrument {instrument_key} passed validation checks")
-            
-            # Update tracker
-            prev_price = tracker.current_price
-            tracker.current_price = current_price
-            tracker.current_volume = volume
-            tracker.last_updated = datetime.now()
-            
-            # Update daily high/low
-            if current_price > tracker.day_high:
-                tracker.day_high = current_price
-            if current_price < tracker.day_low:
-                tracker.day_low = current_price
-            
-            # Add to price history
-            tracker.price_history.append((datetime.now(), current_price, volume))
-            tracker.volume_history.append(volume)
-            
-            # Calculate support/resistance if we have enough data
-            if len(tracker.price_history) >= 20:
-                self._calculate_support_resistance(tracker)
-            
-            # Check for breakouts
-            return self._check_breakouts(tracker, price_data)
-            
-        except Exception as e:
-            logger.debug(f"Error updating instrument {instrument_key}: {e}")
-            return None
-    
-    def _calculate_support_resistance(self, tracker: InstrumentTracker):
-        """Calculate support and resistance levels"""
-        try:
-            if len(tracker.price_history) < 20:
-                return
-            
-            # Get recent price data
-            recent_prices = [price for _, price, _ in list(tracker.price_history)[-20:]]
-            
-            # Calculate resistance (recent high)
-            tracker.resistance_level = max(recent_prices)
-            
-            # Calculate support (recent low)  
-            tracker.support_level = min(recent_prices)
-            
-        except Exception as e:
-            logger.debug(f"Error calculating support/resistance: {e}")
-    
-    def _check_breakouts(self, tracker: InstrumentTracker, price_data: Dict[str, Any]) -> Optional[BreakoutSignal]:
-        """IMPROVED breakout detection with better accuracy"""
-        try:
-            current_price = tracker.current_price
-            volume = tracker.current_volume
-            
-            # Skip if we just had a breakout (avoid duplicates)
-            if (tracker.last_breakout_time and 
-                (datetime.now() - tracker.last_breakout_time).total_seconds() < 300):  # 5 minutes
-                return None
-            
-            detected_breakouts = []
-            
-            # 1. IMPROVED Volume Breakout Detection
-            volume_breakout = self._check_volume_breakout_improved(tracker, price_data)
-            if volume_breakout:
-                detected_breakouts.append(volume_breakout)
-            
-            # 2. IMPROVED Momentum Breakout Detection  
-            momentum_breakout = self._check_momentum_breakout_improved(tracker, price_data)
-            if momentum_breakout:
-                detected_breakouts.append(momentum_breakout)
-            
-            # 3. IMPROVED Resistance/Support Breakout Detection
-            resistance_breakout = self._check_resistance_breakout_improved(tracker, price_data)
-            if resistance_breakout:
-                detected_breakouts.append(resistance_breakout)
-            
-            # 4. NEW: Gap Breakout Detection
-            gap_breakout = self._check_gap_breakout(tracker, price_data)
-            if gap_breakout:
-                detected_breakouts.append(gap_breakout)
-            
-            # Return the strongest breakout signal
-            if detected_breakouts:
-                strongest_breakout = max(detected_breakouts, key=lambda x: x['strength'])
-                
-                # Convert to BreakoutSignal object
-                breakout_type_map = {
-                    'volume_breakout': BreakoutType.VOLUME_BREAKOUT,
-                    'momentum_breakout': BreakoutType.MOMENTUM_BREAKOUT,
-                    'resistance_breakout': BreakoutType.RESISTANCE_BREAKOUT,
-                    'support_breakdown': BreakoutType.SUPPORT_BREAKDOWN,
-                    'gap_up_breakout': BreakoutType.MOMENTUM_BREAKOUT,  # Map to momentum
-                    'gap_down_breakout': BreakoutType.SUPPORT_BREAKDOWN,  # Map to support breakdown
-                }
-                
-                breakout_type = breakout_type_map.get(strongest_breakout['type'], BreakoutType.MOMENTUM_BREAKOUT)
-                
-                return self._create_breakout_signal(
-                    tracker, breakout_type,
-                    current_price, strongest_breakout['move'], strongest_breakout['strength']
-                )
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"Error checking breakouts for {tracker.symbol}: {e}")
-            return None
-    
-    def _create_breakout_signal(self, tracker: InstrumentTracker, breakout_type: BreakoutType,
-                              breakout_price: float, percentage_move: float, strength: float) -> BreakoutSignal:
-        """Create a breakout signal"""
-        signal = BreakoutSignal(
-            instrument_key=tracker.instrument_key,
-            symbol=tracker.symbol,
-            breakout_type=breakout_type,
-            current_price=tracker.current_price,
-            breakout_price=breakout_price,
-            volume=tracker.current_volume,
-            percentage_move=percentage_move,
-            strength=strength,
-            timestamp=datetime.now()
-        )
+    async def process_instrument(
+        self,
+        instrument_key: str,
+        symbol: str,
+        historical_data: Optional[Dict[str, Any]] = None
+    ) -> List[BreakoutSignal]:
+        """
+        Process instrument for breakout detection
         
-        # Add to tracking
-        tracker.breakouts_today.append(signal)
-        tracker.last_breakout_time = signal.timestamp
-        self.daily_breakouts.append(signal)
-        self.breakouts_detected += 1
+        Args:
+            instrument_key: Instrument identifier
+            symbol: Trading symbol
+            historical_data: Optional historical OHLC data for level calculation
+            
+        Returns:
+            List of detected breakout signals
+            
+        Raises:
+            ValueError: If processing fails
+        """
+        start_time = asyncio.get_event_loop().time()
+        signals = []
         
-        # Add to active breakouts (keep last 50 per type)
-        breakout_key = breakout_type.value
-        self.active_breakouts[breakout_key].append(signal)
-        if len(self.active_breakouts[breakout_key]) > 50:
-            self.active_breakouts[breakout_key] = self.active_breakouts[breakout_key][-50:]
-        
-        logger.info(f"🚨 {breakout_type.value.upper()}: {signal.symbol} @ {signal.current_price:.2f} ({percentage_move:+.2f}%)")
-        
-        return signal
-    
-    def _check_volume_breakout_improved(self, tracker: InstrumentTracker, price_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Improved volume breakout detection"""
         try:
-            current_volume = tracker.current_volume
-            change_percent = abs(float(price_data.get("change_percent", 0)))
+            # Check signal cooldown (prevent spam)
+            if self._is_in_cooldown(instrument_key):
+                return signals
             
-            # Need at least 10 data points for volume analysis
-            if len(tracker.volume_history) < 10:
-                return None
+            # Get recent ticks
+            recent_ticks = self.tick_store.get_recent_ticks(instrument_key)
+            if not recent_ticks:
+                logger.debug(f"📊 No ticks available for {instrument_key}")
+                return signals
             
-            # Calculate volume statistics
-            recent_volumes = list(tracker.volume_history)[-10:]
-            avg_volume = np.mean(recent_volumes)
-            volume_std = np.std(recent_volumes)
+            # Build candles
+            candles = self.candle_builder.build_candles(instrument_key, recent_ticks)
             
-            if avg_volume <= 0:
-                return None
+            if candles["1min"].empty:
+                logger.debug(f"📊 No 1m candles available for {instrument_key}")
+                return signals
             
-            # Volume breakout criteria (IMPROVED):
-            volume_ratio = current_volume / avg_volume
-            volume_z_score = (current_volume - avg_volume) / max(volume_std, avg_volume * 0.1)
+            # Calculate support/resistance levels
+            await self._calculate_all_levels(instrument_key, candles, historical_data)
             
-            # Breakout conditions (ANY of these):
-            conditions = [
-                volume_ratio >= self.volume_multiplier * 1.5,  # 3x average volume
-                volume_z_score >= self.volume_z_threshold,     # 2 standard deviations
-                (volume_ratio >= self.volume_multiplier and change_percent >= 1.5),  # 2x volume + 1.5% move
+            # Get current price
+            current_price = self.tick_store.get_last_price(instrument_key)
+            if not current_price:
+                return signals
+            
+            # Run breakout detection strategies
+            strategies = [
+                ("yesterday", self.level_calculator._daily_levels),
+                ("orb_15", self.level_calculator._orb_levels),
+                ("orb_30", self.level_calculator._orb_levels), 
+                ("donchian", self.level_calculator._donchian_levels),
+                ("pivot", self.level_calculator._pivot_levels),
+                ("cpr", self.level_calculator._cpr_levels)
             ]
             
-            if any(conditions) and change_percent >= 0.8:  # At least 0.8% price move
-                strength = min(10, max(3, volume_ratio * 2))  # Minimum strength 3
+            for strategy_name, level_source in strategies:
+                try:
+                    signal = await self._detect_breakout(
+                        strategy_name,
+                        candles["1min"],
+                        level_source.get(instrument_key, {}),
+                        current_price,
+                        symbol
+                    )
+                    
+                    if signal:
+                        signals.append(signal)
+                        self._set_signal_cooldown(instrument_key)
+                        logger.info(f"🚨 {strategy_name} breakout detected: {symbol} {signal.signal} @ {signal.entry_price}")
                 
-                return {
-                    'type': 'volume_breakout',
-                    'strength': strength,
-                    'move': change_percent,
-                    'volume_ratio': volume_ratio
-                }
+                except Exception as e:
+                    logger.error(f"❌ Error in {strategy_name} strategy for {symbol}: {e}")
+                    continue
             
-            return None
+            # Update stats
+            self._processing_stats["signals_generated"] += len(signals)
+            self._processing_stats["last_update"] = datetime.now(tz=IST)
+            
+            # Update performance metrics
+            processing_time = (asyncio.get_event_loop().time() - start_time) * 1000
+            self._update_performance_metrics(processing_time, success=True)
+            
+            return signals
             
         except Exception as e:
-            logger.debug(f"Volume breakout check error: {e}")
-            return None
+            logger.error(f"❌ Error processing instrument {instrument_key}: {e}")
+            self._update_performance_metrics(0, success=False)
+            raise ValueError(f"Failed to process instrument {instrument_key}: {e}") from e
     
-    def _check_momentum_breakout_improved(self, tracker: InstrumentTracker, price_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Improved momentum breakout detection"""
+    async def _calculate_all_levels(
+        self,
+        instrument_key: str,
+        candles: Dict[str, DataFrame],
+        historical_data: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Calculate all support/resistance levels for an instrument
+        
+        Args:
+            instrument_key: Instrument identifier
+            candles: Dictionary of candle DataFrames
+            historical_data: Optional historical data for calculations
+        """
         try:
-            change_percent = float(price_data.get("change_percent", 0))
-            current_price = tracker.current_price
+            candles_1m = candles["1min"]
             
-            # Dynamic threshold based on stock price
-            if current_price >= 2000:
-                momentum_threshold = self.breakout_threshold * 0.75  # 1.35% for expensive stocks
-            elif current_price >= 1000:
-                momentum_threshold = self.breakout_threshold  # 1.8% for mid-price stocks
+            # Yesterday levels (requires historical data)
+            if historical_data:
+                prev_high = historical_data.get("prev_high")
+                prev_low = historical_data.get("prev_low") 
+                prev_close = historical_data.get("prev_close")
+                
+                if all([prev_high, prev_low, prev_close]):
+                    self.level_calculator.calculate_yesterday_levels(instrument_key, prev_high, prev_low)
+                    self.level_calculator.calculate_pivot_levels(instrument_key, prev_high, prev_low, prev_close)
+                    self.level_calculator.calculate_cpr_levels(instrument_key, prev_high, prev_low, prev_close)
+            
+            # ORB levels (15m and 30m)
+            if not candles_1m.empty:
+                self.level_calculator.calculate_orb_levels(instrument_key, candles_1m, orb_minutes=15)
+                self.level_calculator.calculate_orb_levels(instrument_key, candles_1m, orb_minutes=30)
+                
+                # Donchian levels
+                self.level_calculator.calculate_donchian_levels(instrument_key, candles_1m, period=20)
+        
+        except Exception as e:
+            logger.error(f"❌ Error calculating levels for {instrument_key}: {e}")
+    
+    async def _detect_breakout(
+        self,
+        strategy_name: str,
+        candles: DataFrame,
+        levels: Dict[str, float],
+        current_price: float,
+        symbol: str
+    ) -> Optional[BreakoutSignal]:
+        """
+        Detect breakout using specific strategy
+        
+        Args:
+            strategy_name: Name of breakout strategy
+            candles: OHLC candles
+            levels: Support/resistance levels
+            current_price: Current market price
+            symbol: Trading symbol
+            
+        Returns:
+            BreakoutSignal or None
+        """
+        try:
+            # Strategy dispatch
+            if strategy_name == "yesterday":
+                breakout_data = BreakoutStrategies.yesterday_breakout(candles, levels, current_price)
+            elif strategy_name == "orb_15":
+                breakout_data = BreakoutStrategies.orb_breakout(candles, levels, current_price, orb_period=15)
+            elif strategy_name == "orb_30":
+                breakout_data = BreakoutStrategies.orb_breakout(candles, levels, current_price, orb_period=30)
+            elif strategy_name == "donchian":
+                breakout_data = BreakoutStrategies.donchian_breakout(candles, levels, current_price)
+            elif strategy_name == "pivot":
+                breakout_data = BreakoutStrategies.pivot_breakout(candles, levels, current_price)
+            elif strategy_name == "cpr":
+                breakout_data = BreakoutStrategies.cpr_breakout(candles, levels, current_price)
             else:
-                momentum_threshold = self.breakout_threshold * 1.25  # 2.25% for cheaper stocks
-            
-            abs_change = abs(change_percent)
-            
-            if abs_change >= momentum_threshold:
-                # Calculate strength with better scaling
-                strength = min(10, max(2, abs_change * 2))
-                
-                breakout_type = 'momentum_breakout' if change_percent > 0 else 'support_breakdown'
-                
-                return {
-                    'type': breakout_type,
-                    'strength': strength,
-                    'move': change_percent,
-                    'threshold_used': momentum_threshold
-                }
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"Momentum breakout check error: {e}")
-            return None
-    
-    def _check_resistance_breakout_improved(self, tracker: InstrumentTracker, price_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Improved resistance/support breakout detection"""
-        try:
-            current_price = tracker.current_price
-            
-            # Need sufficient price history
-            if len(tracker.price_history) < 15:
+                logger.warning(f"⚠️ Unknown strategy: {strategy_name}")
                 return None
             
-            # IMPROVED resistance/support calculation using percentile method
-            recent_prices = [price for _, price, _ in list(tracker.price_history)[-20:]]
-            
-            # Calculate resistance and support using percentile method (more robust)
-            resistance_level = np.percentile(recent_prices, 90)  # 90th percentile as resistance
-            support_level = np.percentile(recent_prices, 10)   # 10th percentile as support
-            
-            # Alternative: Use recent highs/lows
-            recent_high = max(recent_prices[-10:])  # Last 10 periods high
-            recent_low = min(recent_prices[-10:])   # Last 10 periods low
-            
-            # Use the more conservative estimate
-            resistance_level = max(resistance_level, recent_high)
-            support_level = min(support_level, recent_low)
-            
-            breakout_buffer = 0.005  # 0.5% buffer for breakout confirmation
-            
-            # Resistance breakout
-            if current_price > resistance_level * (1 + breakout_buffer):
-                percentage_move = ((current_price - resistance_level) / resistance_level) * 100
-                
-                if percentage_move >= 0.3:  # At least 0.3% above resistance
-                    strength = min(10, max(4, percentage_move * 3))
-                    
-                    return {
-                        'type': 'resistance_breakout',
-                        'strength': strength,
-                        'move': percentage_move,
-                        'resistance_level': resistance_level
-                    }
-            
-            # Support breakdown
-            elif current_price < support_level * (1 - breakout_buffer):
-                percentage_move = ((support_level - current_price) / support_level) * 100
-                
-                if percentage_move >= 0.3:  # At least 0.3% below support
-                    strength = min(10, max(4, percentage_move * 3))
-                    
-                    return {
-                        'type': 'support_breakdown',
-                        'strength': strength,
-                        'move': -percentage_move,  # Negative for breakdown
-                        'support_level': support_level
-                    }
-            
-            return None
-            
-        except Exception as e:
-            logger.debug(f"Resistance/support breakout check error: {e}")
-            return None
-    
-    def _check_gap_breakout(self, tracker: InstrumentTracker, price_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """NEW: Gap breakout detection (opening gaps)"""
-        try:
-            current_price = tracker.current_price
-            open_price = float(price_data.get("open", 0))
-            prev_close = tracker.prev_close
-            
-            if open_price <= 0 or prev_close <= 0:
+            if not breakout_data:
                 return None
             
-            # Calculate gap percentage
-            gap_percent = ((open_price - prev_close) / prev_close) * 100
+            # Apply confirmation filters
+            confirmation = ConfirmationFilters.apply_all_filters(
+                candles,
+                breakout_data["direction"],
+                volume_multiplier=2.0,
+                momentum_threshold=0.015
+            )
             
-            if abs(gap_percent) >= self.gap_threshold:
-                # Check if gap is being sustained
-                price_from_open = ((current_price - open_price) / open_price) * 100
-                
-                # Gap up breakout
-                if gap_percent > 0 and price_from_open >= -0.5:  # Not fading significantly
-                    strength = min(10, max(3, abs(gap_percent) * 2))
-                    
-                    return {
-                        'type': 'gap_up_breakout',
-                        'strength': strength,
-                        'move': gap_percent,
-                        'open_price': open_price,
-                        'prev_close': prev_close
-                    }
-                
-                # Gap down breakout
-                elif gap_percent < 0 and price_from_open <= 0.5:  # Not recovering significantly
-                    strength = min(10, max(3, abs(gap_percent) * 2))
-                    
-                    return {
-                        'type': 'gap_down_breakout',
-                        'strength': strength,
-                        'move': gap_percent,
-                        'open_price': open_price,
-                        'prev_close': prev_close
-                    }
+            # Only proceed if breakout is confirmed
+            if not confirmation["overall_confirmed"]:
+                logger.debug(f"📊 Breakout not confirmed for {symbol} ({strategy_name})")
+                return None
             
-            return None
+            # Calculate entry, stop loss, and target prices
+            entry_price, stop_loss, target = self._calculate_trade_levels(
+                breakout_data, current_price, candles
+            )
+            
+            # Get current volume
+            current_volume = int(candles.iloc[-1]["volume"]) if not candles.empty else 0
+            
+            # Create breakout signal
+            signal = BreakoutSignal(
+                symbol=symbol,
+                strategy=breakout_data["strategy"],
+                signal=breakout_data["direction"],
+                breakout_level=breakout_data["level"],
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                target=target,
+                volume=current_volume,
+                timestamp=datetime.now(tz=IST).isoformat()
+            )
+            
+            return signal
             
         except Exception as e:
-            logger.debug(f"Gap breakout check error: {e}")
+            logger.error(f"❌ Error detecting breakout ({strategy_name}) for {symbol}: {e}")
             return None
-
-    async def _broadcast_breakouts(self, breakouts: List[BreakoutSignal]):
-        """Broadcast breakout signals to UI via unified manager"""
+    
+    def _calculate_trade_levels(
+        self,
+        breakout_data: Dict[str, Any],
+        current_price: float,
+        candles: DataFrame
+    ) -> Tuple[float, float, float]:
+        """
+        Calculate entry, stop loss, and target levels
+        
+        Args:
+            breakout_data: Breakout detection results
+            current_price: Current market price
+            candles: OHLC candles for ATR calculation
+            
+        Returns:
+            Tuple of (entry_price, stop_loss, target)
+        """
+        direction = breakout_data["direction"]
+        breakout_level = breakout_data["level"]
+        
+        # Calculate ATR for dynamic stop loss
+        atr = self._calculate_atr(candles, period=14)
+        if not atr or atr == 0:
+            atr = current_price * 0.02  # 2% fallback
+        
+        if direction == "BUY":
+            # Entry slightly above breakout level
+            entry_price = max(current_price, breakout_level * 1.002)  # 0.2% above
+            
+            # Stop loss below breakout level or using ATR
+            stop_loss = min(breakout_level * 0.995, entry_price - (2 * atr))  # 0.5% below or 2x ATR
+            
+            # Target using 2:1 risk-reward ratio
+            risk = entry_price - stop_loss
+            target = entry_price + (2 * risk)
+            
+        else:  # SELL
+            # Entry slightly below breakout level  
+            entry_price = min(current_price, breakout_level * 0.998)  # 0.2% below
+            
+            # Stop loss above breakout level or using ATR
+            stop_loss = max(breakout_level * 1.005, entry_price + (2 * atr))  # 0.5% above or 2x ATR
+            
+            # Target using 2:1 risk-reward ratio
+            risk = stop_loss - entry_price
+            target = entry_price - (2 * risk)
+        
+        return (
+            round(entry_price, 2),
+            round(stop_loss, 2),
+            round(target, 2)
+        )
+    
+    def _calculate_atr(self, candles: DataFrame, period: int = 14) -> Optional[float]:
+        """
+        Calculate Average True Range for stop loss calculation
+        
+        Args:
+            candles: OHLC candles
+            period: ATR calculation period
+            
+        Returns:
+            ATR value or None if insufficient data
+        """
+        if candles.empty or len(candles) < period:
+            return None
+        
         try:
-            if not self.unified_manager or not breakouts:
-                return
+            # Calculate True Range
+            candles = candles.copy()
+            candles['prev_close'] = candles['close'].shift(1)
             
-            # Group breakouts by type
-            breakouts_by_type = defaultdict(list)
-            for breakout in breakouts:
-                breakouts_by_type[breakout.breakout_type.value].append(breakout.to_dict())
+            candles['tr1'] = candles['high'] - candles['low']
+            candles['tr2'] = abs(candles['high'] - candles['prev_close'])
+            candles['tr3'] = abs(candles['low'] - candles['prev_close'])
             
-            # Broadcast to UI
-            broadcast_data = {
-                "type": "breakout_update",
-                "data": {
-                    "new_breakouts": [b.to_dict() for b in breakouts],
-                    "breakouts_by_type": dict(breakouts_by_type),
-                    "total_today": len(self.daily_breakouts),
-                    "timestamp": datetime.now().isoformat(),
-                    "market_status": "open" if self.is_market_open else "closed"
-                }
-            }
+            candles['true_range'] = candles[['tr1', 'tr2', 'tr3']].max(axis=1)
             
-            self.unified_manager.emit_event("breakout_update", broadcast_data, priority=2)
+            # Calculate ATR using exponential moving average
+            atr = candles['true_range'].ewm(span=period).mean().iloc[-1]
             
-            logger.info(f"📡 Broadcasted {len(breakouts)} breakout signals to UI")
+            return float(atr) if not pd.isna(atr) else None
             
         except Exception as e:
-            logger.error(f"❌ Error broadcasting breakouts: {e}")
+            logger.error(f"❌ Error calculating ATR: {e}")
+            return None
     
-    async def _scan_loop(self):
-        """Background scanning loop"""
-        while self.is_running:
-            try:
-                await asyncio.sleep(10)  # Scan every 10 seconds
-                
-                # Check if we need to reset for new trading day
-                if self._is_new_trading_day():
-                    await self._reset_for_new_day()
-                
-            except Exception as e:
-                logger.error(f"❌ Error in scan loop: {e}")
-                await asyncio.sleep(5)
+    def _is_in_cooldown(self, instrument_key: str, cooldown_minutes: int = 5) -> bool:
+        """Check if instrument is in signal cooldown period"""
+        if instrument_key not in self._signal_cooldown:
+            return False
+        
+        last_signal_time = self._signal_cooldown[instrument_key]
+        cooldown_end = last_signal_time + timedelta(minutes=cooldown_minutes)
+        
+        return datetime.now(tz=IST) < cooldown_end
     
-    async def _cleanup_loop(self):
-        """Background cleanup loop"""
-        while self.is_running:
-            try:
-                await asyncio.sleep(300)  # Clean up every 5 minutes
-                
-                with self.data_lock:
-                    # Remove old breakouts (older than 6 hours)
-                    cutoff_time = datetime.now() - timedelta(hours=6)
-                    
-                    for breakout_type in self.active_breakouts:
-                        self.active_breakouts[breakout_type] = [
-                            b for b in self.active_breakouts[breakout_type]
-                            if datetime.fromisoformat(b.timestamp.replace('Z', '+00:00') if isinstance(b.timestamp, str) else b.timestamp.isoformat()) > cutoff_time
-                        ]
-                
-                logger.debug("🧹 Cleaned up old breakout data")
-                
-            except Exception as e:
-                logger.error(f"❌ Error in cleanup loop: {e}")
-                await asyncio.sleep(60)
+    def _set_signal_cooldown(self, instrument_key: str) -> None:
+        """Set signal cooldown for instrument"""
+        self._signal_cooldown[instrument_key] = datetime.now(tz=IST)
     
-    async def _market_status_loop(self):
-        """Track market status"""
-        while self.is_running:
-            try:
-                await asyncio.sleep(60)  # Check every minute
-                
-                # Simple market hours check (9:15 AM to 3:30 PM IST)
-                now = datetime.now()
-                market_start = now.replace(hour=9, minute=15, second=0, microsecond=0)
-                market_end = now.replace(hour=15, minute=30, second=0, microsecond=0)
-                
-                was_open = self.is_market_open
-                self.is_market_open = market_start <= now <= market_end
-                
-                if was_open != self.is_market_open:
-                    status = "opened" if self.is_market_open else "closed"
-                    logger.info(f"📈 Market {status} - Breakout scanner adjusted")
-                
-            except Exception as e:
-                logger.error(f"❌ Error checking market status: {e}")
-                await asyncio.sleep(60)
+    def _update_performance_metrics(self, processing_time: float, success: bool) -> None:
+        """Update internal performance metrics"""
+        if success:
+            self._performance_metrics["success_count"] += 1
+            
+            # Update average processing time
+            current_avg = self._performance_metrics["avg_processing_time"]
+            success_count = self._performance_metrics["success_count"]
+            
+            new_avg = ((current_avg * (success_count - 1)) + processing_time) / success_count
+            self._performance_metrics["avg_processing_time"] = new_avg
+            
+            # Update max processing time
+            if processing_time > self._performance_metrics["max_processing_time"]:
+                self._performance_metrics["max_processing_time"] = processing_time
+        else:
+            self._performance_metrics["error_count"] += 1
     
-    def _is_new_trading_day(self) -> bool:
-        """Check if it's a new trading day"""
-        today = datetime.now().date()
-        return today > self.current_trading_day
+    async def broadcast_signal(self, signal: BreakoutSignal) -> None:
+        """
+        Broadcast breakout signal to Redis and WebSocket
+        
+        Args:
+            signal: BreakoutSignal to broadcast
+        """
+        try:
+            signal_data = signal.to_dict()
+            
+            # Redis pub/sub broadcasting
+            if self.redis_client:
+                try:
+                    await self.redis_client.publish("breakout_signals", signal.to_json())
+                    logger.debug(f"📡 Signal broadcasted to Redis: {signal.symbol}")
+                except Exception as e:
+                    logger.error(f"❌ Redis broadcast error for {signal.symbol}: {e}")
+            
+            # WebSocket broadcasting
+            if self.websocket_manager:
+                try:
+                    await self.websocket_manager.emit_event(
+                        "breakout_signals",
+                        {
+                            "signal": signal_data,
+                            "timestamp": signal.timestamp,
+                            "source": "breakout_scanner"
+                        },
+                        priority=1  # High priority for trading signals
+                    )
+                    logger.debug(f"📡 Signal broadcasted to WebSocket: {signal.symbol}")
+                except Exception as e:
+                    logger.error(f"❌ WebSocket broadcast error for {signal.symbol}: {e}")
+        
+        except Exception as e:
+            logger.error(f"❌ Error broadcasting signal for {signal.symbol}: {e}")
     
-    async def _reset_for_new_day(self):
-        """Reset data for new trading day"""
-        with self.data_lock:
-            # Update current trading day
-            self.current_trading_day = datetime.now().date()
-            
-            # Reset daily breakouts
-            self.daily_breakouts = []
-            
-            # Reset instrument trackers for new day
-            for tracker in self.instruments.values():
-                tracker.day_high = tracker.current_price
-                tracker.day_low = tracker.current_price
-                tracker.breakouts_today = []
-                tracker.session_start = datetime.now()
-            
-            # Reset counters
-            self.breakouts_detected = 0
-            
-            logger.info(f"🌅 Reset breakout scanner for new trading day: {self.current_trading_day}")
-    
-    def get_breakouts_summary(self) -> Dict[str, Any]:
-        """Get summary of today's breakouts"""
-        with self.data_lock:
-            current_time = datetime.now()
-            summary = {
-                "total_breakouts_today": len(self.daily_breakouts),
-                "breakouts_by_type": {},
-                "top_breakouts": [],
-                "recent_breakouts": [],
-                "scanner_stats": {
-                    "instruments_tracked": len(self.instruments),
-                    "scans_completed": self.scan_count,
-                    "last_scan": self.last_scan_time.isoformat() if self.last_scan_time else None,
-                    "last_scan_formatted": self.last_scan_time.strftime("%Y-%m-%d %H:%M:%S") if self.last_scan_time else None,
-                    "market_status": "open" if self.is_market_open else "closed",
-                    "trading_day": self.current_trading_day.isoformat(),
-                    "trading_day_formatted": self.current_trading_day.strftime("%Y-%m-%d"),
-                    "session_start": datetime.now().replace(hour=9, minute=15).strftime("%Y-%m-%d %H:%M:%S"),
-                    "session_end": datetime.now().replace(hour=15, minute=30).strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "timestamp": current_time.isoformat(),
-                "timestamp_formatted": current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "generated_at": current_time.strftime("%I:%M:%S %p"),
-                "epoch_timestamp": int(current_time.timestamp())
-            }
-            
-            # Group by breakout type
-            for breakout in self.daily_breakouts:
-                breakout_type = breakout.breakout_type.value
-                if breakout_type not in summary["breakouts_by_type"]:
-                    summary["breakouts_by_type"][breakout_type] = []
-                summary["breakouts_by_type"][breakout_type].append(breakout.to_dict())
-            
-            # Top breakouts (by strength)
-            top_breakouts = sorted(
-                self.daily_breakouts, 
-                key=lambda x: x.strength, 
-                reverse=True
-            )[:20]
-            summary["top_breakouts"] = [b.to_dict() for b in top_breakouts]
-            
-            # Recent breakouts (last 10)
-            recent_breakouts = sorted(
-                self.daily_breakouts,
-                key=lambda x: x.timestamp,
-                reverse=True
-            )[:10]
-            summary["recent_breakouts"] = [b.to_dict() for b in recent_breakouts]
-            
-            return summary
+    def get_statistics(self) -> Dict[str, Any]:
+        """
+        Get service performance statistics
+        
+        Returns:
+            Dictionary with processing statistics
+        """
+        return {
+            "processing_stats": self._processing_stats.copy(),
+            "performance_metrics": self._performance_metrics.copy(),
+            "active_instruments": len(self.tick_store._ticks),
+            "signals_in_cooldown": len(self._signal_cooldown),
+            "recent_signals_count": sum(len(signals) for signals in self._recent_signals.values()),
+            "service_status": "active"
+        }
 
-# Global instance
-breakout_scanner = BreakoutScannerService()
 
-async def start_breakout_scanner():
-    """Start the breakout scanner service"""
-    await breakout_scanner.start()
+# Integration functions for FastAPI
+async def create_breakout_scanner(redis_client=None, websocket_manager=None) -> BreakoutScannerService:
+    """
+    Create and initialize BreakoutScannerService instance
+    
+    Args:
+        redis_client: Optional Redis client for pub/sub
+        websocket_manager: Optional WebSocket manager for broadcasting
+        
+    Returns:
+        Configured BreakoutScannerService instance
+    """
+    try:
+        service = BreakoutScannerService(
+            redis_client=redis_client,
+            websocket_manager=websocket_manager
+        )
+        
+        logger.info("🚀 BreakoutScannerService created successfully")
+        return service
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create BreakoutScannerService: {e}")
+        raise
 
-async def stop_breakout_scanner():
-    """Stop the breakout scanner service"""
-    await breakout_scanner.stop()
 
-def get_breakouts_data() -> Dict[str, Any]:
-    """Get current breakouts data for API"""
-    return breakout_scanner.get_breakouts_summary()
+async def demo_breakout_detection(service: BreakoutScannerService) -> None:
+    """
+    Demonstration function with mock tick data
+    
+    Args:
+        service: BreakoutScannerService instance
+    """
+    logger.info("🧪 Starting breakout detection demo...")
+    
+    try:
+        # Mock historical data
+        historical_data = {
+            "prev_high": 2200.0,
+            "prev_low": 2150.0, 
+            "prev_close": 2180.0
+        }
+        
+        # Mock tick data for RELIANCE
+        instrument_key = "NSE_EQ|INE002A01018"
+        symbol = "RELIANCE"
+        base_price = 2190.0
+        current_time = int(datetime.now().timestamp() * 1000)
+        
+        # Simulate ticks leading to breakout
+        tick_prices = [
+            2190.0, 2192.0, 2195.0, 2198.0, 2201.0, 2205.0  # Breakout above 2200
+        ]
+        
+        for i, price in enumerate(tick_prices):
+            await service.ingest_tick(
+                instrument_key=instrument_key,
+                symbol=symbol,
+                ltp=price,
+                ltt=current_time + (i * 60000),  # 1 minute intervals
+                ltq=100
+            )
+            
+            # Process for breakout detection
+            signals = await service.process_instrument(
+                instrument_key=instrument_key,
+                symbol=symbol,
+                historical_data=historical_data
+            )
+            
+            # Broadcast any detected signals
+            for signal in signals:
+                await service.broadcast_signal(signal)
+                logger.info(f"🚨 DEMO: {signal.strategy} signal - {signal.symbol} {signal.signal} @ {signal.entry_price}")
+        
+        # Print statistics
+        stats = service.get_statistics()
+        logger.info(f"📊 Demo completed. Stats: {stats}")
+        
+    except Exception as e:
+        logger.error(f"❌ Demo error: {e}")
 
-# Health check function
-def health_check() -> Dict[str, Any]:
-    """Health check for the service"""
-    return {
-        "service": "breakout_scanner",
-        "status": "running" if breakout_scanner.is_running else "stopped",
-        "market_open": breakout_scanner.is_market_open,
-        "instruments_tracked": len(breakout_scanner.instruments),
-        "breakouts_today": len(breakout_scanner.daily_breakouts),
-        "last_scan": breakout_scanner.last_scan_time.isoformat() if breakout_scanner.last_scan_time else None,
-        "timestamp": datetime.now().isoformat()
-    }
+
+# Global service instance (will be created in app.py)
+breakout_scanner_service: Optional[BreakoutScannerService] = None
+
+
+def get_breakout_scanner_service() -> Optional[BreakoutScannerService]:
+    """Get the global breakout scanner service instance"""
+    return breakout_scanner_service
+
+
+async def initialize_breakout_scanner_service(redis_client=None, websocket_manager=None) -> None:
+    """
+    Initialize the global breakout scanner service
+    
+    Args:
+        redis_client: Redis client for broadcasting
+        websocket_manager: WebSocket manager for real-time updates
+    """
+    global breakout_scanner_service
+    
+    try:
+        breakout_scanner_service = await create_breakout_scanner(
+            redis_client=redis_client,
+            websocket_manager=websocket_manager
+        )
+        
+        logger.info("🚀 Global BreakoutScannerService initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize global BreakoutScannerService: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    # Test the service with demo data
+    async def test_service():
+        service = await create_breakout_scanner()
+        await demo_breakout_detection(service)
+    
+    asyncio.run(test_service())
