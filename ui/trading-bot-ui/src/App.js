@@ -28,6 +28,7 @@ import AboutPage from "./pages/AboutPage";
 import ContactPage from "./pages/ContactPage";
 import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
 import TermsPage from "./pages/TermsPage";
+import NotificationsDashboard from "./components/notifications/NotificationsDashboard";
 import SecurityPage from "./pages/SecurityPage";
 import TermsModal from "./components/TermsModal";
 import { UnifiedMarketProvider } from "./hooks/useUnifiedMarketData";
@@ -140,6 +141,14 @@ const App = () => {
               element={
                 <ProtectedLayout>
                   <ProfilePage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedLayout>
+                  <NotificationsDashboard />
                 </ProtectedLayout>
               }
             />
