@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-Enhanced Breakout Detection Engine - Unified Vectorized System
+Enhanced Breakout Detection Engine - HFT Integration Bridge
+LEGACY SYSTEM - Use services/hft_breakout_detection.py for new HFT architecture
 
-Consolidates and improves all existing breakout detection services:
-- breakout_scanner_service.py
-- improved_breakout_detection.py  
-- breakout_detection_service.py
+This service now acts as a bridge between legacy breakout detection and the new HFT system.
+All new breakout detection should use the HFT system for sub-millisecond performance.
 
-Features:
-🚀 Ultra-fast vectorized processing with NumPy/Numba JIT compilation
-📊 16+ different breakout detection strategies
-💾 Memory-efficient ring buffer storage for all 3000+ stocks
-⚡ <5ms processing latency per market cycle
-🔄 Real-time integration with Market Data Hub
-📱 WebSocket broadcasting to UI
+Migration Status:
+- HFT system provides ultra-fast vectorized processing
+- This service maintained for backwards compatibility
+- Gradually being phased out in favor of HFT architecture
 """
 
 import asyncio
@@ -901,10 +897,11 @@ class EnhancedBreakoutEngine:
                 
                 # Update storage
                 with self.data_lock:
-                    success = self.storage.update_instrument_data(
+                    success = self.storage.update_data(
                         instrument_key=instrument,
                         price=current_price,
                         volume=volume,
+                        change_pct=price_change,
                         timestamp=time.time()
                     )
                 

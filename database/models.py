@@ -81,7 +81,10 @@ class User(Base):
         "UserCapital", back_populates="user", cascade="all, delete"
     )
     paper_account = relationship(
-        "PaperTradingAccount", back_populates="user", uselist=False, cascade="all, delete"
+        "PaperTradingAccount",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete",
     )
     notifications = relationship(
         "Notification", back_populates="user", cascade="all, delete"
@@ -97,9 +100,12 @@ class User(Base):
         "DailyTradingReport", back_populates="user", cascade="all, delete"
     )
     notification_preferences = relationship(
-        "UserNotificationPreferences", back_populates="user", uselist=False, cascade="all, delete"
+        "UserNotificationPreferences",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete",
     )
-    
+
     # New Auto-Trading System Relationships
     auto_trade_executions = relationship(
         "AutoTradeExecution", back_populates="user", cascade="all, delete"
@@ -174,25 +180,37 @@ class BrokerConfig(Base):
     last_error_message = Column(String, nullable=True)
     config = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=func.now())
-    
+
     # Funds and Margin Fields (Equity)
-    available_margin = Column(Float, nullable=True, comment="Available margin for trading")
+    available_margin = Column(
+        Float, nullable=True, comment="Available margin for trading"
+    )
     used_margin = Column(Float, nullable=True, comment="Currently used margin")
     payin_amount = Column(Float, nullable=True, comment="Instant payin amount")
     span_margin = Column(Float, nullable=True, comment="SPAN margin for F&O")
     adhoc_margin = Column(Float, nullable=True, comment="Adhoc margin")
     notional_cash = Column(Float, nullable=True, comment="Notional cash")
     exposure_margin = Column(Float, nullable=True, comment="Exposure margin for F&O")
-    
+
     # Commodity Funds (if applicable)
-    commodity_available_margin = Column(Float, nullable=True, comment="Commodity available margin")
-    commodity_used_margin = Column(Float, nullable=True, comment="Commodity used margin")
-    
+    commodity_available_margin = Column(
+        Float, nullable=True, comment="Commodity available margin"
+    )
+    commodity_used_margin = Column(
+        Float, nullable=True, comment="Commodity used margin"
+    )
+
     # Calculated Fields
-    total_portfolio_value = Column(Float, nullable=True, comment="Total portfolio value")
-    margin_utilization_percent = Column(Float, nullable=True, comment="Margin utilization percentage")
-    funds_last_updated = Column(DateTime, nullable=True, comment="Last funds data update")
-    
+    total_portfolio_value = Column(
+        Float, nullable=True, comment="Total portfolio value"
+    )
+    margin_utilization_percent = Column(
+        Float, nullable=True, comment="Margin utilization percentage"
+    )
+    funds_last_updated = Column(
+        DateTime, nullable=True, comment="Last funds data update"
+    )
+
     # User Profile Fields (cached from broker API)
     user_name = Column(String, nullable=True, comment="Broker account user name")
     email = Column(String, nullable=True, comment="Broker account email")
@@ -203,71 +221,73 @@ class BrokerConfig(Base):
     poa_enabled = Column(Boolean, nullable=True, comment="Power of Attorney enabled")
     ddpi_enabled = Column(Boolean, nullable=True, comment="DDPI enabled")
     account_status = Column(String, nullable=True, comment="Account status")
-    profile_last_updated = Column(DateTime, nullable=True, comment="Last profile data update")
+    profile_last_updated = Column(
+        DateTime, nullable=True, comment="Last profile data update"
+    )
 
     # Relationships
     user = relationship("User", back_populates="broker_configs")
-    
+
     def get_margin_utilization(self):
         """Calculate margin utilization percentage"""
         if self.available_margin and self.available_margin > 0:
             return (self.used_margin or 0) / self.available_margin * 100
         return 0.0
-    
+
     def get_free_margin(self):
         """Get available free margin"""
         available = self.available_margin or 0
         used = self.used_margin or 0
         return max(0, available - used)
-    
+
     def can_place_order(self, required_margin):
         """Check if broker has enough margin for order"""
         return self.get_free_margin() >= required_margin
-    
+
     def update_funds_data(self, funds_data):
         """Update funds data from API response"""
-        if not funds_data or 'data' not in funds_data:
+        if not funds_data or "data" not in funds_data:
             return
-        
-        data = funds_data['data']
-        
+
+        data = funds_data["data"]
+
         # Update equity funds
-        if 'equity' in data:
-            equity = data['equity']
-            self.available_margin = equity.get('available_margin', 0)
-            self.used_margin = equity.get('used_margin', 0)
-            self.payin_amount = equity.get('payin_amount', 0)
-            self.span_margin = equity.get('span_margin', 0)
-            self.adhoc_margin = equity.get('adhoc_margin', 0)
-            self.notional_cash = equity.get('notional_cash', 0)
-            self.exposure_margin = equity.get('exposure_margin', 0)
-        
+        if "equity" in data:
+            equity = data["equity"]
+            self.available_margin = equity.get("available_margin", 0)
+            self.used_margin = equity.get("used_margin", 0)
+            self.payin_amount = equity.get("payin_amount", 0)
+            self.span_margin = equity.get("span_margin", 0)
+            self.adhoc_margin = equity.get("adhoc_margin", 0)
+            self.notional_cash = equity.get("notional_cash", 0)
+            self.exposure_margin = equity.get("exposure_margin", 0)
+
         # Update commodity funds
-        if 'commodity' in data:
-            commodity = data['commodity']
-            self.commodity_available_margin = commodity.get('available_margin', 0)
-            self.commodity_used_margin = commodity.get('used_margin', 0)
-        
+        if "commodity" in data:
+            commodity = data["commodity"]
+            self.commodity_available_margin = commodity.get("available_margin", 0)
+            self.commodity_used_margin = commodity.get("used_margin", 0)
+
         # Update calculated fields
         self.margin_utilization_percent = self.get_margin_utilization()
         self.funds_last_updated = datetime.now()
-    
+
     def update_profile_data(self, profile_data):
         """Update profile data from API response"""
-        if not profile_data or 'data' not in profile_data:
+        if not profile_data or "data" not in profile_data:
             return
-        
-        data = profile_data['data']
-        
-        self.user_name = data.get('user_name')
-        self.email = data.get('email')
-        self.user_type = data.get('user_type', 'individual')
-        self.exchanges = data.get('exchanges', [])
-        self.products = data.get('products', [])
-        self.order_types = data.get('order_types', [])
-        self.poa_enabled = data.get('poa', False)
-        self.ddpi_enabled = data.get('ddpi', False)
-        self.account_status = 'active' if data.get('is_active', False) else 'inactive'
+
+        data = profile_data["data"]
+
+        self.user_name = data.get("user_name")
+        self.email = data.get("email")
+        self.user_type = data.get("user_type", "individual")
+        self.exchanges = data.get("exchanges", [])
+        self.products = data.get("products", [])
+        self.order_types = data.get("order_types", [])
+        self.poa_enabled = data.get("poa", False)
+        self.ddpi_enabled = data.get("ddpi", False)
+        self.account_status = "active" if data.get("is_active", False) else "inactive"
         self.profile_last_updated = datetime.now()
 
 
@@ -609,12 +629,14 @@ class UserCapital(Base):
 
 class PaperTradingAccount(Base):
     """Paper trading virtual account"""
-    
+
     __tablename__ = "paper_trading_accounts"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
-    initial_capital = Column(Float, nullable=False, default=500000.0)  # ₹5 lakhs default
+    initial_capital = Column(
+        Float, nullable=False, default=500000.0
+    )  # ₹5 lakhs default
     current_balance = Column(Float, nullable=False, default=500000.0)
     used_margin = Column(Float, nullable=False, default=0.0)
     available_margin = Column(Float, nullable=False, default=500000.0)
@@ -625,20 +647,24 @@ class PaperTradingAccount(Base):
     max_risk_per_trade = Column(Float, nullable=False, default=0.02)  # 2%
     max_daily_loss = Column(Float, nullable=False, default=0.05)  # 5%
     created_at = Column(DateTime(timezone=True), default=func.now())
-    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
-    
+    updated_at = Column(
+        DateTime(timezone=True), default=func.now(), onupdate=func.now()
+    )
+
     user = relationship("User", back_populates="paper_account")
 
 
 class PaperTradingPosition(Base):
     """Paper trading position tracking"""
-    
+
     __tablename__ = "paper_trading_positions"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     position_id = Column(String, nullable=False, unique=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    account_id = Column(Integer, ForeignKey("paper_trading_accounts.id"), nullable=False)
+    account_id = Column(
+        Integer, ForeignKey("paper_trading_accounts.id"), nullable=False
+    )
     symbol = Column(String, nullable=False)
     instrument_key = Column(String, nullable=False)
     option_type = Column(String, nullable=False)  # CE/PE
@@ -656,20 +682,24 @@ class PaperTradingPosition(Base):
     status = Column(String, nullable=False, default="ACTIVE")  # ACTIVE, CLOSED, PARTIAL
     entry_time = Column(DateTime(timezone=True), default=func.now())
     exit_time = Column(DateTime(timezone=True), nullable=True)
-    
+
     user = relationship("User")
     account = relationship("PaperTradingAccount")
 
 
 class PaperTradingHistory(Base):
     """Paper trading transaction history"""
-    
+
     __tablename__ = "paper_trading_history"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    account_id = Column(Integer, ForeignKey("paper_trading_accounts.id"), nullable=False)
-    position_id = Column(String, ForeignKey("paper_trading_positions.position_id"), nullable=False)
+    account_id = Column(
+        Integer, ForeignKey("paper_trading_accounts.id"), nullable=False
+    )
+    position_id = Column(
+        String, ForeignKey("paper_trading_positions.position_id"), nullable=False
+    )
     action = Column(String, nullable=False)  # BUY, SELL
     symbol = Column(String, nullable=False)
     price = Column(Float, nullable=False)
@@ -678,7 +708,7 @@ class PaperTradingHistory(Base):
     pnl = Column(Float, nullable=True)  # Only for SELL actions
     pnl_percentage = Column(Float, nullable=True)  # Only for SELL actions
     timestamp = Column(DateTime(timezone=True), default=func.now())
-    
+
     user = relationship("User")
     account = relationship("PaperTradingAccount")
 
@@ -847,56 +877,60 @@ class Notification(Base):
 
 class UserNotificationPreferences(Base):
     __tablename__ = "user_notification_preferences"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
     )
-    
+
     # Channel preferences
     email_enabled = Column(Boolean, default=True)
     sms_enabled = Column(Boolean, default=False)
     push_enabled = Column(Boolean, default=True)
-    
+
     # Notification type preferences (JSON)
-    email_types = Column(JSON, default=lambda: {
-        "trading": True,
-        "token_expiry": True, 
-        "system": True,
-        "portfolio": True,
-        "alerts": True,
-        "risk_management": True
-    })
-    
-    sms_types = Column(JSON, default=lambda: {
-        "token_expiry": True,
-        "critical_trades": True,
-        "system_critical": True,
-        "margin_call": True,
-        "stop_loss_hit": True
-    })
-    
-    push_types = Column(JSON, default=lambda: {
-        "all": True
-    })
-    
+    email_types = Column(
+        JSON,
+        default=lambda: {
+            "trading": True,
+            "token_expiry": True,
+            "system": True,
+            "portfolio": True,
+            "alerts": True,
+            "risk_management": True,
+        },
+    )
+
+    sms_types = Column(
+        JSON,
+        default=lambda: {
+            "token_expiry": True,
+            "critical_trades": True,
+            "system_critical": True,
+            "margin_call": True,
+            "stop_loss_hit": True,
+        },
+    )
+
+    push_types = Column(JSON, default=lambda: {"all": True})
+
     # Quiet hours
     quiet_hours_enabled = Column(Boolean, default=True)
     quiet_start_time = Column(String, default="22:00")  # 10 PM
-    quiet_end_time = Column(String, default="07:00")    # 7 AM
-    
+    quiet_end_time = Column(String, default="07:00")  # 7 AM
+
     # Frequency limits
     max_emails_per_hour = Column(Integer, default=10)
     max_sms_per_day = Column(Integer, default=5)
     max_push_per_hour = Column(Integer, default=50)
-    
+
     # Priority overrides (critical notifications ignore quiet hours and limits)
     critical_override_quiet_hours = Column(Boolean, default=True)
     critical_override_limits = Column(Boolean, default=True)
-    
+
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
-    
+
     # Relationships
     user = relationship("User")
 
@@ -1153,13 +1187,19 @@ class HourlyMarketStats(Base):
 # AUTO-TRADING SYSTEM MODELS - HFT Grade Performance & Monitoring
 # =======================
 
+
 class AutoTradeExecution(Base):
     """Enhanced trade execution tracking for Fibonacci + EMA auto-trading system"""
+
     __tablename__ = "auto_trade_executions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    session_id = Column(Integer, ForeignKey("auto_trading_sessions.id", ondelete="CASCADE"))
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id = Column(
+        Integer, ForeignKey("auto_trading_sessions.id", ondelete="CASCADE")
+    )
 
     # Trade Identification
     trade_id = Column(String(50), unique=True, nullable=False, index=True)
@@ -1167,41 +1207,43 @@ class AutoTradeExecution(Base):
     instrument_key = Column(String(100), nullable=False)
 
     # Strategy Details
-    strategy_name = Column(String(50), default='fibonacci_ema')
+    strategy_name = Column(String(50), default="fibonacci_ema")
     signal_type = Column(String(10), nullable=False)  # BUY_CE, BUY_PE
-    signal_strength = Column(Numeric(5,2))  # 0-100 score
+    signal_strength = Column(Numeric(5, 2))  # 0-100 score
 
     # Fibonacci Strategy Specific (JSON fields for complex data)
     fibonacci_levels = Column(JSON)  # All fib levels at entry {fib_23_6: 2450.50, ...}
     ema_values = Column(JSON)  # EMA 9,21,50 values at entry {ema_9: 2455, ...}
-    swing_high = Column(Numeric(10,2))  # Swing high used for Fibonacci
-    swing_low = Column(Numeric(10,2))   # Swing low used for Fibonacci
+    swing_high = Column(Numeric(10, 2))  # Swing high used for Fibonacci
+    swing_low = Column(Numeric(10, 2))  # Swing low used for Fibonacci
 
     # Trade Execution Details
     entry_time = Column(DateTime, nullable=False, index=True)
-    entry_price = Column(Numeric(10,2), nullable=False)
+    entry_price = Column(Numeric(10, 2), nullable=False)
     entry_order_id = Column(String(50))
     quantity = Column(Integer, nullable=False)
     lot_size = Column(Integer, nullable=False)
 
     # Exit Details
     exit_time = Column(DateTime)
-    exit_price = Column(Numeric(10,2))
+    exit_price = Column(Numeric(10, 2))
     exit_order_id = Column(String(50))
-    exit_reason = Column(String(50))  # stop_loss, target_1, target_2, trailing_stop, time_based, manual
+    exit_reason = Column(
+        String(50)
+    )  # stop_loss, target_1, target_2, trailing_stop, time_based, manual
 
     # P&L Tracking with Precision
-    gross_pnl = Column(Numeric(15,2))
-    net_pnl = Column(Numeric(15,2))  # After brokerage and taxes
-    pnl_percentage = Column(Numeric(10,4))
-    risk_reward_actual = Column(Numeric(10,2))  # Actual R:R achieved
+    gross_pnl = Column(Numeric(15, 2))
+    net_pnl = Column(Numeric(15, 2))  # After brokerage and taxes
+    pnl_percentage = Column(Numeric(10, 4))
+    risk_reward_actual = Column(Numeric(10, 2))  # Actual R:R achieved
 
     # Risk Management Data
-    initial_stop_loss = Column(Numeric(10,2))
-    target_1 = Column(Numeric(10,2))
-    target_2 = Column(Numeric(10,2))
-    max_profit_reached = Column(Numeric(10,2))
-    max_drawdown_in_trade = Column(Numeric(10,2))
+    initial_stop_loss = Column(Numeric(10, 2))
+    target_1 = Column(Numeric(10, 2))
+    target_2 = Column(Numeric(10, 2))
+    max_profit_reached = Column(Numeric(10, 2))
+    max_drawdown_in_trade = Column(Numeric(10, 2))
 
     # HFT Performance Metrics (milliseconds)
     signal_generation_latency_ms = Column(Integer)
@@ -1210,14 +1252,18 @@ class AutoTradeExecution(Base):
     time_in_trade_minutes = Column(Integer)
 
     # Status & Metadata
-    status = Column(String(20), default='ACTIVE', index=True)  # ACTIVE, CLOSED, CANCELLED
+    status = Column(
+        String(20), default="ACTIVE", index=True
+    )  # ACTIVE, CLOSED, CANCELLED
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     user = relationship("User", back_populates="auto_trade_executions")
     session = relationship("AutoTradingSession", back_populates="trade_executions")
-    active_position = relationship("ActivePosition", back_populates="trade_execution", uselist=False)
+    active_position = relationship(
+        "ActivePosition", back_populates="trade_execution", uselist=False
+    )
 
     # Indexes for HFT performance
     __table_args__ = (
@@ -1229,26 +1275,31 @@ class AutoTradeExecution(Base):
 
 class ActivePosition(Base):
     """Real-time position tracking for active trades"""
+
     __tablename__ = "active_positions"
 
     id = Column(Integer, primary_key=True, index=True)
-    trade_execution_id = Column(Integer, ForeignKey("auto_trade_executions.id", ondelete="CASCADE"), unique=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    trade_execution_id = Column(
+        Integer, ForeignKey("auto_trade_executions.id", ondelete="CASCADE"), unique=True
+    )
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     # Current Position Data
     symbol = Column(String(20), nullable=False, index=True)
     instrument_key = Column(String(100), nullable=False)
-    current_price = Column(Numeric(10,2))
-    current_pnl = Column(Numeric(15,2))
-    current_pnl_percentage = Column(Numeric(10,4))
+    current_price = Column(Numeric(10, 2))
+    current_pnl = Column(Numeric(15, 2))
+    current_pnl_percentage = Column(Numeric(10, 4))
 
     # Dynamic Stop Loss Management (Trailing)
-    current_stop_loss = Column(Numeric(10,2))
+    current_stop_loss = Column(Numeric(10, 2))
     trailing_stop_triggered = Column(Boolean, default=False)
-    highest_price_reached = Column(Numeric(10,2))
+    highest_price_reached = Column(Numeric(10, 2))
 
     # Risk Monitoring
-    unrealized_risk = Column(Numeric(15,2))
+    unrealized_risk = Column(Numeric(15, 2))
     mark_to_market_time = Column(DateTime, index=True)
 
     # Status
@@ -1256,21 +1307,24 @@ class ActivePosition(Base):
     last_updated = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    trade_execution = relationship("AutoTradeExecution", back_populates="active_position")
+    trade_execution = relationship(
+        "AutoTradeExecution", back_populates="active_position"
+    )
     user = relationship("User", back_populates="active_positions")
 
     # Index for fast queries
-    __table_args__ = (
-        Index("idx_active_position_user_active", "user_id", "is_active"),
-    )
+    __table_args__ = (Index("idx_active_position_user_active", "user_id", "is_active"),)
 
 
 class DailyTradingPerformance(Base):
     """Comprehensive daily performance analytics"""
+
     __tablename__ = "daily_trading_performance"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     trading_date = Column(Date, nullable=False, index=True)
 
     # Basic Trade Counts
@@ -1280,33 +1334,33 @@ class DailyTradingPerformance(Base):
     breakeven_trades = Column(Integer, default=0)
 
     # P&L Analysis
-    gross_pnl = Column(Numeric(15,2), default=0)
-    net_pnl = Column(Numeric(15,2), default=0)
-    largest_win = Column(Numeric(15,2), default=0)
-    largest_loss = Column(Numeric(15,2), default=0)
+    gross_pnl = Column(Numeric(15, 2), default=0)
+    net_pnl = Column(Numeric(15, 2), default=0)
+    largest_win = Column(Numeric(15, 2), default=0)
+    largest_loss = Column(Numeric(15, 2), default=0)
 
     # Performance Ratios
-    win_rate = Column(Numeric(5,2))  # Percentage
-    avg_win = Column(Numeric(15,2))
-    avg_loss = Column(Numeric(15,2))
-    profit_factor = Column(Numeric(10,4))  # Total wins / Total losses
-    expectancy = Column(Numeric(15,2))  # Average per trade
+    win_rate = Column(Numeric(5, 2))  # Percentage
+    avg_win = Column(Numeric(15, 2))
+    avg_loss = Column(Numeric(15, 2))
+    profit_factor = Column(Numeric(10, 4))  # Total wins / Total losses
+    expectancy = Column(Numeric(15, 2))  # Average per trade
 
     # Risk Metrics
-    max_drawdown = Column(Numeric(15,2))
+    max_drawdown = Column(Numeric(15, 2))
     max_consecutive_losses = Column(Integer, default=0)
     max_consecutive_wins = Column(Integer, default=0)
-    sharpe_ratio = Column(Numeric(10,4))
+    sharpe_ratio = Column(Numeric(10, 4))
 
     # Strategy-Specific Metrics
     fibonacci_signals_generated = Column(Integer, default=0)
     fibonacci_signals_executed = Column(Integer, default=0)
-    signal_to_execution_ratio = Column(Numeric(5,2))
+    signal_to_execution_ratio = Column(Numeric(5, 2))
 
     # Account Impact
-    account_balance_start = Column(Numeric(15,2))
-    account_balance_end = Column(Numeric(15,2))
-    daily_return_percentage = Column(Numeric(10,4))
+    account_balance_start = Column(Numeric(15, 2))
+    account_balance_end = Column(Numeric(15, 2))
+    daily_return_percentage = Column(Numeric(10, 4))
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -1315,18 +1369,23 @@ class DailyTradingPerformance(Base):
 
     # Unique constraint per user per day
     __table_args__ = (
-        UniqueConstraint('user_id', 'trading_date', name='uq_daily_perf_user_date'),
+        UniqueConstraint("user_id", "trading_date", name="uq_daily_perf_user_date"),
         Index("idx_daily_perf_date", "trading_date"),
     )
 
 
 class TradingSystemLog(Base):
     """Structured logging for the auto-trading system"""
+
     __tablename__ = "trading_system_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    log_level = Column(String(20), nullable=False, index=True)  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    component = Column(String(50), nullable=False, index=True)  # fibonacci_strategy, order_manager, risk_manager
+    log_level = Column(
+        String(20), nullable=False, index=True
+    )  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    component = Column(
+        String(50), nullable=False, index=True
+    )  # fibonacci_strategy, order_manager, risk_manager
     message = Column(Text, nullable=False)
 
     # Context Data
@@ -1356,25 +1415,30 @@ class TradingSystemLog(Base):
 
 class EmergencyControl(Base):
     """Kill switch and emergency trading controls"""
+
     __tablename__ = "emergency_controls"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     # Control Configuration
-    control_type = Column(String(50), nullable=False)  # KILL_SWITCH, DAILY_LIMIT, POSITION_LIMIT
+    control_type = Column(
+        String(50), nullable=False
+    )  # KILL_SWITCH, DAILY_LIMIT, POSITION_LIMIT
     is_active = Column(Boolean, default=True, index=True)
 
     # Kill Switch Triggers
-    max_daily_loss = Column(Numeric(15,2))  # Maximum daily loss in currency
+    max_daily_loss = Column(Numeric(15, 2))  # Maximum daily loss in currency
     max_consecutive_losses = Column(Integer)
-    max_drawdown_percentage = Column(Numeric(5,2))
+    max_drawdown_percentage = Column(Numeric(5, 2))
     max_position_count = Column(Integer, default=3)
 
     # Current Status (Real-time tracking)
-    current_daily_loss = Column(Numeric(15,2), default=0)
+    current_daily_loss = Column(Numeric(15, 2), default=0)
     current_consecutive_losses = Column(Integer, default=0)
-    current_drawdown = Column(Numeric(15,2), default=0)
+    current_drawdown = Column(Numeric(15, 2), default=0)
     current_position_count = Column(Integer, default=0)
 
     # Emergency State
@@ -1396,13 +1460,16 @@ class EmergencyControl(Base):
 
 class TradingAuditTrail(Base):
     """Complete audit trail for compliance and monitoring"""
+
     __tablename__ = "trading_audit_trail"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
 
     # Action Details
-    action_type = Column(String(50), nullable=False, index=True)  # SIGNAL_GENERATED, ORDER_PLACED, POSITION_CLOSED
+    action_type = Column(
+        String(50), nullable=False, index=True
+    )  # SIGNAL_GENERATED, ORDER_PLACED, POSITION_CLOSED
     entity_type = Column(String(50), index=True)  # TRADE, ORDER, POSITION, SYSTEM
     entity_id = Column(String(50), index=True)
 
@@ -1420,7 +1487,7 @@ class TradingAuditTrail(Base):
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
 
     # Relationships
-    user = relationship("User", back_populates="audit_trails")
+    user = relationship("User")
 
     # Indexes for fast audit queries
     __table_args__ = (
@@ -1431,107 +1498,304 @@ class TradingAuditTrail(Base):
 
 
 # =======================
+# PREMARKET CANDLE & GAP DETECTION SYSTEM
+# =======================
+
+
+class PremarketCandle(Base):
+    """
+    Premarket candle data for gap detection (9:00 AM to 9:08 AM IST)
+    Stores OHLC data built from tick-by-tick WebSocket feeds
+    """
+
+    __tablename__ = "premarket_candles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Instrument Identification
+    symbol = Column(String(50), nullable=False, index=True)
+    instrument_key = Column(String(100), nullable=False, index=True)
+    exchange = Column(String(10), default="NSE")
+    
+    # Candle Time Information
+    candle_date = Column(Date, nullable=False, index=True)
+    candle_start_time = Column(DateTime, nullable=False)  # 9:00 AM IST
+    candle_end_time = Column(DateTime, nullable=False)    # 9:08 AM IST
+    
+    # OHLC Data (Decimal for precision)
+    open_price = Column(Numeric(12, 2), nullable=False)
+    high_price = Column(Numeric(12, 2), nullable=False) 
+    low_price = Column(Numeric(12, 2), nullable=False)
+    close_price = Column(Numeric(12, 2), nullable=False)
+    
+    # Volume and Trade Data
+    total_volume = Column(BigInteger, default=0)
+    total_trades = Column(Integer, default=0)
+    avg_price = Column(Numeric(12, 2), nullable=False)
+    
+    # Previous Session Data (for gap calculation)
+    previous_close = Column(Numeric(12, 2), nullable=False)
+    
+    # Gap Analysis
+    gap_percentage = Column(Numeric(10, 4))  # (open - prev_close) / prev_close * 100
+    gap_type = Column(String(10))  # "GAP_UP", "GAP_DOWN", "NO_GAP"
+    gap_strength = Column(String(15))  # "WEAK", "MODERATE", "STRONG", "VERY_STRONG"
+    
+    # Volume Analysis  
+    volume_ratio = Column(Numeric(8, 2))  # Current volume / 20-day avg volume
+    volume_confirmation = Column(Boolean, default=False)  # Volume supports gap
+    
+    # Market Data Quality
+    ticks_received = Column(Integer, default=0)
+    data_quality_score = Column(Numeric(4, 3))  # 0-1 based on data completeness
+    
+    # Sector and Classification
+    sector = Column(String(50))
+    market_cap_category = Column(String(15))  # "LARGE_CAP", "MID_CAP", "SMALL_CAP"
+    
+    # Status and Metadata
+    is_significant_gap = Column(Boolean, default=False, index=True)  # Gap > 1%
+    processed_by_strategy = Column(Boolean, default=False)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Optimized indexes for gap detection queries
+    __table_args__ = (
+        # Primary index for daily gap screening
+        Index("idx_premarket_date_gap", "candle_date", "is_significant_gap", "gap_type"),
+        # Index for symbol-based queries
+        Index("idx_premarket_symbol_date", "symbol", "candle_date"),
+        # Index for gap strength analysis  
+        Index("idx_premarket_gap_analysis", "gap_strength", "volume_confirmation", "sector"),
+        # Index for instrument key lookup
+        Index("idx_premarket_instrument_date", "instrument_key", "candle_date"),
+        # Index for data quality monitoring
+        Index("idx_premarket_quality", "data_quality_score", "ticks_received"),
+        # Unique constraint per instrument per day
+        UniqueConstraint("instrument_key", "candle_date", name="uq_premarket_instrument_date"),
+        # Check constraints for data integrity
+        CheckConstraint("gap_percentage >= -50 AND gap_percentage <= 50", name="ck_gap_percentage_range"),
+        CheckConstraint("gap_type IN ('GAP_UP', 'GAP_DOWN', 'NO_GAP')", name="ck_valid_gap_type"),
+        CheckConstraint("gap_strength IN ('WEAK', 'MODERATE', 'STRONG', 'VERY_STRONG')", name="ck_valid_gap_strength"),
+        CheckConstraint("data_quality_score >= 0 AND data_quality_score <= 1", name="ck_quality_score_range"),
+        CheckConstraint("volume_ratio >= 0", name="ck_positive_volume_ratio"),
+        CheckConstraint("high_price >= low_price", name="ck_high_low_price"),
+        CheckConstraint("high_price >= open_price AND high_price >= close_price", name="ck_high_price_validity"),
+        CheckConstraint("low_price <= open_price AND low_price <= close_price", name="ck_low_price_validity"),
+    )
+
+
+class GapDetectionAlert(Base):
+    """
+    Real-time gap detection alerts generated during premarket hours
+    """
+    
+    __tablename__ = "gap_detection_alerts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Reference to premarket candle
+    premarket_candle_id = Column(Integer, ForeignKey("premarket_candles.id", ondelete="CASCADE"), index=True)
+    
+    # Alert Details
+    alert_time = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    
+    # Gap Information
+    gap_percentage = Column(Numeric(10, 4), nullable=False)
+    gap_type = Column(String(10), nullable=False)  # "GAP_UP", "GAP_DOWN"
+    gap_strength = Column(String(15), nullable=False)
+    
+    # Price Data
+    trigger_price = Column(Numeric(12, 2), nullable=False)
+    previous_close = Column(Numeric(12, 2), nullable=False)
+    
+    # Alert Priority and Status
+    alert_priority = Column(String(10), default="MEDIUM")  # "LOW", "MEDIUM", "HIGH", "CRITICAL" 
+    alert_status = Column(String(15), default="ACTIVE")  # "ACTIVE", "ACKNOWLEDGED", "EXPIRED"
+    
+    # Confidence Scoring
+    confidence_score = Column(Numeric(4, 3))  # 0-1 based on volume, gap size, etc.
+    
+    # Volume Confirmation
+    volume_at_alert = Column(BigInteger, default=0)
+    volume_ratio = Column(Numeric(8, 2))
+    
+    # Expiry and Processing
+    expires_at = Column(DateTime, nullable=False)  # Alert expiry time (market open)
+    acknowledged_at = Column(DateTime)
+    processed_by_trading_system = Column(Boolean, default=False)
+    
+    # Relationships
+    premarket_candle = relationship("PremarketCandle")
+    
+    # Optimized indexes
+    __table_args__ = (
+        Index("idx_gap_alert_active", "alert_status", "alert_time"),
+        Index("idx_gap_alert_symbol", "symbol", "gap_type", "alert_time"),
+        Index("idx_gap_alert_priority", "alert_priority", "confidence_score"),
+        Index("idx_gap_alert_processing", "processed_by_trading_system", "alert_status"),
+        CheckConstraint("gap_type IN ('GAP_UP', 'GAP_DOWN')", name="ck_alert_gap_type"),
+        CheckConstraint("alert_priority IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')", name="ck_alert_priority"),
+        CheckConstraint("alert_status IN ('ACTIVE', 'ACKNOWLEDGED', 'EXPIRED')", name="ck_alert_status"),
+        CheckConstraint("confidence_score >= 0 AND confidence_score <= 1", name="ck_alert_confidence_range"),
+    )
+
+
+# =======================
 # F&O STOCK SELECTION METADATA - Phase 2 Implementation
 # =======================
+
 
 class FNOStockMetadata(Base):
     """
     F&O Stock Metadata for Fibonacci Strategy Selection
-    
+
     Stores detailed metadata about F&O stocks including:
     - Index membership and sector classification
     - Option liquidity metrics and lot sizes
     - Historical Fibonacci respect scores
     - Technical analysis scores for strategy selection
     """
+
     __tablename__ = "fno_stock_metadata"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    
+
     # Stock Identification
     symbol = Column(String(20), unique=True, nullable=False, index=True)
     company_name = Column(String(100))
     sector = Column(String(50), index=True)
     industry = Column(String(100))
-    
+
     # Index Membership (JSON array for multiple index membership)
-    index_membership = Column(JSON, nullable=False)  # ['NIFTY', 'BANKNIFTY'] if in multiple
+    index_membership = Column(
+        JSON, nullable=False
+    )  # ['NIFTY', 'BANKNIFTY'] if in multiple
     primary_index = Column(String(20), index=True)  # Primary index for classification
-    
+
     # F&O Contract Details
     lot_size = Column(Integer, nullable=False)
-    tick_size = Column(Numeric(6,4), default=0.05)  # Minimum price movement
-    instrument_type = Column(String(20), default='EQ')  # EQ, FUTIDX, FUTSTK, etc.
-    
+    tick_size = Column(Numeric(6, 4), default=0.05)  # Minimum price movement
+    instrument_type = Column(String(20), default="EQ")  # EQ, FUTIDX, FUTSTK, etc.
+
     # Market Data Metrics (Updated daily)
     avg_daily_volume = Column(BigInteger, index=True)  # 30-day average volume
     market_cap = Column(BigInteger)  # Market capitalization in lakhs
-    current_price = Column(Numeric(10,2))
-    price_change_percent = Column(Numeric(8,4))  # Daily % change
-    
+    current_price = Column(Numeric(10, 2))
+    price_change_percent = Column(Numeric(8, 4))  # Daily % change
+
     # Option Liquidity Scores (0.0 to 1.0)
-    option_liquidity_score = Column(Numeric(4,3), index=True)  # Overall option liquidity
-    ce_liquidity_score = Column(Numeric(4,3))  # Call option liquidity
-    pe_liquidity_score = Column(Numeric(4,3))  # Put option liquidity
+    option_liquidity_score = Column(
+        Numeric(4, 3), index=True
+    )  # Overall option liquidity
+    ce_liquidity_score = Column(Numeric(4, 3))  # Call option liquidity
+    pe_liquidity_score = Column(Numeric(4, 3))  # Put option liquidity
     liquid_strikes_count = Column(Integer)  # Number of liquid strikes
     total_option_oi = Column(BigInteger)  # Total open interest across all strikes
-    
+
     # Fibonacci Strategy Specific Metrics (Updated weekly)
-    fibonacci_respect_score = Column(Numeric(4,3), index=True)  # Historical Fibonacci level respect (0-1)
-    swing_clarity_score = Column(Numeric(4,3), index=True)  # Clear swing highs/lows score (0-1)
-    ema_alignment_score = Column(Numeric(4,3), index=True)  # EMA trend alignment score (0-1)
-    overall_fibonacci_score = Column(Numeric(4,3), index=True)  # Combined Fibonacci suitability score
-    
+    fibonacci_respect_score = Column(
+        Numeric(4, 3), index=True
+    )  # Historical Fibonacci level respect (0-1)
+    swing_clarity_score = Column(
+        Numeric(4, 3), index=True
+    )  # Clear swing highs/lows score (0-1)
+    ema_alignment_score = Column(
+        Numeric(4, 3), index=True
+    )  # EMA trend alignment score (0-1)
+    overall_fibonacci_score = Column(
+        Numeric(4, 3), index=True
+    )  # Combined Fibonacci suitability score
+
     # Technical Analysis Metrics
-    volatility_30d = Column(Numeric(6,4))  # 30-day historical volatility
-    avg_true_range = Column(Numeric(10,2))  # ATR for volatility measurement
-    beta_vs_nifty = Column(Numeric(6,4))  # Beta coefficient vs Nifty
-    correlation_nifty = Column(Numeric(6,4))  # Correlation with Nifty (-1 to 1)
-    
+    volatility_30d = Column(Numeric(6, 4))  # 30-day historical volatility
+    avg_true_range = Column(Numeric(10, 2))  # ATR for volatility measurement
+    beta_vs_nifty = Column(Numeric(6, 4))  # Beta coefficient vs Nifty
+    correlation_nifty = Column(Numeric(6, 4))  # Correlation with Nifty (-1 to 1)
+
     # Selection History Tracking
-    times_selected = Column(Integer, default=0)  # How many times selected for auto-trading
+    times_selected = Column(
+        Integer, default=0
+    )  # How many times selected for auto-trading
     last_selected_date = Column(Date)
-    selection_success_rate = Column(Numeric(5,2))  # % of profitable selections
-    avg_holding_period_hours = Column(Numeric(8,2))  # Average position holding time
-    
+    selection_success_rate = Column(Numeric(5, 2))  # % of profitable selections
+    avg_holding_period_hours = Column(Numeric(8, 2))  # Average position holding time
+
     # Status and Quality Flags
-    is_active_fno = Column(Boolean, default=True, index=True)  # Currently has F&O availability
-    quality_grade = Column(String(2), index=True)  # A+, A, B+, B, C based on overall suitability
-    is_fibonacci_friendly = Column(Boolean, default=False, index=True)  # Passes Fibonacci criteria
+    is_active_fno = Column(
+        Boolean, default=True, index=True
+    )  # Currently has F&O availability
+    quality_grade = Column(
+        String(2), index=True
+    )  # A+, A, B+, B, C based on overall suitability
+    is_fibonacci_friendly = Column(
+        Boolean, default=False, index=True
+    )  # Passes Fibonacci criteria
     last_liquidity_check = Column(DateTime)
-    
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_analysis_date = Column(Date)  # Last technical analysis update
-    
+
     # Enhanced indexing for fast queries
     __table_args__ = (
         # Index for Fibonacci strategy selection
-        Index("idx_fno_fibonacci_selection", "is_fibonacci_friendly", "overall_fibonacci_score", "option_liquidity_score"),
-        
+        Index(
+            "idx_fno_fibonacci_selection",
+            "is_fibonacci_friendly",
+            "overall_fibonacci_score",
+            "option_liquidity_score",
+        ),
         # Index for active F&O stocks by quality
-        Index("idx_fno_active_quality", "is_active_fno", "quality_grade", "primary_index"),
-        
+        Index(
+            "idx_fno_active_quality", "is_active_fno", "quality_grade", "primary_index"
+        ),
         # Index for option liquidity filtering
-        Index("idx_fno_liquidity", "option_liquidity_score", "liquid_strikes_count", "total_option_oi"),
-        
+        Index(
+            "idx_fno_liquidity",
+            "option_liquidity_score",
+            "liquid_strikes_count",
+            "total_option_oi",
+        ),
         # Index for sector and index analysis
         Index("idx_fno_sector_index", "sector", "primary_index", "market_cap"),
-        
         # Index for performance tracking
-        Index("idx_fno_performance", "times_selected", "selection_success_rate", "last_selected_date"),
-        
+        Index(
+            "idx_fno_performance",
+            "times_selected",
+            "selection_success_rate",
+            "last_selected_date",
+        ),
         # Index for volatility-based selection
-        Index("idx_fno_volatility", "volatility_30d", "avg_true_range", "beta_vs_nifty"),
-        
+        Index(
+            "idx_fno_volatility", "volatility_30d", "avg_true_range", "beta_vs_nifty"
+        ),
         # Check constraints for data quality
-        CheckConstraint("fibonacci_respect_score >= 0 AND fibonacci_respect_score <= 1", name="ck_fib_respect_range"),
-        CheckConstraint("swing_clarity_score >= 0 AND swing_clarity_score <= 1", name="ck_swing_clarity_range"),
-        CheckConstraint("option_liquidity_score >= 0 AND option_liquidity_score <= 1", name="ck_option_liquidity_range"),
+        CheckConstraint(
+            "fibonacci_respect_score >= 0 AND fibonacci_respect_score <= 1",
+            name="ck_fib_respect_range",
+        ),
+        CheckConstraint(
+            "swing_clarity_score >= 0 AND swing_clarity_score <= 1",
+            name="ck_swing_clarity_range",
+        ),
+        CheckConstraint(
+            "option_liquidity_score >= 0 AND option_liquidity_score <= 1",
+            name="ck_option_liquidity_range",
+        ),
         CheckConstraint("lot_size > 0", name="ck_positive_lot_size"),
-        CheckConstraint("quality_grade IN ('A+', 'A', 'B+', 'B', 'C')", name="ck_valid_quality_grade"),
-        CheckConstraint("selection_success_rate >= 0 AND selection_success_rate <= 100", name="ck_success_rate_range"),
+        CheckConstraint(
+            "quality_grade IN ('A+', 'A', 'B+', 'B', 'C')",
+            name="ck_valid_quality_grade",
+        ),
+        CheckConstraint(
+            "selection_success_rate >= 0 AND selection_success_rate <= 100",
+            name="ck_success_rate_range",
+        ),
     )
 
 
@@ -1539,78 +1803,92 @@ class FNOSelectionHistory(Base):
     """
     Historical record of F&O stock selections for performance tracking and analysis
     """
+
     __tablename__ = "fno_selection_history"
-    
+
     id = Column(Integer, primary_key=True, index=True)
-    
+
     # Selection Session Details
     selection_date = Column(Date, nullable=False, index=True)
     selection_time = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    session_type = Column(String(20), default='PREMARKET')  # PREMARKET, INTRADAY, CUSTOM
-    
+    session_type = Column(
+        String(20), default="PREMARKET"
+    )  # PREMARKET, INTRADAY, CUSTOM
+
     # Selected Stock Information
     symbol = Column(String(20), nullable=False, index=True)
-    selection_score = Column(Numeric(6,3), nullable=False)  # Score at time of selection
+    selection_score = Column(
+        Numeric(6, 3), nullable=False
+    )  # Score at time of selection
     selection_rank = Column(Integer)  # Rank among all candidates (1st, 2nd, etc.)
-    
+
     # Market Context at Selection
     market_sentiment = Column(String(20))  # BULLISH, BEARISH, NEUTRAL
-    nifty_change_percent = Column(Numeric(8,4))
-    sector_momentum = Column(Numeric(8,4))  # Sector performance %
-    
+    nifty_change_percent = Column(Numeric(8, 4))
+    sector_momentum = Column(Numeric(8, 4))  # Sector performance %
+
     # Fibonacci Strategy Metrics at Selection
     fibonacci_levels_at_selection = Column(JSON)  # Fib levels when selected
     ema_values_at_selection = Column(JSON)  # EMA values when selected
-    price_at_selection = Column(Numeric(10,2))
-    
+    price_at_selection = Column(Numeric(10, 2))
+
     # Selection Criteria Met
-    technical_score = Column(Numeric(4,3))  # Technical analysis score (0-1)
-    liquidity_score = Column(Numeric(4,3))  # Liquidity score (0-1)
-    market_score = Column(Numeric(4,3))  # Market conditions score (0-1)
-    
+    technical_score = Column(Numeric(4, 3))  # Technical analysis score (0-1)
+    liquidity_score = Column(Numeric(4, 3))  # Liquidity score (0-1)
+    market_score = Column(Numeric(4, 3))  # Market conditions score (0-1)
+
     # Option Details Selected
     option_type_selected = Column(String(5))  # CE or PE
-    atm_strike = Column(Numeric(10,2))
-    option_premium = Column(Numeric(8,2))
+    atm_strike = Column(Numeric(10, 2))
+    option_premium = Column(Numeric(8, 2))
     option_liquidity = Column(JSON)  # Liquidity metrics for selected option
-    
+
     # Performance Tracking
     was_traded = Column(Boolean, default=False)  # Was actually traded
     trade_outcome = Column(String(20))  # PROFIT, LOSS, BREAKEVEN, NOT_TRADED
-    profit_loss_points = Column(Numeric(10,2))  # P&L in points
-    profit_loss_percent = Column(Numeric(8,4))  # P&L percentage
+    profit_loss_points = Column(Numeric(10, 2))  # P&L in points
+    profit_loss_percent = Column(Numeric(8, 4))  # P&L percentage
     holding_period_minutes = Column(Integer)  # How long position was held
-    
+
     # Analysis Results
-    max_favorable_move = Column(Numeric(8,4))  # Max % move in predicted direction
-    max_adverse_move = Column(Numeric(8,4))  # Max % move against prediction
+    max_favorable_move = Column(Numeric(8, 4))  # Max % move in predicted direction
+    max_adverse_move = Column(Numeric(8, 4))  # Max % move against prediction
     fibonacci_level_accuracy = Column(Boolean)  # Did price respect predicted Fib level?
-    
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     trade_closed_at = Column(DateTime)  # When trade was closed (if traded)
-    
+
     # Relationships
     user = relationship("User")
-    
+
     # Optimized indexes for analysis queries
     __table_args__ = (
         # Index for performance analysis by date
         Index("idx_selection_history_date", "selection_date", "symbol"),
-        
         # Index for user performance tracking
-        Index("idx_selection_history_user", "user_id", "selection_date", "trade_outcome"),
-        
+        Index(
+            "idx_selection_history_user", "user_id", "selection_date", "trade_outcome"
+        ),
         # Index for symbol performance analysis
         Index("idx_selection_history_symbol", "symbol", "was_traded", "trade_outcome"),
-        
         # Index for strategy performance analysis
-        Index("idx_selection_history_strategy", "fibonacci_level_accuracy", "profit_loss_percent", "holding_period_minutes"),
-        
+        Index(
+            "idx_selection_history_strategy",
+            "fibonacci_level_accuracy",
+            "profit_loss_percent",
+            "holding_period_minutes",
+        ),
         # Index for market condition analysis
-        Index("idx_selection_history_market", "market_sentiment", "session_type", "selection_date"),
-        
+        Index(
+            "idx_selection_history_market",
+            "market_sentiment",
+            "session_type",
+            "selection_date",
+        ),
         # Unique constraint to prevent duplicate selections on same date
-        UniqueConstraint("selection_date", "symbol", "user_id", name="uq_daily_stock_selection"),
+        UniqueConstraint(
+            "selection_date", "symbol", "user_id", name="uq_daily_stock_selection"
+        ),
     )

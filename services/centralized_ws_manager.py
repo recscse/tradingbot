@@ -1109,14 +1109,16 @@ class CentralizedWebSocketManager:
 
             # 🚨 CRITICAL: ZERO-DELAY breakout detection (parallel with UI streaming)
             try:
-                from services.realtime_breakout_detector import (
-                    realtime_breakout_detector,
-                )
+                # Use NEW modular breakout system instead of legacy realtime detector
+                from services.breakout import get_breakout_system
+                breakout_system = get_breakout_system()
 
-                # Process breakouts in parallel (non-blocking)
-                asyncio.create_task(
-                    realtime_breakout_detector.process_realtime_data(data)
-                )
+                # Process breakouts using new modular system (non-blocking)
+                if breakout_system and breakout_system.is_running:
+                    # The modular system already processes data via data adapters
+                    logger.debug("Modular breakout system is active and processing data")
+                else:
+                    logger.debug("Modular breakout system not running - data will be processed when started")
             except ImportError:
                 logger.debug("Real-time breakout detector not available")
             except Exception as e:

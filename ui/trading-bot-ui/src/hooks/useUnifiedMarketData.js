@@ -32,8 +32,8 @@ const debugLog = (level, message, data) => {
   }
 };
 
-const WEBSOCKET_URL = process.env.REACT_APP_WS_URL
-  ? `${process.env.REACT_APP_WS_URL}/ws/unified`
+const WEBSOCKET_URL = process.env.REACT_APP_API_URL
+  ? `${process.env.REACT_APP_API_URL}/ws/unified`.replace('http', 'ws')
   : "ws://localhost:8000/ws/unified";
 
 const RECONNECT_INTERVALS = [1000, 2000, 4000, 8000, 16000, 32000];

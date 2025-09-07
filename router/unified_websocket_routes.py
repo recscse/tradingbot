@@ -43,18 +43,28 @@ async def unified_websocket_endpoint(websocket: WebSocket):
         logger.info(f"🔍 Connection params: user_id={user_id}, session_id={session_id}, client_type={client_type}")
         logger.info(f"🔍 All query params: {query_params}")
 
-        # Enhanced client ID generation with better fallback handling
+        # Enhanced client ID generation with better fallback handling and deduplication
         if user_id and session_id:
             # Extract last part of session_id for shorter client_id
             session_suffix = session_id.split('_')[-1] if '_' in session_id else session_id[:8]
             client_id = f"{client_type}_{user_id.replace('user_', '')}_{session_suffix}"
             logger.info(f"✅ Generated user-specific client_id: {client_id}")
         else:
-            # Enhanced fallback: Generate temporary user ID and track it
-            temp_user_id = f"temp_{uuid.uuid4().hex[:8]}"
+            # Enhanced fallback: Check for existing temp connection to avoid duplicates
+            client_ip = websocket.client.host if hasattr(websocket, 'client') and websocket.client else 'unknown'
+            user_agent = query_params.get('user_agent', 'unknown')
+            
+            # Create a stable temp user ID based on client info to reduce duplicates
+            import hashlib
+            stable_hash = hashlib.md5(f"{client_ip}_{user_agent}_{client_type}".encode()).hexdigest()[:8]
+            temp_user_id = f"temp_{stable_hash}"
             client_id = f"{client_type}_{temp_user_id}"
-            user_id = temp_user_id  # Set user_id so deduplication can work
-            logger.warning(f"⚠️ Generated fallback client_id: {client_id} (missing query params)")
+            user_id = temp_user_id
+            
+            # Clean up any existing temp connections from the same source
+            await _cleanup_temp_connections(client_ip, client_type, client_id)
+            
+            logger.info(f"✅ Generated stable temp client_id: {client_id} (IP: {client_ip})")
 
         # CRITICAL: Close existing connections for this user to prevent duplicates
         if user_id:  # Only cleanup if we have a valid user_id
@@ -74,6 +84,36 @@ async def unified_websocket_endpoint(websocket: WebSocket):
             if user_id not in unified_manager.user_connections:
                 unified_manager.user_connections[user_id] = {}
             unified_manager.user_connections[user_id][client_type] = client_id
+        
+        # AUTO-SUBSCRIBE: Automatically subscribe clients to relevant events based on client type
+        default_subscriptions = {
+            'dashboard': [
+                'top_movers_update', 
+                'intraday_stocks_update', 
+                'volume_analysis_update',
+                'market_sentiment_update', 
+                'indices_data_update',
+                'price_update',
+                'dashboard_update'
+            ],
+            'trading': [
+                'price_update', 
+                'live_prices_enriched',
+                'index_update',
+                'dashboard_update'
+            ],
+            'analytics': [
+                'top_movers_update', 
+                'intraday_stocks_update',
+                'market_sentiment_update',
+                'volume_analysis_update'
+            ]
+        }
+        
+        # Subscribe client to default events for their type
+        client_events = default_subscriptions.get(client_type, default_subscriptions['dashboard'])
+        unified_manager.client_subscriptions[client_id].update(client_events)
+        logger.info(f"📡 Auto-subscribed {client_id} to {len(client_events)} events: {client_events}")
 
         # Send welcome message directly with connection state check
         try:
@@ -191,6 +231,39 @@ async def unified_websocket_endpoint(websocket: WebSocket):
                         del unified_manager.user_connections[user_id]
             
             logger.info(f"🧹 Cleaned up client: {client_id} (user: {user_id})")
+
+
+async def _cleanup_temp_connections(client_ip: str, client_type: str, new_client_id: str):
+    """Clean up existing temporary connections from the same IP/client to prevent duplicates"""
+    try:
+        connections_to_remove = []
+        for conn_id, conn_ws in list(unified_manager.connections.items()):
+            # Check if this is a temp connection for the same client type
+            if (conn_id.startswith(f"{client_type}_temp_") and 
+                conn_id != new_client_id and
+                hasattr(conn_ws, 'client') and conn_ws.client and
+                conn_ws.client.host == client_ip):
+                connections_to_remove.append(conn_id)
+        
+        for conn_id in connections_to_remove:
+            logger.info(f"🧹 Closing duplicate temp connection: {conn_id} (IP: {client_ip})")
+            try:
+                existing_ws = unified_manager.connections[conn_id]
+                if _is_websocket_connected(existing_ws):
+                    await existing_ws.close(code=1000, reason=f"Duplicate {client_type} connection from same client")
+                
+                # Clean up immediately
+                unified_manager.connections.pop(conn_id, None)
+                unified_manager.client_types.pop(conn_id, None)
+                unified_manager.client_subscriptions.pop(conn_id, None)
+                
+                logger.info(f"✅ Successfully closed duplicate temp connection: {conn_id}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error closing temp connection {conn_id}: {e}")
+    
+    except Exception as e:
+        logger.error(f"❌ Error cleaning up temp connections for IP {client_ip}: {e}")
 
 
 async def _cleanup_user_connections(user_id: str, client_type: str, new_client_id: str):

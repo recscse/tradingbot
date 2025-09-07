@@ -2,9 +2,9 @@ from datetime import datetime
 import logging
 from typing import Any, Dict, List
 
-# Import the correct breakout detection service
+# Import the NEW modular breakout detection service
 try:
-    from services.breakout_detection_service import get_breakout_detection_service
+    from services.breakout import get_breakout_system, get_breakout_system_statistics
     BREAKOUT_SERVICE_AVAILABLE = True
 except ImportError:
     BREAKOUT_SERVICE_AVAILABLE = False
@@ -1201,59 +1201,82 @@ class EnhancedMarketAnalyticsService:
     # MISSING METHODS - ADD THESE:
 
     def get_gap_analysis(self) -> Dict[str, Any]:
-        """Enhanced gap analysis using dedicated gap analysis service"""
+        """Enhanced gap analysis using premarket candle builder service"""
         if not self._should_recalculate("gap_analysis"):
             return self.cache.get("gap_analysis", {"gap_up": [], "gap_down": []})
 
         try:
-            # Use the comprehensive gap analysis service if available
+            # Use premarket candle builder for gap analysis
+            import asyncio
+            from services.premarket_candle_builder import get_todays_gaps
+            
+            # Get today's gaps from premarket candle builder
             try:
-                from services.gap_analysis_service import get_gap_data
-                
-                # Get comprehensive gap data from the dedicated service
-                gap_service_data = get_gap_data()
-                
-                # Extract data for analytics compatibility
-                result = {
-                    "gap_up": gap_service_data.get("gap_up", {}).get("all", [])[:20],
-                    "gap_down": gap_service_data.get("gap_down", {}).get("all", [])[:20],
-                    "gap_up_small": gap_service_data.get("gap_up", {}).get("small", []),
-                    "gap_up_medium": gap_service_data.get("gap_up", {}).get("medium", []),
-                    "gap_up_large": gap_service_data.get("gap_up", {}).get("large", []),
-                    "gap_down_small": gap_service_data.get("gap_down", {}).get("small", []),
-                    "gap_down_medium": gap_service_data.get("gap_down", {}).get("medium", []),
-                    "gap_down_large": gap_service_data.get("gap_down", {}).get("large", []),
-                    "recent_gaps": gap_service_data.get("recent_gaps", [])[:15],
-                    "top_gap_up": gap_service_data.get("top_gap_up", []),
-                    "top_gap_down": gap_service_data.get("top_gap_down", []),
-                    "summary": {
-                        "total_gap_up": gap_service_data.get("statistics", {}).get("gap_up_total", 0),
-                        "total_gap_down": gap_service_data.get("statistics", {}).get("gap_down_total", 0),
-                        "total_gaps_today": gap_service_data.get("statistics", {}).get("total_gaps_today", 0),
-                        "market_status": gap_service_data.get("statistics", {}).get("market_status", "unknown"),
-                        # Calculate averages from the service data
-                        "avg_gap_up": self._calculate_avg_gap(gap_service_data.get("gap_up", {}).get("all", []), positive=True),
-                        "avg_gap_down": self._calculate_avg_gap(gap_service_data.get("gap_down", {}).get("all", []), positive=False),
-                    },
-                    "sustainability": gap_service_data.get("sustainability", {}),
-                    "sector_analysis": gap_service_data.get("sector_analysis", {}),
-                    "statistics": gap_service_data.get("statistics", {}),
-                    "timestamp": datetime.now().isoformat(),
-                    "data_source": "gap_analysis_service",
-                }
-                
-                self.cache["gap_analysis"] = result
-                self._mark_calculated("gap_analysis")
-                
-                logger.info(f"📊 Enhanced gap analysis: {result['summary']['total_gaps_today']} gaps detected")
-                return result
-                
-            except ImportError:
-                logger.warning("⚠️ Gap analysis service not available, using fallback method")
-                return self._calculate_gap_analysis_fallback()
+                # Try to get existing event loop
+                loop = asyncio.get_running_loop()
+                # Create a task instead of run_until_complete to avoid blocking
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, get_todays_gaps())
+                    all_gaps = future.result(timeout=10)
+            except RuntimeError:
+                # No event loop running, safe to use run_until_complete
+                all_gaps = asyncio.run(get_todays_gaps())
+            
+            # Separate gap up and gap down
+            gap_up = [g for g in all_gaps if g["gap_percentage"] > 0]
+            gap_down = [g for g in all_gaps if g["gap_percentage"] < 0]
+            
+            # Categorize by size
+            gap_up_small = [g for g in gap_up if 0.5 <= g["gap_percentage"] < 2.5]
+            gap_up_medium = [g for g in gap_up if 2.5 <= g["gap_percentage"] < 5.0]
+            gap_up_large = [g for g in gap_up if g["gap_percentage"] >= 5.0]
+            
+            gap_down_small = [g for g in gap_down if -2.5 < g["gap_percentage"] <= -0.5]
+            gap_down_medium = [g for g in gap_down if -5.0 < g["gap_percentage"] <= -2.5]  
+            gap_down_large = [g for g in gap_down if g["gap_percentage"] <= -5.0]
+            
+            # Calculate averages
+            avg_gap_up = sum(g["gap_percentage"] for g in gap_up) / len(gap_up) if gap_up else 0
+            avg_gap_down = sum(g["gap_percentage"] for g in gap_down) / len(gap_down) if gap_down else 0
+            
+            # Sort for top gaps
+            top_gap_up = sorted(gap_up, key=lambda x: x["gap_percentage"], reverse=True)[:10]
+            top_gap_down = sorted(gap_down, key=lambda x: abs(x["gap_percentage"]), reverse=True)[:10]
+            
+            result = {
+                "gap_up": gap_up,
+                "gap_down": gap_down,
+                "gap_up_small": gap_up_small,
+                "gap_up_medium": gap_up_medium,
+                "gap_up_large": gap_up_large,
+                "gap_down_small": gap_down_small,
+                "gap_down_medium": gap_down_medium,
+                "gap_down_large": gap_down_large,
+                "recent_gaps": all_gaps[:15],  # Most recent 15
+                "top_gap_up": top_gap_up,
+                "top_gap_down": top_gap_down,
+                "summary": {
+                    "total_gap_up": len(gap_up),
+                    "total_gap_down": len(gap_down),
+                    "total_gaps_today": len(all_gaps),
+                    "market_status": "premarket_data",
+                    "avg_gap_up": round(avg_gap_up, 2),
+                    "avg_gap_down": round(avg_gap_down, 2),
+                },
+                "timestamp": datetime.now().isoformat(),
+                "data_source": "premarket_candle_builder",
+                "capture_window": "9:00-9:08 AM IST"
+            }
+            
+            self.cache["gap_analysis"] = result
+            self._mark_calculated("gap_analysis")
+            
+            logger.info(f"📊 Premarket gap analysis: {result['summary']['total_gaps_today']} gaps from 9:00-9:08 AM")
+            return result
                 
         except Exception as e:
-            logger.error(f"Error getting enhanced gap analysis: {e}")
+            logger.error(f"Error getting premarket gap analysis: {e}")
             # Fallback to basic calculation
             return self._calculate_gap_analysis_fallback()
 
@@ -1327,10 +1350,19 @@ class EnhancedMarketAnalyticsService:
         try:
             # Use the proper breakout detection service
             if BREAKOUT_SERVICE_AVAILABLE:
-                breakout_service = get_breakout_detection_service()
+                breakout_service = get_breakout_system()
                 
                 # Get active breakouts from the service
-                all_breakouts = breakout_service.get_active_breakouts()
+                if breakout_service and hasattr(breakout_service, 'get_active_breakouts'):
+                    all_breakouts = breakout_service.get_active_breakouts()
+                else:
+                    # Fallback to getting statistics if direct method not available
+                    statistics = get_breakout_system_statistics()
+                    all_breakouts = []
+                    # Extract breakouts from statistics
+                    breakouts_by_type = statistics.get("breakouts_by_type", {})
+                    for breakout_list in breakouts_by_type.values():
+                        all_breakouts.extend(breakout_list)
                 
                 # Separate breakouts and breakdowns
                 breakouts = [b for b in all_breakouts if b.get("breakout_type") == "breakout"]

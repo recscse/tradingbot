@@ -82,15 +82,59 @@ class SimpleAnalyticsService:
         return {"sentiment": "unknown", "confidence": 0, "metrics": {}}
 
     def get_gap_analysis(self):
-        """Get gap analysis"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
-            try:
-                return analytics.get_gap_analysis()
-            except Exception as e:
-                logger.error(f"Error getting gap analysis: {e}")
-
-        return {"gap_up": [], "gap_down": [], "summary": {}}
+        """Get gap analysis from premarket candle builder"""
+        try:
+            # Import premarket candle builder function
+            import asyncio
+            from services.premarket_candle_builder import get_todays_gaps
+            
+            # Get today's gaps (both up and down)
+            loop = asyncio.get_event_loop()
+            all_gaps = loop.run_until_complete(get_todays_gaps())
+            
+            # Separate gap up and gap down
+            gap_up = []
+            gap_down = []
+            
+            for gap in all_gaps:
+                gap_data = {
+                    "symbol": gap["symbol"],
+                    "gap_percentage": gap["gap_percentage"], 
+                    "gap_strength": gap["gap_strength"],
+                    "open_price": gap["open_price"],
+                    "close_price": gap["close_price"],
+                    "previous_close": gap["previous_close"],
+                    "volume": gap["volume"],
+                    "volume_ratio": gap["volume_ratio"],
+                    "sector": gap["sector"],
+                    "timestamp": gap["timestamp"],
+                    "last_price": gap["close_price"],  # For compatibility
+                    "change_percent": gap["gap_percentage"],  # For compatibility
+                }
+                
+                if gap["gap_percentage"] > 0:
+                    gap_up.append(gap_data)
+                else:
+                    gap_down.append(gap_data)
+            
+            # Create summary
+            summary = {
+                "total_gaps": len(all_gaps),
+                "gap_up_count": len(gap_up), 
+                "gap_down_count": len(gap_down),
+                "data_source": "premarket_candle_builder",
+                "capture_window": "9:00-9:08 AM IST"
+            }
+            
+            return {
+                "gap_up": gap_up,
+                "gap_down": gap_down, 
+                "summary": summary
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting premarket gap analysis: {e}")
+            return {"gap_up": [], "gap_down": [], "summary": {}}
 
     def get_breakout_analysis(self):
         """Get breakout analysis"""

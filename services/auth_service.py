@@ -9,6 +9,12 @@ from fastapi.security import OAuth2PasswordBearer
 from database.connection import get_db
 from database.models import User
 from core.config import JWT_SECRET, REFRESH_SECRET, ACCESS_TOKEN_EXPIRE_MINUTES
+import logging
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # Constants
 ALGORITHM = "HS256"
