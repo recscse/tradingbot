@@ -32,6 +32,8 @@ import StocksListOptimized from "../components/common/StocksListOptimized";
 import StocksListWithLivePrices from "../components/common/StocksListWithLivePrices";
 import TipRanksHeatmap from "../components/common/TipRanksHeatmap";
 import FinancialHeatmap from "../components/common/FinancialHeatmap";
+import BreakoutAnalysisWidget from "../components/dashboard/BreakoutAnalysisWidget";
+import EnhancedBreakoutWidget from "../components/dashboard/EnhancedBreakoutWidget";
 import { useMarket } from "../hooks/useUnifiedMarketData";
 import useMarketStore from "../store/marketStore";
 // PERFORMANCE FIX: Memoized components to prevent unnecessary re-renders
@@ -2692,89 +2694,27 @@ const DashboardPage = () => {
       </Paper>
     </Stack>
   );
-  // Render function for the breakouts section (RESPONSIVE - SINGLE COLUMN FOR PAIRED LISTS)
+  // Render function for the breakouts section with REAL-TIME BREAKOUT WIDGETS
   const renderBreakoutsSection = () => (
     <Stack spacing={2}>
-      <Paper
-        elevation={2}
-        sx={{
-          p: 2,
-          borderRadius: 3,
-          border: `1px solid ${colors.border}`,
-          bgcolor: "background.paper",
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
+      {/* Enhanced Breakout Widget - Real-time detection */}
+      <EnhancedBreakoutWidget
+        data={breakoutAnalysis}
+        isLoading={!breakoutAnalysis || !isConnected}
+        compact={isMobile}
+        realTimeEnabled={isConnected}
+        onRefresh={() => {
+          // Trigger refresh if needed
+          console.log("Refreshing breakout data...");
         }}
-      >
-        {breakouts.length > 0 ? (
-          <MemoizedStocksList
-            title={`⚡ BREAKOUTS (${breakouts.length})`}
-            data={breakouts}
-            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
-            showSector={!isMobile} // Show sector on larger screens if table
-            showTimestamp={true} // Enable timestamp display for breakouts
-            maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
-            isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
-          />
-        ) : (
-          <Box sx={{ textAlign: "center", py: 2 }}>
-            <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
-              ⚡ BREAKOUTS (0)
-            </Typography>
-            <Typography
-              variant="body2"
-              sx={{ color: "text.secondary", fontStyle: "italic" }}
-            >
-              Stocks breaking above resistance with real-time detection
-              <br />
-              Waiting for market data...
-            </Typography>
-          </Box>
-        )}
-      </Paper>
-      <Paper
-        elevation={2}
-        sx={{
-          p: 2,
-          borderRadius: 3,
-          border: `1px solid ${colors.border}`,
-          bgcolor: "background.paper",
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {breakdowns.length > 0 ? (
-          <MemoizedStocksList
-            title={`📉 BREAKDOWNS (${breakdowns.length})`}
-            data={breakdowns}
-            layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
-            showSector={!isMobile} // Show sector on larger screens if table
-            showTimestamp={true} // Enable timestamp display for breakdowns
-            maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
-            isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
-          />
-        ) : (
-          <Box sx={{ textAlign: "center", py: 2 }}>
-            <Typography variant="h6" sx={{ color: colors.primary, mb: 1 }}>
-              📉 BREAKDOWNS (0)
-            </Typography>
-            <Typography
-              variant="body2"
-              sx={{ color: "text.secondary", fontStyle: "italic" }}
-            >
-              Stocks breaking below support with real-time detection
-              <br />
-              Waiting for market data...
-            </Typography>
-          </Box>
-        )}
-      </Paper>
+      />
+      
+      {/* Breakout Analysis Widget - Detailed view */}
+      <BreakoutAnalysisWidget
+        data={breakoutAnalysis}
+        isLoading={!breakoutAnalysis || !isConnected}
+        compact={isMobile}
+      />
     </Stack>
   );
   // Enhanced MCX trading symbol parser using proper data fields

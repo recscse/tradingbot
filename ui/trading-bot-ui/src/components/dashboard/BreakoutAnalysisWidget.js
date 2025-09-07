@@ -1,7 +1,7 @@
 // components/dashboard/BreakoutAnalysisWidget.jsx
 import React, { useState } from "react";
 import { bloombergColors } from "../../themes/bloombergColors";
-import { Paper, Box, Grid2, Chip, Tooltip, Button, Typography } from "@mui/material";
+import { Paper, Box, Chip, Tooltip, Button, Typography } from "@mui/material";
 import { withErrorBoundary } from "../common/ErrorBoundary";
 
 const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
@@ -34,27 +34,32 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
 
   // Combine and filter breakout/breakdown signals
   const allSignals = [
-    ...breakouts.map(b => ({...b, breakout_type: "breakout"})),
-    ...breakdowns.map(b => ({...b, breakout_type: "breakdown"}))
+    ...breakouts.map((b) => ({ ...b, breakout_type: "breakout" })),
+    ...breakdowns.map((b) => ({ ...b, breakout_type: "breakdown" })),
   ];
 
   // Apply filters
-  const filteredSignals = allSignals.filter(signal => {
-    // Type filter
-    if (selectedType !== "all" && signal.breakout_type !== selectedType) {
-      return false;
-    }
-    
-    // Quality filter
-    if (selectedQuality !== "all" && signal.breakout_quality !== selectedQuality) {
-      return false;
-    }
-    
-    return true;
-  }).sort((a, b) => {
-    // Sort by timestamp (newest first)
-    return new Date(b.timestamp) - new Date(a.timestamp);
-  });
+  const filteredSignals = allSignals
+    .filter((signal) => {
+      // Type filter
+      if (selectedType !== "all" && signal.breakout_type !== selectedType) {
+        return false;
+      }
+
+      // Quality filter
+      if (
+        selectedQuality !== "all" &&
+        signal.breakout_quality !== selectedQuality
+      ) {
+        return false;
+      }
+
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by timestamp (newest first)
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    });
 
   // Format volume for display
   const formatVolume = (volume) => {
@@ -96,7 +101,7 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
     const now = new Date();
     const time = new Date(timestamp);
     const diffInMinutes = Math.floor((now - time) / (1000 * 60));
-    
+
     if (diffInMinutes < 1) return "Just now";
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
     const hours = Math.floor(diffInMinutes / 60);
@@ -111,31 +116,37 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
     const quality = signal.breakout_quality || "weak";
     const confidence = signal.confidence_score || 0;
     const timeAgo = getTimeAgo(signal.timestamp);
-    
+
     // Use direct breakout time from service if available, fallback to parsing timestamp
-    const displayTime = signal.breakout_time || (signal.timestamp 
-      ? new Date(signal.timestamp).toLocaleTimeString("en-US", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
-      : "N/A");
-    
+    const displayTime =
+      signal.breakout_time ||
+      (signal.timestamp
+        ? new Date(signal.timestamp).toLocaleTimeString("en-US", {
+            hour12: false,
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        : "N/A");
+
     // Enhanced date display
-    const displayDate = signal.breakout_date || (signal.timestamp 
-      ? new Date(signal.timestamp).toLocaleDateString("en-US", {
-          month: "short",
-          day: "2-digit",
-        })
-      : "N/A");
+    const displayDate =
+      signal.breakout_date ||
+      (signal.timestamp
+        ? new Date(signal.timestamp).toLocaleDateString("en-US", {
+            month: "short",
+            day: "2-digit",
+          })
+        : "N/A");
 
     return (
       <Tooltip
         key={`${signal.symbol}-${signal.timestamp}`}
         title={
           <Box>
-            <Box sx={{ fontWeight: "bold", fontSize: "1rem", mb: 1 }}>{signal.symbol}</Box>
+            <Box sx={{ fontWeight: "bold", fontSize: "1rem", mb: 1 }}>
+              {signal.symbol}
+            </Box>
             <Box sx={{ color: "#FFD700", fontWeight: "bold", mb: 1 }}>
               🕒 {displayTime} on {displayDate}
             </Box>
@@ -147,7 +158,10 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
               <Box>Support: ₹{signal.support_level?.toFixed(2)}</Box>
             )}
             <Box>Strength: {strength.toFixed(2)}%</Box>
-            <Box>Volume: {formatVolume(signal.volume)} ({signal.volume_ratio?.toFixed(1)}x avg)</Box>
+            <Box>
+              Volume: {formatVolume(signal.volume)} (
+              {signal.volume_ratio?.toFixed(1)}x avg)
+            </Box>
             <Box>Quality: {quality.toUpperCase()}</Box>
             <Box>Confidence: {(confidence * 100).toFixed(0)}%</Box>
             <Box>Momentum: {signal.price_momentum?.toFixed(2)}%</Box>
@@ -240,11 +254,10 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
             <Box
               sx={{ fontSize: "0.75rem", color: bloombergColors.textSecondary }}
             >
-              ₹{signal.current_price?.toFixed(2)} | 
-              {isBreakout 
+              ₹{signal.current_price?.toFixed(2)} |
+              {isBreakout
                 ? ` R: ₹${signal.resistance_level?.toFixed(2)}`
-                : ` S: ₹${signal.support_level?.toFixed(2)}`
-              }
+                : ` S: ₹${signal.support_level?.toFixed(2)}`}
             </Box>
             <Box
               sx={{
@@ -359,11 +372,14 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
       {!compact && (
         <Box sx={{ mb: 2 }}>
           <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
-            <Typography variant="caption" sx={{ 
-              color: bloombergColors.textSecondary, 
-              alignSelf: "center",
-              minWidth: "40px"
-            }}>
+            <Typography
+              variant="caption"
+              sx={{
+                color: bloombergColors.textSecondary,
+                alignSelf: "center",
+                minWidth: "40px",
+              }}
+            >
               Type:
             </Typography>
             {["all", "breakout", "breakdown"].map((type) => (
@@ -377,16 +393,19 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
                   minWidth: "60px",
                   height: "24px",
                   borderColor: bloombergColors.border,
-                  color: selectedType === type 
-                    ? bloombergColors.background 
-                    : bloombergColors.textSecondary,
-                  backgroundColor: selectedType === type 
-                    ? bloombergColors.accent 
-                    : "transparent",
+                  color:
+                    selectedType === type
+                      ? bloombergColors.background
+                      : bloombergColors.textSecondary,
+                  backgroundColor:
+                    selectedType === type
+                      ? bloombergColors.accent
+                      : "transparent",
                   "&:hover": {
-                    backgroundColor: selectedType === type 
-                      ? bloombergColors.accent 
-                      : `${bloombergColors.accent}20`,
+                    backgroundColor:
+                      selectedType === type
+                        ? bloombergColors.accent
+                        : `${bloombergColors.accent}20`,
                   },
                 }}
               >
@@ -394,42 +413,54 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
               </Button>
             ))}
           </Box>
-          
+
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-            <Typography variant="caption" sx={{ 
-              color: bloombergColors.textSecondary, 
-              alignSelf: "center",
-              minWidth: "40px"
-            }}>
+            <Typography
+              variant="caption"
+              sx={{
+                color: bloombergColors.textSecondary,
+                alignSelf: "center",
+                minWidth: "40px",
+              }}
+            >
               Quality:
             </Typography>
-            {["all", "weak", "moderate", "strong", "very_strong"].map((quality) => (
-              <Button
-                key={quality}
-                size="small"
-                variant={selectedQuality === quality ? "contained" : "outlined"}
-                onClick={() => setSelectedQuality(quality)}
-                sx={{
-                  fontSize: "0.65rem",
-                  minWidth: "50px",
-                  height: "22px",
-                  borderColor: bloombergColors.border,
-                  color: selectedQuality === quality 
-                    ? bloombergColors.background 
-                    : bloombergColors.textSecondary,
-                  backgroundColor: selectedQuality === quality 
-                    ? getQualityColor(quality) 
-                    : "transparent",
-                  "&:hover": {
-                    backgroundColor: selectedQuality === quality 
-                      ? getQualityColor(quality) 
-                      : `${getQualityColor(quality)}20`,
-                  },
-                }}
-              >
-                {quality === "very_strong" ? "V.STRONG" : quality.toUpperCase()}
-              </Button>
-            ))}
+            {["all", "weak", "moderate", "strong", "very_strong"].map(
+              (quality) => (
+                <Button
+                  key={quality}
+                  size="small"
+                  variant={
+                    selectedQuality === quality ? "contained" : "outlined"
+                  }
+                  onClick={() => setSelectedQuality(quality)}
+                  sx={{
+                    fontSize: "0.65rem",
+                    minWidth: "50px",
+                    height: "22px",
+                    borderColor: bloombergColors.border,
+                    color:
+                      selectedQuality === quality
+                        ? bloombergColors.background
+                        : bloombergColors.textSecondary,
+                    backgroundColor:
+                      selectedQuality === quality
+                        ? getQualityColor(quality)
+                        : "transparent",
+                    "&:hover": {
+                      backgroundColor:
+                        selectedQuality === quality
+                          ? getQualityColor(quality)
+                          : `${getQualityColor(quality)}20`,
+                    },
+                  }}
+                >
+                  {quality === "very_strong"
+                    ? "V.STRONG"
+                    : quality.toUpperCase()}
+                </Button>
+              )
+            )}
           </Box>
         </Box>
       )}
@@ -479,9 +510,7 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
       {/* Signals List */}
       <Box
         sx={{
-          height: compact 
-            ? "calc(100% - 50px)" 
-            : "calc(100% - 200px)",
+          height: compact ? "calc(100% - 50px)" : "calc(100% - 200px)",
           overflow: "auto",
           pr: 1,
         }}
@@ -491,21 +520,25 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
             .slice(0, compact ? 5 : 15)
             .map((signal) => renderBreakoutSignal(signal))
         ) : allSignals.length > 0 ? (
-          <Box sx={{ 
-            p: 2, 
-            textAlign: "center", 
-            color: bloombergColors.textSecondary,
-            fontSize: "0.8rem"
-          }}>
+          <Box
+            sx={{
+              p: 2,
+              textAlign: "center",
+              color: bloombergColors.textSecondary,
+              fontSize: "0.8rem",
+            }}
+          >
             No signals match the selected filters
           </Box>
         ) : (
-          <Box sx={{ 
-            p: 2, 
-            textAlign: "center", 
-            color: bloombergColors.textSecondary,
-            fontSize: "0.8rem"
-          }}>
+          <Box
+            sx={{
+              p: 2,
+              textAlign: "center",
+              color: bloombergColors.textSecondary,
+              fontSize: "0.8rem",
+            }}
+          >
             No breakout signals detected yet today
           </Box>
         )}
@@ -524,13 +557,17 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
           }}
         >
           <Box sx={{ textAlign: "center" }}>
-            <Box sx={{ color: bloombergColors.textSecondary }}>Market Hours</Box>
+            <Box sx={{ color: bloombergColors.textSecondary }}>
+              Market Hours
+            </Box>
             <Box sx={{ fontWeight: "bold", color: bloombergColors.positive }}>
               ACTIVE
             </Box>
           </Box>
           <Box sx={{ textAlign: "center" }}>
-            <Box sx={{ color: bloombergColors.textSecondary }}>Breakout Ratio</Box>
+            <Box sx={{ color: bloombergColors.textSecondary }}>
+              Breakout Ratio
+            </Box>
             <Box sx={{ fontWeight: "bold", color: bloombergColors.accent }}>
               {breakouts.length > 0 || breakdowns.length > 0
                 ? (breakouts.length / Math.max(breakdowns.length, 1)).toFixed(2)
@@ -541,14 +578,17 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
             <Box sx={{ color: bloombergColors.textSecondary }}>
               Market Direction
             </Box>
-            <Box sx={{ 
-              fontWeight: "bold", 
-              color: breakouts.length > breakdowns.length 
-                ? bloombergColors.positive 
-                : breakdowns.length > breakouts.length 
-                ? bloombergColors.negative 
-                : bloombergColors.textPrimary 
-            }}>
+            <Box
+              sx={{
+                fontWeight: "bold",
+                color:
+                  breakouts.length > breakdowns.length
+                    ? bloombergColors.positive
+                    : breakdowns.length > breakouts.length
+                    ? bloombergColors.negative
+                    : bloombergColors.textPrimary,
+              }}
+            >
               {breakouts.length > breakdowns.length
                 ? "BULLISH"
                 : breakdowns.length > breakouts.length
@@ -563,6 +603,7 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
 };
 
 export default withErrorBoundary(BreakoutAnalysisWidget, {
-  fallbackMessage: "Unable to load breakout analysis data. Real-time breakout detection is currently unavailable.",
-  height: "100%"
+  fallbackMessage:
+    "Unable to load breakout analysis data. Real-time breakout detection is currently unavailable.",
+  height: "100%",
 });

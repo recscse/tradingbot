@@ -5,35 +5,35 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-# ✅ Configure Logger (Console Only)
+#  Configure Logger (Console Only)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ✅ Console Handler (Logs to Terminal)
+#  Console Handler (Logs to Terminal)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.DEBUG)
 console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(console_formatter)
 
-# ✅ Add Console Handler (No File Logging)
+#  Add Console Handler (No File Logging)
 logger.addHandler(console_handler)
 
-# ✅ Load Secret Keys
+#  Load Secret Keys
 SECRET_KEY = os.getenv("JWT_SECRET", "your-access-secret-key")
 ALGORITHM = "HS256"
 
-# ✅ Allowed Origins (Frontend URLs)
+#  Allowed Origins (Frontend URLs)
 ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # ✅ Local Dev (React Frontend)
-    "https://resplendent-shortbread-e830d3.netlify.app",  # ✅ Production Frontend
-    "http://localhost:8000",  # ✅ Local Backend (FastAPI)
-    "https://tradingbot-ttys.onrender.com",  # ✅ Production Backend
-    "https://growthquantix.com",  # ✅ Production Frontend
-    "https://www.growthquantix.com",  # ✅ Production Frontend
-    "https://api.growthquantix.com",  # ✅ Production Backend
-    "https://api.growthquantix.com/v1",  # ✅ Production Backend (API Version)
+    "http://localhost:3000",  #  Local Dev (React Frontend)
+    "https://resplendent-shortbread-e830d3.netlify.app",  #  Production Frontend
+    "http://localhost:8000",  #  Local Backend (FastAPI)
+    "https://tradingbot-ttys.onrender.com",  #  Production Backend
+    "https://growthquantix.com",  #  Production Frontend
+    "https://www.growthquantix.com",  #  Production Frontend
+    "https://api.growthquantix.com",  #  Production Backend
+    "https://api.growthquantix.com/v1",  #  Production Backend (API Version)
 ]
 
 
@@ -46,7 +46,7 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
             f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
         )
 
-        # ✅ Handle CORS Preflight (OPTIONS Request)
+        #  Handle CORS Preflight (OPTIONS Request)
         if request.method == "OPTIONS":
             logger.info(f"🔍 Handling CORS Preflight request from {origin}")
             response = JSONResponse(status_code=200, content={})
@@ -68,7 +68,7 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
             try:
                 jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
                 logger.info(
-                    f"✅ Token successfully validated for request: {request.url.path}"
+                    f" Token successfully validated for request: {request.url.path}"
                 )
             except jwt.ExpiredSignatureError:
                 logger.warning(f"⚠️ Token expired for request: {request.url.path}")
@@ -100,12 +100,12 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
 
-        # ✅ Log Response Status
+        #  Log Response Status
         logger.info(
             f"📤 Response {response.status_code} for {request.method} {request.url.path}"
         )
 
-        # ✅ Set Correct CORS Headers on Response
+        #  Set Correct CORS Headers on Response
         if origin in ALLOWED_ORIGINS:
             response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"

@@ -1,9 +1,10 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional, Any
 from database.connection import get_db
 from database.models import Notification, User, UserNotificationPreferences
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, get_current_user_optional
 from services.notification_service import (
     notification_service,
     NotificationTypes,
@@ -54,6 +55,97 @@ class TradingNotificationRequest(BaseModel):
     data: Dict[str, Any]
 
 
+# ================== AUTHENTICATION DEBUG ==================
+@router.get("/auth/status")
+async def get_auth_status(user: Optional[User] = Depends(get_current_user_optional)):
+    """Check authentication status for debugging"""
+    if user:
+        return {
+            "authenticated": True,
+            "user_id": user.id,
+            "email": user.email,
+            "message": "Authentication successful"
+        }
+    else:
+        return {
+            "authenticated": False,
+            "message": "No valid authentication token provided. Please login to access notification endpoints.",
+            "required_header": "Authorization: Bearer <your_access_token>",
+            "endpoints_requiring_auth": [
+                "GET /api/notifications",
+                "GET /api/notifications/tokens/status",
+                "POST /api/notifications",
+                "PUT /api/notifications/preferences"
+            ]
+        }
+
+# ================== DEVELOPMENT ENDPOINTS ==================
+@router.get("/dev/mock")
+async def get_mock_notifications():
+    """Development endpoint - mock notifications without authentication"""
+    if os.getenv("ENVIRONMENT", "development") != "development":
+        raise HTTPException(
+            status_code=404,
+            detail="Development endpoints are only available in development mode"
+        )
+    
+    return {
+        "notifications": [
+            {
+                "id": 1,
+                "title": "Welcome to the Trading Platform",
+                "message": "Your account has been successfully created and verified.",
+                "type": "account",
+                "priority": "normal",
+                "category": "account_management",
+                "is_read": False,
+                "created_at": "2025-09-01T01:30:00Z",
+                "metadata": {}
+            },
+            {
+                "id": 2,
+                "title": "Token Expiry Warning",
+                "message": "Your Upstox token will expire in 2 days. Please refresh to continue trading.",
+                "type": "token_expiry",
+                "priority": "high",
+                "category": "system",
+                "is_read": False,
+                "created_at": "2025-09-01T01:25:00Z",
+                "metadata": {"broker": "upstox", "days_left": 2}
+            }
+        ],
+        "total": 2,
+        "unread_count": 2,
+        "page": 1,
+        "limit": 20,
+        "total_pages": 1,
+        "message": "Mock data for development - authentication not required"
+    }
+
+@router.get("/dev/tokens/status")
+async def get_mock_token_status():
+    """Development endpoint - mock token status without authentication"""
+    if os.getenv("ENVIRONMENT", "development") != "development":
+        raise HTTPException(
+            status_code=404,
+            detail="Development endpoints are only available in development mode"
+        )
+    
+    return {
+        "expired_tokens": 0,
+        "critical_tokens": 1,
+        "warning_tokens": 2,
+        "healthy_tokens": 3,
+        "last_check": "2025-09-01T01:30:00Z",
+        "next_check": "2025-09-01T02:30:00Z",
+        "tokens": [
+            {"broker": "upstox", "status": "critical", "expires_in_days": 2},
+            {"broker": "zerodha", "status": "warning", "expires_in_days": 7},
+            {"broker": "angel_one", "status": "healthy", "expires_in_days": 25}
+        ],
+        "message": "Mock data for development - authentication not required"
+    }
+
 # ================== NOTIFICATIONS ==================
 @router.get("")
 async def get_notifications(
@@ -62,10 +154,23 @@ async def get_notifications(
     type: Optional[str] = Query(None),
     is_read: Optional[bool] = Query(None),
     priority: Optional[str] = Query(None),
-    user: User = Depends(get_current_user),
+    user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     """Get user notifications with enhanced pagination and filtering"""
+    # If no user authenticated, return empty result with auth message
+    if not user:
+        return {
+            "notifications": [],
+            "total": 0,
+            "unread_count": 0,
+            "page": page,
+            "limit": limit,
+            "total_pages": 0,
+            "message": "Authentication required to view notifications. Please login.",
+            "auth_required": True
+        }
+    
     try:
         notifications = notification_service.get_user_notifications(
             user_id=user.id,
@@ -240,8 +345,21 @@ async def update_notification_preferences(
 
 # ================== TOKEN STATUS ==================
 @router.get("/tokens/status")
-async def get_token_status(user: User = Depends(get_current_user)):
+async def get_token_status(user: Optional[User] = Depends(get_current_user_optional)):
     """Get token expiry status for current user"""
+    # If no user authenticated, return auth required message
+    if not user:
+        return {
+            "expired_tokens": 0,
+            "critical_tokens": 0,
+            "warning_tokens": 0,
+            "healthy_tokens": 0,
+            "message": "Authentication required to view token status. Please login.",
+            "auth_required": True,
+            "last_check": None,
+            "next_check": None
+        }
+    
     try:
         summary = await token_monitor_service.get_expiring_tokens_summary(
             user_id=user.id

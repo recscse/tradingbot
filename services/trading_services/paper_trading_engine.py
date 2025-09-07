@@ -10,6 +10,13 @@ from database.models import TradePerformance, TradeSignal, User
 from database.connection import get_db
 from services.screener.stock_screening_service import StockScreeningService
 
+# Import instrument registry for HFT producer-consumer pattern
+try:
+    from services.instrument_registry import instrument_registry
+    INSTRUMENT_REGISTRY_AVAILABLE = True
+except ImportError:
+    INSTRUMENT_REGISTRY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,6 +25,10 @@ class PaperTradingEngine:
         self.is_active = False
         self.user_portfolios = {}  # {user_id: portfolio_data}
         self.screener = StockScreeningService()
+        self.active_position_instruments = set()  # Track active positions for subscriptions
+        
+        # 🚀 HFT PRODUCER-CONSUMER: Register as consumer for active position updates
+        self._register_as_consumer()
 
     def initialize_portfolio(self, user_id: int, initial_balance: float = 1000000):
         """Initialize user portfolio for paper trading"""
@@ -749,6 +760,138 @@ class PaperTradingEngine:
                 portfolio["daily_pnl"][-30:] if len(portfolio["daily_pnl"]) > 0 else []
             ),  # Last 30 days
         }
+    
+    def _register_as_consumer(self):
+        """🚀 Register as consumer for active position instruments - HFT Producer-Consumer Pattern"""
+        try:
+            if INSTRUMENT_REGISTRY_AVAILABLE and instrument_registry:
+                # Note: Initial registration with empty list - will update when positions are opened
+                success = instrument_registry.register_strategy_callback(
+                    strategy_name="paper_trading",
+                    instruments=list(self.active_position_instruments),
+                    callback=self._process_live_tick_callback
+                )
+                
+                if success:
+                    logger.info("✅ Paper Trading Engine registered as consumer (dynamic position tracking)")
+                else:
+                    logger.error("❌ Failed to register Paper Trading Engine as consumer")
+            else:
+                logger.warning("⚠️ Instrument registry not available for consumer registration")
+                
+        except Exception as e:
+            logger.error(f"❌ Error registering Paper Trading Engine as consumer: {e}")
+    
+    def _update_position_subscriptions(self):
+        """Update subscriptions when positions change"""
+        try:
+            if not INSTRUMENT_REGISTRY_AVAILABLE or not instrument_registry:
+                return
+            
+            # Get all active position symbols across all users
+            current_symbols = set()
+            for user_portfolio in self.user_portfolios.values():
+                if user_portfolio.get("is_active", False):
+                    current_symbols.update(user_portfolio.get("positions", {}).keys())
+            
+            # Convert symbols to instrument keys
+            new_instruments = set()
+            for symbol in current_symbols:
+                try:
+                    if instrument_registry._symbols_map.get(symbol):
+                        symbol_data = instrument_registry._symbols_map[symbol]
+                        if symbol_data.get("spot"):
+                            new_instruments.update(symbol_data["spot"])
+                except Exception:
+                    continue
+            
+            # Update subscriptions if instruments changed
+            if new_instruments != self.active_position_instruments:
+                self.active_position_instruments = new_instruments
+                
+                # Re-register with updated instrument list
+                success = instrument_registry.register_strategy_callback(
+                    strategy_name="paper_trading",
+                    instruments=list(self.active_position_instruments),
+                    callback=self._process_live_tick_callback
+                )
+                
+                logger.info(f"📊 Updated Paper Trading subscriptions: {len(self.active_position_instruments)} instruments")
+                
+        except Exception as e:
+            logger.error(f"❌ Error updating position subscriptions: {e}")
+    
+    def _process_live_tick_callback(self, instrument_key: str, price_data: dict):
+        """
+        🚀 ZERO-DELAY CALLBACK: Process live tick data for position P&L updates
+        This is called directly by instrument_registry when price data arrives for active positions
+        
+        Args:
+            instrument_key: Instrument identifier
+            price_data: Live price data dictionary
+        """
+        try:
+            # Extract price and symbol
+            current_price = price_data.get('ltp') or price_data.get('last_price', 0)
+            symbol = price_data.get('symbol') or self._get_symbol_from_instrument_key(instrument_key)
+            
+            if not current_price or not symbol:
+                return
+            
+            # Update positions for all users holding this symbol
+            for user_id, portfolio in self.user_portfolios.items():
+                if symbol in portfolio.get("positions", {}):
+                    position = portfolio["positions"][symbol]
+                    
+                    # Update current price and unrealized P&L
+                    position["current_price"] = current_price
+                    position["unrealized_pnl"] = (
+                        (current_price - position["entry_price"]) * position["quantity"]
+                    )
+                    position["unrealized_pnl_pct"] = (
+                        (current_price - position["entry_price"]) / position["entry_price"] * 100
+                    )
+                    position["last_updated"] = datetime.now()
+                    
+                    # Check stop loss and target triggers
+                    self._check_exit_conditions(user_id, symbol, current_price, position)
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing live tick for paper trading: {e}")
+    
+    def _get_symbol_from_instrument_key(self, instrument_key: str) -> Optional[str]:
+        """Extract symbol from instrument key"""
+        try:
+            if instrument_registry:
+                # Check if instrument exists in registry
+                spot_data = instrument_registry._spot_instruments.get(instrument_key)
+                if spot_data:
+                    return spot_data.get('symbol')
+            return None
+        except Exception:
+            return None
+    
+    def _check_exit_conditions(self, user_id: int, symbol: str, current_price: float, position: dict):
+        """Check if position should be closed based on stop loss or target"""
+        try:
+            # Stop loss check
+            if position.get("stop_loss") and current_price <= position["stop_loss"]:
+                asyncio.create_task(
+                    self._close_position(user_id, symbol, "STOP_LOSS_HIT")
+                )
+                logger.info(f"🛑 Stop loss triggered for {symbol} @ ₹{current_price}")
+                return
+            
+            # Target check
+            if position.get("target_price") and current_price >= position["target_price"]:
+                asyncio.create_task(
+                    self._close_position(user_id, symbol, "TARGET_REACHED")
+                )
+                logger.info(f"🎯 Target reached for {symbol} @ ₹{current_price}")
+                return
+                
+        except Exception as e:
+            logger.debug(f"Error checking exit conditions for {symbol}: {e}")
 
 
 # Global instance
