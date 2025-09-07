@@ -138,60 +138,13 @@ except ImportError as e:
     AUTO_TRADING_AVAILABLE = False
     logger.warning(f"⚠️ Auto Trading services not available: {e}")
 
-# Import NEW Modular Breakout System (replacing legacy enhanced engine)
-try:
-    from services.breakout import (
-        initialize_breakout_system,
-        start_breakout_system,
-        stop_breakout_system,
-        get_breakout_system,
-        health_check_breakout_system,
-        get_breakout_system_statistics
-    )
-    from router.breakout_router import router as breakout_router
+# Enhanced Breakout Engine provides all breakout functionality (router removed)
+MODULAR_BREAKOUT_AVAILABLE = False
+logger.info("✅ Using enhanced_breakout_engine instead of modular breakout router")
 
-    MODULAR_BREAKOUT_AVAILABLE = True
-    logger.info("✅ NEW Modular Breakout System imported successfully")
-except ImportError as e:
-    MODULAR_BREAKOUT_AVAILABLE = False
-    logger.warning(f"⚠️ Modular Breakout System not available: {e}")
-    from fastapi import APIRouter
+# Only premarket candle builder provides gap detection functionality
 
-    breakout_router = APIRouter()  # Dummy router
-
-# Import ONLY enhanced gap detection service (remove old service)
-try:
-    from services.enhanced_gap_detection import (
-        enhanced_gap_detection,
-        start_enhanced_gap_detection,
-    )
-    from router.gap_analysis_router import router as gap_analysis_router
-
-    ENHANCED_GAP_DETECTION_AVAILABLE = True
-    logger.info("✅ Enhanced gap detection service imported successfully")
-except ImportError as e:
-    ENHANCED_GAP_DETECTION_AVAILABLE = False
-    logger.warning(f"⚠️ Enhanced gap detection service not available: {e}")
-    from fastapi import APIRouter
-
-    gap_analysis_router = APIRouter()  # Dummy router
-
-# Import NEW Comprehensive Gap Detector Service with CPR and ORB
-try:
-    from services.gap_detector_service import (
-        get_gap_detector_service,
-        test_gap_detection_simulation
-    )
-    from router.gap_detector_router import router as gap_detector_router
-
-    GAP_DETECTOR_SERVICE_AVAILABLE = True
-    logger.info("✅ NEW: Comprehensive Gap Detector Service imported successfully")
-except ImportError as e:
-    GAP_DETECTOR_SERVICE_AVAILABLE = False
-    logger.warning(f"⚠️ NEW: Comprehensive Gap Detector Service not available: {e}")
-    from fastapi import APIRouter
-
-    gap_detector_router = APIRouter()  # Dummy router
+# Enhanced Gap Detection Service provides all gap detection functionality
 
 # Import from market_analytics_router safely
 try:
@@ -237,6 +190,25 @@ except ImportError:
         return []
 
     logger.warning("⚠️ Pre-market data service not available")
+
+# Import premarket candle builder service
+try:
+    from services.premarket_candle_builder import (
+        get_premarket_candle_service,
+        start_premarket_monitoring,
+    )
+    PREMARKET_CANDLE_AVAILABLE = True
+    logger.info("✅ Premarket candle builder service imported successfully")
+except ImportError as e:
+    PREMARKET_CANDLE_AVAILABLE = False
+    logger.warning(f"⚠️ Premarket candle builder service not available: {e}")
+
+    # Dummy functions for fallback
+    def get_premarket_candle_service():
+        return None
+    
+    async def start_premarket_monitoring():
+        pass
 
 
 # KEEP: Your existing Redis manager (it's already well-designed)
@@ -533,41 +505,28 @@ async def lifespan(app: FastAPI):
         logger.info("🔌 Starting Unified WebSocket System...")
         await start_unified_websocket()
 
-        # 7. 🚀 NEW: Start Modular Breakout System (with data adapters)
-        if MODULAR_BREAKOUT_AVAILABLE:
-            logger.info("🚀 Starting NEW Modular Breakout System...")
-            try:
-                # Initialize breakout system with production configuration
-                config = {
-                    'enable_market_hub': True,      # High-performance primary
-                    'enable_centralized_ws': True,  # Live broker feed backup
-                    'enable_registry': True,        # Metadata and caching
-                    'enable_redis_stream': False,   # Optional for now
-                    'enable_redis_broadcast': True, # Redis pub/sub
-                    'max_ticks': 5000
-                }
-                
-                # Initialize and start the breakout system
-                breakout_service = await initialize_breakout_system(config)
-                if breakout_service:
-                    # Start with default instruments (will auto-discover more)
-                    await start_breakout_system()
-                    logger.info("✅ NEW Modular Breakout System started with data adapters")
-                else:
-                    logger.error("❌ Failed to initialize Modular Breakout System")
-            except Exception as e:
-                logger.error(f"❌ Failed to start Modular Breakout System: {e}")
+        # 7. 🚀 Start Enhanced Breakout Engine (consolidated breakout detection)
+        logger.info("🚀 Starting Enhanced Breakout Engine...")
+        try:
+            from services.enhanced_breakout_engine import start_enhanced_breakout_engine
+            await start_enhanced_breakout_engine()
+            logger.info("✅ Enhanced Breakout Engine started successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Enhanced Breakout Engine: {e}")
 
-        # 7b. 🚀 NEW: Start ONLY Enhanced Gap Detection (numpy/pandas optimized)
-        if ENHANCED_GAP_DETECTION_AVAILABLE:
-            logger.info("🎯 Starting Enhanced Gap Detection Service...")
+        # Premarket Candle Builder provides gap detection for 9:00-9:08 AM window
+
+        # 7c. 🚀 NEW: Start Premarket Candle Builder Service
+        if PREMARKET_CANDLE_AVAILABLE:
+            logger.info("🕘 Starting Premarket Candle Builder Service...")
             try:
-                await start_enhanced_gap_detection()
+                # Start as background task to avoid blocking startup
+                asyncio.create_task(start_premarket_monitoring())
                 logger.info(
-                    "✅ Enhanced Gap Detection Service started with numpy/pandas optimization"
+                    "✅ Premarket Candle Builder Service started for 9:00-9:08 AM gap detection"
                 )
             except Exception as e:
-                logger.error(f"❌ Failed to start Enhanced Gap Detection Service: {e}")
+                logger.error(f"❌ Failed to start Premarket Candle Builder Service: {e}")
 
         # 8. NEW: Initialize Centralized WebSocket System
         if CENTRALIZED_WS_AVAILABLE:
@@ -620,6 +579,16 @@ async def lifespan(app: FastAPI):
                         f"📈 Total Instruments: {status.get('total_instruments', 0)}"
                     )
                     logger.info(f"👑 Admin Token Strategy: Active")
+                    
+                    # 🚀 CRITICAL FIX: Connect centralized manager to unified WebSocket manager
+                    logger.info("🔗 Connecting centralized WebSocket manager to unified WebSocket manager...")
+                    try:
+                        from services.unified_websocket_manager import integrate_with_centralized_manager
+                        integrate_with_centralized_manager()
+                        logger.info("✅ CRITICAL FIX: WebSocket managers successfully connected for real-time price flow")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to connect WebSocket managers: {e}")
+                        
                 else:
                     logger.error(
                         "❌ NEW: Failed to initialize centralized WebSocket system"
@@ -793,13 +762,7 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error stopping Modular Breakout System: {e}")
 
-        # Stop enhanced gap detection service
-        if ENHANCED_GAP_DETECTION_AVAILABLE and enhanced_gap_detection:
-            try:
-                await enhanced_gap_detection.stop()
-                logger.info("✅ Enhanced Gap Detection Service stopped")
-            except Exception as e:
-                logger.error(f"Error stopping enhanced gap detection service: {e}")
+        # Premarket Candle Builder Service stops automatically when premarket window closes
 
         # Stop trading engine
         if trading_engine:
@@ -973,18 +936,19 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Real-time streaming routes not available: {e}")
 
-    app.include_router(breakout_router, tags=["Modular Breakout System"])
-    logger.info("✅ NEW Modular Breakout System routes registered")
+    # Breakout router removed - using enhanced_breakout_engine instead
+    logger.info("✅ Using enhanced_breakout_engine for breakout functionality")
 
-# NEW: Add enhanced gap analysis routes
-if ENHANCED_GAP_DETECTION_AVAILABLE:
-    app.include_router(gap_analysis_router, tags=["Enhanced Gap Analysis"])
-    logger.info("✅ Enhanced gap analysis routes registered")
+# Add Test Breakout Router for debugging
+try:
+    from router.test_breakout_router import router as test_breakout_router
+    app.include_router(test_breakout_router, tags=["Test Breakout Detection"])
+    logger.info("✅ Test Breakout Detection routes registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Test Breakout Router not available: {e}")
 
-# NEW: Add comprehensive gap detector routes with CPR and ORB
-if GAP_DETECTOR_SERVICE_AVAILABLE:
-    app.include_router(gap_detector_router, tags=["Comprehensive Gap Detector (CPR + ORB)"])
-    logger.info("✅ NEW: Comprehensive Gap Detector routes registered")
+# Premarket candle builder API routes handled by existing routers
+
 
 # NEW: Add centralized WebSocket routes
 if CENTRALIZED_ROUTES_AVAILABLE:

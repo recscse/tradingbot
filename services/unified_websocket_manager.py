@@ -59,21 +59,21 @@ class UnifiedWebSocketManager:
             maxsize=5000
         )  # ✅ FIXED: 25x larger queue for volatile periods
 
-        # PERFORMANCE: Rate limiting and deduplication - COMPLETELY DISABLED FOR REAL-TIME TRADING
+        # OPTIMIZED: Balanced rate limiting for stability while maintaining speed
         self.last_event_time = {}
         self.event_rate_limits = {
-            "price_update": 0.0,  # ✅ ZERO DELAY: Instant price updates
-            "dashboard_update": 0.0,  # ✅ ZERO DELAY: Instant dashboard updates
-            "live_prices_enriched": 0.0,  # ✅ ZERO DELAY: Instant enriched price data
-            "index_update": 0.0,  # ✅ ZERO DELAY: Instant index updates
-            "top_movers_update": 0.0,  # ✅ ZERO DELAY: Instant momentum updates
-            "intraday_stocks_update": 0.0,  # ✅ ZERO DELAY: Instant breakout updates
-            "market_sentiment_update": 0.0,  # ✅ ZERO DELAY: Instant sentiment updates
-            "indices_data_update": 0.0,  # ✅ ZERO DELAY: Instant index tracking
-            "volume_analysis_update": 0.0,  # ✅ ZERO DELAY: Instant volume updates
-            "analytics_update": 0.0,  # ✅ ZERO DELAY: Instant analytics updates
-            "gap_signals_update": 0.0,  # ✅ ZERO DELAY: Instant gap signals
-            "breakout_signals_update": 0.0,  # ✅ ZERO DELAY: Instant breakout signals
+            "price_update": 0.01,  # 100 updates/sec max for price stability
+            "dashboard_update": 0.05,  # 20 updates/sec for dashboard efficiency
+            "live_prices_enriched": 0.02,  # 50 updates/sec for enriched data
+            "index_update": 0.1,  # 10 updates/sec for indices (less volatile)
+            "top_movers_update": 0.5,  # 2 updates/sec for analytics
+            "intraday_stocks_update": 0.5,  # 2 updates/sec for stock screening
+            "market_sentiment_update": 1.0,  # 1 update/sec for sentiment
+            "indices_data_update": 0.5,  # 2 updates/sec for index data
+            "volume_analysis_update": 1.0,  # 1 update/sec for volume analysis
+            "analytics_update": 2.0,  # 1 update every 2 seconds for complex analytics
+            "gap_signals_update": 0.1,  # 10 updates/sec for gap signals
+            "breakout_signals_update": 0.1,  # 10 updates/sec for breakout signals
         }
 
         # SAFETY: Trading mode configuration
@@ -698,14 +698,27 @@ class UnifiedWebSocketManager:
                 pass
 
     def emit_event(self, event_type: str, data: Dict[str, Any], priority: int = 5):
-        """Emit an event to the queue with ZERO rate limiting for real-time trading (1=highest, 10=lowest)"""
+        """Emit an event to the queue with optimized rate limiting for stability (1=highest, 10=lowest)"""
 
-        # 🚀 ULTRA-CRITICAL FIX: COMPLETE RATE LIMITING BYPASS for ALL events
         now = datetime.now()
 
-        # ⚡ ZERO DELAY MODE: Skip ALL rate limiting checks for maximum speed
-        logger.debug(f"⚡ ZERO-DELAY processing {event_type} (priority: {priority})")
+        # Check rate limiting unless in emergency mode
+        if not self.emergency_mode and event_type in self.event_rate_limits:
+            rate_limit = self.event_rate_limits[event_type]
+            
+            if rate_limit > 0 and event_type in self.last_event_time:
+                time_since_last = (now - self.last_event_time[event_type]).total_seconds()
+                if time_since_last < rate_limit:
+                    # Rate limited - add to pending instead of dropping
+                    self.pending_events[event_type] = {
+                        "data": data,
+                        "priority": priority,
+                        "timestamp": now
+                    }
+                    logger.debug(f"⏱️ Rate limited {event_type}, adding to pending (last: {time_since_last:.3f}s, limit: {rate_limit}s)")
+                    return
 
+        logger.debug(f"✅ Processing {event_type} (priority: {priority})")
         self.last_event_time[event_type] = now
 
         # ⚡ ULTRA-FAST: Skip all pending event processing for maximum speed
@@ -1498,12 +1511,12 @@ def integrate_with_centralized_manager():
         gap_service = None
         breakout_service = None
         try:
-            from services.gap_detection_service import get_gap_detection_service
-            from services.breakout import get_breakout_system
+            from services.enhanced_breakout_engine import enhanced_breakout_engine
+            # Gap detection is now handled by premarket_candle_builder
+            # from services.premarket_candle_builder import get_todays_gaps
 
-            gap_service = get_gap_detection_service()
-            breakout_service = get_breakout_system()
-            logger.info("✅ Gap and breakout detection services loaded")
+            breakout_service = enhanced_breakout_engine
+            logger.info("✅ Enhanced breakout engine loaded (gap detection via premarket_candle_builder)")
         except ImportError as e:
             logger.warning(f"⚠️ Detection services not available: {e}")
 
@@ -1587,62 +1600,41 @@ def integrate_with_centralized_manager():
                     except Exception as e:
                         logger.error(f"❌ Error in background gap detection: {e}")
 
-                # Process breakout detection in background
-                if breakout_service:
-                    try:
-                        new_breakouts = breakout_service.process_live_feed_batch(
-                            price_data
-                        )
-                        if new_breakouts:
-                            breakout_signals_data = [
-                                {
-                                    "symbol": breakout.symbol,
-                                    "breakout_type": breakout.breakout_type,
-                                    "current_price": breakout.current_price,
-                                    "resistance_level": breakout.resistance_level,
-                                    "support_level": breakout.support_level,
-                                    "breakout_strength": round(
-                                        breakout.breakout_strength, 2
-                                    ),
-                                    "volume_ratio": round(breakout.volume_ratio, 1),
-                                    "breakout_quality": breakout.breakout_quality,
-                                    "confidence_score": round(
-                                        breakout.confidence_score, 2
-                                    ),
-                                    "price_momentum": round(breakout.price_momentum, 2),
-                                    "time_since_level": breakout.time_since_level,
-                                    "sector": breakout.sector,
-                                    "timestamp": breakout.timestamp.isoformat(),
-                                    "metadata": breakout.metadata,
-                                }
-                                for breakout in new_breakouts
-                            ]
+                # ✅ MODERN BREAKOUT PROCESSING: 
+                # The new BreakoutScannerService already receives data via centralized WebSocket manager
+                # and handles its own signal broadcasting via Redis/WebSocket. No batch processing needed.
+                # Breakout signals are automatically processed through the callback system.
+                
+                # Legacy batch processing removed - modern event-driven architecture handles this
 
-                            # Broadcast breakout signals (now from background)
-                            unified_manager.emit_event(
-                                "breakout_signals_update",
-                                {
-                                    "signals": breakout_signals_data,
-                                    "count": len(breakout_signals_data),
-                                    "market_hours": breakout_service.is_trading_hours(),
-                                    "timestamp": datetime.now().isoformat(),
-                                },
-                                priority=2,
-                            )  # Lower priority than price updates
-
-                            logger.info(
-                                f"⚡ Background processed {len(new_breakouts)} breakout signals"
-                            )
-                    except Exception as e:
-                        logger.error(f"❌ Error in background breakout detection: {e}")
+                # Background unified processing complete
+                logger.debug("📊 Background market data processing completed")
 
             except Exception as e:
                 logger.error(f"❌ Error in background analytics processing: {e}")
 
-        # ✅ FIXED: Callback registration now handled in app.py to avoid duplicates
-        logger.info(
-            "✅ Integration with centralized manager prepared (callback registered in app.py)"
-        )
+        # ✅ CRITICAL FIX: Actually register the callback with centralized manager
+        try:
+            centralized_manager.register_callback("price_update", price_update_callback)
+            logger.info("✅ CRITICAL FIX: Price update callback registered with centralized manager")
+        except Exception as e:
+            logger.error(f"❌ Failed to register price update callback: {e}")
+            
+        # Also register market status callback for completeness
+        try:
+            def market_status_callback(data):
+                """Forward market status updates to unified manager"""
+                try:
+                    unified_manager.emit_event("market_status_update", data, priority=2)
+                except Exception as e:
+                    logger.error(f"❌ Error in market status callback: {e}")
+            
+            centralized_manager.register_callback("market_status", market_status_callback)
+            logger.info("✅ Market status callback registered with centralized manager")
+        except Exception as e:
+            logger.error(f"❌ Failed to register market status callback: {e}")
+            
+        logger.info("✅ Integration with centralized manager completed successfully")
 
     except ImportError:
         logger.warning("⚠️ Centralized manager not available")
