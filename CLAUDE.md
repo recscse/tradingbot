@@ -145,6 +145,109 @@ Each broker has standardized interface in `brokers/base_broker.py`:
 - **Database**: Alembic migrations must be run on deployment (`alembic upgrade head`)
 - **Token Automation**: Playwright browser installed automatically via `start.sh` for token refresh automation
 - **Monitoring**: Comprehensive health endpoints and logging for production monitoring
+
+## Live Feed Data Format Reference
+
+### Upstox WebSocket Live Feed Structure
+The system receives real-time market data from Upstox in the following format:
+
+```json
+{
+  "type": "live_feed",
+  "feeds": {
+    "NSE_EQ|INE318A01026": {
+      "fullFeed": {
+        "marketFF": {
+          "ltpc": {
+            "ltp": 3097.7,          // Last traded price
+            "ltt": "1757308567467",  // Last traded time (timestamp)
+            "ltq": "1",             // Last traded quantity
+            "cp": 3095.1            // Previous close price
+          },
+          "marketLevel": {
+            "bidAskQuote": [
+              {
+                "bidQ": "1",        // Bid quantity
+                "bidP": 3097.4,     // Bid price
+                "askQ": "2",        // Ask quantity
+                "askP": 3097.9      // Ask price
+              }
+              // ... up to 5 bid/ask levels
+            ]
+          },
+          "optionGreeks": {},       // Option Greeks (empty for equity)
+          "marketOHLC": {
+            "ohlc": [
+              {
+                "interval": "1d",   // Daily interval
+                "open": 3094.0,     // Open price
+                "high": 3115.4,     // High price
+                "low": 3081.0,      // Low price
+                "close": 3097.7,    // Close price
+                "vol": "31929",     // Volume
+                "ts": "1757269800000" // Timestamp
+              },
+              {
+                "interval": "I1",   // 1-minute interval
+                "open": 3097.0,
+                "high": 3097.5,
+                "low": 3095.2,
+                "close": 3097.5,
+                "vol": "488",
+                "ts": "1757308500000"
+              }
+            ]
+          },
+          "atp": 3096.11,          // Average traded price
+          "vtt": "31929",          // Total volume traded
+          "tbq": 49001.0,          // Total buy quantity
+          "tsq": 45374.0           // Total sell quantity
+        }
+      },
+      "requestMode": "full_d5"
+    },
+    "NSE_INDEX|Nifty Bank": {
+      "fullFeed": {
+        "indexFF": {
+          "ltpc": {
+            "ltp": 54154.8,        // Index last value
+            "ltt": "1757308567000", // Last update time
+            "cp": 54114.55         // Previous close
+          },
+          "marketOHLC": {
+            "ohlc": [
+              {
+                "interval": "1d",
+                "open": 54215.4,
+                "high": 54329.2,
+                "low": 54067.15,
+                "close": 54154.8,
+                "ts": "1757269800000"
+              }
+            ]
+          }
+        }
+      },
+      "requestMode": "full_d5"
+    }
+  }
+}
+```
+
+### Data Processing Notes
+- **Instrument Keys**: Format is `EXCHANGE|ISIN` (e.g., `NSE_EQ|INE318A01026` for equity, `NSE_INDEX|Nifty Bank` for indices)
+- **Timestamps**: Unix timestamps in milliseconds
+- **Price Precision**: Prices are provided as floating-point numbers
+- **Volume Data**: String format for large numbers
+- **Market Depth**: Up to 5 levels of bid/ask quotes
+- **OHLC Data**: Multiple intervals available (1d for daily, I1 for 1-minute)
+- **Index vs Equity**: Indices use `indexFF` structure, equities use `marketFF`
+
+### System Integration
+- Raw feed data is received by `services/upstox/ws_client.py`
+- Processed by `services/centralized_ws_manager.py` for standardization
+- Broadcasted to clients via `services/unified_websocket_manager.py`
+- Frontend receives updates through custom React hooks
 ## Coding Standards and Best Practices
 
 **MANDATORY REQUIREMENTS**: All code written for this project MUST follow these standards:
