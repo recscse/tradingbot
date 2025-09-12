@@ -5,11 +5,11 @@ import requests
 import time
 
 # Configuration
-API_KEY = "**************8"
+API_KEY = "**************"
 SECRET_KEY = "*****"
 RURL = "http://localhost:8000/api/broker/upstox/callback"
 
-TOTP_KEY = "I7YOC3GRMOPMZAWLYCRXRAJFIXUDIBFE"
+TOTP_KEY = "***********"
 MOBILE_NO = "*****"
 PIN = "***"
 
