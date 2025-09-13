@@ -19,11 +19,63 @@
       "WebFetch(domain:blog.tipranks.com)",
       "Bash(grep:*)",
       "Bash(npm start --silent)",
-      "Bash(alembic upgrade:*)"
+      "Bash(alembic upgrade:*)",
+      "Bash(touch:*)",
+      "Bash(local_kafka_setup.bat)",
+      "Bash(findstr:*)",
+      "Bash(pip install:*)",
+      "Task",
+      "Read(~/**)",
+      "Edit(~/.claude/settings.json)"
     ],
     "deny": [],
     "additionalDirectories": [
       "C:\\Work\\P\\app\\tradingapp-main"
     ]
+  },
+  "autoApply": {
+    "codingStandards": true,
+    "financialPrecision": true,
+    "securityValidation": true,
+    "performanceOptimization": true,
+    "errorHandling": true,
+    "typeHints": true,
+    "documentation": true
+  },
+  "development": {
+    "preferredAgents": {
+      "financial": "trading-system-architect",
+      "quality": "code-quality-enforcer",
+      "realtime": "websocket-specialist",
+      "general": "software-engineer",
+      "hft": "hft-expert",
+      "fullstack": "fullstack-trading-expert",
+      "market": "stock-market-expert",
+      "algorithms": "algo-trader-expert",
+      "frontend": "css-ui-ux-expert",
+      "backend": "fastapi-python-expert"
+    },
+    "templates": {
+      "pythonService": ".claude/templates/python-service-template.py",
+      "reactComponent": ".claude/templates/react-component-template.jsx",
+      "websocketClient": ".claude/templates/websocket-client-template.py"
+    },
+    "qualityGates": {
+      "testCoverage": 80,
+      "maxComplexity": 10,
+      "securityScan": true,
+      "performanceCheck": true,
+      "financialValidation": true
+    }
+  },
+  "tradingSystem": {
+    "precisionMode": "decimal",
+    "auditTrails": true,
+    "regulatoryCompliance": ["SEBI", "RBI"],
+    "marketHours": {
+      "start": "09:15",
+      "end": "15:30",
+      "timezone": "Asia/Kolkata"
+    }
   }
 }
