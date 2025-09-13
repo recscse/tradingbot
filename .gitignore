@@ -99,3 +99,5 @@ docker-compose.override.yml
 *.tar   
 
 models/trading_model.pkl
+
+kafka/
