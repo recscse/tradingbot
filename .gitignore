@@ -100,4 +100,4 @@ docker-compose.override.yml
 
 models/trading_model.pkl
 
-kafka/
+kafka/kafka_2.13-4.1.0
