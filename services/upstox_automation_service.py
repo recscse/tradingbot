@@ -28,6 +28,9 @@ from services.upstox_service import (
     generate_upstox_auth_url,
 )
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
