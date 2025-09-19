@@ -128,23 +128,19 @@ from router.paper_trading_routes import router as paper_trading_router
 from router.option_routes import option_router
 from services.unified_websocket_manager import unified_manager, start_unified_websocket
 from services.market_data_hub import market_data_hub, start_market_hub
+
 try:
     from router.auto_trading_routes import router as auto_trading_router
+
     AUTO_TRADING_AVAILABLE = True
     logger.info("✅ Auto Trading routes imported successfully")
 except ImportError as e:
     from fastapi import APIRouter
+
     auto_trading_router = APIRouter()  # Dummy router
     AUTO_TRADING_AVAILABLE = False
     logger.warning(f"⚠️ Auto Trading services not available: {e}")
 
-# Enhanced Breakout Engine provides all breakout functionality (router removed)
-MODULAR_BREAKOUT_AVAILABLE = False
-logger.info("✅ Using enhanced_breakout_engine instead of modular breakout router")
-
-# Only premarket candle builder provides gap detection functionality
-
-# Enhanced Gap Detection Service provides all gap detection functionality
 
 # Import from market_analytics_router safely
 try:
@@ -197,6 +193,7 @@ try:
         get_premarket_candle_service,
         start_premarket_monitoring,
     )
+
     PREMARKET_CANDLE_AVAILABLE = True
     logger.info("✅ Premarket candle builder service imported successfully")
 except ImportError as e:
@@ -206,7 +203,7 @@ except ImportError as e:
     # Dummy functions for fallback
     def get_premarket_candle_service():
         return None
-    
+
     async def start_premarket_monitoring():
         pass
 
@@ -509,6 +506,7 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Starting Enhanced Breakout Engine...")
         try:
             from services.enhanced_breakout_engine import start_enhanced_breakout_engine
+
             await start_enhanced_breakout_engine()
             logger.info("✅ Enhanced Breakout Engine started successfully")
         except Exception as e:
@@ -526,7 +524,9 @@ async def lifespan(app: FastAPI):
                     "✅ Premarket Candle Builder Service started for 9:00-9:08 AM gap detection"
                 )
             except Exception as e:
-                logger.error(f"❌ Failed to start Premarket Candle Builder Service: {e}")
+                logger.error(
+                    f"❌ Failed to start Premarket Candle Builder Service: {e}"
+                )
 
         # 8. NEW: Initialize Centralized WebSocket System
         if CENTRALIZED_WS_AVAILABLE:
@@ -579,16 +579,23 @@ async def lifespan(app: FastAPI):
                         f"📈 Total Instruments: {status.get('total_instruments', 0)}"
                     )
                     logger.info(f"👑 Admin Token Strategy: Active")
-                    
+
                     # 🚀 CRITICAL FIX: Connect centralized manager to unified WebSocket manager
-                    logger.info("🔗 Connecting centralized WebSocket manager to unified WebSocket manager...")
+                    logger.info(
+                        "🔗 Connecting centralized WebSocket manager to unified WebSocket manager..."
+                    )
                     try:
-                        from services.unified_websocket_manager import integrate_with_centralized_manager
+                        from services.unified_websocket_manager import (
+                            integrate_with_centralized_manager,
+                        )
+
                         integrate_with_centralized_manager()
-                        logger.info("✅ CRITICAL FIX: WebSocket managers successfully connected for real-time price flow")
+                        logger.info(
+                            "✅ CRITICAL FIX: WebSocket managers successfully connected for real-time price flow"
+                        )
                     except Exception as e:
                         logger.error(f"❌ Failed to connect WebSocket managers: {e}")
-                        
+
                 else:
                     logger.error(
                         "❌ NEW: Failed to initialize centralized WebSocket system"
@@ -659,7 +666,7 @@ async def lifespan(app: FastAPI):
         logger.info("📨 Starting Notification Scheduler...")
         try:
             from services.notification_scheduler import notification_scheduler
-            
+
             notification_scheduler.start_scheduler()
             logger.info(
                 "✅ Notification Scheduler started - handling token expiry, daily summaries, and system alerts"
@@ -733,9 +740,32 @@ async def lifespan(app: FastAPI):
                     f"❌ Auto Trade Execution Service failed to initialize: {e}"
                 )
 
+        # 16. 🚀 NEW: Initialize MCX WebSocket Service
+        logger.info("📊 Initializing MCX WebSocket Service...")
+        try:
+            from services.websocket.mcx.integration import initialize_mcx_service
+
+            mcx_success = await initialize_mcx_service()
+            if mcx_success:
+                logger.info("✅ MCX WebSocket Service initialized successfully")
+            else:
+                logger.warning("⚠️ MCX WebSocket Service initialization failed")
+        except ImportError as e:
+            logger.warning(f"⚠️ MCX WebSocket Service not available: {e}")
+        except Exception as e:
+            logger.error(f"❌ MCX WebSocket Service failed to initialize: {e}")
+
         logger.info(
-            "🟢 All services started successfully with NEW Centralized WebSocket + Optimized Architecture!"
+            "🟢 All services started successfully with NEW Centralized WebSocket + MCX + Optimized Architecture!"
         )
+
+        # Signal that startup is complete and token refresh can now proceed
+        if CENTRALIZED_WS_AVAILABLE and centralized_manager:
+            try:
+                centralized_manager.mark_startup_complete()
+                logger.info("✅ Marked startup complete - token refresh enabled")
+            except Exception as e:
+                logger.warning(f"⚠️ Error marking startup complete: {e}")
 
         yield
 
@@ -754,13 +784,15 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error stopping centralized WebSocket: {e}")
 
-        # Stop NEW Modular Breakout System
-        if MODULAR_BREAKOUT_AVAILABLE:
-            try:
-                await stop_breakout_system()
-                logger.info("✅ NEW Modular Breakout System stopped")
-            except Exception as e:
-                logger.error(f"Error stopping Modular Breakout System: {e}")
+        # NEW: Stop MCX WebSocket service
+        try:
+            from services.websocket.mcx.integration import stop_mcx_service
+            await stop_mcx_service()
+            logger.info("✅ MCX WebSocket service stopped")
+        except ImportError:
+            pass  # MCX service not available
+        except Exception as e:
+            logger.error(f"❌ Error stopping MCX WebSocket service: {e}")
 
         # Premarket Candle Builder Service stops automatically when premarket window closes
 
@@ -791,11 +823,12 @@ async def lifespan(app: FastAPI):
         try:
             logger.info("🛑 Stopping Notification Scheduler...")
             from services.notification_scheduler import notification_scheduler
+
             notification_scheduler.stop_scheduler()
             logger.info("✅ Notification Scheduler stopped")
         except Exception as e:
             logger.error(f"Error stopping notification scheduler: {e}")
-            
+
         logger.info(
             "🎯 Enhanced gap and breakout detection services shutdown completed"
         )
@@ -919,6 +952,7 @@ app.include_router(auto_trading_router, tags=["Auto Trading & Stock Selection"])
 # NIFTY 09:40 Strategy Router
 try:
     from router.nifty_strategy_router import nifty_strategy_router
+
     app.include_router(nifty_strategy_router, tags=["NIFTY 09:40 Strategy"])
     logger.info("✅ NIFTY 09:40 Strategy routes registered")
 except ImportError as e:
@@ -935,20 +969,8 @@ try:
     logger.info("✅ 🚀 ZERO-DELAY real-time streaming routes registered")
 except ImportError as e:
     logger.warning(f"⚠️ Real-time streaming routes not available: {e}")
-
     # Breakout router removed - using enhanced_breakout_engine instead
     logger.info("✅ Using enhanced_breakout_engine for breakout functionality")
-
-# Add Test Breakout Router for debugging
-try:
-    from router.test_breakout_router import router as test_breakout_router
-    app.include_router(test_breakout_router, tags=["Test Breakout Detection"])
-    logger.info("✅ Test Breakout Detection routes registered")
-except ImportError as e:
-    logger.warning(f"⚠️ Test Breakout Router not available: {e}")
-
-# Premarket candle builder API routes handled by existing routers
-
 
 # NEW: Add centralized WebSocket routes
 if CENTRALIZED_ROUTES_AVAILABLE:
