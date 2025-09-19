@@ -376,18 +376,15 @@ class UpstoxWebSocketClient:
         OPEN_STATUSES = ["NORMAL_OPEN", "PRE_OPEN_START", "PRE_OPEN_END"]
         CLOSING_STATUSES = ["CLOSING_START", "CLOSING_END", "NORMAL_CLOSE"]
 
-        # Check instrument segments
+        # Check instrument segments - MCX is now handled by dedicated MCX WebSocket service
         has_nse = any("NSE_" in key for key in self.instrument_keys if key)
         has_bse = any("BSE_" in key for key in self.instrument_keys if key)
-        has_mcx = any("MCX_" in key for key in self.instrument_keys if key)
 
-        # Extract relevant segment statuses
+        # Extract relevant segment statuses - focus only on NSE and BSE
         nse_eq_status = segment_status.get("NSE_EQ", "")
         nse_fo_status = segment_status.get("NSE_FO", "")
         nse_index_status = segment_status.get("NSE_INDEX", "")
         bse_eq_status = segment_status.get("BSE_EQ", "")
-        mcx_fo_status = segment_status.get("MCX_FO", "")
-        mcx_index_status = segment_status.get("MCX_INDEX", "")
 
         # Determine market phase for each segment
         nse_status = (
@@ -400,18 +397,12 @@ class UpstoxWebSocketClient:
             if bse_eq_status in OPEN_STATUSES
             else ("closed" if bse_eq_status in CLOSING_STATUSES else "unknown")
         )
-        mcx_status = (
-            "open"
-            if mcx_fo_status in OPEN_STATUSES
-            else ("closed" if mcx_fo_status in CLOSING_STATUSES else "unknown")
-        )
 
-        # Log market status details
+        # Log market status details - no MCX since it's handled separately
         logger.info(
             f"📊 {self.connection_type}: Market Status - "
             f"NSE: {nse_eq_status} ({nse_status}), "
-            f"BSE: {bse_eq_status} ({bse_status}), "
-            f"MCX: {mcx_fo_status} ({mcx_status})"
+            f"BSE: {bse_eq_status} ({bse_status})"
         )
 
         # Determine active segments and overall market status
@@ -420,37 +411,39 @@ class UpstoxWebSocketClient:
             active_segments.append("NSE")
         if has_bse and bse_status == "open":
             active_segments.append("BSE")
-        if has_mcx and mcx_status == "open":
-            active_segments.append("MCX")
 
-        # For trading logic - are ALL of our markets closed?
+        # For trading logic - are ALL of our markets closed? (NSE/BSE only)
         all_markets_closed = (
             (not has_nse or nse_status == "closed")
             and (not has_bse or bse_status == "closed")
-            and (not has_mcx or mcx_status == "closed")
         )
 
         return active_segments, all_markets_closed
 
     def _log_exchange_summary(self, feeds):
-        """Log a summary of instruments by exchange"""
+        """Log a summary of instruments by exchange - MCX handled by dedicated service"""
         nse_instruments = [k for k in feeds.keys() if k.startswith("NSE_")]
         bse_instruments = [k for k in feeds.keys() if k.startswith("BSE_")]
-        mcx_instruments = [k for k in feeds.keys() if k.startswith("MCX_")]
 
-        # Prepare exchange summary for logging
+        # Prepare exchange summary for logging - NSE and BSE only
         exchange_summary = []
         if nse_instruments:
             exchange_summary.append(f"NSE: {len(nse_instruments)}")
         if bse_instruments:
             exchange_summary.append(f"BSE: {len(bse_instruments)}")
-        if mcx_instruments:
-            exchange_summary.append(f"MCX: {len(mcx_instruments)}")
 
-        # Log with segment information
+        # Log with segment information - MCX instruments should not appear here
+        # as they are handled by the dedicated MCX WebSocket service
         logger.info(
             f"✅ {self.connection_type}: Processing {len(feeds)} instruments ({', '.join(exchange_summary)})"
         )
+
+        # Log warning if MCX instruments are detected (they shouldn't be here)
+        mcx_instruments = [k for k in feeds.keys() if k.startswith("MCX_")]
+        if mcx_instruments:
+            logger.warning(
+                f"⚠️ {self.connection_type}: Detected {len(mcx_instruments)} MCX instruments - these should be handled by dedicated MCX service"
+            )
 
     async def _send_subscription(self):
         """Send subscription request to WebSocket with enhanced error handling"""

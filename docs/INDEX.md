@@ -27,6 +27,11 @@
 - [`GAP_DETECTION_SUMMARY.md`](services/GAP_DETECTION_SUMMARY.md) - Gap detection service summary
 - [`gap-detector/GAP_DETECTOR_IMPLEMENTATION_SUMMARY.md`](services/gap-detector/GAP_DETECTOR_IMPLEMENTATION_SUMMARY.md) - Gap detector implementation
 
+#### 🌐 **WebSocket Services** (`/services/websocket/`)
+- [`README.md`](services/websocket/README.md) - WebSocket services overview and architecture
+- [`mcx/MCX_WEBSOCKET_SERVICE.md`](services/websocket/mcx/MCX_WEBSOCKET_SERVICE.md) - MCX commodity WebSocket service
+- [`mcx/MCX_DATA_FORMAT.md`](services/websocket/mcx/MCX_DATA_FORMAT.md) - MCX data format specification
+
 ### 📋 **Development Standards** (`/standards/`)
 - [`CLAUDE_REVIEW_WORKFLOW.md`](standards/CLAUDE_REVIEW_WORKFLOW.md) - Code review workflow
 - [`CODE_REVIEW_CRITERIA.md`](standards/CODE_REVIEW_CRITERIA.md) - Code review criteria
