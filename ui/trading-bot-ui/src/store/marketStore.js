@@ -1,20 +1,45 @@
 // store/marketStore.js - Zustand store for ultra-fast live price updates
+// NOTE: This version defers the actual `set(...)` calls for updatePrice/updatePrices
+// to the microtask queue to avoid "setState during render" React errors.
+// It also stores each sanitized price under multiple canonical keys so UI lookups
+// by instrument_key OR symbol OR compact forms succeed.
+
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
+// Helper: compact key (remove whitespace, dashes/underscores, uppercase)
+const compactKey = (s) => {
+  if (s === undefined || s === null) return "";
+  return String(s)
+    .replace(/[\s_-]+/g, "")
+    .toUpperCase();
+};
+
+// Helper: get RHS from pipe-delimited instrument_key (e.g. "NSE_INDEX|Nifty 50" -> "Nifty 50")
+const rhsFromPipe = (s) => {
+  if (!s) return "";
+  try {
+    const parts = String(s)
+      .split("|")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 1] : parts[0] || "";
+  } catch (e) {
+    return String(s);
+  }
+};
+
 // Helper function to validate price data
 const validatePriceData = (data) => {
-  // Check if data exists and is an object
   if (!data || typeof data !== "object") return false;
-
-  // Accept data if it has ltp OR last_price field
   const priceField = data.ltp !== undefined ? data.ltp : data.last_price;
 
-  // Debug logging for indices (development only)
   if (
     process.env.NODE_ENV === "development" &&
     data.symbol &&
-    ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(data.symbol)
+    ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(
+      String(data.symbol).toUpperCase()
+    )
   ) {
     console.log(`🔍 VALIDATING INDEX: ${data.symbol}`, {
       hasLtp: data.ltp !== undefined,
@@ -38,7 +63,6 @@ const validatePriceData = (data) => {
 const sanitizePriceData = (data) => {
   if (!validatePriceData(data)) return null;
 
-  // Use ltp field if available, otherwise use last_price
   const priceValue = data.ltp !== undefined ? data.ltp : data.last_price;
 
   return {
@@ -58,10 +82,44 @@ const sanitizePriceData = (data) => {
   };
 };
 
-// Create Zustand store with selector middleware for granular subscriptions
+// Microtask deferrer helper to ensure set(...) doesn't run synchronously during render
+const deferSet = (fn) => {
+  Promise.resolve().then(() => {
+    try {
+      fn();
+    } catch (e) {
+      // swallow to avoid unhandled errors during async set
+      console.error("Deferred set error:", e);
+    }
+  });
+};
+
+// Small utility: produce canonical keys for storing a sanitizedData instance
+const buildStoreKeysForSanitized = (sanitizedData, feedKey = null) => {
+  const keys = new Set();
+
+  const symbol = sanitizedData.symbol || "";
+  const instKey = sanitizedData.instrument_key || "";
+
+  if (instKey) keys.add(instKey);
+  if (symbol) keys.add(symbol);
+  if (symbol) keys.add(compactKey(symbol));
+  if (instKey) keys.add(rhsFromPipe(instKey));
+  if (feedKey) keys.add(feedKey);
+
+  // Also add compact form of RHS (to match feed/popular names compacted)
+  if (instKey) keys.add(compactKey(rhsFromPipe(instKey)));
+
+  // Ensure non-empty keys only
+  return Array.from(keys).filter(
+    (k) => k !== undefined && k !== null && String(k) !== ""
+  );
+};
+
+// Create Zustand store with subscribeWithSelector for granular subscriptions
 const useMarketStore = create(
   subscribeWithSelector((set, get) => ({
-    // 🚀 Core price data - optimized for fast updates
+    // Core price data - optimized for fast updates
     prices: {},
 
     // Performance metrics
@@ -72,96 +130,121 @@ const useMarketStore = create(
     // Subscription management
     subscribedSymbols: new Set(),
 
-    // 🚀 ULTRA-FAST: Update single price (called for each real-time tick)
-    updatePrice: (priceData) => {
+    // ULTRA-FAST: Update single price (called for each real-time tick)
+    // Accepts optional second param `feedKey` (raw key used in feed) to help mapping
+    updatePrice: (priceData, feedKey = null) => {
       const sanitizedData = sanitizePriceData(priceData);
       if (!sanitizedData) return;
 
       const symbol = sanitizedData.symbol;
       if (!symbol) return;
 
-      // Debug logging for indices (development only)
       if (
         process.env.NODE_ENV === "development" &&
         (sanitizedData.sector === "INDEX" ||
-          ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(symbol))
+          ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(
+            String(symbol).toUpperCase()
+          ))
       ) {
         console.log(
           `🏛️ SINGLE INDEX UPDATE: ${symbol} = ₹${sanitizedData.ltp} (${sanitizedData.change_percent}%)`
         );
       }
 
-      set((state) => {
-        // Only update if the price is actually different (avoid unnecessary renders)
-        const currentPrice = state.prices[symbol];
-        if (
-          currentPrice &&
-          currentPrice.ltp === sanitizedData.ltp &&
-          currentPrice.volume === sanitizedData.volume
-        ) {
-          return state; // No change needed
-        }
+      const keysToStore = buildStoreKeysForSanitized(sanitizedData, feedKey);
 
-        return {
-          prices: {
-            ...state.prices,
-            [symbol]: sanitizedData,
-          },
-          updateCount: state.updateCount + 1,
-          lastUpdate: Date.now(),
-        };
-      });
+      // Defer the actual state mutation to microtask to avoid setState-in-render errors
+      deferSet(() =>
+        set((state) => {
+          // If no effective change for the canonical symbol, we still want to update
+          // because there could be a new feedKey mapping. We'll compare canonical symbol entry
+          const canonicalKey = sanitizedData.symbol;
+          const currentPriceForCanonical = state.prices[canonicalKey];
+
+          if (
+            currentPriceForCanonical &&
+            currentPriceForCanonical.ltp === sanitizedData.ltp &&
+            currentPriceForCanonical.volume === sanitizedData.volume
+          ) {
+            // but still ensure keysToStore exist in map pointing to that same object
+            const newPrices = { ...state.prices };
+            let anyNewKey = false;
+            keysToStore.forEach((k) => {
+              if (!newPrices[k]) {
+                newPrices[k] = sanitizedData;
+                anyNewKey = true;
+              }
+            });
+            if (!anyNewKey) {
+              return state; // nothing changed
+            }
+            return {
+              prices: newPrices,
+              updateCount: state.updateCount + 1,
+              lastUpdate: Date.now(),
+            };
+          }
+
+          // Otherwise merge sanitizedData under all candidate keys
+          const newPrices = { ...state.prices };
+          keysToStore.forEach((k) => {
+            newPrices[k] = sanitizedData;
+          });
+
+          return {
+            prices: newPrices,
+            updateCount: state.updateCount + 1,
+            lastUpdate: Date.now(),
+          };
+        })
+      );
     },
 
-    // 🚀 BATCH UPDATE: Update multiple prices efficiently
+    // BATCH UPDATE: Update multiple prices efficiently
+    // pricesData is expected to be an object mapping feedKey -> rawData
     updatePrices: (pricesData) => {
       if (!pricesData || typeof pricesData !== "object") return;
 
-      const sanitizedPrices = {};
+      // Map of storeKey -> sanitizedData
+      const sanitizedMap = {};
       let hasValidUpdates = false;
-      
 
-      // Process all price updates
-      Object.entries(pricesData).forEach(([key, data]) => {
-        const sanitizedData = sanitizePriceData(data);
-        if (sanitizedData && sanitizedData.symbol) {
-          sanitizedPrices[sanitizedData.symbol] = sanitizedData;
-          hasValidUpdates = true;
+      Object.entries(pricesData).forEach(([feedKey, raw]) => {
+        const sanitizedData = sanitizePriceData(raw);
+        if (!sanitizedData) return;
 
-          // Debug logging for indices (development only)
-          if (
-            process.env.NODE_ENV === "development" &&
-            (sanitizedData.sector === "INDEX" ||
-              key.includes("INDEX") ||
-              ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(
-                sanitizedData.symbol
-              ))
-          ) {
-            console.log(
-              `🏛️ INDEX UPDATE: ${sanitizedData.symbol} = ₹${sanitizedData.ltp} (${sanitizedData.change_percent}%)`
-            );
-          }
+        hasValidUpdates = true;
+
+        // Build store keys for this sanitized entry
+        const keys = buildStoreKeysForSanitized(sanitizedData, feedKey);
+        keys.forEach((k) => {
+          // last write wins within this batch for key
+          sanitizedMap[k] = sanitizedData;
+        });
+
+        // Also ensure canonical symbol key present
+        if (sanitizedData.symbol) {
+          sanitizedMap[sanitizedData.symbol] = sanitizedData;
         }
       });
 
       if (!hasValidUpdates) return;
 
-      set((state) => {
-        const newPrices = {
-          ...state.prices,
-          ...sanitizedPrices,
-        };
-        
-        
-        return {
-          prices: newPrices,
-          updateCount: state.updateCount + Object.keys(sanitizedPrices).length,
-          lastUpdate: Date.now(),
-        };
-      });
+      // Defer merge to microtask
+      deferSet(() =>
+        set((state) => {
+          const newPrices = { ...state.prices, ...sanitizedMap };
+
+          return {
+            prices: newPrices,
+            updateCount: state.updateCount + Object.keys(sanitizedMap).length,
+            lastUpdate: Date.now(),
+          };
+        })
+      );
     },
 
-    // Get price for specific symbol
+    // Get price for specific symbol (tries exact key)
     getPrice: (symbol) => {
       return get().prices[symbol] || null;
     },
@@ -231,6 +314,7 @@ const useMarketStore = create(
 
     // Connection status
     setConnectionStatus: (status) => {
+      // connection status is OK to set synchronously - not heavy
       set({ connectionStatus: status });
     },
 

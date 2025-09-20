@@ -1,5 +1,13 @@
-// components/common/StocksListOptimized.jsx - ULTRA-OPTIMIZED FOR REAL-TIME PERFORMANCE
-import React, { memo, useMemo, useState } from "react";
+// components/common/StocksListOptimized.jsx
+/**
+ * 🚀 StocksListOptimized - ULTRA-OPTIMIZED FOR REAL-TIME PERFORMANCE
+ *
+ * Each row subscribes to Zustand store with a selector that tries several
+ * candidate keys (symbol, instrument_key, compact variant, pipe-RHS, etc.)
+ * so live prices stored under e.g. "NSE_EQ|INE002A01018" are correctly found.
+ */
+
+import React, { memo, useMemo, useState, useCallback } from "react";
 import {
   Box,
   Card,
@@ -19,13 +27,90 @@ import {
   Tooltip,
 } from "@mui/material";
 import { ShowChart as OptionsIcon } from "@mui/icons-material";
-import { useSymbolPrice } from "../../store/marketStore";
+import useMarketStore from "../../store/marketStore";
 import OptionChainModal from "../options/OptionChainModal";
 
-// 🚀 ULTRA-OPTIMIZED: Individual stock row with React.memo and Zustand subscription
+/* -------------------------
+   Utilities used by rows
+   ------------------------- */
+
+// compact key: remove whitespace/underscores/hyphens and uppercase
+const compactKey = (s) => {
+  if (s === undefined || s === null) return "";
+  return String(s)
+    .replace(/[\s_-]+/g, "")
+    .toUpperCase();
+};
+
+// RHS of pipe-format e.g. "NSE_EQ|Nifty 50" -> "Nifty 50"
+const rhsFromPipe = (s) => {
+  if (!s && s !== 0) return "";
+  try {
+    const parts = String(s)
+      .split("|")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return "";
+    return parts[parts.length - 1];
+  } catch (e) {
+    return String(s);
+  }
+};
+
+// Build ordered candidate keys to lookup in store
+const buildCandidatesForLookup = (symbolOrObj) => {
+  // symbolOrObj may be string (symbol) or object { symbol, instrument_key, name }
+  const candidates = [];
+  if (!symbolOrObj && symbolOrObj !== 0) return candidates;
+
+  // If an object, prefer instrument_key and symbol
+  if (typeof symbolOrObj === "object") {
+    const { symbol, instrument_key, name } = symbolOrObj;
+    if (instrument_key) {
+      candidates.push(instrument_key);
+      // also push RHS and compact RHS
+      const rhs = rhsFromPipe(instrument_key);
+      if (rhs) candidates.push(rhs, compactKey(rhs));
+    }
+    if (symbol) {
+      candidates.push(symbol);
+      candidates.push(compactKey(symbol));
+      // relaxed symbol (replace _ - with space)
+      candidates.push(String(symbol).replace(/[_-]+/g, " "));
+    }
+    if (name) {
+      candidates.push(name, compactKey(name));
+    }
+  } else {
+    // primitive: treat as symbol string
+    const s = String(symbolOrObj);
+    candidates.push(s);
+    candidates.push(compactKey(s));
+    if (s.includes("|")) {
+      const rhs = rhsFromPipe(s);
+      if (rhs) candidates.push(rhs, compactKey(rhs));
+    }
+    candidates.push(s.replace(/[_-]+/g, " "));
+  }
+
+  // unique preserve order
+  const seen = new Set();
+  return candidates.filter((c) => {
+    if (c === undefined || c === null || c === "") return false;
+    const key = String(c);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+/* -------------------------
+   StockRow - per-symbol subscriber
+   ------------------------- */
+
 const StockRow = memo(
   ({
-    symbol,
+    symbol, // can be string symbol or object with instrument_key
     showVolume = true,
     showSector = false,
     compact = false,
@@ -34,24 +119,54 @@ const StockRow = memo(
   }) => {
     const theme = useTheme();
 
-    // 🚀 GRANULAR SUBSCRIPTION: Only this row re-renders when this symbol updates
-    const stock = useSymbolPrice(symbol);
+    // Build candidates once per symbol prop
+    const candidates = useMemo(
+      () => buildCandidatesForLookup(symbol),
+      [symbol]
+    );
 
-    const handleOptionChainClick = (e) => {
-      e.stopPropagation();
-      if (onOptionChainClick && stock) {
+    // Selector: returns first store.prices[key] found among candidates
+    // (keeps subscription granular to the returned object)
+    const stock = useMarketStore(
+      useMemo(
+        () => (state) => {
+          if (!state.prices) return null;
+          for (let i = 0; i < candidates.length; i++) {
+            const k = candidates[i];
+            if (k && state.prices[k]) return state.prices[k];
+          }
+          // Fallback: if symbol is an object try its symbol key
+          if (typeof symbol === "object" && symbol?.symbol) {
+            return state.prices[symbol.symbol] || null;
+          }
+          // fallback by direct symbol string
+          return state.prices[String(symbol)] || null;
+        },
+        [candidates, symbol]
+      )
+    );
+
+    // Handler for option click - attempt to create a compact stock object
+    const handleOptionChainClick = useCallback(
+      (e) => {
+        e.stopPropagation();
+        if (!onOptionChainClick) return;
+        const s = stock || (typeof symbol === "object" ? symbol : { symbol });
         onOptionChainClick({
-          symbol: stock.symbol,
-          name: stock.symbol,
-          instrument_key: stock.instrument_key && stock.instrument_key.includes('|') ? stock.instrument_key : null,
-          last_price: stock.ltp,
-          change: stock.change,
-          change_percent: stock.change_percent,
+          symbol: s.symbol || (typeof symbol === "string" ? symbol : undefined),
+          name: s.name || s.symbol,
+          instrument_key:
+            s.instrument_key ||
+            (typeof symbol === "object" ? symbol.instrument_key : undefined),
+          last_price: s.ltp ?? s.last_price,
+          change: s.change ?? 0,
+          change_percent: s.change_percent ?? 0,
         });
-      }
-    };
+      },
+      [onOptionChainClick, stock, symbol]
+    );
 
-    // Skip rendering if no data
+    // If no data available for this row yet, show skeleton / placeholder
     if (!stock) {
       return (
         <TableRow>
@@ -62,7 +177,7 @@ const StockRow = memo(
       );
     }
 
-    const isPositive = stock.change >= 0;
+    const isPositive = Number(stock.change || 0) >= 0;
     const changeColor = isPositive
       ? theme.palette.success.main
       : theme.palette.error.main;
@@ -71,9 +186,7 @@ const StockRow = memo(
       <TableRow
         sx={{
           height: compact ? 35 : 45,
-          "&:hover": {
-            backgroundColor: theme.palette.action.hover,
-          },
+          "&:hover": { backgroundColor: theme.palette.action.hover },
           transition: "background-color 0.1s ease",
         }}
       >
@@ -81,9 +194,12 @@ const StockRow = memo(
         <TableCell sx={{ py: compact ? 0.5 : 1 }}>
           <Box>
             <Typography variant={compact ? "body2" : "body1"} fontWeight="bold">
-              {stock.symbol}
+              {stock.symbol ||
+                (typeof symbol === "string"
+                  ? symbol
+                  : stock.instrument_key || "")}
             </Typography>
-            {showSector && (
+            {showSector && stock.sector && (
               <Typography variant="caption" color="text.secondary">
                 {stock.sector}
               </Typography>
@@ -98,7 +214,7 @@ const StockRow = memo(
             fontWeight="bold"
             color={changeColor}
           >
-            ₹{stock.ltp.toFixed(2)}
+            ₹{Number(stock.ltp || 0).toFixed(2)}
           </Typography>
         </TableCell>
 
@@ -109,16 +225,16 @@ const StockRow = memo(
             color={changeColor}
             fontWeight="medium"
           >
-            {isPositive ? "+" : ""}₹{stock.change.toFixed(2)}
+            {isPositive ? "+" : ""}₹{Number(stock.change || 0).toFixed(2)}
           </Typography>
         </TableCell>
 
         {/* Change % */}
         <TableCell align="right" sx={{ py: compact ? 0.5 : 1 }}>
           <Chip
-            label={`${isPositive ? "+" : ""}${stock.change_percent.toFixed(
-              2
-            )}%`}
+            label={`${isPositive ? "+" : ""}${Number(
+              stock.change_percent || 0
+            ).toFixed(2)}%`}
             size={compact ? "small" : "medium"}
             sx={{
               backgroundColor: isPositive
@@ -140,16 +256,16 @@ const StockRow = memo(
               variant={compact ? "caption" : "body2"}
               color="text.secondary"
             >
-              {stock.volume > 1000000
-                ? `${(stock.volume / 1000000).toFixed(1)}M`
-                : stock.volume > 1000
-                ? `${(stock.volume / 1000).toFixed(1)}K`
-                : stock.volume.toString()}
+              {Number(stock.volume || 0) > 1000000
+                ? `${(Number(stock.volume || 0) / 1000000).toFixed(1)}M`
+                : Number(stock.volume || 0) > 1000
+                ? `${(Number(stock.volume || 0) / 1000).toFixed(1)}K`
+                : String(stock.volume || 0)}
             </Typography>
           </TableCell>
         )}
 
-        {/* High/Low */}
+        {/* High / Low */}
         <TableCell align="right" sx={{ py: compact ? 0.5 : 1 }}>
           <Box
             sx={{
@@ -161,15 +277,19 @@ const StockRow = memo(
           >
             <Box>
               <Typography variant="caption" color="text.secondary">
-                H: ₹{stock.high?.toFixed(2) || "--"}
+                H: ₹
+                {stock.high !== undefined
+                  ? Number(stock.high).toFixed(2)
+                  : "--"}
               </Typography>
               <br />
               <Typography variant="caption" color="text.secondary">
-                L: ₹{stock.low?.toFixed(2) || "--"}
+                L: ₹
+                {stock.low !== undefined ? Number(stock.low).toFixed(2) : "--"}
               </Typography>
             </Box>
 
-            {/* Option Chain Button - All stocks are F&O eligible */}
+            {/* Option Chain Button */}
             {showOptionChain && (
               <Tooltip title="View Option Chain" placement="left">
                 <IconButton
@@ -199,7 +319,10 @@ const StockRow = memo(
 
 StockRow.displayName = "StockRow";
 
-// 🚀 OPTIMIZED: Loading skeleton row
+/* -------------------------
+   SkeletonRow
+   ------------------------- */
+
 const SkeletonRow = memo(({ showVolume = true, compact = false }) => (
   <TableRow sx={{ height: compact ? 35 : 45 }}>
     <TableCell>
@@ -227,11 +350,14 @@ const SkeletonRow = memo(({ showVolume = true, compact = false }) => (
 
 SkeletonRow.displayName = "SkeletonRow";
 
-// 🚀 MAIN COMPONENT: Optimized stocks list
+/* -------------------------
+   StocksListOptimized (main)
+   ------------------------- */
+
 const StocksListOptimized = memo(
   ({
     title,
-    symbols = [], // Array of symbol strings to display
+    symbols = [], // array of strings OR array of objects { symbol, instrument_key, name }
     isLoading = false,
     titleIcon = "📊",
     emptyMessage = "No data available",
@@ -240,17 +366,39 @@ const StocksListOptimized = memo(
     showSector = false,
     compact = false,
     containerHeight = "70vh",
-    showOptionChain = false, // New prop to enable option chain integration
+    showOptionChain = false,
   }) => {
     const theme = useTheme();
 
-    // Debug logging
+    // Defensive debug logging
     if (process.env.NODE_ENV === "development") {
+      let titlePreview = "";
+      try {
+        if (typeof title === "string") {
+          titlePreview =
+            title.length > 20 ? `${title.substring(0, 20)}...` : title;
+        } else if (title == null) {
+          titlePreview = "<<no-title>>";
+        } else if (React.isValidElement(title)) {
+          const child = title.props?.children;
+          if (typeof child === "string") {
+            titlePreview =
+              child.length > 20 ? `${child.substring(0, 20)}...` : child;
+          } else {
+            titlePreview = "<<jsx-title>>";
+          }
+        } else {
+          titlePreview = String(title);
+        }
+      } catch (e) {
+        titlePreview = "<<debug-error>>";
+      }
+
       console.log("🔍 StocksListOptimized Debug:", {
-        title: title?.substring(0, 20) + "...",
+        title: titlePreview,
         showOptionChain,
-        symbolsLength: symbols.length,
-        hasSymbols: symbols.length > 0,
+        symbolsLength: Array.isArray(symbols) ? symbols.length : 0,
+        hasSymbols: Array.isArray(symbols) ? symbols.length > 0 : false,
       });
     }
 
@@ -258,19 +406,17 @@ const StocksListOptimized = memo(
     const [optionChainOpen, setOptionChainOpen] = useState(false);
     const [selectedStock, setSelectedStock] = useState(null);
 
-    // Handle option chain click
-    const handleOptionChainClick = (stock) => {
+    const handleOptionChainClick = useCallback((stock) => {
       setSelectedStock(stock);
       setOptionChainOpen(true);
-    };
+    }, []);
 
-    // 🚀 OPTIMIZED: Memoized symbols list (prevents unnecessary re-renders)
+    // Display slice
     const displaySymbols = useMemo(
-      () => symbols.slice(0, maxItems),
+      () => (Array.isArray(symbols) ? symbols.slice(0, maxItems) : []),
       [symbols, maxItems]
     );
 
-    // 🚀 OPTIMIZED: Memoized table header
     const tableHeader = useMemo(
       () => (
         <TableHead>
@@ -336,7 +482,13 @@ const StocksListOptimized = memo(
               {titleIcon}
             </Typography>
             <Typography variant="h6" fontWeight="bold" color="primary">
-              {title}
+              {typeof title === "string" || typeof title === "number"
+                ? title
+                : React.isValidElement(title)
+                ? title
+                : typeof title === "object" && title !== null
+                ? String(title)
+                : ""}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               ({displaySymbols.length} items)
@@ -349,9 +501,7 @@ const StocksListOptimized = memo(
             component={Paper}
             sx={{
               height: "100%",
-              "& .MuiTableContainer-root": {
-                borderRadius: 0,
-              },
+              "& .MuiTableContainer-root": { borderRadius: 0 },
             }}
           >
             <Table
@@ -367,7 +517,6 @@ const StocksListOptimized = memo(
               {tableHeader}
               <TableBody>
                 {isLoading ? (
-                  // Loading state
                   Array.from({ length: Math.min(maxItems, 10) }).map(
                     (_, index) => (
                       <SkeletonRow
@@ -378,20 +527,28 @@ const StocksListOptimized = memo(
                     )
                   )
                 ) : displaySymbols.length > 0 ? (
-                  // 🚀 OPTIMIZED: Each row is independently subscribed and memoized
-                  displaySymbols.map((symbol) => (
+                  displaySymbols.map((sym) => (
                     <StockRow
-                      key={symbol}
-                      symbol={symbol}
+                      key={
+                        typeof sym === "string"
+                          ? sym
+                          : sym.instrument_key ||
+                            sym.symbol ||
+                            JSON.stringify(sym)
+                      }
+                      symbol={sym}
                       showVolume={showVolume}
                       showSector={showSector}
                       compact={compact}
                       showOptionChain={showOptionChain}
-                      onOptionChainClick={handleOptionChainClick}
+                      onOptionChainClick={(s) => {
+                        setSelectedStock(s);
+                        setOptionChainOpen(true);
+                        if (handleOptionChainClick) handleOptionChainClick(s);
+                      }}
                     />
                   ))
                 ) : (
-                  // Empty state
                   <TableRow>
                     <TableCell
                       colSpan={showVolume ? 6 : 5}
@@ -409,7 +566,6 @@ const StocksListOptimized = memo(
           </TableContainer>
         </Box>
 
-        {/* Option Chain Modal */}
         {showOptionChain && (
           <OptionChainModal
             open={optionChainOpen}
