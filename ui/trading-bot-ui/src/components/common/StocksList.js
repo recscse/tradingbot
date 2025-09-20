@@ -42,16 +42,34 @@ const StocksList = memo(
     containerHeight = "70vh", // Default container height
     showOptionChain = false, // New prop to enable option chain integration
   }) => {
-    
-    // Debug logging
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 StocksList Debug:', {
-        title: title?.substring(0, 20) + '...',
+    // Debug logging (defensive)
+    if (process.env.NODE_ENV === "development") {
+      let titlePreview = "";
+      try {
+        if (typeof title === "string") {
+          titlePreview =
+            title.length > 20 ? title.substring(0, 20) + "..." : title;
+        } else if (title == null) {
+          titlePreview = "<<no-title>>";
+        } else if (typeof title === "object") {
+          // show small JSON preview for objects (avoid huge dumps)
+          const j = JSON.stringify(title);
+          titlePreview = j.length > 20 ? j.substring(0, 20) + "..." : j;
+        } else {
+          titlePreview = String(title);
+        }
+      } catch (e) {
+        titlePreview = "<<error>>";
+      }
+
+      console.log("🔍 StocksList Debug:", {
+        title: titlePreview,
         showOptionChain,
-        dataLength: data.length,
-        hasData: data.length > 0
+        dataLength: Array.isArray(data) ? data.length : 0,
+        hasData: Array.isArray(data) ? data.length > 0 : false,
       });
     }
+
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
     const isTablet = useMediaQuery(theme.breakpoints.down("md"));
@@ -1154,33 +1172,38 @@ const StocksList = memo(
                                 </Box>
                               </TableCell>
                             )}
-                            
+
                             {/* Option Chain Button Column */}
                             {showOptionChain && (
                               <TableCell align="center">
-                                <Tooltip title="View Option Chain" placement="left">
+                                <Tooltip
+                                  title="View Option Chain"
+                                  placement="left"
+                                >
                                   <Box
                                     component="button"
-                                    onClick={() => handleOptionChainClick(stock)}
+                                    onClick={() =>
+                                      handleOptionChainClick(stock)
+                                    }
                                     sx={{
-                                      background: 'none',
-                                      border: 'none',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
+                                      background: "none",
+                                      border: "none",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
                                       padding: 0.5,
                                       borderRadius: 0.5,
                                       color: colors.accent,
-                                      width: '100%',
-                                      '&:hover': {
+                                      width: "100%",
+                                      "&:hover": {
                                         bgcolor: `${colors.accent}20`,
-                                        transform: 'scale(1.1)',
+                                        transform: "scale(1.1)",
                                       },
-                                      transition: 'all 0.15s ease',
+                                      transition: "all 0.15s ease",
                                     }}
                                   >
-                                    <OptionsIcon sx={{ fontSize: '1.1rem' }} />
+                                    <OptionsIcon sx={{ fontSize: "1.1rem" }} />
                                   </Box>
                                 </Tooltip>
                               </TableCell>
