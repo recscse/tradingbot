@@ -697,7 +697,9 @@ class CentralizedWebSocketManager:
                 total = len(self.all_instrument_keys)
 
                 logger.info(f"✅ Loaded {total} WebSocket instrument keys")
-                logger.info(f"   📈 NSE instruments ready for subscription (MCX handled by dedicated service)")
+                logger.info(
+                    f"   📈 NSE instruments ready for subscription (MCX handled by dedicated service)"
+                )
 
                 return True
             else:
@@ -736,7 +738,6 @@ class CentralizedWebSocketManager:
                 "NSE_INDEX|Nifty Bank",
                 "NSE_INDEX|Fin Nifty",
                 "BSE_INDEX|SENSEX",
-
                 # Major Sectoral Indices
                 "NSE_INDEX|Nifty Auto",
                 "NSE_INDEX|Nifty IT",
@@ -750,7 +751,6 @@ class CentralizedWebSocketManager:
                 "NSE_INDEX|Nifty Oil & Gas",
                 "NSE_INDEX|Nifty Consumer Durables",
                 "NSE_INDEX|Nifty Healthcare Index",
-
                 # Broad Market Indices
                 "NSE_INDEX|Nifty Next 50",
                 "NSE_INDEX|Nifty 100",
@@ -1318,15 +1318,25 @@ class CentralizedWebSocketManager:
             except Exception as e:
                 stats["errors"] += 1
                 # Enhanced error logging for NoneType comparison debugging
-                if "'>' not suppported between instances of 'NoneType' and 'int'" in str(e):
+                if (
+                    "'>' not suppported between instances of 'NoneType' and 'int'"
+                    in str(e)
+                ):
                     logger.warning(f"⚠️ DETAILED ERROR for {instrument_key}:")
-                    logger.warning(f"   Raw data keys: {list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not dict'}")
-                    if isinstance(raw_data, dict) and 'fullFeed' in raw_data:
-                        market_ff = raw_data.get('fullFeed', {}).get('marketFF', {})
-                        ltpc = market_ff.get('ltpc', {})
-                        logger.warning(f"   LTPC data: ltp={ltpc.get('ltp')}, cp={ltpc.get('cp')}")
-                        logger.warning(f"   LTPC types: ltp={type(ltpc.get('ltp'))}, cp={type(ltpc.get('cp'))}")
+                    logger.warning(
+                        f"   Raw data keys: {list(raw_data.keys()) if isinstance(raw_data, dict) else 'Not dict'}"
+                    )
+                    if isinstance(raw_data, dict) and "fullFeed" in raw_data:
+                        market_ff = raw_data.get("fullFeed", {}).get("marketFF", {})
+                        ltpc = market_ff.get("ltpc", {})
+                        logger.warning(
+                            f"   LTPC data: ltp={ltpc.get('ltp')}, cp={ltpc.get('cp')}"
+                        )
+                        logger.warning(
+                            f"   LTPC types: ltp={type(ltpc.get('ltp'))}, cp={type(ltpc.get('cp'))}"
+                        )
                     import traceback
+
                     logger.warning(f"   Full traceback: {traceback.format_exc()}")
 
                 logger.warning(f"⚠️ Error processing {instrument_key}: {e}")
@@ -1538,7 +1548,9 @@ class CentralizedWebSocketManager:
 
             # MCX F&O - now handled by dedicated MCX WebSocket service
             elif "MCX_FO" in exchange_segment:
-                logger.debug(f"MCX instrument {instrument_key} - handled by dedicated MCX service")
+                logger.debug(
+                    f"MCX instrument {instrument_key} - handled by dedicated MCX service"
+                )
                 return None
 
             return None
@@ -1597,6 +1609,7 @@ class CentralizedWebSocketManager:
 
             name = getattr(instrument_data, "name", isin)
 
+            # stock_info = isin_mapping.get(isin)
             sector = self._get_sector_for_symbol(symbol)
             return {
                 "symbol": symbol,
@@ -1708,7 +1721,9 @@ class CentralizedWebSocketManager:
         """DEPRECATED: MCX F&O instruments are now handled by dedicated MCX WebSocket service"""
         # MCX instruments are no longer processed by the centralized manager
         # They are handled by the dedicated MCX WebSocket service in services/websocket/mcx/
-        logger.debug(f"MCX instrument {instrument_key} - redirected to dedicated MCX service")
+        logger.debug(
+            f"MCX instrument {instrument_key} - redirected to dedicated MCX service"
+        )
         return None
 
     def _get_sector_for_symbol(self, symbol: str) -> str:
@@ -1751,11 +1766,16 @@ class CentralizedWebSocketManager:
                     # Ensure calculated values are valid numbers
                     if change is not None and change_percent is not None:
                         data.update(
-                            {"change": round(change, 2), "change_percent": round(change_percent, 2)}
+                            {
+                                "change": round(change, 2),
+                                "change_percent": round(change_percent, 2),
+                            }
                         )
 
                         # Price trend with null-safe comparisons
-                        if change_percent is not None and isinstance(change_percent, (int, float)):
+                        if change_percent is not None and isinstance(
+                            change_percent, (int, float)
+                        ):
                             if change_percent > 2:
                                 data["trend"] = "strong_bullish"
                             elif change_percent > 0:
@@ -1784,12 +1804,20 @@ class CentralizedWebSocketManager:
                 low = None
                 ltp = None
 
-            if (high is not None and low is not None and ltp is not None and
-                isinstance(high, (int, float)) and isinstance(low, (int, float)) and
-                isinstance(ltp, (int, float)) and ltp > 0):
+            if (
+                high is not None
+                and low is not None
+                and ltp is not None
+                and isinstance(high, (int, float))
+                and isinstance(low, (int, float))
+                and isinstance(ltp, (int, float))
+                and ltp > 0
+            ):
                 try:
                     range_percent = ((high - low) / ltp) * 100
-                    if range_percent is not None and isinstance(range_percent, (int, float)):
+                    if range_percent is not None and isinstance(
+                        range_percent, (int, float)
+                    ):
                         if range_percent > 5:
                             data["volatility"] = "high"
                         elif range_percent > 2:
@@ -2717,8 +2745,13 @@ class CentralizedWebSocketManager:
                     ltp = ltpc.get("ltp")
                     prev_close = ltpc.get("cp")
 
-                if (ltp is not None and prev_close is not None and
-                    isinstance(ltp, (int, float)) and isinstance(prev_close, (int, float)) and prev_close > 0):
+                if (
+                    ltp is not None
+                    and prev_close is not None
+                    and isinstance(ltp, (int, float))
+                    and isinstance(prev_close, (int, float))
+                    and prev_close > 0
+                ):
                     change_pct = (ltp - prev_close) / prev_close * 100
                     price_changes.append(
                         {
