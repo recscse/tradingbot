@@ -94,7 +94,6 @@ except ImportError as e:
     MARKET_ANALYTICS_ROUTER_AVAILABLE = False
 
 # Import other services
-from services.market_data_queue import initialize_queue_service
 from services.auto_stock_selection_service import start_auto_stock_selection
 
 # Import your existing routers
@@ -127,7 +126,6 @@ from router.unified_websocket_routes import router as unified_ws_router
 from router.paper_trading_routes import router as paper_trading_router
 from router.option_routes import option_router
 from services.unified_websocket_manager import unified_manager, start_unified_websocket
-from services.market_data_hub import market_data_hub, start_market_hub
 
 try:
     from router.auto_trading_routes import router as auto_trading_router
@@ -490,14 +488,6 @@ async def lifespan(app: FastAPI):
 
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
-        # 5. 🚀 NEW: Start Market Data Hub FIRST (ultra-fast processing)
-        logger.info("🚀 Starting Market Data Hub...")
-        try:
-            await start_market_hub()
-            logger.info("✅ Market Data Hub started with NumPy/Pandas acceleration")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Market Data Hub: {e}")
-
         # 6. Start Unified WebSocket System (will connect to hub)
         logger.info("🔌 Starting Unified WebSocket System...")
         await start_unified_websocket()
@@ -787,6 +777,7 @@ async def lifespan(app: FastAPI):
         # NEW: Stop MCX WebSocket service
         try:
             from services.websocket.mcx.integration import stop_mcx_service
+
             await stop_mcx_service()
             logger.info("✅ MCX WebSocket service stopped")
         except ImportError:

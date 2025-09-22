@@ -1629,7 +1629,6 @@ class CentralizedWebSocketManager:
         """FIXED: Resolve NSE index with better matching"""
         index_mapping = {
             "Nifty 50": {"symbol": "NIFTY", "name": "Nifty 50"},
-            "NIFTY": {"symbol": "NIFTY", "name": "Nifty 50"},
             "Nifty Bank": {"symbol": "BANKNIFTY", "name": "Nifty Bank"},
             "BANKNIFTY": {"symbol": "BANKNIFTY", "name": "Nifty Bank"},
             "Nifty Fin Service": {
@@ -1644,6 +1643,28 @@ class CentralizedWebSocketManager:
             "Nifty Midcap 50": {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap 50"},
             "NIFTY MID SELECT": {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap 50"},
             "MIDCPNIFTY": {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap 50"},
+            "Nifty IT": {"symbol": "NIFTYIT", "name": "Nifty IT"},
+            "NIFTYIT": {"symbol": "NIFTYIT", "name": "Nifty IT"},
+            "Nifty Pharma": {"symbol": "NIFTYPHARM", "name": "Nifty Pharma"},
+            "NIFTYPHARM": {"symbol": "NIFTYPHARM", "name": "Nifty Pharma"},
+            "Nifty Auto": {"symbol": "NIFTAUTO", "name": "  Nifty Auto"},
+            "NIFTAUTO": {"symbol": "NIFTAUTO", "name": "  Nifty Auto"},
+            "Nifty FMCG": {"symbol": "NIFTYFMCG", "name": "Nifty FMCG"},
+           
+            "Nifty Metal": {"symbol": "NIFTYMETAL", "name": "Nifty Metal"},
+            "NIFTYMETAL": {"symbol": "NIFTYMETAL", "name": "Nifty Metal"},
+            "Nifty Realty": {"symbol": "NIFTYREALTY", "name": "Nifty Realty"},
+            "NIFTYREALTY": {"symbol": "NIFTYREALTY", "  name": "Nifty Realty"},
+            "Nifty Energy": {"symbol": "NIFTYENERGY", "name": "Nifty Energy"},
+            "NIFTYENERGY": {"symbol": "NIFTYENERGY", "name": "Nifty Energy"},
+            "Nifty PSU Bank": {"symbol": "PSUBNK", "name": "Nifty PSU Bank"},
+            "PSUBNK": {"symbol": "PSUBNK", "name": "Nifty PSU Bank"},
+            "Nifty Oil AND GAS": {"symbol": "OILGAS", "name": "Nifty Oil and Gas"},
+            "Nifty Media": {"symbol": "NIFTYMEDIA", "name": "Nifty Media"},
+            "Nifty Private Bank": {
+                "symbol": "NIFTYPRIVB",
+                "name": "Nifty Private Bank",
+            },
         }
 
         # Try exact match first
@@ -2903,17 +2924,6 @@ class CentralizedWebSocketManager:
         """Background processing for analytics (non-blocking, can have slight delay)"""
         try:
             from services.unified_websocket_manager import unified_manager
-
-            # Update market data hub (background)
-            try:
-                from services.market_data_hub import market_data_hub
-
-                market_data_hub.update_market_data_batch(feeds)
-                logger.debug(
-                    f"📊 Hub updated with {len(feeds)} instruments (background)"
-                )
-            except Exception as e:
-                logger.debug(f"Hub update error: {e}")
 
             # Update cache (background)
             await self._update_cache(feeds)
