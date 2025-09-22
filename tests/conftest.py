@@ -22,14 +22,8 @@ def event_loop():
 
 @pytest.fixture
 async def market_hub():
-    """Provide Market Data Hub for tests"""
-    try:
-        from services.market_data_hub import start_market_hub, market_data_hub
-        await start_market_hub()
-        yield market_data_hub
-        await market_data_hub.stop()
-    except ImportError:
-        pytest.skip("Market Data Hub not available")
+    """Market Data Hub removed - using shared_market_processor"""
+    pytest.skip("Market Data Hub removed - tests should use shared_market_processor")
 
 @pytest.fixture
 async def enhanced_breakout_engine():
