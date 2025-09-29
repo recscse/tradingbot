@@ -1,0 +1,2762 @@
+{
+  "metadata": {
+    "version": "2.0",
+    "last_updated": "2025-09-22",
+    "total_sectors": 15,
+    "total_stocks": 150,
+    "total_indices": 15,
+    "description": "Enhanced NSE sectoral stocks mapping with corresponding indices",
+    "data_source": "NSE F&O segment with sectoral indices mapping"
+  },
+  "sectors": {
+    "AUTO": {
+      "display_name": "Automobile",
+      "icon": "🚗",
+      "color": "#FF6B35",
+      "description": "Automobile manufacturers, auto components, and related services",
+      "index": {
+        "symbol": "CNXAUTO",
+        "name": "Nifty Auto",
+        "instrument_key": "NSE_INDEX|NIFTY AUTO"
+      },
+      "stocks": [
+        {
+          "symbol": "MRF",
+          "name": "MRF Limited",
+          "lot_size": 10,
+          "isin": "INE883A01011",
+          "type": "Tyres"
+        },
+        {
+          "symbol": "BAJAJ-AUTO",
+          "name": "Bajaj Auto Limited",
+          "lot_size": 250,
+          "isin": "INE917I01010",
+          "type": "Two Wheelers"
+        },
+        {
+          "symbol": "MOTHERSON",
+          "name": "Motherson Sumi Wiring India Limited",
+          "lot_size": 2200,
+          "isin": "INE775A01035",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "TIINDIA",
+          "name": "Tube Investments of India Limited",
+          "lot_size": 400,
+          "isin": "INE974X01010",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "HEROMOTOCO",
+          "name": "Hero MotoCorp Limited",
+          "lot_size": 300,
+          "isin": "INE158A01026",
+          "type": "Two Wheelers"
+        },
+        {
+          "symbol": "TVSMOTOR",
+          "name": "TVS Motor Company Limited",
+          "lot_size": 600,
+          "isin": "INE494B01023",
+          "type": "Two Wheelers"
+        },
+        {
+          "symbol": "M&M",
+          "name": "Mahindra & Mahindra Limited",
+          "lot_size": 300,
+          "isin": "INE101A01026",
+          "type": "Commercial Vehicles"
+        },
+        {
+          "symbol": "EICHERMOT",
+          "name": "Eicher Motors Limited",
+          "lot_size": 250,
+          "isin": "INE066A01021",
+          "type": "Commercial Vehicles"
+        },
+        {
+          "symbol": "MARUTI",
+          "name": "Maruti Suzuki India Limited",
+          "lot_size": 100,
+          "isin": "INE585B01010",
+          "type": "Passenger Cars"
+        },
+        {
+          "symbol": "BOSCHLTD",
+          "name": "Bosch Limited",
+          "lot_size": 40,
+          "isin": "INE323A01026",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "ASHOKLEY",
+          "name": "Ashok Leyland Limited",
+          "lot_size": 1500,
+          "isin": "INE208A01029",
+          "type": "Commercial Vehicles"
+        },
+        {
+          "symbol": "BHARATFORG",
+          "name": "Bharat Forge Limited",
+          "lot_size": 1100,
+          "isin": "INE465A01025",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "BALKRISIND",
+          "name": "Balkrishna Industries Limited",
+          "lot_size": 75,
+          "isin": "INE787D01026",
+          "type": "Tyres"
+        },
+        {
+          "symbol": "TATAMOTORS",
+          "name": "Tata Motors Limited",
+          "lot_size": 400,
+          "isin": "INE155A01022",
+          "type": "Commercial Vehicles"
+        },
+        {
+          "symbol": "EXIDEIND",
+          "name": "Exide Industries Limited",
+          "lot_size": 2800,
+          "isin": "INE302A01020",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "KAYNES",
+          "name": "KAYNES TECHNOLOGY IND LTD",
+          "lot_size": 400,
+          "isin": "INE918Z01012",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "UNOMINDA",
+          "name": "UNO MINDA LIMITED",
+          "lot_size": 1000,
+          "isin": "INE405E01023",
+          "type": "Auto Components"
+        },
+        {
+          "symbol": "SONACOMS",
+          "name": "SONA BLW PRECISION FRGS L",
+          "lot_size": 1100,
+          "isin": "INE073K01018",
+          "type": "Auto Components"
+        }
+      ]
+    },
+    "BANKING": {
+      "display_name": "Banking",
+      "icon": "🏦",
+      "color": "#1E88E5",
+      "description": "Public and private sector banks",
+      "index": {
+        "symbol": "CNXBANK",
+        "name": "Nifty Bank",
+        "instrument_key": "NSE_INDEX|Nifty Bank"
+      },
+      "stocks": [
+        {
+          "symbol": "HDFCBANK",
+          "name": "HDFC Bank Limited",
+          "lot_size": 550,
+          "isin": "INE040A01034",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "ICICIBANK",
+          "name": "ICICI Bank Limited",
+          "lot_size": 175,
+          "isin": "INE090A01021",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "AXISBANK",
+          "name": "Axis Bank Limited",
+          "lot_size": 625,
+          "isin": "INE238A01034",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "KOTAKBANK",
+          "name": "Kotak Mahindra Bank Limited",
+          "lot_size": 400,
+          "isin": "INE237A01028",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "SBI",
+          "name": "State Bank of India",
+          "lot_size": 1500,
+          "isin": "INE062A01020",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "INDUSINDBK",
+          "name": "IndusInd Bank Limited",
+          "lot_size": 900,
+          "isin": "INE095A01012",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "FEDERALBNK",
+          "name": "Federal Bank Limited",
+          "lot_size": 5000,
+          "isin": "INE171A01029",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "BANDHANBNK",
+          "name": "Bandhan Bank Limited",
+          "lot_size": 2800,
+          "isin": "INE545U01014",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "IDFCFIRSTB",
+          "name": "IDFC First Bank Limited",
+          "lot_size": 10000,
+          "isin": "INE092T01019",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "PNB",
+          "name": "Punjab National Bank",
+          "lot_size": 7500,
+          "isin": "INE476A01022",
+          "type": "Public Bank"
+        }
+      ]
+    },
+    "IT": {
+      "display_name": "Information Technology",
+      "icon": "💻",
+      "color": "#4CAF50",
+      "description": "Software services, IT consulting, and technology companies",
+      "index": {
+        "symbol": "CNXIT",
+        "name": "Nifty IT",
+        "instrument_key": "NSE_INDEX|NIFTY IT"
+      },
+      "stocks": [
+        {
+          "symbol": "TCS",
+          "name": "Tata Consultancy Services Limited",
+          "lot_size": 300,
+          "isin": "INE467B01029",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "INFY",
+          "name": "Infosys Limited",
+          "lot_size": 300,
+          "isin": "INE009A01021",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "HCLTECH",
+          "name": "HCL Technologies Limited",
+          "lot_size": 250,
+          "isin": "INE860A01027",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "WIPRO",
+          "name": "Wipro Limited",
+          "lot_size": 1200,
+          "isin": "INE075A01022",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "LTI",
+          "name": "L&T Infotech Limited",
+          "lot_size": 125,
+          "isin": "INE214T01019",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "TECHM",
+          "name": "Tech Mahindra Limited",
+          "lot_size": 500,
+          "isin": "INE669C01036",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "MINDTREE",
+          "name": "Mindtree Limited",
+          "lot_size": 200,
+          "isin": "INE018I01017",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "COFORGE",
+          "name": "Coforge Limited",
+          "lot_size": 125,
+          "isin": "INE591G01017",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "OFSS",
+          "name": "Oracle Financial Services Software Limited",
+          "lot_size": 40,
+          "isin": "INE881D01027",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "PERSISTENT",
+          "name": "Persistent Systems Limited",
+          "lot_size": 75,
+          "isin": "INE262H01013",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "LTIM",
+          "name": "LTIMindtree Limited",
+          "lot_size": 100,
+          "isin": "INE214T01019",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "MPHASIS",
+          "name": "Mphasis Limited",
+          "lot_size": 200,
+          "isin": "INE356A01018",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "INTELLECT",
+          "name": "Intellect Design Arena Limited",
+          "lot_size": 500,
+          "isin": "INE306R01017",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "SONATSOFTW",
+          "name": "Sonata Software Limited",
+          "lot_size": 125,
+          "isin": "INE269A01021",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "AFFLE",
+          "name": "Affle (India) Limited",
+          "lot_size": 75,
+          "isin": "INE00WC01027",
+          "type": "Digital Marketing"
+        },
+        {
+          "symbol": "INDUSTOWER",
+          "name": "Indus Towers Limited",
+          "lot_size": 2500,
+          "isin": "INE121J01017",
+          "type": "Telecom Infrastructure"
+        },
+        {
+          "symbol": "IDEA",
+          "name": "Vodafone Idea Limited",
+          "lot_size": 75000,
+          "isin": "INE669E01016",
+          "type": "Telecom Services"
+        },
+        {
+          "symbol": "BHARTIHEXA",
+          "name": "Bharti Hexacom Limited",
+          "lot_size": 1000,
+          "isin": "INE0JV001029",
+          "type": "Telecom Services"
+        },
+        {
+          "symbol": "TEJASNET",
+          "name": "Tejas Networks Limited",
+          "lot_size": 600,
+          "isin": "INE010B01027",
+          "type": "Telecom Equipment"
+        },
+        {
+          "symbol": "KPITTECH",
+          "name": "KPIT Technologies Limited",
+          "lot_size": 600,
+          "isin": "INE04I401011",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "TATACOMM",
+          "name": "Tata Communications Limited",
+          "lot_size": 375,
+          "isin": "INE151A01013",
+          "type": "Telecom Services"
+        },
+        {
+          "symbol": "HFCL",
+          "name": "HFCL Limited",
+          "lot_size": 8000,
+          "isin": "INE548A01028",
+          "type": "Telecom Equipment"
+        },
+        {
+          "symbol": "TATAELXSI",
+          "name": "Tata Elxsi Limited",
+          "lot_size": 50,
+          "isin": "INE670A01012",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "BSOFT",
+          "name": "Birlasoft Limited",
+          "lot_size": 1000,
+          "isin": "INE836A01035",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "TATATECH",
+          "name": "Tata Technologies Limited",
+          "lot_size": 500,
+          "isin": "INE142M01025",
+          "type": "Engineering Services"
+        },
+        {
+          "symbol": "LTTS",
+          "name": "L&T Technology Services Limited",
+          "lot_size": 125,
+          "isin": "INE010V01017",
+          "type": "Engineering Services"
+        },
+        {
+          "symbol": "CYIENT",
+          "name": "Cyient Limited",
+          "lot_size": 375,
+          "isin": "INE136B01020",
+          "type": "Engineering Services"
+        },
+        {
+          "symbol": "ZENSARTECH",
+          "name": "Zensar Technologies Limited",
+          "lot_size": 1000,
+          "isin": "INE520A01027",
+          "type": "Software Services"
+        },
+        {
+          "symbol": "BHARTIARTL",
+          "name": "BHARTI AIRTEL LIMITED",
+          "lot_size": 2000,
+          "isin": "INE397D01024",
+          "type": "Telecommunications"
+        },
+        {
+          "symbol": "NAUKRI",
+          "name": "INFO EDGE (I) LTD",
+          "lot_size": 200,
+          "isin": "INE663F01032",
+          "type": "Internet Services"
+        },
+        {
+          "symbol": "KFINTECH",
+          "name": "KFIN TECHNOLOGIES LIMITED",
+          "lot_size": 1000,
+          "isin": "INE138Y01010",
+          "type": "Financial Technology"
+        },
+        {
+          "symbol": "DELHIVERY",
+          "name": "DELHIVERY LIMITED",
+          "lot_size": 2000,
+          "isin": "INE148O01028",
+          "type": "Logistics Technology"
+        }
+      ]
+    },
+    "PHARMA": {
+      "display_name": "Pharmaceuticals",
+      "icon": "💊",
+      "color": "#E91E63",
+      "description": "Pharmaceutical companies and healthcare",
+      "index": {
+        "symbol": "CNXPHARMA",
+        "name": "Nifty Pharma",
+        "instrument_key": "NSE_INDEX|NIFTY PHARMA"
+      },
+      "stocks": [
+        {
+          "symbol": "SUNPHARMA",
+          "name": "Sun Pharmaceutical Industries Limited",
+          "lot_size": 400,
+          "isin": "INE044A01036",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "DRREDDY",
+          "name": "Dr. Reddy's Laboratories Limited",
+          "lot_size": 125,
+          "isin": "INE089A01023",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "CIPLA",
+          "name": "Cipla Limited",
+          "lot_size": 700,
+          "isin": "INE059A01026",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "BIOCON",
+          "name": "Biocon Limited",
+          "lot_size": 1800,
+          "isin": "INE376G01013",
+          "type": "Biotechnology"
+        },
+        {
+          "symbol": "DIVISLAB",
+          "name": "Divi's Laboratories Limited",
+          "lot_size": 125,
+          "isin": "INE361B01024",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "LUPIN",
+          "name": "Lupin Limited",
+          "lot_size": 600,
+          "isin": "INE326A01037",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "AUROPHARMA",
+          "name": "Aurobindo Pharma Limited",
+          "lot_size": 1000,
+          "isin": "INE406A01037",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "CADILAHC",
+          "name": "Cadila Healthcare Limited",
+          "lot_size": 1800,
+          "isin": "INE010B01027",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "TORNTPHARM",
+          "name": "Torrent Pharmaceuticals Limited",
+          "lot_size": 150,
+          "isin": "INE685A01028",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "JBCHEPHARM",
+          "name": "JB Chemicals & Pharmaceuticals Limited",
+          "lot_size": 300,
+          "isin": "INE572A01036",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "AJANTPHARM",
+          "name": "Ajanta Pharma Limited",
+          "lot_size": 250,
+          "isin": "INE031B01049",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "ZYDUSLIFE",
+          "name": "Zydus Lifesciences Limited",
+          "lot_size": 800,
+          "isin": "INE010B01027",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "ABBOTINDIA",
+          "name": "Abbott India Limited",
+          "lot_size": 100,
+          "isin": "INE358A01014",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "GLAND",
+          "name": "Gland Pharma Limited",
+          "lot_size": 300,
+          "isin": "INE068V01023",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "ALKEM",
+          "name": "Alkem Laboratories Limited",
+          "lot_size": 125,
+          "isin": "INE540L01014",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "NATCOPHARM",
+          "name": "Natco Pharma Limited",
+          "lot_size": 6000,
+          "isin": "INE987B01026",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "MANKIND",
+          "name": "Mankind Pharma Limited",
+          "lot_size": 300,
+          "isin": "INE634S01028",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "IPCALAB",
+          "name": "IPCA Laboratories Limited",
+          "lot_size": 500,
+          "isin": "INE571A01038",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "GRANULES",
+          "name": "Granules India Limited",
+          "lot_size": 1500,
+          "isin": "INE101D01020",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "GLENMARK",
+          "name": "Glenmark Pharmaceuticals Limited",
+          "lot_size": 600,
+          "isin": "INE935A01035",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "LAURUSLABS",
+          "name": "Laurus Labs Limited",
+          "lot_size": 1200,
+          "isin": "INE947Q01028",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "PIDILITIND",
+          "name": "PIDILITE INDUSTRIES LTD",
+          "lot_size": 400,
+          "isin": "INE318A01026",
+          "type": "Chemicals"
+        },
+        {
+          "symbol": "UPL",
+          "name": "UPL LIMITED",
+          "lot_size": 1000,
+          "isin": "INE628A01036",
+          "type": "Agrochemicals"
+        },
+        {
+          "symbol": "TATACHEM",
+          "name": "TATA CHEMICALS LTD",
+          "lot_size": 3500,
+          "isin": "INE092A01019",
+          "type": "Chemicals"
+        },
+        {
+          "symbol": "SRF",
+          "name": "SRF LTD",
+          "lot_size": 300,
+          "isin": "INE647A01010",
+          "type": "Chemicals"
+        },
+        {
+          "symbol": "PIIND",
+          "name": "PI INDUSTRIES LTD",
+          "lot_size": 1000,
+          "isin": "INE603J01030",
+          "type": "Agrochemicals"
+        }
+      ]
+    },
+    "FMCG": {
+      "display_name": "Fast Moving Consumer Goods",
+      "icon": "🛍️",
+      "color": "#FF9800",
+      "description": "Consumer goods, food, beverages, and personal care",
+      "index": {
+        "symbol": "CNXFMCG",
+        "name": "Nifty FMCG",
+        "instrument_key": "NSE_INDEX|NIFTY FMCG"
+      },
+      "stocks": [
+        {
+          "symbol": "NESTLEIND",
+          "name": "Nestle India Limited",
+          "lot_size": 25,
+          "isin": "INE239A01016",
+          "type": "Food & Beverages"
+        },
+        {
+          "symbol": "HINDUNILVR",
+          "name": "Hindustan Unilever Limited",
+          "lot_size": 300,
+          "isin": "INE030A01027",
+          "type": "Personal Care"
+        },
+        {
+          "symbol": "ITC",
+          "name": "ITC Limited",
+          "lot_size": 3200,
+          "isin": "INE154A01025",
+          "type": "Tobacco & FMCG"
+        },
+        {
+          "symbol": "BRITANNIA",
+          "name": "Britannia Industries Limited",
+          "lot_size": 150,
+          "isin": "INE216A01030",
+          "type": "Food & Beverages"
+        },
+        {
+          "symbol": "DABUR",
+          "name": "Dabur India Limited",
+          "lot_size": 1000,
+          "isin": "INE016A01026",
+          "type": "Personal Care"
+        },
+        {
+          "symbol": "MARICO",
+          "name": "Marico Limited",
+          "lot_size": 1200,
+          "isin": "INE196A01026",
+          "type": "Personal Care"
+        },
+        {
+          "symbol": "COLPAL",
+          "name": "Colgate Palmolive (India) Limited",
+          "lot_size": 400,
+          "isin": "INE259A01022",
+          "type": "Personal Care"
+        },
+        {
+          "symbol": "GODREJCP",
+          "name": "Godrej Consumer Products Limited",
+          "lot_size": 600,
+          "isin": "INE102D01028",
+          "type": "Personal Care"
+        },
+        {
+          "symbol": "UNITDSPR",
+          "name": "United Spirits Limited",
+          "lot_size": 500,
+          "isin": "INE854D01024",
+          "type": "Beverages"
+        },
+        {
+          "symbol": "EMAMILTD",
+          "name": "Emami Limited",
+          "lot_size": 1200,
+          "isin": "INE548C01032",
+          "type": "Personal Care"
+        },
+        {
+          "symbol": "TATACONSUM",
+          "name": "Tata Consumer Products Limited",
+          "lot_size": 600,
+          "isin": "INE192R01011",
+          "type": "Food & Beverages"
+        },
+        {
+          "symbol": "UBL",
+          "name": "United Breweries Limited",
+          "lot_size": 375,
+          "isin": "INE686F01025",
+          "type": "Beverages"
+        },
+        {
+          "symbol": "PATANJALI",
+          "name": "Patanjali Foods Limited",
+          "lot_size": 1100,
+          "isin": "INE619A01035",
+          "type": "Food & Beverages"
+        },
+        {
+          "symbol": "VBL",
+          "name": "Varun Beverages Limited",
+          "lot_size": 1700,
+          "isin": "INE200M01021",
+          "type": "Beverages"
+        },
+        {
+          "symbol": "NYKAA",
+          "name": "FSN E COMMERCE VENTURES",
+          "lot_size": 1000,
+          "isin": "INE388Y01029",
+          "type": "E-commerce"
+        },
+        {
+          "symbol": "JUBLFOOD",
+          "name": "JUBILANT FOODWORKS LTD",
+          "lot_size": 500,
+          "isin": "INE797F01020",
+          "type": "Food Services"
+        },
+        {
+          "symbol": "INDHOTEL",
+          "name": "THE INDIAN HOTELS CO. LTD",
+          "lot_size": 1000,
+          "isin": "INE053A01029",
+          "type": "Hospitality"
+        }
+      ]
+    },
+    "METAL": {
+      "display_name": "Metals & Mining",
+      "icon": "⚙️",
+      "color": "#607D8B",
+      "description": "Steel, aluminum, mining and metal companies",
+      "index": {
+        "symbol": "CNXMETAL",
+        "name": "Nifty Metal",
+        "instrument_key": "NSE_INDEX|NIFTY METAL"
+      },
+      "stocks": [
+        {
+          "symbol": "TATASTEEL",
+          "name": "Tata Steel Limited",
+          "lot_size": 800,
+          "isin": "INE081A01020",
+          "type": "Steel"
+        },
+        {
+          "symbol": "JSWSTEEL",
+          "name": "JSW Steel Limited",
+          "lot_size": 1200,
+          "isin": "INE019A01038",
+          "type": "Steel"
+        },
+        {
+          "symbol": "HINDALCO",
+          "name": "Hindalco Industries Limited",
+          "lot_size": 2000,
+          "isin": "INE038A01020",
+          "type": "Aluminum"
+        },
+        {
+          "symbol": "VEDL",
+          "name": "Vedanta Limited",
+          "lot_size": 2400,
+          "isin": "INE205A01025",
+          "type": "Mining"
+        },
+        {
+          "symbol": "COALINDIA",
+          "name": "Coal India Limited",
+          "lot_size": 4000,
+          "isin": "INE522F01014",
+          "type": "Mining"
+        },
+        {
+          "symbol": "SAIL",
+          "name": "Steel Authority of India Limited",
+          "lot_size": 8000,
+          "isin": "INE114A01011",
+          "type": "Steel"
+        },
+        {
+          "symbol": "NMDC",
+          "name": "NMDC Limited",
+          "lot_size": 3000,
+          "isin": "INE584A01023",
+          "type": "Mining"
+        },
+        {
+          "symbol": "JINDALSTEL",
+          "name": "Jindal Steel & Power Limited",
+          "lot_size": 1200,
+          "isin": "INE749A01030",
+          "type": "Steel"
+        },
+        {
+          "symbol": "HINDCOPPER",
+          "name": "Hindustan Copper Limited",
+          "lot_size": 3000,
+          "isin": "INE531E01026",
+          "type": "Copper"
+        },
+        {
+          "symbol": "ADANIENT",
+          "name": "Adani Enterprises Limited",
+          "lot_size": 250,
+          "isin": "INE423A01024",
+          "type": "Diversified Mining"
+        },
+        {
+          "symbol": "HINDZINC",
+          "name": "Hindustan Zinc Limited",
+          "lot_size": 1500,
+          "isin": "INE267A01025",
+          "type": "Zinc"
+        },
+        {
+          "symbol": "JSL",
+          "name": "Jindal Stainless Limited",
+          "lot_size": 1500,
+          "isin": "INE220G01021",
+          "type": "Stainless Steel"
+        },
+        {
+          "symbol": "NATIONALUM",
+          "name": "National Aluminium Company Limited",
+          "lot_size": 8000,
+          "isin": "INE139A01034",
+          "type": "Aluminum"
+        },
+        {
+          "symbol": "APLAPOLLO",
+          "name": "APL Apollo Tubes Limited",
+          "lot_size": 500,
+          "isin": "INE702C01027",
+          "type": "Steel Tubes"
+        },
+        {
+          "symbol": "LLOYDSME",
+          "name": "Lloyds Metals and Energy Limited",
+          "lot_size": 2000,
+          "isin": "INE281B01034",
+          "type": "Steel"
+        },
+        {
+          "symbol": "WELCORP",
+          "name": "Welspun Corp Limited",
+          "lot_size": 2500,
+          "isin": "INE191B01025",
+          "type": "Steel Pipes"
+        }
+      ]
+    },
+    "ENERGY": {
+      "display_name": "Oil & Gas",
+      "icon": "⛽",
+      "color": "#795548",
+      "description": "Oil, gas, petrochemicals and energy companies",
+      "index": {
+        "symbol": "CNXENERGY",
+        "name": "Nifty Energy",
+        "instrument_key": "NSE_INDEX|NIFTY ENERGY"
+      },
+      "stocks": [
+        {
+          "symbol": "RELIANCE",
+          "name": "Reliance Industries Limited",
+          "lot_size": 250,
+          "isin": "INE002A01018",
+          "type": "Oil & Gas"
+        },
+        {
+          "symbol": "ONGC",
+          "name": "Oil & Natural Gas Corporation Limited",
+          "lot_size": 4000,
+          "isin": "INE213A01029",
+          "type": "Oil & Gas"
+        },
+        {
+          "symbol": "IOC",
+          "name": "Indian Oil Corporation Limited",
+          "lot_size": 6400,
+          "isin": "INE242A01010",
+          "type": "Oil Refining"
+        },
+        {
+          "symbol": "BPCL",
+          "name": "Bharat Petroleum Corporation Limited",
+          "lot_size": 2000,
+          "isin": "INE029A01011",
+          "type": "Oil Refining"
+        },
+        {
+          "symbol": "HPCL",
+          "name": "Hindustan Petroleum Corporation Limited",
+          "lot_size": 2500,
+          "isin": "INE094A01015",
+          "type": "Oil Refining"
+        },
+        {
+          "symbol": "GAIL",
+          "name": "GAIL (India) Limited",
+          "lot_size": 6000,
+          "isin": "INE129A01019",
+          "type": "Natural Gas"
+        },
+        {
+          "symbol": "PETRONET",
+          "name": "Petronet LNG Limited",
+          "lot_size": 3000,
+          "isin": "INE347G01014",
+          "type": "Natural Gas"
+        },
+        {
+          "symbol": "ATGL",
+          "name": "Adani Total Gas Limited",
+          "lot_size": 3000,
+          "isin": "INE399L01023",
+          "type": "Natural Gas"
+        },
+        {
+          "symbol": "OIL",
+          "name": "Oil India Limited",
+          "lot_size": 2500,
+          "isin": "INE274J01014",
+          "type": "Oil & Gas"
+        },
+        {
+          "symbol": "CASTROLIND",
+          "name": "Castrol India Limited",
+          "lot_size": 5000,
+          "isin": "INE172A01027",
+          "type": "Lubricants"
+        },
+        {
+          "symbol": "HINDPETRO",
+          "name": "Hindustan Petroleum Corporation Limited",
+          "lot_size": 2500,
+          "isin": "INE094A01015",
+          "type": "Oil Refining"
+        },
+        {
+          "symbol": "GSPL",
+          "name": "Gujarat State Petronet Limited",
+          "lot_size": 2000,
+          "isin": "INE246F01010",
+          "type": "Natural Gas"
+        },
+        {
+          "symbol": "GUJGASLTD",
+          "name": "Gujarat Gas Limited",
+          "lot_size": 1500,
+          "isin": "INE844O01030",
+          "type": "Natural Gas"
+        },
+        {
+          "symbol": "IGL",
+          "name": "Indraprastha Gas Limited",
+          "lot_size": 1500,
+          "isin": "INE203G01027",
+          "type": "Natural Gas"
+        },
+        {
+          "symbol": "AEGISLOG",
+          "name": "Aegis Logistics Limited",
+          "lot_size": 2500,
+          "isin": "INE208C01025",
+          "type": "Oil & Gas Logistics"
+        },
+        {
+          "symbol": "MGL",
+          "name": "Mahanagar Gas Limited",
+          "lot_size": 600,
+          "isin": "INE002S01010",
+          "type": "Natural Gas"
+        }
+      ]
+    },
+    "FINANCIAL": {
+      "display_name": "Financial Services",
+      "icon": "💰",
+      "color": "#3F51B5",
+      "description": "NBFCs, insurance, and financial services",
+      "index": {
+        "symbol": "FINNIFTY",
+        "name": "Nifty Financial Services",
+        "instrument_key": "NSE_INDEX|Nifty Fin Service"
+      },
+      "stocks": [
+        {
+          "symbol": "BAJFINANCE",
+          "name": "Bajaj Finance Limited",
+          "lot_size": 125,
+          "isin": "INE296A01024",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "BAJAJFINSV",
+          "name": "Bajaj Finserv Limited",
+          "lot_size": 500,
+          "isin": "INE918I01018",
+          "type": "Financial Services"
+        },
+        {
+          "symbol": "HDFCLIFE",
+          "name": "HDFC Life Insurance Company Limited",
+          "lot_size": 1000,
+          "isin": "INE795G01014",
+          "type": "Insurance"
+        },
+        {
+          "symbol": "SBILIFE",
+          "name": "SBI Life Insurance Company Limited",
+          "lot_size": 600,
+          "isin": "INE123W01016",
+          "type": "Insurance"
+        },
+        {
+          "symbol": "ICICIPRULI",
+          "name": "ICICI Prudential Life Insurance Company Limited",
+          "lot_size": 1100,
+          "isin": "INE726G01019",
+          "type": "Insurance"
+        },
+        {
+          "symbol": "SHRIRAMFIN",
+          "name": "Shriram Finance Limited",
+          "lot_size": 300,
+          "isin": "INE721A01013",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "LICHSGFIN",
+          "name": "LIC Housing Finance Limited",
+          "lot_size": 1500,
+          "isin": "INE115A01026",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "PFC",
+          "name": "Power Finance Corporation Limited",
+          "lot_size": 3500,
+          "isin": "INE134E01011",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "MUTHOOTFIN",
+          "name": "Muthoot Finance Limited",
+          "lot_size": 100,
+          "isin": "INE414G01012",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "CHOLAFIN",
+          "name": "Cholamandalam Investment and Finance Company Limited",
+          "lot_size": 400,
+          "isin": "INE121A01024",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "ICICIGI",
+          "name": "ICICI Lombard General Insurance Company Limited",
+          "lot_size": 600,
+          "isin": "INE765G01017",
+          "type": "Insurance"
+        },
+        {
+          "symbol": "AXISBANK",
+          "name": "Axis Bank Limited",
+          "lot_size": 625,
+          "isin": "INE238A01034",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "ICICIBANK",
+          "name": "ICICI Bank Limited",
+          "lot_size": 175,
+          "isin": "INE090A01021",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "SBICARD",
+          "name": "SBI Cards and Payment Services Limited",
+          "lot_size": 1100,
+          "isin": "INE018E01016",
+          "type": "Financial Services"
+        },
+        {
+          "symbol": "RECLTD",
+          "name": "REC Limited",
+          "lot_size": 2600,
+          "isin": "INE020B01018",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "HDFCBANK",
+          "name": "HDFC Bank Limited",
+          "lot_size": 550,
+          "isin": "INE040A01034",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "KOTAKBANK",
+          "name": "Kotak Mahindra Bank Limited",
+          "lot_size": 400,
+          "isin": "INE237A01028",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "HDFCAMC",
+          "name": "HDFC Asset Management Company Limited",
+          "lot_size": 100,
+          "isin": "INE127D01025",
+          "type": "Asset Management"
+        },
+        {
+          "symbol": "SBIN",
+          "name": "State Bank of India",
+          "lot_size": 1500,
+          "isin": "INE062A01020",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "JIOFIN",
+          "name": "Jio Financial Services Limited",
+          "lot_size": 3200,
+          "isin": "INE758E01017",
+          "type": "Financial Services"
+        },
+        {
+          "symbol": "PAYTM",
+          "name": "One 97 Communications Limited",
+          "lot_size": 1700,
+          "isin": "INE982J01020",
+          "type": "Fintech"
+        },
+        {
+          "symbol": "LICI",
+          "name": "Life Insurance Corporation of India",
+          "lot_size": 2000,
+          "isin": "INE0J1Y01017",
+          "type": "Insurance"
+        },
+        {
+          "symbol": "PEL",
+          "name": "Piramal Enterprises Limited",
+          "lot_size": 300,
+          "isin": "INE140A01024",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "LTF",
+          "name": "L&T Finance Limited",
+          "lot_size": 8000,
+          "isin": "INE498L01015",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "MFSL",
+          "name": "Max Financial Services Limited",
+          "lot_size": 750,
+          "isin": "INE180A01020",
+          "type": "Insurance"
+        },
+        {
+          "symbol": "ABCAPITAL",
+          "name": "Aditya Birla Capital Limited",
+          "lot_size": 6000,
+          "isin": "INE674K01013",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "M&MFIN",
+          "name": "Mahindra & Mahindra Financial Services Limited",
+          "lot_size": 2500,
+          "isin": "INE774D01024",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "POLICYBZR",
+          "name": "PB Fintech Limited",
+          "lot_size": 500,
+          "isin": "INE0JC201020",
+          "type": "Fintech"
+        },
+        {
+          "symbol": "IRFC",
+          "name": "Indian Railway Finance Corporation Limited",
+          "lot_size": 10000,
+          "isin": "INE053F01010",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "ANGELONE",
+          "name": "Angel One Limited",
+          "lot_size": 200,
+          "isin": "INE732I01013",
+          "type": "Stockbroking"
+        },
+        {
+          "symbol": "MCX",
+          "name": "Multi Commodity Exchange of India Limited",
+          "lot_size": 250,
+          "isin": "INE745G01035",
+          "type": "Exchange"
+        },
+        {
+          "symbol": "BSE",
+          "name": "BSE Limited",
+          "lot_size": 10000,
+          "isin": "INE118H01025",
+          "type": "Exchange"
+        },
+        {
+          "symbol": "CDSL",
+          "name": "Central Depository Services (India) Limited",
+          "lot_size": 500,
+          "isin": "INE736A01011",
+          "type": "Financial Infrastructure"
+        },
+        {
+          "symbol": "IEX",
+          "name": "Indian Energy Exchange Limited",
+          "lot_size": 2500,
+          "isin": "INE022Q01020",
+          "type": "Exchange"
+        },
+        {
+          "symbol": "CAMS",
+          "name": "Computer Age Management Services Limited",
+          "lot_size": 200,
+          "isin": "INE596I01012",
+          "type": "Financial Services"
+        },
+        {
+          "symbol": "HUDCO",
+          "name": "Housing and Urban Development Corporation Limited",
+          "lot_size": 3000,
+          "isin": "INE031A01017",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "MANAPPURAM",
+          "name": "Manappuram Finance Limited",
+          "lot_size": 4000,
+          "isin": "INE522D01027",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "SUNDARMFIN",
+          "name": "Sundaram Finance Limited",
+          "lot_size": 750,
+          "isin": "INE660A01013",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "POONAWALLA",
+          "name": "Poonawalla Fincorp Limited",
+          "lot_size": 750,
+          "isin": "INE511C01022",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "NUVAMA",
+          "name": "NUVAMA WEALTH MANAGE LTD",
+          "lot_size": 1000,
+          "isin": "INE200M01039",
+          "type": "Wealth Management"
+        },
+        {
+          "symbol": "PNBHOUSING",
+          "name": "PNB HOUSING FIN LTD.",
+          "lot_size": 2000,
+          "isin": "INE148I01020",
+          "type": "Housing Finance"
+        },
+        {
+          "symbol": "IIFL",
+          "name": "IIFL FINANCE LIMITED",
+          "lot_size": 500,
+          "isin": "INE530B01024",
+          "type": "NBFC"
+        },
+        {
+          "symbol": "SAMMAANCAP",
+          "name": "SAMMAAN CAPITAL LIMITED",
+          "lot_size": 1000,
+          "isin": "INE531F01015",
+          "type": "NBFC"
+        }
+      ]
+    },
+    "REALTY": {
+      "display_name": "Real Estate",
+      "icon": "🏠",
+      "color": "#8BC34A",
+      "description": "Real estate development and related services",
+      "index": {
+        "symbol": "CNXREALTY",
+        "name": "Nifty Realty",
+        "instrument_key": "NSE_INDEX|NIFTY REALTY"
+      },
+      "stocks": [
+        {
+          "symbol": "DLF",
+          "name": "DLF Limited",
+          "lot_size": 1300,
+          "isin": "INE271C01023",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "GODREJPROP",
+          "name": "Godrej Properties Limited",
+          "lot_size": 300,
+          "isin": "INE484J01027",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "OBEROIRLTY",
+          "name": "Oberoi Realty Limited",
+          "lot_size": 500,
+          "isin": "INE093I01010",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "PRESTIGE",
+          "name": "Prestige Estates Projects Limited",
+          "lot_size": 1000,
+          "isin": "INE811K01011",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "SOBHA",
+          "name": "Sobha Limited",
+          "lot_size": 650,
+          "isin": "INE671H01025",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "ANANTRAJ",
+          "name": "Anant Raj Limited",
+          "lot_size": 15000,
+          "isin": "INE242C01024",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "PHOENIXLTD",
+          "name": "Phoenix Mills Limited",
+          "lot_size": 300,
+          "isin": "INE211B01039",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "RAYMOND",
+          "name": "Raymond Limited",
+          "lot_size": 1000,
+          "isin": "INE301A01014",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "LODHA",
+          "name": "Macrotech Developers Limited",
+          "lot_size": 600,
+          "isin": "INE018V01017",
+          "type": "Real Estate"
+        },
+        {
+          "symbol": "BRIGADE",
+          "name": "Brigade Enterprises Limited",
+          "lot_size": 900,
+          "isin": "INE791I01019",
+          "type": "Real Estate"
+        }
+      ]
+    },
+    "MEDIA": {
+      "display_name": "Media & Entertainment",
+      "icon": "📺",
+      "color": "#9C27B0",
+      "description": "Media, entertainment, broadcasting and digital content companies",
+      "index": {
+        "symbol": "CNXMEDIA",
+        "name": "Nifty Media",
+        "instrument_key": "NSE_INDEX|NIFTY MEDIA"
+      },
+      "stocks": [
+        {
+          "symbol": "ZEEL",
+          "name": "Zee Entertainment Enterprises Limited",
+          "lot_size": 2400,
+          "isin": "INE256A01028",
+          "type": "Broadcasting"
+        },
+        {
+          "symbol": "NAZARA",
+          "name": "Nazara Technologies Limited",
+          "lot_size": 650,
+          "isin": "INE418L01021",
+          "type": "Gaming"
+        },
+        {
+          "symbol": "TIPSMUSIC",
+          "name": "Tips Music Limited",
+          "lot_size": 2000,
+          "isin": "INE716H01025",
+          "type": "Music"
+        },
+        {
+          "symbol": "NETWORK18",
+          "name": "Network18 Media & Investments Limited",
+          "lot_size": 7500,
+          "isin": "INE870H01013",
+          "type": "Broadcasting"
+        },
+        {
+          "symbol": "SUNTV",
+          "name": "Sun TV Network Limited",
+          "lot_size": 1000,
+          "isin": "INE424H01027",
+          "type": "Broadcasting"
+        },
+        {
+          "symbol": "PVRINOX",
+          "name": "PVR INOX Limited",
+          "lot_size": 375,
+          "isin": "INE191H01014",
+          "type": "Cinema Exhibition"
+        },
+        {
+          "symbol": "SAREGAMA",
+          "name": "Saregama India Limited",
+          "lot_size": 1300,
+          "isin": "INE979A01025",
+          "type": "Music"
+        },
+        {
+          "symbol": "DBCORP",
+          "name": "D.B. Corp Limited",
+          "lot_size": 3500,
+          "isin": "INE950I01011",
+          "type": "Print Media"
+        },
+        {
+          "symbol": "HATHWAY",
+          "name": "Hathway Cable & Datacom Limited",
+          "lot_size": 22500,
+          "isin": "INE982F01036",
+          "type": "Cable TV"
+        },
+        {
+          "symbol": "DISHTV",
+          "name": "Dish TV India Limited",
+          "lot_size": 37500,
+          "isin": "INE836F01026",
+          "type": "DTH"
+        }
+      ]
+    },
+    "PSU_BANK": {
+      "display_name": "PSU Banks",
+      "icon": "🏛️",
+      "color": "#2196F3",
+      "description": "Public Sector Undertaking Banks",
+      "index": {
+        "symbol": "CNXPSUBANK",
+        "name": "Nifty PSU Bank",
+        "instrument_key": "NSE_INDEX|NIFTY PSU BANK"
+      },
+      "stocks": [
+        {
+          "symbol": "CANBK",
+          "name": "Canara Bank",
+          "lot_size": 4000,
+          "isin": "INE476A01014",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "INDIANB",
+          "name": "Indian Bank",
+          "lot_size": 1250,
+          "isin": "INE562A01011",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "BANKINDIA",
+          "name": "Bank of India",
+          "lot_size": 5000,
+          "isin": "INE084A01016",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "MAHABANK",
+          "name": "Bank of Maharashtra",
+          "lot_size": 12500,
+          "isin": "INE457A01014",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "PNB",
+          "name": "Punjab National Bank",
+          "lot_size": 7500,
+          "isin": "INE476A01022",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "BANKBARODA",
+          "name": "Bank of Baroda",
+          "lot_size": 3000,
+          "isin": "INE028A01039",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "SBIN",
+          "name": "State Bank of India",
+          "lot_size": 1500,
+          "isin": "INE062A01020",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "UCOBANK",
+          "name": "UCO Bank",
+          "lot_size": 22500,
+          "isin": "INE691A01018",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "CENTRALBK",
+          "name": "Central Bank of India",
+          "lot_size": 15000,
+          "isin": "INE483A01010",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "UNIONBANK",
+          "name": "Union Bank of India",
+          "lot_size": 5000,
+          "isin": "INE692A01016",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "PSB",
+          "name": "Punjab & Sind Bank",
+          "lot_size": 37500,
+          "isin": "INE608A01012",
+          "type": "Public Bank"
+        },
+        {
+          "symbol": "IOB",
+          "name": "Indian Overseas Bank",
+          "lot_size": 22500,
+          "isin": "INE565A01014",
+          "type": "Public Bank"
+        }
+      ]
+    },
+    "PRIVATE_BANK": {
+      "display_name": "Private Banks",
+      "icon": "🏦",
+      "color": "#1976D2",
+      "description": "Private Sector Banks",
+      "index": {
+        "symbol": "CNXPVTBANK",
+        "name": "Nifty Private Bank",
+        "instrument_key": "NSE_INDEX|NIFTY PVT BANK"
+      },
+      "stocks": [
+        {
+          "symbol": "AXISBANK",
+          "name": "Axis Bank Limited",
+          "lot_size": 625,
+          "isin": "INE238A01034",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "YESBANK",
+          "name": "Yes Bank Limited",
+          "lot_size": 37500,
+          "isin": "INE528G01027",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "RBLBANK",
+          "name": "RBL Bank Limited",
+          "lot_size": 2800,
+          "isin": "INE976G01028",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "ICICIBANK",
+          "name": "ICICI Bank Limited",
+          "lot_size": 175,
+          "isin": "INE090A01021",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "HDFCBANK",
+          "name": "HDFC Bank Limited",
+          "lot_size": 550,
+          "isin": "INE040A01034",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "KOTAKBANK",
+          "name": "Kotak Mahindra Bank Limited",
+          "lot_size": 400,
+          "isin": "INE237A01028",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "IDFCFIRSTB",
+          "name": "IDFC First Bank Limited",
+          "lot_size": 10000,
+          "isin": "INE092T01019",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "INDUSINDBK",
+          "name": "IndusInd Bank Limited",
+          "lot_size": 900,
+          "isin": "INE095A01012",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "FEDERALBNK",
+          "name": "Federal Bank Limited",
+          "lot_size": 5000,
+          "isin": "INE171A01029",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "BANDHANBNK",
+          "name": "Bandhan Bank Limited",
+          "lot_size": 2800,
+          "isin": "INE545U01014",
+          "type": "Private Bank"
+        },
+        {
+          "symbol": "AUBANK",
+          "name": "AU Small Finance Bank Limited",
+          "lot_size": 500,
+          "isin": "INE949L01017",
+          "type": "Private Bank"
+        }
+      ]
+    },
+    "HEALTHCARE": {
+      "display_name": "Healthcare",
+      "icon": "🏥",
+      "color": "#E53935",
+      "description": "Healthcare services, hospitals, pharmaceuticals and biotechnology",
+      "index": {
+        "symbol": "CNXHEALTHCARE",
+        "name": "Nifty Healthcare Index",
+        "instrument_key": "NSE_INDEX|NIFTY HEALTHCARE INDEX"
+      },
+      "stocks": [
+        {
+          "symbol": "FORTIS",
+          "name": "Fortis Healthcare Limited",
+          "lot_size": 1800,
+          "isin": "INE061F01013",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "MAXHEALTH",
+          "name": "Max Healthcare Institute Limited",
+          "lot_size": 1500,
+          "isin": "INE027H01028",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "TORNTPHARM",
+          "name": "Torrent Pharmaceuticals Limited",
+          "lot_size": 150,
+          "isin": "INE685A01028",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "ZYDUSLIFE",
+          "name": "Zydus Lifesciences Limited",
+          "lot_size": 800,
+          "isin": "INE010B01027",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "AUROPHARMA",
+          "name": "Aurobindo Pharma Limited",
+          "lot_size": 1000,
+          "isin": "INE406A01037",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "ABBOTINDIA",
+          "name": "Abbott India Limited",
+          "lot_size": 100,
+          "isin": "INE358A01014",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "APOLLOHOSP",
+          "name": "Apollo Hospitals Enterprise Limited",
+          "lot_size": 125,
+          "isin": "INE437A01024",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "ALKEM",
+          "name": "Alkem Laboratories Limited",
+          "lot_size": 125,
+          "isin": "INE540L01014",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "SUNPHARMA",
+          "name": "Sun Pharmaceutical Industries Limited",
+          "lot_size": 400,
+          "isin": "INE044A01036",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "DRREDDY",
+          "name": "Dr. Reddy's Laboratories Limited",
+          "lot_size": 125,
+          "isin": "INE089A01023",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "SYNGENE",
+          "name": "Syngene International Limited",
+          "lot_size": 800,
+          "isin": "INE398R01022",
+          "type": "Biotechnology"
+        },
+        {
+          "symbol": "DIVISLAB",
+          "name": "Divi's Laboratories Limited",
+          "lot_size": 125,
+          "isin": "INE361B01024",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "BIOCON",
+          "name": "Biocon Limited",
+          "lot_size": 1800,
+          "isin": "INE376G01013",
+          "type": "Biotechnology"
+        },
+        {
+          "symbol": "LUPIN",
+          "name": "Lupin Limited",
+          "lot_size": 600,
+          "isin": "INE326A01037",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "CIPLA",
+          "name": "Cipla Limited",
+          "lot_size": 700,
+          "isin": "INE059A01026",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "MANKIND",
+          "name": "Mankind Pharma Limited",
+          "lot_size": 300,
+          "isin": "INE634S01028",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "IPCALAB",
+          "name": "IPCA Laboratories Limited",
+          "lot_size": 500,
+          "isin": "INE571A01038",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "GRANULES",
+          "name": "Granules India Limited",
+          "lot_size": 1500,
+          "isin": "INE101D01020",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "GLENMARK",
+          "name": "Glenmark Pharmaceuticals Limited",
+          "lot_size": 600,
+          "isin": "INE935A01035",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "LAURUSLABS",
+          "name": "Laurus Labs Limited",
+          "lot_size": 1200,
+          "isin": "INE947Q01028",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "GLAXO",
+          "name": "GlaxoSmithKline Pharmaceuticals Limited",
+          "lot_size": 125,
+          "isin": "INE159A01016",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "COHANCE",
+          "name": "Cohance Lifesciences Limited",
+          "lot_size": 750,
+          "isin": "INE970V01019",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "ASTERDM",
+          "name": "Aster DM Healthcare Limited",
+          "lot_size": 1500,
+          "isin": "INE914M01019",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "RAINBOW",
+          "name": "Rainbow Children's Medicare Limited",
+          "lot_size": 700,
+          "isin": "INE961O01016",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "PFIZER",
+          "name": "Pfizer Limited",
+          "lot_size": 125,
+          "isin": "INE182A01018",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "APLLTD",
+          "name": "Alembic Pharmaceuticals Limited",
+          "lot_size": 600,
+          "isin": "INE901L01018",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "KIMS",
+          "name": "Krishna Institute of Medical Sciences Limited",
+          "lot_size": 2500,
+          "isin": "INE409T01010",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "NEULANDLAB",
+          "name": "Neuland Laboratories Limited",
+          "lot_size": 500,
+          "isin": "INE794B01018",
+          "type": "Pharmaceuticals"
+        },
+        {
+          "symbol": "NH",
+          "name": "Narayana Hrudayalaya Limited",
+          "lot_size": 700,
+          "isin": "INE410P01011",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "MEDANTA",
+          "name": "Global Health Limited",
+          "lot_size": 1800,
+          "isin": "INE597J01018",
+          "type": "Healthcare Services"
+        },
+        {
+          "symbol": "POLYMED",
+          "name": "Poly Medicure Limited",
+          "lot_size": 1500,
+          "isin": "INE205C01021",
+          "type": "Medical Devices"
+        },
+        {
+          "symbol": "LALPATHLAB",
+          "name": "Dr. Lal Path Labs Limited",
+          "lot_size": 250,
+          "isin": "INE600L01024",
+          "type": "Diagnostics"
+        },
+        {
+          "symbol": "PPLPHARMA",
+          "name": "Piramal Pharma Limited",
+          "lot_size": 1200,
+          "isin": "INE0DM01020",
+          "type": "Pharmaceuticals"
+        }
+      ]
+    },
+    "CONSUMER_DURABLES": {
+      "display_name": "Consumer Durables",
+      "icon": "🏠",
+      "color": "#FF5722",
+      "description": "Consumer durables, appliances, jewelry, footwear and home improvement products",
+      "index": {
+        "symbol": "CNXCONSUMERDUR",
+        "name": "Nifty Consumer Durables",
+        "instrument_key": "NSE_INDEX|NIFTY CONSUMER DURABLES"
+      },
+      "stocks": [
+        {
+          "symbol": "BLUESTARCO",
+          "name": "Blue Star Limited",
+          "lot_size": 650,
+          "isin": "INE472A01039",
+          "type": "Air Conditioning"
+        },
+        {
+          "symbol": "CERA",
+          "name": "Cera Sanitaryware Limited",
+          "lot_size": 75,
+          "isin": "INE739E01017",
+          "type": "Sanitaryware"
+        },
+        {
+          "symbol": "AMBER",
+          "name": "Amber Enterprises India Limited",
+          "lot_size": 150,
+          "isin": "INE371P01015",
+          "type": "Air Conditioning"
+        },
+        {
+          "symbol": "KAJARIACER",
+          "name": "Kajaria Ceramics Limited",
+          "lot_size": 50,
+          "isin": "INE217B01036",
+          "type": "Ceramics & Tiles"
+        },
+        {
+          "symbol": "WHIRLPOOL",
+          "name": "Whirlpool of India Limited",
+          "lot_size": 300,
+          "isin": "INE716A01013",
+          "type": "Home Appliances"
+        },
+        {
+          "symbol": "TITAN",
+          "name": "Titan Company Limited",
+          "lot_size": 250,
+          "isin": "INE280A01028",
+          "type": "Jewelry & Watches"
+        },
+        {
+          "symbol": "DIXON",
+          "name": "Dixon Technologies (India) Limited",
+          "lot_size": 125,
+          "isin": "INE935N01020",
+          "type": "Electronics Manufacturing"
+        },
+        {
+          "symbol": "HAVELLS",
+          "name": "Havells India Limited",
+          "lot_size": 500,
+          "isin": "INE176B01034",
+          "type": "Electrical Equipment"
+        },
+        {
+          "symbol": "CENTURYPLY",
+          "name": "Century Plyboards (India) Limited",
+          "lot_size": 900,
+          "isin": "INE348B01021",
+          "type": "Plywood & Laminates"
+        },
+        {
+          "symbol": "BATAINDIA",
+          "name": "Bata India Limited",
+          "lot_size": 400,
+          "isin": "INE176A01028",
+          "type": "Footwear"
+        },
+        {
+          "symbol": "KALYANKJIL",
+          "name": "Kalyan Jewellers India Limited",
+          "lot_size": 1500,
+          "isin": "INE303R01014",
+          "type": "Jewelry"
+        },
+        {
+          "symbol": "VGUARD",
+          "name": "V-Guard Industries Limited",
+          "lot_size": 2000,
+          "isin": "INE951I01027",
+          "type": "Electrical Equipment"
+        },
+        {
+          "symbol": "CROMPTON",
+          "name": "Crompton Greaves Consumer Electricals Limited",
+          "lot_size": 1500,
+          "isin": "INE299U01018",
+          "type": "Electrical Equipment"
+        },
+        {
+          "symbol": "PGEL",
+          "name": "PG Electroplast Limited",
+          "lot_size": 2500,
+          "isin": "INE457L01011",
+          "type": "Electronics Manufacturing"
+        },
+        {
+          "symbol": "VOLTAS",
+          "name": "Voltas Limited",
+          "lot_size": 600,
+          "isin": "INE226A01021",
+          "type": "Air Conditioning"
+        },
+        {
+          "symbol": "TRENT",
+          "name": "TRENT LIMITED",
+          "lot_size": 400,
+          "isin": "INE849A01020",
+          "type": "Retail"
+        },
+        {
+          "symbol": "DMART",
+          "name": "AVENUE SUPERMARTS LIMITED",
+          "lot_size": 125,
+          "isin": "INE192R01011",
+          "type": "Retail"
+        },
+        {
+          "symbol": "PAGEIND",
+          "name": "PAGE INDUSTRIES LIMITED",
+          "lot_size": 10,
+          "isin": "INE761H01022",
+          "type": "Apparel"
+        },
+        {
+          "symbol": "ASIANPAINT",
+          "name": "ASIAN PAINTS LIMITED",
+          "lot_size": 200,
+          "isin": "INE021A01026",
+          "type": "Paints & Coatings"
+        }
+      ]
+    },
+    "POWER": {
+      "display_name": "Power & Utilities",
+      "icon": "⚡",
+      "color": "#FFC107",
+      "description": "Power generation, transmission, distribution and renewable energy",
+      "index": {
+        "symbol": "CNXPOWER",
+        "name": "Nifty Energy",
+        "instrument_key": "NSE_INDEX|NIFTY ENERGY"
+      },
+      "stocks": [
+        {
+          "symbol": "ADANIGREEN",
+          "name": "ADANI GREEN ENERGY LTD",
+          "lot_size": 1500,
+          "isin": "INE364U01010",
+          "type": "Renewable Energy"
+        },
+        {
+          "symbol": "TORNTPOWER",
+          "name": "TORRENT POWER LTD",
+          "lot_size": 1000,
+          "isin": "INE813H01021",
+          "type": "Power Distribution"
+        },
+        {
+          "symbol": "TATAPOWER",
+          "name": "TATA POWER CO LTD",
+          "lot_size": 1500,
+          "isin": "INE245A01021",
+          "type": "Power Generation"
+        },
+        {
+          "symbol": "JSWENERGY",
+          "name": "JSW ENERGY LIMITED",
+          "lot_size": 2500,
+          "isin": "INE121E01018",
+          "type": "Power Generation"
+        },
+        {
+          "symbol": "NHPC",
+          "name": "NHPC LTD",
+          "lot_size": 5000,
+          "isin": "INE848E01016",
+          "type": "Hydro Power"
+        },
+        {
+          "symbol": "ADANIENSOL",
+          "name": "ADANI ENERGY SOLUTION LTD",
+          "lot_size": 300,
+          "isin": "INE931S01010",
+          "type": "Renewable Energy"
+        },
+        {
+          "symbol": "INOXWIND",
+          "name": "INOX WIND LIMITED",
+          "lot_size": 4000,
+          "isin": "INE066P01011",
+          "type": "Wind Energy"
+        },
+        {
+          "symbol": "SUZLON",
+          "name": "SUZLON ENERGY LIMITED",
+          "lot_size": 10000,
+          "isin": "INE040H01021",
+          "type": "Wind Energy"
+        },
+        {
+          "symbol": "IREDA",
+          "name": "INDIAN RENEWABLE ENERGY",
+          "lot_size": 7500,
+          "isin": "INE202E01016",
+          "type": "Renewable Energy Financing"
+        },
+        {
+          "symbol": "SOLARINDS",
+          "name": "SOLAR INDUSTRIES (I) LTD",
+          "lot_size": 1000,
+          "isin": "INE343H01029",
+          "type": "Industrial Explosives"
+        }
+      ]
+    },
+    "CEMENT": {
+      "display_name": "Cement & Building Materials",
+      "icon": "🧱",
+      "color": "#9E9E9E",
+      "description": "Cement manufacturing and building materials",
+      "index": {
+        "symbol": "CNXCEMENT",
+        "name": "Nifty Infrastructure",
+        "instrument_key": "NSE_INDEX|NIFTY INFRASTRUCTURE"
+      },
+      "stocks": [
+        {
+          "symbol": "DALBHARAT",
+          "name": "DALMIA BHARAT LIMITED",
+          "lot_size": 1000,
+          "isin": "INE00R701025",
+          "type": "Cement"
+        },
+        {
+          "symbol": "SHREECEM",
+          "name": "SHREE CEMENT LIMITED",
+          "lot_size": 10,
+          "isin": "INE070A01015",
+          "type": "Cement"
+        },
+        {
+          "symbol": "AMBUJACEM",
+          "name": "AMBUJA CEMENTS LTD",
+          "lot_size": 2000,
+          "isin": "INE079A01024",
+          "type": "Cement"
+        },
+        {
+          "symbol": "ULTRACEMCO",
+          "name": "ULTRATECH CEMENT LIMITED",
+          "lot_size": 100,
+          "isin": "INE481G01011",
+          "type": "Cement"
+        },
+        {
+          "symbol": "GRASIM",
+          "name": "GRASIM INDUSTRIES LTD",
+          "lot_size": 400,
+          "isin": "INE047A01021",
+          "type": "Cement & Chemicals"
+        },
+        {
+          "symbol": "ASTRAL",
+          "name": "ASTRAL LIMITED",
+          "lot_size": 1500,
+          "isin": "INE006I01046",
+          "type": "Building Materials"
+        },
+        {
+          "symbol": "SUPREMEIND",
+          "name": "SUPREME INDUSTRIES LTD",
+          "lot_size": 200,
+          "isin": "INE195A01028",
+          "type": "Plastic Products"
+        }
+      ]
+    },
+    "INFRASTRUCTURE": {
+      "display_name": "Infrastructure & Construction",
+      "icon": "🏗️",
+      "color": "#795548",
+      "description": "Construction, infrastructure development and engineering",
+      "index": {
+        "symbol": "CNXINFRA",
+        "name": "Nifty Infrastructure",
+        "instrument_key": "NSE_INDEX|NIFTY INFRASTRUCTURE"
+      },
+      "stocks": [
+        {
+          "symbol": "LT",
+          "name": "LARSEN & TOUBRO LTD.",
+          "lot_size": 250,
+          "isin": "INE018A01030",
+          "type": "Engineering & Construction"
+        },
+        {
+          "symbol": "NCC",
+          "name": "NCC LIMITED",
+          "lot_size": 4000,
+          "isin": "INE868B01028",
+          "type": "Construction"
+        },
+        {
+          "symbol": "NBCC",
+          "name": "NBCC (INDIA) LIMITED",
+          "lot_size": 3000,
+          "isin": "INE095N01031",
+          "type": "Construction"
+        },
+        {
+          "symbol": "RVNL",
+          "name": "RAIL VIKAS NIGAM LIMITED",
+          "lot_size": 2000,
+          "isin": "INE415G01027",
+          "type": "Railway Infrastructure"
+        },
+        {
+          "symbol": "IRCTC",
+          "name": "INDIAN RAIL TOUR CORP LTD",
+          "lot_size": 1000,
+          "isin": "INE335Y01020",
+          "type": "Railway Services"
+        },
+        {
+          "symbol": "GMRAIRPORT",
+          "name": "GMR AIRPORTS LIMITED",
+          "lot_size": 2000,
+          "isin": "INE776C01039",
+          "type": "Airport Infrastructure"
+        },
+        {
+          "symbol": "ADANIPORTS",
+          "name": "ADANI PORT & SEZ LTD",
+          "lot_size": 500,
+          "isin": "INE742F01042",
+          "type": "Port Operations"
+        },
+        {
+          "symbol": "CONCOR",
+          "name": "CONTAINER CORP OF IND LTD",
+          "lot_size": 2000,
+          "isin": "INE111A01025",
+          "type": "Logistics"
+        },
+        {
+          "symbol": "INDIGO",
+          "name": "INTERGLOBE AVIATION LTD",
+          "lot_size": 400,
+          "isin": "INE646L01027",
+          "type": "Aviation"
+        },
+        {
+          "symbol": "NTPC",
+          "name": "NTPC LIMITED",
+          "lot_size": 3000,
+          "isin": "INE733E01010",
+          "type": "Power Generation"
+        },
+        {
+          "symbol": "POWERGRID",
+          "name": "POWER GRID CORP OF INDIA LTD",
+          "lot_size": 1200,
+          "isin": "INE752E01010",
+          "type": "Power Transmission"
+        }
+      ]
+    },
+    "DEFENSE": {
+      "display_name": "Defense & Aerospace",
+      "icon": "🛡️",
+      "color": "#4CAF50",
+      "description": "Defense equipment, aerospace and related services",
+      "index": {
+        "symbol": "CNXDEFENSE",
+        "name": "Nifty India Defence",
+        "instrument_key": "NSE_INDEX|NIFTY INDIA DEFENCE"
+      },
+      "stocks": [
+        {
+          "symbol": "BDL",
+          "name": "BHARAT DYNAMICS LIMITED",
+          "lot_size": 2000,
+          "isin": "INE171Z01026",
+          "type": "Defense Equipment"
+        },
+        {
+          "symbol": "HAL",
+          "name": "HINDUSTAN AERONAUTICS LTD",
+          "lot_size": 250,
+          "isin": "INE066F01020",
+          "type": "Aerospace"
+        },
+        {
+          "symbol": "BEL",
+          "name": "BHARAT ELECTRONICS LTD",
+          "lot_size": 3000,
+          "isin": "INE263A01024",
+          "type": "Defense Electronics"
+        },
+        {
+          "symbol": "MAZDOCK",
+          "name": "MAZAGON DOCK SHIPBUIL LTD",
+          "lot_size": 1500,
+          "isin": "INE249Z01020",
+          "type": "Shipbuilding"
+        }
+      ]
+    },
+    "INDUSTRIAL": {
+      "display_name": "Industrial Manufacturing",
+      "icon": "🏭",
+      "color": "#607D8B",
+      "description": "Industrial equipment, machinery and manufacturing",
+      "index": {
+        "symbol": "CNXIND",
+        "name": "Nifty India Manufacturing",
+        "instrument_key": "NSE_INDEX|NIFTY INDIA MANUFACTURING"
+      },
+      "stocks": [
+        {
+          "symbol": "ABB",
+          "name": "ABB INDIA LIMITED",
+          "lot_size": 1000,
+          "isin": "INE117A01022",
+          "type": "Industrial Equipment"
+        },
+        {
+          "symbol": "CUMMINSIND",
+          "name": "CUMMINS INDIA LTD",
+          "lot_size": 400,
+          "isin": "INE298A01020",
+          "type": "Engines"
+        },
+        {
+          "symbol": "SIEMENS",
+          "name": "SIEMENS LTD",
+          "lot_size": 50,
+          "isin": "INE003A01024",
+          "type": "Industrial Equipment"
+        },
+        {
+          "symbol": "BHEL",
+          "name": "BHEL",
+          "lot_size": 3000,
+          "isin": "INE257A01026",
+          "type": "Heavy Engineering"
+        },
+        {
+          "symbol": "TITAGARH",
+          "name": "TITAGARH RAIL SYSTEMS LTD",
+          "lot_size": 1500,
+          "isin": "INE615H01020",
+          "type": "Railway Equipment"
+        },
+        {
+          "symbol": "CGPOWER",
+          "name": "CG POWER AND IND SOL LTD",
+          "lot_size": 4000,
+          "isin": "INE067A01029",
+          "type": "Electrical Equipment"
+        },
+        {
+          "symbol": "KEI",
+          "name": "KEI INDUSTRIES LTD.",
+          "lot_size": 1000,
+          "isin": "INE878B01027",
+          "type": "Cables"
+        },
+        {
+          "symbol": "POLYCAB",
+          "name": "POLYCAB INDIA LIMITED",
+          "lot_size": 500,
+          "isin": "INE455K01017",
+          "type": "Cables"
+        },
+        {
+          "symbol": "ETERNAL",
+          "name": "ETERNAL LIMITED",
+          "lot_size": 1500,
+          "isin": "INE202E01016",
+          "type": "Industrial Materials"
+        }
+      ]
+    }
+  },
+  "indices_mapping": {
+    "NSE_INDEX|NIFTY AUTO": "AUTO",
+    "NSE_INDEX|Nifty Bank": "BANKING",
+    "NSE_INDEX|NIFTY IT": "IT",
+    "NSE_INDEX|NIFTY PHARMA": "PHARMA",
+    "NSE_INDEX|NIFTY FMCG": "FMCG",
+    "NSE_INDEX|NIFTY METAL": "METAL",
+    "NSE_INDEX|NIFTY ENERGY": "ENERGY",
+    "NSE_INDEX|Nifty Fin Service": "FINANCIAL",
+    "NSE_INDEX|NIFTY REALTY": "REALTY",
+    "NSE_INDEX|NIFTY MEDIA": "MEDIA",
+    "NSE_INDEX|NIFTY PSU BANK": "PSU_BANK",
+    "NSE_INDEX|NIFTY PVT BANK": "PRIVATE_BANK",
+    "NSE_INDEX|NIFTY HEALTHCARE INDEX": "HEALTHCARE",
+    "NSE_INDEX|NIFTY CONSUMER DURABLES": "CONSUMER_DURABLES",
+    "NSE_INDEX|NIFTY OIL & GAS": "ENERGY",
+    "NSE_INDEX|NIFTY MIDSMALL HEALTHCARE": "HEALTHCARE",
+    "NSE_INDEX|NIFTY FINANCIAL SERVICES EX-BANK": "FINANCIAL",
+    "NSE_INDEX|NIFTY MIDSMALL FINANCIAL SERVICES": "FINANCIAL",
+    "NSE_INDEX|NIFTY MIDSMALL IT & TELECOM": "IT"
+  },
+  "symbol_to_sector_mapping": {
+    "MRF": "AUTO",
+    "BAJAJ-AUTO": "AUTO",
+    "MOTHERSON": "AUTO",
+    "TIINDIA": "AUTO",
+    "HEROMOTOCO": "AUTO",
+    "TVSMOTOR": "AUTO",
+    "M&M": "AUTO",
+    "EICHERMOT": "AUTO",
+    "MARUTI": "AUTO",
+    "BOSCHLTD": "AUTO",
+    "ASHOKLEY": "AUTO",
+    "BHARATFORG": "AUTO",
+    "BALKRISIND": "AUTO",
+    "TATAMOTORS": "AUTO",
+    "EXIDEIND": "AUTO",
+    "HDFCBANK": "FINANCIAL",
+    "ICICIBANK": "FINANCIAL",
+    "AXISBANK": "FINANCIAL",
+    "KOTAKBANK": "FINANCIAL",
+    "SBI": "BANKING",
+    "INDUSINDBK": "BANKING",
+    "FEDERALBNK": "BANKING",
+    "BANDHANBNK": "BANKING",
+    "IDFCFIRSTB": "BANKING",
+    "PNB": "BANKING",
+    "TCS": "IT",
+    "INFY": "IT",
+    "HCLTECH": "IT",
+    "WIPRO": "IT",
+    "LTI": "IT",
+    "TECHM": "IT",
+    "MINDTREE": "IT",
+    "COFORGE": "IT",
+    "OFSS": "IT",
+    "PERSISTENT": "IT",
+    "LTIM": "IT",
+    "MPHASIS": "IT",
+    "INTELLECT": "IT",
+    "SONATSOFTW": "IT",
+    "AFFLE": "IT",
+    "INDUSTOWER": "IT",
+    "IDEA": "IT",
+    "BHARTIHEXA": "IT",
+    "TEJASNET": "IT",
+    "KPITTECH": "IT",
+    "TATACOMM": "IT",
+    "HFCL": "IT",
+    "TATAELXSI": "IT",
+    "BSOFT": "IT",
+    "TATATECH": "IT",
+    "LTTS": "IT",
+    "CYIENT": "IT",
+    "ZENSARTECH": "IT",
+    "SUNPHARMA": "PHARMA",
+    "DRREDDY": "PHARMA",
+    "CIPLA": "PHARMA",
+    "BIOCON": "PHARMA",
+    "DIVISLAB": "PHARMA",
+    "LUPIN": "PHARMA",
+    "AUROPHARMA": "PHARMA",
+    "CADILAHC": "PHARMA",
+    "TORNTPHARM": "PHARMA",
+    "JBCHEPHARM": "PHARMA",
+    "AJANTPHARM": "PHARMA",
+    "ZYDUSLIFE": "PHARMA",
+    "ABBOTINDIA": "PHARMA",
+    "GLAND": "PHARMA",
+    "ALKEM": "PHARMA",
+    "NATCOPHARM": "PHARMA",
+    "MANKIND": "PHARMA",
+    "IPCALAB": "PHARMA",
+    "GRANULES": "PHARMA",
+    "GLENMARK": "PHARMA",
+    "LAURUSLABS": "PHARMA",
+    "NESTLEIND": "FMCG",
+    "HINDUNILVR": "FMCG",
+    "ITC": "FMCG",
+    "BRITANNIA": "FMCG",
+    "DABUR": "FMCG",
+    "MARICO": "FMCG",
+    "COLPAL": "FMCG",
+    "GODREJCP": "FMCG",
+    "UNITDSPR": "FMCG",
+    "EMAMILTD": "FMCG",
+    "TATACONSUM": "FMCG",
+    "UBL": "FMCG",
+    "PATANJALI": "FMCG",
+    "VBL": "FMCG",
+    "TATASTEEL": "METAL",
+    "JSWSTEEL": "METAL",
+    "HINDALCO": "METAL",
+    "VEDL": "METAL",
+    "COALINDIA": "METAL",
+    "SAIL": "METAL",
+    "NMDC": "METAL",
+    "JINDALSTEL": "METAL",
+    "HINDCOPPER": "METAL",
+    "ADANIENT": "METAL",
+    "HINDZINC": "METAL",
+    "JSL": "METAL",
+    "NATIONALUM": "METAL",
+    "APLAPOLLO": "METAL",
+    "LLOYDSME": "METAL",
+    "WELCORP": "METAL",
+    "RELIANCE": "ENERGY",
+    "ONGC": "ENERGY",
+    "IOC": "ENERGY",
+    "BPCL": "ENERGY",
+    "HPCL": "ENERGY",
+    "GAIL": "ENERGY",
+    "PETRONET": "ENERGY",
+    "ATGL": "ENERGY",
+    "OIL": "ENERGY",
+    "CASTROLIND": "ENERGY",
+    "HINDPETRO": "ENERGY",
+    "GSPL": "ENERGY",
+    "GUJGASLTD": "ENERGY",
+    "IGL": "ENERGY",
+    "AEGISLOG": "ENERGY",
+    "MGL": "ENERGY",
+    "BAJFINANCE": "FINANCIAL",
+    "BAJAJFINSV": "FINANCIAL",
+    "HDFCLIFE": "FINANCIAL",
+    "SBILIFE": "FINANCIAL",
+    "ICICIPRULI": "FINANCIAL",
+    "SHRIRAMFIN": "FINANCIAL",
+    "LICHSGFIN": "FINANCIAL",
+    "PFC": "FINANCIAL",
+    "MUTHOOTFIN": "FINANCIAL",
+    "CHOLAFIN": "FINANCIAL",
+    "ICICIGI": "FINANCIAL",
+    "SBICARD": "FINANCIAL",
+    "RECLTD": "FINANCIAL",
+    "HDFCAMC": "FINANCIAL",
+    "SBIN": "FINANCIAL",
+    "JIOFIN": "FINANCIAL",
+    "PAYTM": "FINANCIAL",
+    "LICI": "FINANCIAL",
+    "PEL": "FINANCIAL",
+    "LTF": "FINANCIAL",
+    "MFSL": "FINANCIAL",
+    "ABCAPITAL": "FINANCIAL",
+    "M&MFIN": "FINANCIAL",
+    "POLICYBZR": "FINANCIAL",
+    "IRFC": "FINANCIAL",
+    "ANGELONE": "FINANCIAL",
+    "MCX": "FINANCIAL",
+    "BSE": "FINANCIAL",
+    "CDSL": "FINANCIAL",
+    "IEX": "FINANCIAL",
+    "CAMS": "FINANCIAL",
+    "HUDCO": "FINANCIAL",
+    "MANAPPURAM": "FINANCIAL",
+    "SUNDARMFIN": "FINANCIAL",
+    "POONAWALLA": "FINANCIAL",
+    "DLF": "REALTY",
+    "GODREJPROP": "REALTY",
+    "OBEROIRLTY": "REALTY",
+    "PRESTIGE": "REALTY",
+    "SOBHA": "REALTY",
+    "ANANTRAJ": "REALTY",
+    "PHOENIXLTD": "REALTY",
+    "RAYMOND": "REALTY",
+    "LODHA": "REALTY",
+    "BRIGADE": "REALTY",
+    "ZEEL": "MEDIA",
+    "NAZARA": "MEDIA",
+    "TIPSMUSIC": "MEDIA",
+    "NETWORK18": "MEDIA",
+    "SUNTV": "MEDIA",
+    "PVRINOX": "MEDIA",
+    "SAREGAMA": "MEDIA",
+    "DBCORP": "MEDIA",
+    "HATHWAY": "MEDIA",
+    "DISHTV": "MEDIA",
+    "CANBK": "PSU_BANK",
+    "INDIANB": "PSU_BANK",
+    "BANKINDIA": "PSU_BANK",
+    "MAHABANK": "PSU_BANK",
+    "BANKBARODA": "PSU_BANK",
+    "UCOBANK": "PSU_BANK",
+    "CENTRALBK": "PSU_BANK",
+    "UNIONBANK": "PSU_BANK",
+    "PSB": "PSU_BANK",
+    "IOB": "PSU_BANK",
+    "YESBANK": "PRIVATE_BANK",
+    "RBLBANK": "PRIVATE_BANK",
+    "AUBANK": "PRIVATE_BANK",
+    "FORTIS": "HEALTHCARE",
+    "MAXHEALTH": "HEALTHCARE",
+    "APOLLOHOSP": "HEALTHCARE",
+    "SYNGENE": "HEALTHCARE",
+    "GLAXO": "HEALTHCARE",
+    "COHANCE": "HEALTHCARE",
+    "ASTERDM": "HEALTHCARE",
+    "RAINBOW": "HEALTHCARE",
+    "PFIZER": "HEALTHCARE",
+    "APLLTD": "HEALTHCARE",
+    "KIMS": "HEALTHCARE",
+    "NEULANDLAB": "HEALTHCARE",
+    "NH": "HEALTHCARE",
+    "MEDANTA": "HEALTHCARE",
+    "POLYMED": "HEALTHCARE",
+    "LALPATHLAB": "HEALTHCARE",
+    "PPLPHARMA": "HEALTHCARE",
+    "BLUESTARCO": "CONSUMER_DURABLES",
+    "CERA": "CONSUMER_DURABLES",
+    "AMBER": "CONSUMER_DURABLES",
+    "KAJARIACER": "CONSUMER_DURABLES",
+    "WHIRLPOOL": "CONSUMER_DURABLES",
+    "TITAN": "CONSUMER_DURABLES",
+    "DIXON": "CONSUMER_DURABLES",
+    "HAVELLS": "CONSUMER_DURABLES",
+    "CENTURYPLY": "CONSUMER_DURABLES",
+    "BATAINDIA": "CONSUMER_DURABLES",
+    "KALYANKJIL": "CONSUMER_DURABLES",
+    "VGUARD": "CONSUMER_DURABLES",
+    "CROMPTON": "CONSUMER_DURABLES",
+    "PGEL": "CONSUMER_DURABLES",
+    "VOLTAS": "CONSUMER_DURABLES",
+    "NUVAMA": "FINANCIAL",
+    "PNBHOUSING": "FINANCIAL",
+    "IIFL": "FINANCIAL",
+    "SAMMAANCAP": "FINANCIAL",
+    "TRENT": "CONSUMER_DURABLES",
+    "DMART": "CONSUMER_DURABLES",
+    "PAGEIND": "CONSUMER_DURABLES",
+    "NYKAA": "FMCG",
+    "JUBLFOOD": "FMCG",
+    "INDHOTEL": "FMCG",
+    "BHARTIARTL": "IT",
+    "NAUKRI": "IT",
+    "KFINTECH": "IT",
+    "DELHIVERY": "IT",
+    "ASIANPAINT": "CONSUMER_DURABLES",
+    "PIDILITIND": "PHARMA",
+    "UPL": "PHARMA",
+    "TATACHEM": "PHARMA",
+    "SRF": "PHARMA",
+    "PIIND": "PHARMA",
+    "NTPC": "INFRASTRUCTURE",
+    "POWERGRID": "INFRASTRUCTURE",
+    "ADANIGREEN": "POWER",
+    "TORNTPOWER": "POWER",
+    "TATAPOWER": "POWER",
+    "JSWENERGY": "POWER",
+    "NHPC": "POWER",
+    "ADANIENSOL": "POWER",
+    "INOXWIND": "POWER",
+    "SUZLON": "POWER",
+    "IREDA": "POWER",
+    "SOLARINDS": "POWER",
+    "DALBHARAT": "CEMENT",
+    "SHREECEM": "CEMENT",
+    "AMBUJACEM": "CEMENT",
+    "ULTRACEMCO": "CEMENT",
+    "GRASIM": "CEMENT",
+    "ASTRAL": "CEMENT",
+    "SUPREMEIND": "CEMENT",
+    "LT": "INFRASTRUCTURE",
+    "NCC": "INFRASTRUCTURE",
+    "NBCC": "INFRASTRUCTURE",
+    "RVNL": "INFRASTRUCTURE",
+    "IRCTC": "INFRASTRUCTURE",
+    "GMRAIRPORT": "INFRASTRUCTURE",
+    "ADANIPORTS": "INFRASTRUCTURE",
+    "CONCOR": "INFRASTRUCTURE",
+    "INDIGO": "INFRASTRUCTURE",
+    "BDL": "DEFENSE",
+    "HAL": "DEFENSE",
+    "BEL": "DEFENSE",
+    "MAZDOCK": "DEFENSE",
+    "ABB": "INDUSTRIAL",
+    "CUMMINSIND": "INDUSTRIAL",
+    "SIEMENS": "INDUSTRIAL",
+    "BHEL": "INDUSTRIAL",
+    "TITAGARH": "INDUSTRIAL",
+    "CGPOWER": "INDUSTRIAL",
+    "KEI": "INDUSTRIAL",
+    "POLYCAB": "INDUSTRIAL",
+    "ETERNAL": "INDUSTRIAL"
+  }
+}
