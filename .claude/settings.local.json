@@ -26,7 +26,8 @@
       "Bash(pip install:*)",
       "Task",
       "Read(~/**)",
-      "Edit(~/.claude/settings.json)"
+      "Edit(~/.claude/settings.json)",
+      "WebSearch"
     ],
     "deny": [],
     "additionalDirectories": [
@@ -71,7 +72,10 @@
   "tradingSystem": {
     "precisionMode": "decimal",
     "auditTrails": true,
-    "regulatoryCompliance": ["SEBI", "RBI"],
+    "regulatoryCompliance": [
+      "SEBI",
+      "RBI"
+    ],
     "marketHours": {
       "start": "09:15",
       "end": "15:30",
