@@ -22,16 +22,16 @@ class SimpleAnalyticsService:
         self._enhanced_analytics = None
         self._registry = None
 
-    def _get_enhanced_analytics(self):
-        """Lazy load enhanced analytics"""
+    def _get_optimized_service(self):
+        """Lazy load optimized market data service"""
         if self._enhanced_analytics is None:
             try:
-                from services.enhanced_market_analytics import enhanced_analytics
+                from services.optimized_market_data_service import optimized_market_service
 
-                self._enhanced_analytics = enhanced_analytics
+                self._enhanced_analytics = optimized_market_service
                 return self._enhanced_analytics
             except ImportError as e:
-                logger.warning(f"Enhanced analytics not available: {e}")
+                logger.warning(f"Optimized market service not available: {e}")
                 return None
         return self._enhanced_analytics
 
@@ -50,10 +50,20 @@ class SimpleAnalyticsService:
 
     def get_top_gainers_losers(self, limit=20):
         """Get top gainers and losers"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_top_gainers_losers(limit)
+                gainers = service.get_top_gainers(limit)
+                losers = service.get_top_losers(limit)
+                return {
+                    "gainers": gainers,
+                    "losers": losers,
+                    "analysis": {
+                        "avg_gainer_change": sum(g.get("change_percent", 0) for g in gainers) / len(gainers) if gainers else 0,
+                        "avg_loser_change": sum(l.get("change_percent", 0) for l in losers) / len(losers) if losers else 0,
+                        "total_analyzed": len(gainers) + len(losers)
+                    }
+                }
             except Exception as e:
                 logger.error(f"Error getting top movers: {e}")
 
@@ -61,10 +71,15 @@ class SimpleAnalyticsService:
 
     def get_volume_analysis(self, limit=20):
         """Get volume analysis"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_volume_analysis(limit)
+                volume_leaders = service.get_volume_leaders(limit)
+                return {
+                    "volume_leaders": volume_leaders,
+                    "unusual_volume": [],  # Can be implemented later
+                    "volume_momentum": []  # Can be implemented later
+                }
             except Exception as e:
                 logger.error(f"Error getting volume analysis: {e}")
 
@@ -72,10 +87,10 @@ class SimpleAnalyticsService:
 
     def get_market_sentiment(self):
         """Get market sentiment"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_market_sentiment()
+                return service.get_market_sentiment()
             except Exception as e:
                 logger.error(f"Error getting market sentiment: {e}")
 
@@ -138,10 +153,22 @@ class SimpleAnalyticsService:
 
     def get_breakout_analysis(self):
         """Get breakout analysis"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_breakout_analysis()
+                # Get new highs and lows as proxies for breakouts/breakdowns
+                new_highs = service.get_new_highs(20)
+                new_lows = service.get_new_lows(20)
+
+                return {
+                    "breakouts": new_highs,  # Stocks near day high can be considered breakouts
+                    "breakdowns": new_lows,  # Stocks near day low can be considered breakdowns
+                    "summary": {
+                        "total_breakouts": len(new_highs),
+                        "total_breakdowns": len(new_lows),
+                        "market_momentum": "bullish" if len(new_highs) > len(new_lows) else "bearish" if len(new_lows) > len(new_highs) else "neutral"
+                    }
+                }
             except Exception as e:
                 logger.error(f"Error getting breakout analysis: {e}")
 
@@ -149,10 +176,40 @@ class SimpleAnalyticsService:
 
     def get_intraday_stocks(self):
         """Get intraday stocks"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_intraday_stocks()
+                # Get biggest movers and volume leaders for intraday trading
+                biggest_movers = service.get_biggest_movers(30)
+                volume_leaders = service.get_volume_leaders(30)
+
+                # Categorize by risk based on volatility and volume
+                low_risk = []
+                medium_risk = []
+                high_risk = []
+
+                for stock in biggest_movers:
+                    change_percent = abs(stock.get("change_percent", 0))
+                    volume = stock.get("volume", 0)
+
+                    if change_percent < 2 and volume > 50000:
+                        low_risk.append(stock)
+                    elif change_percent < 5 and volume > 25000:
+                        medium_risk.append(stock)
+                    elif change_percent >= 5 or volume > 100000:
+                        high_risk.append(stock)
+
+                return {
+                    "low_risk": low_risk[:10],
+                    "medium_risk": medium_risk[:10],
+                    "high_risk": high_risk[:10],
+                    "summary": {
+                        "total_analyzed": len(biggest_movers),
+                        "low_risk_count": len(low_risk),
+                        "medium_risk_count": len(medium_risk),
+                        "high_risk_count": len(high_risk)
+                    }
+                }
             except Exception as e:
                 logger.error(f"Error getting intraday stocks: {e}")
 
@@ -160,10 +217,21 @@ class SimpleAnalyticsService:
 
     def get_record_movers(self):
         """Get record movers"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_record_movers()
+                new_highs = service.get_new_highs(20)
+                new_lows = service.get_new_lows(20)
+
+                return {
+                    "new_highs": new_highs,
+                    "new_lows": new_lows,
+                    "summary": {
+                        "new_highs_count": len(new_highs),
+                        "new_lows_count": len(new_lows),
+                        "high_low_ratio": len(new_highs) / len(new_lows) if new_lows else float('inf')
+                    }
+                }
             except Exception as e:
                 logger.error(f"Error getting record movers: {e}")
 
@@ -173,10 +241,31 @@ class SimpleAnalyticsService:
         self, size_metric="market_cap", color_metric="change_percent"
     ):
         """Generate sector heatmap"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.generate_sector_heatmap(size_metric, color_metric)
+                sector_performance = service.get_sector_performance()
+
+                sectors = []
+                for sector_name, data in sector_performance.items():
+                    if data["total_stocks"] > 0:
+                        sectors.append({
+                            "sector": sector_name,
+                            "avg_change_percent": data["avg_change_percent"],
+                            "advancing": data["advancing"],
+                            "declining": data["declining"],
+                            "total_stocks": data["total_stocks"],
+                            "strength_score": data["strength_score"]
+                        })
+
+                return {
+                    "heatmap": {"sectors": sectors},
+                    "metadata": {
+                        "size_metric": size_metric,
+                        "color_metric": color_metric,
+                        "total_sectors": len(sectors)
+                    }
+                }
             except Exception as e:
                 logger.error(f"Error generating sector heatmap: {e}")
 
@@ -184,10 +273,23 @@ class SimpleAnalyticsService:
 
     def get_complete_analytics(self):
         """Get all analytics data"""
-        analytics = self._get_enhanced_analytics()
-        if analytics:
+        service = self._get_optimized_service()
+        if service:
             try:
-                return analytics.get_complete_analytics()
+                # Use optimized service methods directly for better performance
+                return {
+                    "top_movers": self.get_top_gainers_losers(),
+                    "volume_analysis": self.get_volume_analysis(),
+                    "market_sentiment": self.get_market_sentiment(),
+                    "gap_analysis": self.get_gap_analysis(),
+                    "breakout_analysis": self.get_breakout_analysis(),
+                    "intraday_stocks": self.get_intraday_stocks(),
+                    "record_movers": self.get_record_movers(),
+                    "sector_heatmap": self.generate_sector_heatmap(),
+                    "market_breadth": service.get_advance_decline_analysis(),
+                    "generated_at": datetime.now().isoformat(),
+                    "data_source": "optimized_market_service"
+                }
             except Exception as e:
                 logger.error(f"Error getting complete analytics: {e}")
 
