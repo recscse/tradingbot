@@ -35,9 +35,21 @@ logger = logging.getLogger(__name__)
 
 
 # Global automation lock to prevent multiple concurrent refresh attempts
-_automation_lock = asyncio.Lock()
+# Note: Lock is created lazily to avoid event loop binding issues
+_automation_lock = None
 _last_refresh_attempt = None
 _refresh_in_progress = False
+
+
+def _get_automation_lock():
+    """
+    Get or create the automation lock in the current event loop context.
+    This prevents event loop binding issues when module is imported.
+    """
+    global _automation_lock
+    if _automation_lock is None:
+        _automation_lock = asyncio.Lock()
+    return _automation_lock
 
 
 class UpstoxAutomationService:
@@ -57,8 +69,8 @@ class UpstoxAutomationService:
         # Store captured authorization code
         self._captured_auth_code = None
 
-        # Instance lock for this service
-        self._instance_lock = asyncio.Lock()
+        # Instance lock for this service (lazy initialization to avoid event loop issues)
+        self._instance_lock = None
 
         # Validate critical configuration
         missing_vars = []
@@ -75,6 +87,14 @@ class UpstoxAutomationService:
         logger.info(
             f"✅ Upstox automation service initialized for mobile: {self.mobile_no[:4]}****{self.mobile_no[-2:]}"
         )
+
+    def _get_instance_lock(self):
+        """
+        Get or create instance lock in the current event loop context.
+        """
+        if self._instance_lock is None:
+            self._instance_lock = asyncio.Lock()
+        return self._instance_lock
 
     def get_admin_broker_config(self, db: Session) -> Optional[BrokerConfig]:
         """
@@ -406,7 +426,8 @@ class UpstoxAutomationService:
         global _refresh_in_progress, _last_refresh_attempt
 
         # Use global lock to prevent multiple concurrent refresh attempts
-        async with _automation_lock:
+        automation_lock = _get_automation_lock()
+        async with automation_lock:
             # ✅ CRITICAL FIX: Always allow refresh if emergency_bypass=True or token is expired
             now = datetime.now()
             should_proceed = emergency_bypass

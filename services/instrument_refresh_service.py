@@ -320,10 +320,10 @@ class TradingInstrumentService:
                 await self._save_mcx_instruments(mcx_instruments)
 
                 # Extract NSE EQ FnO stock keys efficiently using pandas
-                nse_instrument_keys = await self._extract_nse_fno_keys(
+                nse_instrument_keys, nse_mappings = await self._extract_nse_fno_keys(
                     all_instruments, top_stocks
                 )
-                await self._save_nse_instrument_keys(nse_instrument_keys)
+                await self._save_nse_instrument_keys(nse_instrument_keys, nse_mappings)
 
                 # Add MCX instruments to filtered list
                 filtered_instruments.extend(mcx_instruments)
@@ -397,8 +397,8 @@ class TradingInstrumentService:
 
     async def _extract_nse_fno_keys(
         self, all_instruments: List[Dict], top_stocks: List[Dict]
-    ) -> List[str]:
-        """Extract NSE EQ instrument keys for FnO stocks."""
+    ) -> tuple[List[str], Dict[str, Dict[str, str]]]:
+        """Extract NSE EQ instrument keys for FnO stocks with symbol mappings."""
         df = pd.DataFrame(all_instruments)
 
         # Get FnO stock symbols and names for better matching
@@ -438,7 +438,7 @@ class TradingInstrumentService:
 
         if nse_eq_df.empty:
             logger.warning("❌ No NSE EQ instruments found matching FnO stocks")
-            return []
+            return [], {}
 
         # One instrument key per stock - prioritize by trading_symbol match
         unique_stocks_df = nse_eq_df.drop_duplicates(
@@ -446,23 +446,55 @@ class TradingInstrumentService:
         )
         instrument_keys = unique_stocks_df["instrument_key"].dropna().tolist()
 
+        # Create instrument key to symbol mapping
+        instrument_mappings = {}
+        for _, row in unique_stocks_df.iterrows():
+            instrument_key = row.get("instrument_key")
+            if instrument_key:
+                # Get the actual trading symbol from the data
+                trading_symbol = self.safe_get_string(row, "trading_symbol")
+                name = self.safe_get_string(row, "name")
+
+                # Use trading_symbol if available, otherwise use name
+                symbol = trading_symbol if trading_symbol else name
+
+                instrument_mappings[instrument_key] = {
+                    "symbol": symbol,
+                    "name": name,
+                    "trading_symbol": trading_symbol
+                }
+
         logger.info(f"📈 Extracted {len(instrument_keys)} NSE EQ instrument keys")
+        logger.info(f"📋 Created {len(instrument_mappings)} symbol mappings")
         logger.info(
             f"📋 Sample keys: {instrument_keys[:5] if instrument_keys else 'None'}"
         )
-        return instrument_keys
 
-    async def _save_nse_instrument_keys(self, instrument_keys: List[str]) -> None:
-        """Save NSE instrument keys to separate JSON file."""
+        return instrument_keys, instrument_mappings
+
+    async def _save_nse_instrument_keys(
+        self, instrument_keys: List[str], instrument_mappings: Dict[str, Dict[str, str]] = None
+    ) -> None:
+        """Save NSE instrument keys and mappings to separate JSON files."""
         nse_file_path = self.data_dir / "nse_instrument_keys.json"
+        nse_mappings_path = self.data_dir / "nse_symbol_mappings.json"
 
         try:
             self.data_dir.mkdir(exist_ok=True)
+
+            # Save instrument keys
             async with aiofiles.open(nse_file_path, "w") as f:
                 await f.write(json.dumps(instrument_keys, indent=2))
             logger.info(f"💾 Saved {len(instrument_keys)} NSE EQ instrument keys")
+
+            # Save symbol mappings if provided
+            if instrument_mappings:
+                async with aiofiles.open(nse_mappings_path, "w") as f:
+                    await f.write(json.dumps(instrument_mappings, indent=2))
+                logger.info(f"💾 Saved {len(instrument_mappings)} NSE symbol mappings")
+
         except Exception as e:
-            logger.error(f"❌ Failed to save NSE instrument keys: {e}")
+            logger.error(f"❌ Failed to save NSE instrument data: {e}")
             raise
 
     async def _is_already_refreshed_today(self) -> bool:
@@ -870,10 +902,10 @@ async def get_websocket_keys(max_keys: int = MAX_WEBSOCKET_INSTRUMENTS) -> List[
 
 def get_spot_only_instruments() -> List[Dict]:
     """
-    Get spot instruments for registry initialization.
+    Get spot instruments for registry initialization with proper symbol mapping.
 
     Returns:
-        List of spot instrument dictionaries
+        List of spot instrument dictionaries with actual stock symbols
     """
     service = get_trading_service()
 
@@ -883,34 +915,67 @@ def get_spot_only_instruments() -> List[Dict]:
     try:
         # Load NSE instrument keys
         nse_file_path = service.data_dir / "nse_instrument_keys.json"
+        nse_mappings_path = service.data_dir / "nse_symbol_mappings.json"
+
         if nse_file_path.exists():
             import json
 
             with open(nse_file_path, "r") as f:
                 nse_keys = json.load(f)
 
+            # Load symbol mappings if available
+            symbol_mappings = {}
+            if nse_mappings_path.exists():
+                try:
+                    with open(nse_mappings_path, "r") as f:
+                        symbol_mappings = json.load(f)
+                    logger.info(f"📋 Loaded {len(symbol_mappings)} symbol mappings")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not load symbol mappings: {e}")
+
             # Create basic instrument data for each key
             for i, key in enumerate(nse_keys):
-                # Extract symbol from key (format: NSE_EQ|INE...)
-                symbol = f"STOCK_{i+1}"  # Fallback symbol
-                try:
-                    # Try to extract real symbol if possible from stored data
-                    if "|" in key:
-                        symbol = (
-                            key.split("|")[1] if len(key.split("|")) > 1 else symbol
-                        )
-                except:
-                    pass
+                # Try to get actual symbol from mappings first
+                if key in symbol_mappings:
+                    mapping = symbol_mappings[key]
+                    symbol = mapping.get("symbol", "").strip()
+                    name = mapping.get("name", "").strip()
+                    trading_symbol = mapping.get("trading_symbol", "").strip()
+
+                    # Use trading_symbol if available, otherwise symbol, otherwise name
+                    display_symbol = trading_symbol or symbol or name
+                else:
+                    # Fallback: Extract ISIN from key (format: NSE_EQ|INE...)
+                    display_symbol = f"STOCK_{i+1}"  # Default fallback
+                    name = display_symbol
+                    trading_symbol = display_symbol
+
+                    try:
+                        if "|" in key:
+                            isin = key.split("|")[1] if len(key.split("|")) > 1 else display_symbol
+                            display_symbol = isin  # Use ISIN as last resort
+                            name = isin
+                            trading_symbol = isin
+                    except:
+                        pass
+
+                # Ensure we have valid symbols
+                if not display_symbol:
+                    display_symbol = f"STOCK_{i+1}"
+                if not name:
+                    name = display_symbol
+                if not trading_symbol:
+                    trading_symbol = display_symbol
 
                 spot_instruments.append(
                     {
                         "instrument_key": key,
-                        "symbol": symbol,
-                        "name": symbol,
+                        "symbol": display_symbol,
+                        "name": name,
                         "exchange": "NSE",
                         "segment": "NSE_EQ",
                         "instrument_type": "EQ",
-                        "trading_symbol": symbol,
+                        "trading_symbol": trading_symbol,
                         "expiry": None,
                         "strike_price": None,
                         "lot_size": 1,
@@ -918,7 +983,11 @@ def get_spot_only_instruments() -> List[Dict]:
                     }
                 )
 
-            logger.info(f"📈 Created {len(spot_instruments)} spot instruments")
+            logger.info(f"📈 Created {len(spot_instruments)} spot instruments with proper symbols")
+            if symbol_mappings:
+                logger.info(f"✅ Using actual stock symbols from Upstox instrument data")
+            else:
+                logger.warning("⚠️ No symbol mappings found, using fallback symbols")
 
     except Exception as e:
         logger.warning(f"⚠️ Could not load spot instruments: {e}")

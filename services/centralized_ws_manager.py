@@ -36,15 +36,6 @@ except ImportError as e:
     logger.warning(f"⚠️ Redis manager not available: {e}")
     redis_manager = None
 
-try:
-    from services.market_data_queue import get_market_queue_service
-
-    QUEUE_SERVICE_AVAILABLE = True
-    logger.info("✅ Market Data Queue Service available for integration")
-except ImportError:
-    QUEUE_SERVICE_AVAILABLE = False
-    logger.warning("⚠️ Market Data Queue Service not available")
-
 
 # Import instrument service with proper error handling
 def get_instrument_service():
@@ -167,49 +158,11 @@ class CentralizedWebSocketManager:
         self.data_count = 0
         self.update_count = 0
 
-        # Client management
-        self.dashboard_clients: Dict[str, WebSocket] = {}
-        self.trading_clients: Dict[str, WebSocket] = {}
-        self.client_subscriptions: Dict[str, Set[str]] = {}
-
-        # Callback registration
-        self.callbacks: Dict[str, List[CallbackFunction]] = {
-            "price_update": [],
-            "market_status": [],
-            "connection_status": [],
-            "error": [],
-        }
-
-        # Performance metrics
-        self.performance_metrics = {
-            "messages_received": 0,
-            "updates_processed": 0,
-            "callbacks_executed": 0,
-            "clients_updated": 0,
-            "reconnection_count": 0,
-            "last_latency_ms": 0,
-            "avg_latency_ms": 0,
-        }
-
-        # Background tasks
         self.background_tasks = set()
 
         # Initialize market data service
         self._initialized = True
         logger.info("✅ Centralized WebSocket manager initialized")
-
-        if QUEUE_SERVICE_AVAILABLE:
-            try:
-                self.queue_service = get_market_queue_service()
-                self.queue_integration_enabled = True
-                logger.info("✅ Queue service integration enabled")
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize queue service: {e}")
-                self.queue_service = None
-                self.queue_integration_enabled = False
-        else:
-            self.queue_service = None
-            self.queue_integration_enabled = False
 
     async def initialize(self) -> bool:
         """Initialize the manager with admin token from database"""
@@ -240,12 +193,15 @@ class CentralizedWebSocketManager:
             # Load the latest market snapshot
             snapshot_loaded = await self._load_market_snapshot()
 
-            # Determine market hours
+            # Determine market hours (including pre-market)
             current_time = datetime.now().time()
             current_day = datetime.now().weekday()
             market_should_be_open = (
                 current_day < 5  # Weekday check (0=Monday, 4=Friday)
-                and current_time >= datetime.strptime("09:15:00", "%H:%M:%S").time()
+                and current_time
+                >= datetime.strptime(
+                    "09:00:00", "%H:%M:%S"
+                ).time()  # Start at 9:00 AM for pre-market
                 and current_time <= datetime.strptime("15:30:00", "%H:%M:%S").time()
             )
 
@@ -751,14 +707,6 @@ class CentralizedWebSocketManager:
                 "NSE_INDEX|Nifty Oil & Gas",
                 "NSE_INDEX|Nifty Consumer Durables",
                 "NSE_INDEX|Nifty Healthcare Index",
-                # Broad Market Indices
-                "NSE_INDEX|Nifty Next 50",
-                "NSE_INDEX|Nifty 100",
-                "NSE_INDEX|Nifty 200",
-                "NSE_INDEX|Nifty Midcap 50",
-                "NSE_INDEX|Nifty Midcap 100",
-                "NSE_INDEX|Nifty Smallcap 50",
-                "NSE_INDEX|Nifty Smallcap 100",
             ]
 
             # Add top FNO stocks for better data coverage
@@ -866,7 +814,6 @@ class CentralizedWebSocketManager:
 
             except Exception as e:
                 self.reconnect_attempts += 1
-                self.performance_metrics["reconnection_count"] += 1
                 logger.error(f"❌ WebSocket connection failed: {e}")
 
                 # Reset connection event
@@ -887,26 +834,11 @@ class CentralizedWebSocketManager:
                     if self.reconnect_attempts == self.max_reconnect_attempts - 2:
                         await self._send_reconnection_warning_email()
 
-                    # Broadcast reconnection attempt status
-                    await self._broadcast_connection_status(
-                        {
-                            "status": "reconnecting",
-                            "message": f"Attempting reconnection {self.reconnect_attempts}/{self.max_reconnect_attempts}",
-                            "backoff_delay": backoff_delay,
-                        }
-                    )
-
                     await asyncio.sleep(backoff_delay)
                 else:
                     logger.error("❌ Max reconnection attempts reached")
                     self.is_running = False
                     await self._send_max_reconnections_email()
-                    await self._broadcast_connection_status(
-                        {
-                            "status": "failed",
-                            "message": "Max reconnection attempts reached",
-                        }
-                    )
 
     async def _start_ws_client(self):
         """Start the actual WebSocket client"""
@@ -963,18 +895,11 @@ class CentralizedWebSocketManager:
             start_time = time.time()
             self._last_raw_data = data.copy() if isinstance(data, dict) else data
             self.last_data_received = datetime.now()
-            self.performance_metrics["messages_received"] += 1
 
             # Signal connection is working
             if not self.connection_ready.is_set():
                 self.connection_ready.set()
                 logger.info("✅ WebSocket connection is receiving data")
-                await self._broadcast_connection_status(
-                    {
-                        "status": "connected",
-                        "message": "WebSocket connection established",
-                    }
-                )
 
             # Determine message type
             msg_type = data.get("type")
@@ -998,7 +923,7 @@ class CentralizedWebSocketManager:
             elif msg_type == "error":
                 logger.error(f"❌ Market data error: {data}")
                 await self._execute_callbacks("error", data)
-                await self._broadcast_error(data)
+                # await self._broadcast_error(data)
 
             else:
                 # Handle direct instrument data format
@@ -1009,20 +934,13 @@ class CentralizedWebSocketManager:
 
             # Calculate processing time
             processing_time = (time.time() - start_time) * 1000
-            self.performance_metrics["last_latency_ms"] = processing_time
-
-            # Update average latency
-            if self.performance_metrics["avg_latency_ms"] == 0:
-                self.performance_metrics["avg_latency_ms"] = processing_time
-            else:
-                self.performance_metrics["avg_latency_ms"] = (
-                    0.95 * self.performance_metrics["avg_latency_ms"]
-                    + 0.05 * processing_time
-                )
 
             try:
                 # This is a separate method to avoid circular imports
-                await self._update_instrument_registry(data)
+                # 🚀 CRITICAL FIX: Pass feeds data instead of complete message
+                feeds_data = data.get("feeds", {}) if isinstance(data, dict) else {}
+                if feeds_data:
+                    await self._update_instrument_registry(feeds_data)
             except Exception as e:
                 logger.debug(f"⚠️ Registry update error: {e}")
 
@@ -1085,7 +1003,7 @@ class CentralizedWebSocketManager:
                 self._schedule_market_close_shutdown()
 
     async def _handle_feeds_data(self, data: dict):
-        """🚀 Handle feeds format data with ultra-fast hub integration + ZERO-DELAY streaming"""
+        """Handle feeds format data - simplified routing only"""
         feeds = data.get("feeds", {})
         update_count = len(feeds)
         is_snapshot = self.update_count == 0
@@ -1094,93 +1012,190 @@ class CentralizedWebSocketManager:
             self.data_count += update_count
             self.update_count += 1
 
-            # 🚀 CRITICAL: ZERO-DELAY real-time streaming to UI FIRST (before any processing)
-            try:
-                from services.realtime_data_streamer import realtime_streamer
-
-                # This bypasses ALL processing and sends raw data directly to UI
-                await realtime_streamer.stream_raw_market_data(data)
-            except ImportError:
-                logger.debug("Real-time streamer not available - using legacy path")
-            except Exception as e:
-                logger.debug(f"Real-time streaming error: {e}")
             # Log data reception
             if is_snapshot:
                 logger.info(
-                    f"📸 Received initial snapshot with {update_count} instruments (ZERO-DELAY streaming active)"
+                    f"📸 Received initial snapshot with {update_count} instruments"
                 )
-            elif self.update_count % 50 == 0:  # Less frequent logging for performance
+            elif self.update_count % 50 == 0:
                 logger.info(
                     f"📊 Received update #{self.update_count} with {update_count} instruments (total: {self.data_count})"
                 )
 
-            # 🚀 BACKGROUND: All data processing happens in parallel (non-blocking)
-            # This includes enrichment, analytics, caching - UI already got raw data above
-            asyncio.create_task(
-                self._background_data_processing(feeds, is_snapshot, data)
-            )
+            # Simple routing - send raw data to processing services
+            # await self._route_feeds_data(feeds, is_snapshot, data)
 
-            logger.debug(
-                f"✅ ZERO-DELAY streaming + background processing initiated for {len(feeds)} instruments"
-            )
+            # 🚀 NEW: Update real-time analytics engine with market data
+            await self._update_analytics_engine(feeds)
 
-    async def _background_data_processing(
-        self, feeds: dict, is_snapshot: bool, data: dict
-    ):
-        """Background processing that doesn't block the main data flow"""
+            logger.debug(f"✅ Data routing completed for {len(feeds)} instruments")
+
+    async def _update_analytics_engine(self, feeds: dict):
+        """
+        Update real-time analytics engine with normalized market data
+
+        This method:
+        1. Normalizes Upstox feed format to analytics engine format
+        2. Calls analytics engine for atomic updates
+        3. Ensures zero-latency analytics calculations
+        """
         try:
-            # Legacy cache and registry updates (background only)
-            await asyncio.gather(
-                self._update_cache(feeds),
-                self._legacy_registry_update(feeds),
-                self._broadcast_live_data(feeds, is_snapshot),
-                return_exceptions=True,
+            # Import analytics engine safely to avoid circular imports
+            from services.realtime_market_engine import (
+                get_market_engine,
+                update_live_data,
             )
 
-            # Execute callbacks (background)
-            await self._execute_callbacks(
-                "price_update",
-                {
-                    "data": feeds,
-                    "is_snapshot": is_snapshot,
-                    "update_count": self.update_count,
-                    "timestamp": data.get("currentTs", datetime.now().isoformat()),
-                    "source": "centralized_background",
-                },
-            )
+            # Normalize Upstox feed format to analytics engine format
+            normalized_updates = {}
+
+            for instrument_key, feed_data in feeds.items():
+                try:
+                    # Extract live price data from Upstox format
+                    ltp_data = self._extract_ltp_from_feed(feed_data)
+
+                    if ltp_data and ltp_data.get("ltp", 0) > 0:
+                        normalized_updates[instrument_key] = {
+                            "ltp": ltp_data["ltp"],
+                            "volume": ltp_data.get("volume", 0),
+                            "timestamp": ltp_data.get("timestamp"),
+                            "high": ltp_data.get("high"),
+                            "low": ltp_data.get("low"),
+                            "open": ltp_data.get("open"),
+                            "close": ltp_data.get("close"),
+                        }
+
+                except Exception as e:
+                    logger.debug(f"⚠️ Error normalizing {instrument_key}: {e}")
+                    continue
+
+            # Update analytics engine with normalized data (atomic operation)
+            if normalized_updates:
+                # Log first update with sample data for debugging
+                if not hasattr(self, "_analytics_first_update_logged"):
+                    self._analytics_first_update_logged = True
+                    sample_keys = list(normalized_updates.keys())[:3]
+                    logger.info(
+                        f"🚀 Sending first update to analytics engine: {len(normalized_updates)} instruments"
+                    )
+                    logger.info(f"Sample keys being sent: {sample_keys}")
+                    if sample_keys:
+                        logger.info(
+                            f"Sample data structure: {normalized_updates[sample_keys[0]]}"
+                        )
+
+                update_live_data(normalized_updates)
+                logger.debug(
+                    f"📊 Updated analytics engine with {len(normalized_updates)} instruments"
+                )
+
+        except ImportError as e:
+            # Analytics engine not available - log the issue
+            logger.warning(f"⚠️ Analytics engine import failed: {e}")
+            logger.warning("Real-time analytics engine will not receive data updates")
         except Exception as e:
-            logger.debug(f"Background processing error: {e}")
+            logger.error(f"❌ Analytics engine update error: {e}")
+            logger.error(
+                f"Failed to update analytics engine with {len(normalized_updates) if 'normalized_updates' in locals() else 0} instruments"
+            )
 
-    async def _legacy_data_processing(self, feeds: dict, is_snapshot: bool, data: dict):
-        """Legacy fallback processing"""
-        await asyncio.gather(
-            self._update_cache(feeds),
-            self._update_instrument_registry(feeds),
-            self._broadcast_live_data(feeds, is_snapshot),
-            return_exceptions=True,
-        )
+    def _extract_ltp_from_feed(self, feed_data: dict) -> dict:
+        """
+        Extract Last Traded Price data from Upstox feed format
 
-        await self._execute_callbacks(
-            "price_update",
-            {
-                "data": feeds,
-                "is_snapshot": is_snapshot,
-                "update_count": self.update_count,
-                "timestamp": data.get("currentTs", datetime.now().isoformat()),
-                "source": "centralized_legacy",
-            },
-        )
-
-    async def _legacy_registry_update(self, feeds: dict):
-        """Legacy registry update (background only)"""
+        Handles both fullFeed.marketFF and fullFeed.indexFF formats
+        """
         try:
-            from services.instrument_registry import instrument_registry
+            full_feed = feed_data.get("fullFeed", {})
 
-            normalized_data = self._normalize_market_data(feeds)
-            if normalized_data:
-                instrument_registry.update_live_prices(normalized_data)
+            # Handle equity/stock data (marketFF)
+            if "marketFF" in full_feed:
+                market_ff = full_feed["marketFF"]
+                ltpc = market_ff.get("ltpc", {})
+
+                if ltpc and ltpc.get("ltp"):
+                    # Get OHLC data
+                    ohlc_data = {}
+                    market_ohlc = market_ff.get("marketOHLC", {}).get("ohlc", [])
+
+                    # Find daily OHLC (interval "1d")
+                    for ohlc_item in market_ohlc:
+                        if ohlc_item.get("interval") == "1d":
+                            ohlc_data = {
+                                "open": ohlc_item.get("open"),
+                                "high": ohlc_item.get("high"),
+                                "low": ohlc_item.get("low"),
+                                "close": ltpc.get("ltp"),  # Current price as close
+                            }
+                            break
+
+                    return {
+                        "ltp": ltpc.get("ltp"),
+                        "volume": (
+                            int(market_ff.get("vtt", 0)) if market_ff.get("vtt") else 0
+                        ),
+                        "timestamp": ltpc.get("ltt"),
+                        "close": ltpc.get("cp"),  # Previous close
+                        **ohlc_data,
+                    }
+
+            # Handle index data (indexFF)
+            elif "indexFF" in full_feed:
+                index_ff = full_feed["indexFF"]
+                ltpc = index_ff.get("ltpc", {})
+
+                if ltpc and ltpc.get("ltp"):
+                    # Get OHLC data for indices
+                    ohlc_data = {}
+                    index_ohlc = index_ff.get("marketOHLC", {}).get("ohlc", [])
+
+                    for ohlc_item in index_ohlc:
+                        if ohlc_item.get("interval") == "1d":
+                            ohlc_data = {
+                                "open": ohlc_item.get("open"),
+                                "high": ohlc_item.get("high"),
+                                "low": ohlc_item.get("low"),
+                                "close": ltpc.get("ltp"),
+                            }
+                            break
+
+                    return {
+                        "ltp": ltpc.get("ltp"),
+                        "volume": 0,  # Indices don't have volume
+                        "timestamp": ltpc.get("ltt"),
+                        "close": ltpc.get("cp"),  # Previous close
+                        **ohlc_data,
+                    }
+
+            return {}
+
         except Exception as e:
-            logger.debug(f"Legacy registry update error: {e}")
+            logger.debug(f"⚠️ Error extracting LTP data: {e}")
+            return {}
+
+    def register_analytics_callback(self, callback: CallbackFunction) -> bool:
+        """
+        Register callback for analytics events
+
+        Args:
+            callback: Function to call with analytics updates
+
+        Returns:
+            bool: True if registered successfully
+        """
+        return self.register_callback("analytics_update", callback)
+
+    def unregister_analytics_callback(self, callback: CallbackFunction) -> bool:
+        """
+        Unregister analytics callback
+
+        Args:
+            callback: Function to unregister
+
+        Returns:
+            bool: True if unregistered successfully
+        """
+        return self.unregister_callback("analytics_update", callback)
 
     async def _handle_live_feed_data(self, data: dict):
         """Handle live_feed format data with ZERO-DELAY streaming"""
@@ -1209,23 +1224,15 @@ class CentralizedWebSocketManager:
                     f"📊 Received update #{self.update_count} with {update_count} instruments (total: {self.data_count})"
                 )
 
-            # ⚡ PERFORMANCE FIX: Run cache updates and broadcasting in parallel for faster response
+            # ⚡ PERFORMANCE FIX: Run cache updates in parallel for faster response
             await asyncio.gather(
                 self._update_cache(feeds),
                 self._update_instrument_registry(feeds),
-                self._broadcast_live_data(feeds, is_snapshot),
                 return_exceptions=True,  # Don't let one failure block others
             )
 
-            await self._execute_callbacks(
-                "price_update",
-                {
-                    "data": feeds,
-                    "is_snapshot": is_snapshot,
-                    "update_count": self.update_count,
-                    "timestamp": data.get("timestamp", datetime.now().isoformat()),
-                },
-            )
+            # Removed callbacks execution - single source architecture
+            # await self._execute_callbacks("price_update", {...})
 
     async def _handle_direct_instrument_data(self, data: dict):
         """Handle direct instrument data format with ZERO-DELAY streaming"""
@@ -1248,46 +1255,73 @@ class CentralizedWebSocketManager:
 
         await self._update_cache(data)
         await self._update_instrument_registry(data)
-        await self._broadcast_live_data(data, is_snapshot)
 
-        await self._execute_callbacks(
-            "price_update",
-            {
-                "data": data,
-                "is_snapshot": is_snapshot,
-                "update_count": self.update_count,
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
+        # Removed callbacks execution - single source architecture
+        # await self._execute_callbacks("price_update", {...})
 
     async def _update_instrument_registry(self, feed_data: dict):
-        """✅ SIMPLE FIX: Send data directly to React frontend via unified manager"""
+        """✅ OPTIMIZED: Update both registry and optimized service"""
         try:
             if not feed_data:
                 return
 
-            # 🚀 REMOVED: Redundant unified manager calls
-            # These are now handled by instrument_registry.update_live_prices() callbacks
-            # which provide ZERO DELAY for strategies and optimized UI batching
-            logger.debug(
-                f"⚡ OPTIMIZED: Data will be broadcast via instrument registry callbacks"
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error in optimized broadcast: {e}")
-
-            # Original registry update (background)
+            # 🚀 FIXED: Update optimized market data service with extracted data
             try:
-                from services.instrument_registry import instrument_registry
+                from services.optimized_market_data_service import (
+                    optimized_market_service,
+                )
+
+                # 🚀 FIXED: Extract raw data without enrichment for optimized service
+                extracted_data = self._extract_for_optimized_service(feed_data)
+                if extracted_data:
+                    optimized_market_service.update_live_data(extracted_data)
+                    logger.debug(
+                        f"⚡ Updated optimized service with {len(extracted_data)} instruments"
+                    )
+                else:
+                    # Only log this as debug for market_info messages without feeds
+                    logger.debug(
+                        "⚠️ No valid data to send to optimized service after extraction (likely market_info message)"
+                    )
+            except Exception as e:
+                logger.error(f"⚠️ Optimized service update error: {e}")
+
+            # Registry update (background) - WITHOUT duplicate optimized service call
+            try:
 
                 normalized_data = self._normalize_market_data(feed_data)
                 if normalized_data:
-                    instrument_registry.update_live_prices(normalized_data)
+                    # ✅ FIXED: Only update registry, not optimized service (already updated above)
+                    # instrument_registry.update_live_prices(normalized_data)
+                    logger.debug(
+                        f"📊 Updated registry with {len(normalized_data)} instruments"
+                    )
             except Exception as e:
-                logger.warning(f"⚠️ Registry update error: {e}")
+                logger.error(f"⚠️ Registry update error: {e}")
 
         except Exception as e:
             logger.error(f"❌ Error in _update_instrument_registry: {e}")
+
+    def _extract_for_optimized_service(self, feed_data: dict) -> dict:
+        """Extract data for optimized service without enrichment"""
+        extracted = {}
+
+        for instrument_key, raw_data in feed_data.items():
+            try:
+                # Validate input
+                if not self._validate_raw_input(instrument_key, raw_data):
+                    continue
+
+                # Extract data directly without enrichment
+                extracted_fields = self._extract_by_format(raw_data)
+                if extracted_fields and extracted_fields.get("ltp", 0) > 0:
+                    extracted[instrument_key] = extracted_fields
+
+            except Exception as e:
+                logger.debug(f"⚠️ Error extracting {instrument_key}: {e}")
+                continue
+
+        return extracted
 
     def _normalize_market_data(self, feed_data: dict) -> dict:
         """COMPLETE: Handle all Upstox formats with full error handling"""
@@ -1395,7 +1429,9 @@ class CentralizedWebSocketManager:
 
         # Volume data
         if "vtt" in market_ff:
-            data["volume"] = self._safe_int(market_ff.get("vtt"))
+            vtt_value = self._safe_int(market_ff.get("vtt"))
+            data["volume"] = vtt_value  # For registry compatibility
+            data["vtt"] = vtt_value  # For optimized service compatibility
 
         # OHLC data
         if "marketOHLC" in market_ff:
@@ -1421,7 +1457,9 @@ class CentralizedWebSocketManager:
 
         # Average Trade Price
         if "atp" in market_ff:
-            data["avg_trade_price"] = self._safe_float(market_ff.get("atp"))
+            atp_value = self._safe_float(market_ff.get("atp"))
+            data["avg_trade_price"] = atp_value  # For registry compatibility
+            data["atp"] = atp_value  # For optimized service compatibility
 
         # Bid/Ask data
         if "marketLevel" in market_ff and "bidAskQuote" in market_ff["marketLevel"]:
@@ -1629,7 +1667,6 @@ class CentralizedWebSocketManager:
         """FIXED: Resolve NSE index with better matching"""
         index_mapping = {
             "Nifty 50": {"symbol": "NIFTY", "name": "Nifty 50"},
-            "NIFTY": {"symbol": "NIFTY", "name": "Nifty 50"},
             "Nifty Bank": {"symbol": "BANKNIFTY", "name": "Nifty Bank"},
             "BANKNIFTY": {"symbol": "BANKNIFTY", "name": "Nifty Bank"},
             "Nifty Fin Service": {
@@ -1640,10 +1677,34 @@ class CentralizedWebSocketManager:
                 "symbol": "FINNIFTY",
                 "name": "Nifty Financial Services",
             },
-            "FINNIFTY": {"symbol": "FINNIFTY", "name": "Nifty Financial Services"},
+            "FIN NIFTY": {"symbol": "FINNIFTY", "name": "Nifty Financial Services"},
             "Nifty Midcap 50": {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap 50"},
             "NIFTY MID SELECT": {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap 50"},
             "MIDCPNIFTY": {"symbol": "MIDCPNIFTY", "name": "Nifty Midcap 50"},
+            "Nifty IT": {"symbol": "NIFTYIT", "name": "Nifty IT"},
+            "NIFT YIT": {"symbol": "NIFTYIT", "name": "Nifty IT"},
+            "Nifty Pharma": {"symbol": "NIFTYPHARM", "name": "Nifty Pharma"},
+            "NIFTYPHARM": {"symbol": "NIFTYPHARM", "name": "Nifty Pharma"},
+            "Nifty Auto": {"symbol": "NIFTAUTO", "name": "  Nifty Auto"},
+            "NIFT AUTO": {"symbol": "NIFTAUTO", "name": "  Nifty Auto"},
+            "Nifty FMCG": {"symbol": "NIFTYFMCG", "name": "Nifty FMCG"},
+            "Nifty Metal": {"symbol": "NIFTYMETAL", "name": "Nifty Metal"},
+            "NIFTY METAL": {"symbol": "NIFTYMETAL", "name": "Nifty Metal"},
+            "Nifty Realty": {"symbol": "NIFTYREALTY", "name": "Nifty Realty"},
+            "NIFTY REALTY": {"symbol": "NIFTYREALTY", "  name": "Nifty Realty"},
+            "Nifty Energy": {"symbol": "NIFTYENERGY", "name": "Nifty Energy"},
+            "NIFTY ENERGY": {"symbol": "NIFTYENERGY", "name": "Nifty Energy"},
+            "Nifty PSU Bank": {"symbol": "PSUBNK", "name": "Nifty PSU Bank"},
+            "PSUBNK": {"symbol": "PSUBNK", "name": "Nifty PSU Bank"},
+            "NIFTY OIL AND GAS": {
+                "symbol": "Nifty Oil and Gas",
+                "name": "Nifty Oil and Gas",
+            },
+            "Nifty Media": {"symbol": "NIFTYMEDIA", "name": "Nifty Media"},
+            "Nifty Private Bank": {
+                "symbol": "NIFTYPRIVB",
+                "name": "Nifty Private Bank",
+            },
         }
 
         # Try exact match first
@@ -1911,15 +1972,9 @@ class CentralizedWebSocketManager:
             logger.info(
                 "⏳ Scheduled shutdown after market close - waiting 2 minutes for final data"
             )
-            await asyncio.sleep(120)
+            await asyncio.sleep(60)
 
             await self._store_market_snapshot()
-            await self._broadcast_connection_status(
-                {
-                    "status": "market_closed",
-                    "message": "Market is closed - WebSocket connection will be stopped until market reopens",
-                }
-            )
 
             if self.ws_client:
                 self.ws_client.stop()
@@ -1971,27 +2026,6 @@ class CentralizedWebSocketManager:
             )
 
             # Broadcast restored snapshot to clients
-            if self.market_data_cache:
-                for client_id, ws in list(self.dashboard_clients.items()):
-                    try:
-                        await self._send_to_client(
-                            ws,
-                            {
-                                "type": "restored_snapshot",
-                                "data": self.market_data_cache,
-                                "market_open": False,
-                                "data_source": "REDIS_SNAPSHOT",
-                                "snapshot_time": snapshot_time,
-                                "timestamp": datetime.now().isoformat(),
-                            },
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"⚠️ Failed to send snapshot to client {client_id}: {e}"
-                        )
-
-            await self._broadcast_market_status()
-            return True
 
         except Exception as e:
             logger.error(f"❌ Error loading market snapshot: {e}")
@@ -2010,7 +2044,9 @@ class CentralizedWebSocketManager:
                     market_should_be_open = (
                         current_day < 5
                         and current_time
-                        >= datetime.strptime("09:15:00", "%H:%M:%S").time()
+                        >= datetime.strptime(
+                            "09:00:00", "%H:%M:%S"
+                        ).time()  # Start at 9:00 AM for pre-market
                         and current_time
                         <= datetime.strptime("15:30:00", "%H:%M:%S").time()
                     )
@@ -2118,161 +2154,40 @@ class CentralizedWebSocketManager:
                 logger.warning(f"⚠️ Failed to store market data in Redis: {e}")
 
     def _extract_symbol_from_key(self, instrument_key: str) -> str:
-        """Extract symbol from instrument key"""
+        """Extract symbol from instrument key with proper resolution"""
         try:
-            # Format: "NSE_EQ|RELIANCE" or "NSE_INDEX|Nifty 50"
+            # Format: "NSE_EQ|ISIN" or "NSE_INDEX|Nifty 50"
             if "|" in instrument_key:
+                parts = instrument_key.split("|", 1)
+                if len(parts) == 2:
+                    exchange_segment, identifier = parts
+
+                    # For NSE_EQ with ISIN, try to resolve to trading symbol
+                    if (
+                        "NSE_EQ" in exchange_segment
+                        and len(identifier) == 12
+                        and identifier.startswith("INE")
+                    ):
+                        # Try to get trading symbol from cached data or instrument registry
+                        cached_data = self.market_data_cache.get(instrument_key)
+                        if cached_data and cached_data.get("trading_symbol"):
+                            return cached_data["trading_symbol"]
+
+                        # Try to get from instrument registry
+                        symbol_info = self._resolve_instrument_symbol(instrument_key)
+                        if symbol_info and symbol_info.get("symbol"):
+                            return symbol_info["symbol"]
+
+                        # Fallback to identifier if resolution fails
+                        return identifier
+                    else:
+                        # For indices and other formats, use identifier directly
+                        return identifier
+
                 return instrument_key.split("|", 1)[1]
             return instrument_key
         except:
             return instrument_key
-
-    async def _broadcast_market_status(self):
-        """Broadcast market status to all clients"""
-        status_data = {
-            "type": "market_info",
-            "marketStatus": self.market_status,
-            "segmentStatus": self.market_segment_status,
-            "phases": self.market_phases,
-            "activeSegments": self.active_segments,
-            "source": "centralized",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        await self._send_to_all_clients(status_data)
-        logger.info(
-            f"📡 Broadcasted market status: {self.market_status} (active: {self.active_segments})"
-        )
-
-    async def _broadcast_live_data(self, feed_data: dict, is_snapshot: bool = False):
-        """Broadcast live data to clients"""
-        if not feed_data:
-            return
-
-        self.performance_metrics["updates_processed"] += 1
-        total_clients = len(self.dashboard_clients) + len(self.trading_clients)
-
-        if total_clients == 0:
-            return
-
-        timestamp = datetime.now().isoformat()
-        clients_updated = 0
-
-        # Send to dashboard clients (all data)
-        dashboard_payload = {
-            "type": "dashboard_update",
-            "data": feed_data,
-            "market_open": self.market_status == "open",
-            "data_source": "CENTRALIZED_WS",
-            "timestamp": timestamp,
-            "update_count": self.update_count,
-            "is_snapshot": is_snapshot,
-        }
-
-        clients_updated += await self._send_to_client_group(
-            self.dashboard_clients, dashboard_payload
-        )
-
-        # Send to trading clients (filtered by subscription)
-        for client_id, ws in self.trading_clients.items():
-            subscribed_keys = self.client_subscriptions.get(client_id, set())
-            if not subscribed_keys:
-                continue
-
-            relevant_data = {
-                key: value for key, value in feed_data.items() if key in subscribed_keys
-            }
-            if relevant_data:
-                trading_payload = {
-                    "type": "trading_update",
-                    "data": relevant_data,
-                    "market_open": self.market_status == "open",
-                    "timestamp": timestamp,
-                    "update_count": self.update_count,
-                    "is_snapshot": is_snapshot,
-                }
-
-                if await self._send_to_client(ws, trading_payload):
-                    clients_updated += 1
-
-        self.performance_metrics["clients_updated"] = clients_updated
-
-        # Log broadcast stats
-        if is_snapshot:
-            logger.info(
-                f"📡 Broadcast initial snapshot to {clients_updated}/{total_clients} clients"
-            )
-        elif self.update_count % 20 == 0:
-            logger.info(
-                f"📡 Broadcast update #{self.update_count} to {clients_updated}/{total_clients} clients"
-            )
-
-    async def _broadcast_connection_status(self, status_data: dict):
-        """Broadcast connection status to all clients"""
-        broadcast_data = {
-            "type": "connection_status",
-            "status": status_data.get("status", "unknown"),
-            "message": status_data.get("message", "Connection status update"),
-            "source": "centralized",
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        await self._send_to_all_clients(broadcast_data)
-
-    async def _broadcast_error(self, error_data: dict):
-        """Broadcast errors to all clients"""
-        await self._send_to_all_clients(
-            {
-                "type": "error",
-                "reason": error_data.get("reason", "unknown"),
-                "message": error_data.get("message", "An error occurred"),
-                "source": "centralized",
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
-
-    async def _send_to_all_clients(self, data: dict):
-        """Send data to all connected clients"""
-        total_sent = 0
-        total_sent += await self._send_to_client_group(self.dashboard_clients, data)
-        total_sent += await self._send_to_client_group(self.trading_clients, data)
-
-        if total_sent > 0:
-            logger.debug(f"📤 Sent to {total_sent} clients")
-
-    async def _send_to_client_group(self, client_group: dict, data: dict) -> int:
-        """Send data to a group of clients"""
-        if not client_group:
-            return 0
-
-        disconnected_ids = []
-        sent_count = 0
-
-        for client_id, ws in client_group.items():
-            success = await self._send_to_client(ws, data)
-            if success:
-                sent_count += 1
-            else:
-                disconnected_ids.append(client_id)
-
-        # Clean up disconnected clients
-        for client_id in disconnected_ids:
-            await self.remove_client(client_id)
-
-        return sent_count
-
-    async def _send_to_client(self, ws: WebSocket, data: dict) -> bool:
-        """Send data to a single client"""
-        try:
-            if ws.client_state != WebSocketState.CONNECTED:
-                return False
-
-            await ws.send_json(data)
-            return True
-
-        except Exception as e:
-            logger.debug(f"⚠️ Failed to send to client: {str(e)[:100]}")
-            return False
 
     async def _handle_connection_stop(self):
         """Handle WebSocket connection stop"""
@@ -2393,33 +2308,6 @@ class CentralizedWebSocketManager:
             except Exception as e:
                 logger.error(f"❌ Error in {event_type} callback: {e}")
 
-    async def _send_reconnection_warning_email(self):
-        """Send warning email when approaching max reconnection attempts"""
-        subject = "⚠️ Warning: WebSocket Reconnection Issues"
-        message = f"""
-        The centralized WebSocket manager is having trouble maintaining connection.
-        
-        Warning Details:
-        - Current Attempt: {self.reconnect_attempts} of {self.max_reconnect_attempts}
-        - Last Connection Attempt: {self.last_connection_attempt.isoformat() if self.last_connection_attempt else 'Never'}
-        
-        System Status:
-        - Market Data: {'Connected' if self.connection_ready.is_set() else 'Disconnected'}
-        - Active Instruments: {len(self.active_instrument_keys)}
-        - Connected Clients: {len(self.dashboard_clients) + len(self.trading_clients)}
-        
-        The system will automatically attempt to reconnect.
-        """
-
-        try:
-            email_sent = email_service.send_notification(
-                recipient_email=ADMIN_EMAIL, subject=subject, message=message
-            )
-            if email_sent:
-                logger.info("📧 Sent WebSocket reconnection warning")
-        except Exception as e:
-            logger.error(f"❌ Error sending reconnection warning email: {e}")
-
     async def _send_max_reconnections_email(self):
         """Send critical email when max reconnection attempts reached"""
         subject = "🚨 CRITICAL: WebSocket Connection Failed"
@@ -2469,164 +2357,6 @@ class CentralizedWebSocketManager:
             return True
         return False
 
-    async def add_client(
-        self,
-        client_id: str,
-        websocket: WebSocket,
-        client_type: str = "dashboard",
-        instrument_keys: List[str] = None,
-    ):
-        """Add a client websocket connection"""
-        if client_type == "dashboard":
-            self.dashboard_clients[client_id] = websocket
-            logger.info(f"📊 Dashboard client connected: {client_id}")
-        else:
-            self.trading_clients[client_id] = websocket
-            logger.info(f"🎯 Trading client connected: {client_id}")
-
-            if instrument_keys:
-                self.client_subscriptions[client_id] = set(instrument_keys)
-                logger.info(
-                    f"🔔 Client {client_id} subscribed to {len(instrument_keys)} instruments"
-                )
-
-        await self._send_initial_data(client_id, websocket, client_type)
-        return True
-
-    async def _send_initial_data(
-        self, client_id: str, websocket: WebSocket, client_type: str
-    ):
-        """Send initial data to a newly connected client"""
-        try:
-            # Send market status
-            await self._send_to_client(
-                websocket,
-                {
-                    "type": "market_info",
-                    "marketStatus": self.market_status,
-                    "source": "centralized",
-                    "timestamp": datetime.now().isoformat(),
-                },
-            )
-
-            # Send cached data based on client type
-            if client_type == "dashboard":
-                if self.market_data_cache:
-                    logger.info(
-                        f"📤 Sending {len(self.market_data_cache)} cached items to dashboard client {client_id}"
-                    )
-                    await self._send_to_client(
-                        websocket,
-                        {
-                            "type": "dashboard_update",
-                            "data": self.market_data_cache,
-                            "market_open": self.market_status == "open",
-                            "data_source": "CENTRALIZED_WS_CACHE",
-                            "timestamp": datetime.now().isoformat(),
-                            "is_cached": True,
-                            "update_count": self.update_count,
-                        },
-                    )
-
-            elif client_type == "trading" and client_id in self.client_subscriptions:
-                subscribed_keys = self.client_subscriptions[client_id]
-                relevant_data = {
-                    key: value
-                    for key, value in self.market_data_cache.items()
-                    if key in subscribed_keys
-                }
-
-                if relevant_data:
-                    logger.info(
-                        f"📤 Sending {len(relevant_data)} relevant cached items to trading client {client_id}"
-                    )
-                    await self._send_to_client(
-                        websocket,
-                        {
-                            "type": "trading_update",
-                            "data": relevant_data,
-                            "market_open": self.market_status == "open",
-                            "data_source": "CENTRALIZED_WS_CACHE",
-                            "timestamp": datetime.now().isoformat(),
-                            "is_cached": True,
-                            "update_count": self.update_count,
-                        },
-                    )
-
-            # Send connection status
-            await self._send_to_client(
-                websocket,
-                {
-                    "type": "connection_status",
-                    "status": (
-                        "connected" if self.connection_ready.is_set() else "connecting"
-                    ),
-                    "source": "centralized",
-                    "timestamp": datetime.now().isoformat(),
-                },
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Error sending initial data to client {client_id}: {e}")
-
-    async def remove_client(self, client_id: str):
-        """Remove a client connection"""
-        removed = False
-
-        if client_id in self.dashboard_clients:
-            del self.dashboard_clients[client_id]
-            removed = True
-            logger.info(f"🧹 Removed dashboard client: {client_id}")
-
-        if client_id in self.trading_clients:
-            del self.trading_clients[client_id]
-            removed = True
-            logger.info(f"🧹 Removed trading client: {client_id}")
-
-        if client_id in self.client_subscriptions:
-            del self.client_subscriptions[client_id]
-            logger.info(f"🧹 Removed subscriptions for client: {client_id}")
-
-        return removed
-
-    async def update_client_subscriptions(
-        self, client_id: str, instrument_keys: List[str]
-    ):
-        """Update instrument subscriptions for a client"""
-        if client_id not in self.trading_clients:
-            logger.warning(
-                f"⚠️ Cannot update subscriptions: Client {client_id} not found"
-            )
-            return False
-
-        self.client_subscriptions[client_id] = set(instrument_keys)
-        logger.info(
-            f"🔄 Updated subscriptions for client {client_id}: {len(instrument_keys)} instruments"
-        )
-
-        # Send initial data for new subscriptions
-        if client_id in self.trading_clients:
-            relevant_data = {
-                key: value
-                for key, value in self.market_data_cache.items()
-                if key in instrument_keys
-            }
-
-            if relevant_data:
-                await self._send_to_client(
-                    self.trading_clients[client_id],
-                    {
-                        "type": "subscription_update",
-                        "data": relevant_data,
-                        "market_open": self.market_status == "open",
-                        "timestamp": datetime.now().isoformat(),
-                        "message": "Subscription updated",
-                        "subscribed_instruments": len(instrument_keys),
-                    },
-                )
-
-        return True
-
     async def stop(self):
         """Stop the centralized manager"""
         logger.info("🛑 Stopping centralized WebSocket manager")
@@ -2637,20 +2367,6 @@ class CentralizedWebSocketManager:
             self.ws_client = None
 
         self.connection_ready.clear()
-
-        await self._send_to_all_clients(
-            {
-                "type": "service_shutdown",
-                "message": "Centralized WebSocket service is shutting down",
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
-
-        # Clear connections
-        self.dashboard_clients.clear()
-        self.trading_clients.clear()
-        self.client_subscriptions.clear()
-
         # Cancel background tasks
         for task in self.background_tasks:
             task.cancel()
@@ -2663,22 +2379,6 @@ class CentralizedWebSocketManager:
         """Get latest data for a specific instrument"""
         return self.market_data_cache.get(instrument_key)
 
-    def get_latest_price(self, instrument_key: str) -> Optional[float]:
-        """Get latest price for a specific instrument"""
-        data = self.market_data_cache.get(instrument_key)
-        if not data or not isinstance(data, dict):
-            return None
-
-        # Try different formats
-        if "ltp" in data:
-            return data["ltp"]
-        elif "fullFeed" in data:
-            feed = data.get("fullFeed", {}).get("marketFF", {})
-            ltpc = feed.get("ltpc", {})
-            return ltpc.get("ltp")
-
-        return None
-
     def get_market_status(self) -> str:
         """Get current market status"""
         return self.market_status
@@ -2690,87 +2390,6 @@ class CentralizedWebSocketManager:
             return data.get("timestamp") if data else None
 
         return self.last_data_received.isoformat() if self.last_data_received else None
-
-    def get_all_prices(self) -> Dict[str, float]:
-        """Get all latest prices as a dictionary"""
-        result = {}
-        for key, data in self.market_data_cache.items():
-            price = self.get_latest_price(key)
-            if price is not None:
-                result[key] = price
-        return result
-
-    def get_dashboard_data(self) -> Dict[str, Any]:
-        """Get formatted data for dashboard"""
-        # Calculate active instruments (those with recent valid data)
-        active_instruments = 0
-        for data in self.market_data_cache.values():
-            if isinstance(data, dict) and data.get("last_price"):
-                active_instruments += 1
-
-        return {
-            "market_status": self.market_status,
-            "last_updated": (
-                self.last_data_received.isoformat() if self.last_data_received else None
-            ),
-            "data": self.market_data_cache,
-            "update_count": self.update_count,
-            "total_instruments": len(self.market_data_cache),
-            "active_instruments": active_instruments,
-        }
-
-    def get_top_performers(
-        self, limit: int = 5, sort: str = "gainers"
-    ) -> List[Dict[str, Any]]:
-        """Get top gainers or losers"""
-        price_changes = []
-
-        for key, data in self.market_data_cache.items():
-            try:
-                if not isinstance(data, dict):
-                    continue
-
-                ltp = None
-                prev_close = None
-                symbol = key
-
-                # Extract price data
-                if "ltp" in data:
-                    ltp = data.get("ltp")
-                    prev_close = data.get("cp")
-                    symbol = data.get("symbol", key)
-                elif "fullFeed" in data:
-                    feed = data.get("fullFeed", {}).get("marketFF", {})
-                    ltpc = feed.get("ltpc", {})
-                    ltp = ltpc.get("ltp")
-                    prev_close = ltpc.get("cp")
-
-                if (
-                    ltp is not None
-                    and prev_close is not None
-                    and isinstance(ltp, (int, float))
-                    and isinstance(prev_close, (int, float))
-                    and prev_close > 0
-                ):
-                    change_pct = (ltp - prev_close) / prev_close * 100
-                    price_changes.append(
-                        {
-                            "instrument_key": key,
-                            "symbol": symbol,
-                            "ltp": ltp,
-                            "prev_close": prev_close,
-                            "change_pct": change_pct,
-                        }
-                    )
-
-            except Exception:
-                continue
-
-        # Sort by percentage change
-        reverse_sort = sort == "gainers"
-        price_changes.sort(key=lambda x: x.get("change_pct", 0), reverse=reverse_sort)
-
-        return price_changes[:limit]
 
     # ===== STATUS METHODS =====
 
@@ -2785,11 +2404,6 @@ class CentralizedWebSocketManager:
             "active_segments": self.active_segments,
             "total_instruments": len(self.all_instrument_keys),
             "active_instruments": len(self.active_instrument_keys),
-            "clients": {
-                "dashboard": len(self.dashboard_clients),
-                "trading": len(self.trading_clients),
-                "total": len(self.dashboard_clients) + len(self.trading_clients),
-            },
             "data_stats": {
                 "cached_instruments": len(self.market_data_cache),
                 "update_count": self.update_count,
@@ -2857,17 +2471,6 @@ class CentralizedWebSocketManager:
                 health_score -= 15
                 issues.append(f"No data received for {int(time_since_data/60)} minutes")
 
-        # Performance metrics
-        performance = {
-            "messages_received": self.performance_metrics["messages_received"],
-            "updates_processed": self.performance_metrics["updates_processed"],
-            "callbacks_executed": self.performance_metrics["callbacks_executed"],
-            "clients_updated": self.performance_metrics["clients_updated"],
-            "reconnection_count": self.performance_metrics["reconnection_count"],
-            "last_latency_ms": round(self.performance_metrics["last_latency_ms"], 2),
-            "avg_latency_ms": round(self.performance_metrics["avg_latency_ms"], 2),
-        }
-
         status.update(
             {
                 "health_score": max(0, health_score),
@@ -2877,7 +2480,6 @@ class CentralizedWebSocketManager:
                     else "degraded" if health_score > 30 else "unhealthy"
                 ),
                 "issues": issues,
-                "performance_metrics": performance,
             }
         )
 
@@ -2904,22 +2506,11 @@ class CentralizedWebSocketManager:
         try:
             from services.unified_websocket_manager import unified_manager
 
-            # Update market data hub (background)
-            try:
-                from services.market_data_hub import market_data_hub
-
-                market_data_hub.update_market_data_batch(feeds)
-                logger.debug(
-                    f"📊 Hub updated with {len(feeds)} instruments (background)"
-                )
-            except Exception as e:
-                logger.debug(f"Hub update error: {e}")
-
             # Update cache (background)
             await self._update_cache(feeds)
 
             # Update registry (background)
-            await self._legacy_registry_update(feeds)
+            # await self._legacy_registry_update(feeds)
 
             # Queue analytics dashboard update (can have delay)
             dashboard_data = {
@@ -2990,169 +2581,6 @@ class CentralizedWebSocketManager:
         except Exception as e:
             logger.error(f"❌ Error getting F&O stocks list: {e}")
             return []
-
-    async def priority_subscription(
-        self, selected_stocks: List[Dict[str, Any]]
-    ) -> bool:
-        """Subscribe with higher frequency for selected auto-trading stocks"""
-        try:
-            logger.info(
-                f"🔥 Setting up priority subscription for {len(selected_stocks)} selected stocks"
-            )
-
-            # Clear previous priority instruments
-            self.priority_instruments.clear()
-            self.selected_stocks_for_trading.clear()
-
-            # Add selected stocks to priority subscription
-            for stock_data in selected_stocks:
-                instrument_key = stock_data.get("instrument_key")
-                symbol = stock_data.get("symbol")
-
-                if instrument_key and symbol:
-                    self.priority_instruments.add(instrument_key)
-                    self.selected_stocks_for_trading[symbol] = {
-                        "instrument_key": instrument_key,
-                        "selection_score": stock_data.get("selection_score", 0),
-                        "option_type": stock_data.get("option_type", "NEUTRAL"),
-                        "sector": stock_data.get("sector", "OTHER"),
-                        "fibonacci_levels": stock_data.get("fibonacci_levels", {}),
-                        "ema_values": stock_data.get("ema_values", {}),
-                    }
-
-            # If we have an active WebSocket connection, update subscription
-            if (
-                self.ws_client
-                and hasattr(self.ws_client, "is_connected")
-                and self.ws_client.is_connected()
-            ):
-                # Note: This would require WebSocket client to support dynamic subscription updates
-                # For now, we'll prioritize these instruments in our data processing
-                logger.info(
-                    "🔄 WebSocket connection active - priority instruments will receive enhanced processing"
-                )
-
-            self.auto_trading_active = True
-            logger.info(
-                f"✅ Priority subscription activated for {len(self.priority_instruments)} instruments"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Error setting up priority subscription: {e}")
-            return False
-
-    def add_option_chain_data_processing(
-        self, symbol: str, option_contracts: List[Dict]
-    ) -> bool:
-        """Add option chain data processing for CE/PE contracts"""
-        try:
-            if symbol not in self.selected_stocks_for_trading:
-                logger.warning(f"Symbol {symbol} not in selected stocks for trading")
-                return False
-
-            # Add option contracts to monitoring
-            option_keys = []
-            for contract in option_contracts:
-                option_key = contract.get("instrument_key")
-                if option_key:
-                    option_keys.append(option_key)
-                    self.priority_instruments.add(option_key)
-
-            # Update stock metadata with option contracts
-            self.selected_stocks_for_trading[symbol][
-                "option_contracts"
-            ] = option_contracts
-            self.selected_stocks_for_trading[symbol]["option_keys"] = option_keys
-
-            logger.info(f"✅ Added {len(option_keys)} option contracts for {symbol}")
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Error adding option chain data processing: {e}")
-            return False
-
-    def fast_tick_processing(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process ticks with < 5ms latency for priority instruments"""
-        start_time = time.perf_counter()
-
-        try:
-            processed_data = {}
-            priority_updates = {}
-
-            for instrument_key, data in market_data.items():
-                # Check if this is a priority instrument
-                is_priority = instrument_key in self.priority_instruments
-
-                if is_priority:
-                    # Enhanced processing for priority instruments
-                    processed_data[instrument_key] = {
-                        "ltp": data.get("ltp", 0),
-                        "change": data.get("net_change", 0),
-                        "change_percent": data.get("percentage_change", 0),
-                        "volume": data.get("volume", 0),
-                        "high": data.get("day_high", 0),
-                        "low": data.get("day_low", 0),
-                        "open": data.get("day_open", 0),
-                        "timestamp": datetime.now(),
-                        "is_priority": True,
-                        "processing_latency_ms": 0,  # Will be calculated below
-                    }
-
-                    # Find associated symbol
-                    associated_symbol = None
-                    for symbol, stock_data in self.selected_stocks_for_trading.items():
-                        if stock_data["instrument_key"] == instrument_key:
-                            associated_symbol = symbol
-                            break
-
-                    if associated_symbol:
-                        priority_updates[associated_symbol] = processed_data[
-                            instrument_key
-                        ]
-                else:
-                    # Standard processing for non-priority instruments
-                    processed_data[instrument_key] = {
-                        "ltp": data.get("ltp", 0),
-                        "timestamp": datetime.now(),
-                        "is_priority": False,
-                    }
-
-            # Calculate processing latency
-            end_time = time.perf_counter()
-            processing_latency_ms = (end_time - start_time) * 1000
-
-            # Update latency for priority updates
-            for update in priority_updates.values():
-                update["processing_latency_ms"] = processing_latency_ms
-
-            # Log performance for HFT monitoring
-            if processing_latency_ms > 5:  # Alert if latency > 5ms
-                logger.warning(
-                    f"⚠️ High processing latency: {processing_latency_ms:.2f}ms for {len(market_data)} instruments"
-                )
-
-            # Update performance metrics
-            self.performance_metrics["last_latency_ms"] = processing_latency_ms
-            self.performance_metrics["messages_received"] += len(market_data)
-            self.performance_metrics["updates_processed"] += len(processed_data)
-
-            return {
-                "processed_data": processed_data,
-                "priority_updates": priority_updates,
-                "processing_latency_ms": processing_latency_ms,
-                "total_instruments": len(market_data),
-                "priority_instruments": len(priority_updates),
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error in fast tick processing: {e}")
-            return {
-                "processed_data": {},
-                "priority_updates": {},
-                "processing_latency_ms": 999,  # Error indicator
-                "error": str(e),
-            }
 
     def market_hours_validation(self) -> Dict[str, Any]:
         """Validate F&O trading hours and market session status"""
@@ -3280,44 +2708,9 @@ class CentralizedWebSocketManager:
             logger.error(f"❌ Error getting auto-trading status: {e}")
             return {"error": str(e)}
 
-    async def _broadcast_to_all_clients(self, message: Dict[str, Any]) -> None:
-        """Broadcast message to all connected clients"""
-        try:
-            message_json = json.dumps(message)
-
-            # Broadcast to dashboard clients
-            for client_id, websocket in list(self.dashboard_clients.items()):
-                try:
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.send_text(message_json)
-                except Exception as e:
-                    logger.debug(
-                        f"Error broadcasting to dashboard client {client_id}: {e}"
-                    )
-                    # Remove disconnected client
-                    if client_id in self.dashboard_clients:
-                        del self.dashboard_clients[client_id]
-
-            # Broadcast to trading clients
-            for client_id, websocket in list(self.trading_clients.items()):
-                try:
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.send_text(message_json)
-                except Exception as e:
-                    logger.debug(
-                        f"Error broadcasting to trading client {client_id}: {e}"
-                    )
-                    # Remove disconnected client
-                    if client_id in self.trading_clients:
-                        del self.trading_clients[client_id]
-
-        except Exception as e:
-            logger.error(f"❌ Error broadcasting to all clients: {e}")
-
 
 # Create singleton instance
 centralized_manager = CentralizedWebSocketManager()
-
 
 # ===== CONVENIENCE FUNCTIONS FOR EASY IMPORT =====
 
@@ -3357,28 +2750,6 @@ def get_market_status() -> str:
     return centralized_manager.get_market_status()
 
 
-async def add_websocket_client(
-    client_id: str,
-    websocket: WebSocket,
-    client_type: str = "dashboard",
-    instrument_keys: List[str] = None,
-) -> bool:
-    """Add a WebSocket client to the centralized manager"""
-    return await centralized_manager.add_client(
-        client_id, websocket, client_type, instrument_keys
-    )
-
-
-async def remove_websocket_client(client_id: str) -> bool:
-    """Remove a WebSocket client from the centralized manager"""
-    return await centralized_manager.remove_client(client_id)
-
-
-def get_all_market_prices() -> Dict[str, float]:
-    """Get all current market prices"""
-    return centralized_manager.get_all_prices()
-
-
 def get_centralized_websocket_status() -> Dict[str, Any]:
     """Get status of the centralized WebSocket manager"""
     return centralized_manager.get_status()
@@ -3397,16 +2768,6 @@ def get_fno_stocks() -> List[str]:
     return centralized_manager.get_fno_stocks_list()
 
 
-async def setup_priority_subscription(selected_stocks: List[Dict[str, Any]]) -> bool:
-    """Setup priority subscription for auto-trading stocks"""
-    return await centralized_manager.priority_subscription(selected_stocks)
-
-
-def add_option_contracts(symbol: str, contracts: List[Dict]) -> bool:
-    """Add option contracts for monitoring"""
-    return centralized_manager.add_option_chain_data_processing(symbol, contracts)
-
-
 def get_market_hours_status() -> Dict[str, Any]:
     """Get F&O market hours validation"""
     return centralized_manager.market_hours_validation()
@@ -3420,11 +2781,6 @@ async def emergency_stop(reason: str = "manual") -> bool:
 def get_auto_trading_metrics() -> Dict[str, Any]:
     """Get auto-trading status and performance metrics"""
     return centralized_manager.get_auto_trading_status()
-
-
-def process_priority_ticks(market_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Process market data with priority for selected stocks"""
-    return centralized_manager.fast_tick_processing(market_data)
 
 
 # For any existing imports that might be looking for these

@@ -304,10 +304,10 @@ async def integrate_with_centralized_manager():
                 # Create a task to broadcast the data
                 asyncio.create_task(broadcast_market_data(market_data))
 
-        # Register the callback with the centralized manager
-        centralized_manager.register_callback("price_update", price_update_callback)
+        # DISABLED: Single source architecture - realtime_market_engine handles UI broadcasting
+        # centralized_manager.register_callback("price_update", price_update_callback)
 
-        logger.info("✅ Integrated WebSocket routes with centralized manager")
+        logger.info("✅ WebSocket routes integration DISABLED for single source architecture")
         return True
 
     except ImportError as e:
