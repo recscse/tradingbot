@@ -99,35 +99,6 @@ const safeNumber = (value, defaultValue = 0) => {
   const num = Number(value);
   return isNaN(num) ? defaultValue : num;
 };
-// FIXED: Helper function to process market data consistently
-const processMarketDataEntry = (key, data) => {
-  if (!data || typeof data !== "object") return null;
-  return {
-    instrument_key: key,
-    symbol: data.symbol || data.trading_symbol || key.split("|").pop() || key,
-    name: data.name || data.symbol || key.split("|").pop() || key,
-    last_price: safeNumber(data.ltp || data.last_price || data.price),
-    change: safeNumber(data.change),
-    change_percent: safeNumber(data.change_percent || data.pchange),
-    volume: safeNumber(data.volume || data.daily_volume || data.vol),
-    high: safeNumber(data.high),
-    low: safeNumber(data.low),
-    open: safeNumber(data.open),
-    close: safeNumber(data.close),
-    sector: data.sector || "OTHER",
-    exchange:
-      data.exchange ||
-      (key.includes("NSE")
-        ? "NSE"
-        : key.includes("MCX")
-        ? "MCX"
-        : key.includes("BSE")
-        ? "BSE"
-        : "UNKNOWN"),
-    instrument_type: data.instrument_type || "EQ",
-    timestamp: data.timestamp || data.last_updated || Date.now(),
-  };
-};
 // Component for Fixed/Sticky Section Navigation
 const SectionNavigation = ({
   activeSection,
@@ -408,14 +379,50 @@ const DashboardPage = () => {
     getIndicesSummary,
   } = useMarket();
 
-  // 🚀 REAL-TIME DATA: Get live prices from Zustand store
-  const allLivePrices = useMarketStore((state) => state.prices);
-  
-  // 🔍 DEBUG: Check all data sources
-  console.log("🔍 Zustand store has", Object.keys(allLivePrices).length, "symbols");
-  console.log("🔍 topMovers from WebSocket:", topMovers);
-  console.log("🔍 marketData keys:", Object.keys(marketData || {}).length);
-  
+  // ⚡ CRITICAL FIX: Use interval-based refresh instead of subscribing to every update
+  // Subscribing to updateCount causes re-renders 20 times/second = freezes UI
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Refresh dashboard data every 2 seconds (smooth, no freeze)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshTrigger((prev) => prev + 1);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate derived data only every 2 seconds (not on every price update)
+  const zustandTopGainers = useMemo(
+    () => useMarketStore.getState().getTopGainers(20),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshTrigger]
+  );
+  const zustandTopLosers = useMemo(
+    () => useMarketStore.getState().getTopLosers(20),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshTrigger]
+  );
+  const zustandStats = useMemo(
+    () => useMarketStore.getState().getStats(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshTrigger]
+  );
+
+  // 🔍 DEBUG: Check all data sources (throttled)
+  useEffect(() => {
+    console.log("📊 DASHBOARD RENDER:", {
+      connected: isConnected,
+      refreshTrigger,
+      zustandStocks: zustandStats.totalSymbols,
+      zustandGainers: zustandTopGainers.length,
+      zustandLosers: zustandTopLosers.length,
+      wsTopMoversGainers: topMovers?.gainers?.length || 0,
+      wsTopMoversLosers: topMovers?.losers?.length || 0,
+      indicesCount: indicesData?.indices?.length || 0,
+      majorIndicesCount: indicesData?.major_indices?.length || 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger]);
 
   const [activeSection, setActiveSection] = useState("overview");
   const [expandedSection, setExpandedSection] = useState(null);
@@ -454,94 +461,87 @@ const DashboardPage = () => {
       fetchFnoStocks();
     }
   }, [activeSection, fetchFnoStocks, fnoStockList.securities.length]);
-  // PERFORMANCE FIX: Memoized market summary
-  const marketSummary = useMemo(() => getMarketSummary(), [getMarketSummary]);
-  // PERFORMANCE FIX: Memoized search results
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    return searchStocks(searchQuery);
-  }, [searchQuery, searchStocks]);
-  // PERFORMANCE FIX: Memoized sector stocks
-  const sectorStocks = useMemo(() => {
-    if (selectedSector === "ALL") return Object.values(marketData || {});
-    const stocksBySector = getStocksBySector();
-    return stocksBySector[selectedSector] || [];
-  }, [selectedSector, getStocksBySector, marketData]);
-  const indicesSummary = useMemo(
-    () => getIndicesSummary(),
-    [getIndicesSummary]
-  );
-  const indicesPerformance = useMemo(
-    () => getIndicesByPerformance(),
-    [getIndicesByPerformance]
-  );
-  const indicesSentiment = useMemo(
-    () => getMarketSentimentFromIndices(),
-    [getMarketSentimentFromIndices]
-  );
+  // ⚡ FIX: Call functions directly without useMemo to avoid infinite dependency loops
+  // These functions are already memoized inside useMarket hook
+  const marketSummary = getMarketSummary();
+  const searchResults = searchQuery.trim() ? searchStocks(searchQuery) : [];
+  const sectorStocks =
+    selectedSector === "ALL"
+      ? Object.values(marketData || {})
+      : getStocksBySector()[selectedSector] || [];
+  const indicesSummary = getIndicesSummary();
+  const indicesPerformance = getIndicesByPerformance();
+  const indicesSentiment = getMarketSentimentFromIndices();
 
-  // 🚀 REAL-TIME DATA HELPERS: Convert Zustand store data to component format
+  // ⚡ PERFORMANCE FIX: Use Zustand store functions directly (no dependency on full state)
   const getRealTimeTopMovers = useCallback(() => {
-    const zustandPrices = Object.values(allLivePrices);
-    
-    console.log("🚀 getRealTimeTopMovers called, Zustand has", zustandPrices.length, "prices");
-    
-    if (zustandPrices.length === 0) {
-      console.log("⚠️ No Zustand data available");
-      return { gainers: [], losers: [] };
-    }
+    // Use Zustand store functions directly (already optimized)
+    const gainers = useMarketStore.getState().getTopGainers(20);
+    const losers = useMarketStore.getState().getTopLosers(20);
 
-    const gainers = zustandPrices
-      .filter((stock) => stock.change_percent > 0)
-      .sort((a, b) => b.change_percent - a.change_percent)
-      .slice(0, 20)
-      .map((stock) => stock.symbol);
+    console.log("🚀 getRealTimeTopMovers:", {
+      gainers: gainers.length,
+      losers: losers.length,
+    });
 
-    const losers = zustandPrices
-      .filter((stock) => stock.change_percent < 0)
-      .sort((a, b) => a.change_percent - b.change_percent)
-      .slice(0, 20)
-      .map((stock) => stock.symbol);
-    
-    console.log("🚀 Returning:", { gainers: gainers.length, losers: losers.length });
-    return { gainers, losers };
-  }, [allLivePrices]);
+    return {
+      gainers: gainers.map((g) => g.symbol),
+      losers: losers.map((l) => l.symbol),
+    };
+  }, []); // No dependencies - stable function
 
-  // Enhanced function to get real-time indices data for cards
-  const getEnhancedIndicesData = useCallback(
-    (indicesArray) => {
-      return indicesArray.map((index) => {
-        const symbol = index.symbol || index.name;
+  // ⚡ CRITICAL FIX: Get live indices data with multiple key lookups
+  const getEnhancedIndicesData = useCallback((indicesArray) => {
+    return indicesArray.map((index) => {
+      const symbol = index.symbol || index.name;
+      const instrumentKey = index.instrument_key;
 
-        // Try to get live data from Zustand store
-        const livePrice = allLivePrices[symbol];
-        if (livePrice) {
-          return {
-            ...index,
-            last_price: livePrice.ltp,
-            ltp: livePrice.ltp,
-            current_price: livePrice.ltp,
-            change: livePrice.change,
-            change_percent: livePrice.change_percent,
-            volume: livePrice.volume,
-            high: livePrice.high,
-            low: livePrice.low,
-            open: livePrice.open,
-            _live_data_available: true,
-            _source: "zustand_realtime",
-          };
-        }
+      // Try multiple keys to find live price
+      const store = useMarketStore.getState();
+      let livePrice = null;
 
-        // Return original data if no live data
+      // Try: instrument_key, symbol, compact symbol, name
+      if (instrumentKey) {
+        livePrice = store.prices[instrumentKey];
+      }
+      if (!livePrice && symbol) {
+        livePrice = store.prices[symbol];
+      }
+      if (!livePrice && symbol) {
+        // Try compact symbol (BANKNIFTY, NIFTY, etc.)
+        const compactSymbol = symbol.toUpperCase().replace(/[\s_-]+/g, "");
+        livePrice = store.prices[compactSymbol];
+      }
+
+      if (livePrice) {
+        console.log(`✅ Found live price for ${symbol}:`, livePrice.ltp);
         return {
           ...index,
-          _live_data_available: false,
-          _source: "analytics_static",
+          last_price: livePrice.ltp,
+          ltp: livePrice.ltp,
+          current_price: livePrice.ltp,
+          change: livePrice.change,
+          change_percent: livePrice.change_percent,
+          volume: livePrice.volume,
+          high: livePrice.high,
+          low: livePrice.low,
+          open: livePrice.open,
+          _live_data_available: true,
+          _source: "zustand_realtime",
         };
-      });
-    },
-    [allLivePrices]
-  );
+      }
+
+      console.log(
+        `⚠️ No live price found for ${symbol} (tried: ${instrumentKey}, ${symbol})`
+      );
+      // Return original data if no live data
+      return {
+        ...index,
+        _live_data_available: false,
+        _source: "analytics_static",
+      };
+    });
+  }, []); // No dependencies - stable function
 
   // Helper function to identify indices
   const isIndexSymbol = useCallback((symbol, name) => {
@@ -679,34 +679,15 @@ const DashboardPage = () => {
       fnoStocks: stocks,
     };
   }, [fnoStocksData]);
-  // ⚡ PERFORMANCE OPTIMIZED: Create market data lookup map outside useMemo for better performance
-  const marketDataLookup = useMemo(() => {
-    if (!marketData || Object.keys(marketData).length === 0) return new Map();
 
-    const lookup = new Map();
-    Object.entries(marketData).forEach(([key, data]) => {
-      const keyUpper = key.toUpperCase();
-      const symbol = data?.symbol?.toUpperCase() || "";
-      const tradingSymbol = data?.trading_symbol?.toUpperCase() || "";
+  // ⚡ CRITICAL FIX: Helper to get live price from Zustand store (O(1) lookup)
+  // Replaces marketDataLookup Map which was O(n) to build on every render
+  const getLivePrice = useCallback((symbol) => {
+    if (!symbol) return null;
+    return useMarketStore.getState().getPrice(symbol);
+  }, []);
 
-      // Primary key lookup
-      lookup.set(keyUpper, { key, data });
-
-      // Symbol-based lookups
-      if (symbol) lookup.set(symbol, { key, data });
-      if (tradingSymbol) lookup.set(tradingSymbol, { key, data });
-
-      // Extract symbol from key (e.g., "NSE|RELIANCE" -> "RELIANCE")
-      const keyParts = key.split("|");
-      if (keyParts.length > 1) {
-        lookup.set(keyParts[keyParts.length - 1].toUpperCase(), { key, data });
-      }
-    });
-
-    return lookup;
-  }, [marketData]);
-
-  // ⚡ PERFORMANCE OPTIMIZED: Real-time live data processing with Map-based lookups
+  // ⚡ CRITICAL FIX: Use Zustand store for live data (O(1) instead of O(n))
   const {
     fnoIndicesWithLiveData,
     fnoStocksWithLiveData,
@@ -714,70 +695,35 @@ const DashboardPage = () => {
     gainersCount,
     losersCount,
   } = useMemo(() => {
-    // Fast live data integration with Map lookups
+    // Fast live data integration using Zustand store (O(1) per stock)
     const addLiveDataFast = (stocksArray) => {
-      if (marketDataLookup.size === 0) return stocksArray;
-
       return stocksArray.map((stock) => {
-        const symbolUpper = stock.symbol.toUpperCase();
+        // Get live price from Zustand store (O(1) lookup)
+        const liveData = getLivePrice(stock.symbol);
 
-        // Fast Map lookup instead of Array.find
-        let match =
-          marketDataLookup.get(symbolUpper) ||
-          marketDataLookup.get(`NSE|${symbolUpper}`) ||
-          marketDataLookup.get(`BSE|${symbolUpper}`);
-
-        // Special index handling
-        if (!match && stock.is_index) {
-          if (symbolUpper === "BANKNIFTY") {
-            match =
-              marketDataLookup.get("NIFTY BANK") ||
-              marketDataLookup.get("BANK NIFTY");
-          } else if (symbolUpper === "FINNIFTY") {
-            match =
-              marketDataLookup.get("NIFTY FIN SERVICE") ||
-              marketDataLookup.get("FIN NIFTY");
-          } else if (symbolUpper === "MIDCPNIFTY") {
-            match =
-              marketDataLookup.get("NIFTY MIDCAP SELECT") ||
-              marketDataLookup.get("MIDCAP NIFTY");
-          }
-        }
-
-        if (match?.data) {
-          const liveData = match.data;
+        if (liveData) {
           return {
             ...stock,
-            // ⚡ Direct assignment for speed
-            last_price: safeNumber(
-              liveData.ltp || liveData.last_price || liveData.price
-            ),
-            change: safeNumber(liveData.change),
-            change_percent: safeNumber(
-              liveData.change_percent || liveData.pchange
-            ),
-            volume: safeNumber(liveData.volume || liveData.daily_volume),
-            high: safeNumber(liveData.high),
-            low: safeNumber(liveData.low),
-            open: safeNumber(liveData.open),
-            close: safeNumber(liveData.close || liveData.cp),
-            sector: liveData.sector || stock.sector,
-            instrument_key: liveData.instrument_key || stock.instrument_key,
+            last_price: liveData.ltp || stock.last_price,
+            change: liveData.change || stock.change,
+            change_percent: liveData.change_percent || stock.change_percent,
+            volume: liveData.volume || stock.volume,
+            high: liveData.high || stock.high,
+            low: liveData.low || stock.low,
+            open: liveData.open || stock.open,
             timestamp: liveData.timestamp || Date.now(),
-            last_updated: liveData.last_updated || Date.now(),
+            _live: true,
           };
         }
-        return stock;
+        return { ...stock, _live: false };
       });
     };
 
-    // Process both arrays in parallel for speed
-    const [indicesWithLive, stocksWithLive] = [
-      addLiveDataFast(fnoIndices),
-      addLiveDataFast(fnoStocks),
-    ];
+    // Process arrays
+    const indicesWithLive = addLiveDataFast(fnoIndices);
+    const stocksWithLive = addLiveDataFast(fnoStocks);
 
-    // Pre-compute stats efficiently
+    // Compute stats
     const allSecurities = [...indicesWithLive, ...stocksWithLive];
     let livePrices = 0,
       gainers = 0,
@@ -797,73 +743,29 @@ const DashboardPage = () => {
       gainersCount: gainers,
       losersCount: losers,
     };
-  }, [fnoIndices, fnoStocks, marketDataLookup]);
-  // FIXED: Heavily optimized data processing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fnoIndices, fnoStocks, getLivePrice, refreshTrigger]);
+
+  // ⚡ CRITICAL FIX: processedData now only depends on backend analytics (NOT marketData)
+  // Removed marketData dependency to prevent re-processing on every price update
   const processedData = useMemo(() => {
-    const marketDataEntries = Object.entries(marketData || {});
+    console.log("🔧 processedData recalculating:", {
+      indicesData: !!indicesData,
+      indicesCount: indicesData?.indices?.length || 0,
+      majorIndicesCount: indicesData?.major_indices?.length || 0,
+      topMoversGainers: topMovers?.gainers?.length || 0,
+      topMoversLosers: topMovers?.losers?.length || 0,
+      gapUp: gapAnalysis?.gap_up?.length || 0,
+      gapDown: gapAnalysis?.gap_down?.length || 0,
+    });
+
+    // Use backend-provided indices directly (no marketData processing)
     const analyticsIndices = indicesData?.indices || [];
     const majorIndices = indicesData?.major_indices || [];
     const sectorIndices = indicesData?.sector_indices || [];
-    // FIXED: Improved index detection with multiple criteria
-    const manualIndices =
-      analyticsIndices.length === 0
-        ? marketDataEntries
-            .map(([key, data]) => processMarketDataEntry(key, data))
-            .filter((item) => {
-              if (!item || !item.last_price) return false;
-              const keyLower = item.instrument_key.toLowerCase();
-              const symbolLower = item.symbol.toLowerCase();
-              const nameLower = (item.name || "").toLowerCase();
-              const indexIndicators = [
-                keyLower.includes("index"),
-                keyLower.includes("nifty"),
-                keyLower.includes("sensex"),
-                keyLower.includes("banknifty"),
-                keyLower.includes("finnifty"),
-                keyLower.includes("midcpnifty"),
-                symbolLower.match(
-                  /^(nifty|sensex|banknifty|finnifty|midcpnifty)$/
-                ),
-                nameLower.includes("index"),
-                item.instrument_type === "INDEX",
-                item.exchange === "INDEX",
-              ];
-              return indexIndicators.some(Boolean);
-            })
-            .sort(
-              (a, b) => Math.abs(b.change_percent) - Math.abs(a.change_percent)
-            )
-        : [];
-    const indices =
-      analyticsIndices.length > 0 ? analyticsIndices : manualIndices;
-    // FIXED: Improved equity filtering with better exclusion (commented out as unused)
-    // const equityStocks = marketDataEntries
-    //   .map(([key, data]) => processMarketDataEntry(key, data))
-    //   .filter((item) => {
-    //     if (!item || !item.last_price) return false;
-    //     const keyLower = item.instrument_key.toLowerCase();
-    //     const symbolLower = item.symbol.toLowerCase();
-    //     const isIndex = [
-    //       keyLower.includes("index"),
-    //       keyLower.includes("nifty"),
-    //       keyLower.includes("sensex"),
-    //       keyLower.includes("banknifty"),
-    //       keyLower.includes("finnifty"),
-    //       keyLower.includes("midcpnifty"),
-    //       symbolLower.match(/^(nifty|sensex|banknifty|finnifty|midcpnifty)$/),
-    //     ].some(Boolean);
-    //     const isEquity =
-    //       (keyLower.includes("nse") || keyLower.includes("eq")) && !isIndex;
-    //     return isEquity;
-    //   })
-    //   .sort((a, b) => Math.abs(b.change_percent) - Math.abs(a.change_percent));
-    // Process MCX data
-    const mcxStocks = marketDataEntries
-      .map(([key, data]) => processMarketDataEntry(key, data))
-      .filter((item) => {
-        return item && item.exchange === "MCX" && item.last_price;
-      })
-      .sort((a, b) => Math.abs(b.change_percent) - Math.abs(a.change_percent));
+    const indices = analyticsIndices;
+    // MCX stocks - empty for now (backend should send this)
+    const mcxStocks = [];
     // FIXED: Better analytics data extraction with comprehensive error handling
     const extractAnalyticsData = (analyticsObject, arrayKey, limit = 50) => {
       try {
@@ -888,7 +790,10 @@ const DashboardPage = () => {
             volume: safeNumber(item.volume || item.daily_volume),
             sector: item.sector || "OTHER",
             exchange: item.exchange || "NSE",
-            instrument_key: item.instrument_key && item.instrument_key.includes('|') ? item.instrument_key : null,
+            instrument_key:
+              item.instrument_key && item.instrument_key.includes("|")
+                ? item.instrument_key
+                : null,
             ...item,
           }))
           .slice(0, limit);
@@ -899,14 +804,14 @@ const DashboardPage = () => {
     };
     const topGainers = extractAnalyticsData(topMovers, "gainers", 20);
     const topLosers = extractAnalyticsData(topMovers, "losers", 20);
-    
+
     console.log("📊 DEBUG: WebSocket analytics data:", {
       topGainers: topGainers.length,
       topLosers: topLosers.length,
-      sampleGainers: topGainers.slice(0, 3).map(g => g?.symbol),
-      sampleLosers: topLosers.slice(0, 3).map(l => l?.symbol)
+      sampleGainers: topGainers.slice(0, 3).map((g) => g?.symbol),
+      sampleLosers: topLosers.slice(0, 3).map((l) => l?.symbol),
     });
-    
+
     console.log("📊 FULL topGainers data:", topGainers);
     console.log("📊 FULL topLosers data:", topLosers);
     // Enhanced gap data extraction with real-time updates and gap-specific info
@@ -926,13 +831,11 @@ const DashboardPage = () => {
         const validData = data
           .filter((item) => item && typeof item === "object" && item.symbol)
           .map((item) => {
-            // Get real-time price from marketData if available
-            const realtimeData =
-              marketData[item.instrument_key] || marketData[item.symbol] || {};
+            // Use backend data directly (no marketData lookup)
             const currentPrice =
-              realtimeData.last_price ||
-              realtimeData.ltp ||
               item.current_price ||
+              item.ltp ||
+              item.last_price ||
               item.open_price ||
               0;
 
@@ -964,13 +867,16 @@ const DashboardPage = () => {
             return {
               symbol: item.symbol || item.trading_symbol || "N/A",
               name: item.name || item.symbol || item.trading_symbol || "N/A",
-              last_price: currentPrice, // Use real-time price
-              change: realtimeData.change || currentPrice - previousClose,
-              change_percent: realtimeData.change_percent || gapPercentage,
-              volume: realtimeData.volume || item.volume || 0,
+              last_price: currentPrice,
+              change: item.change || currentPrice - previousClose,
+              change_percent: item.change_percent || gapPercentage,
+              volume: item.volume || 0,
               sector: item.sector || "OTHER",
               exchange: item.exchange || "NSE",
-              instrument_key: item.instrument_key && item.instrument_key.includes('|') ? item.instrument_key : null,
+              instrument_key:
+                item.instrument_key && item.instrument_key.includes("|")
+                  ? item.instrument_key
+                  : null,
               // Gap-specific fields
               gap_type: item.gap_type || arrayKey,
               gap_percentage: gapPercentage,
@@ -1027,16 +933,9 @@ const DashboardPage = () => {
         const validData = data
           .filter((item) => item && typeof item === "object" && item.symbol)
           .map((item) => {
-            // Get real-time price from marketData if available
-            const realtimeData =
-              marketData[item.instrument_key] || marketData[item.symbol] || {};
+            // Use backend data directly (no marketData lookup)
             const currentPrice =
-              realtimeData.last_price ||
-              realtimeData.ltp ||
-              item.current_price ||
-              item.last_price ||
-              item.ltp ||
-              0;
+              item.current_price || item.last_price || item.ltp || 0;
 
             // Enhanced timestamp handling
             const breakoutTime =
@@ -1079,14 +978,16 @@ const DashboardPage = () => {
             return {
               symbol: item.symbol || item.trading_symbol || "N/A",
               name: item.name || item.symbol || item.trading_symbol || "N/A",
-              last_price: currentPrice, // Use real-time price
-              change: realtimeData.change || item.change || 0,
-              change_percent:
-                realtimeData.change_percent || item.change_percent || 0,
-              volume: realtimeData.volume || item.volume || 0,
+              last_price: currentPrice,
+              change: item.change || 0,
+              change_percent: item.change_percent || 0,
+              volume: item.volume || 0,
               sector: item.sector || "OTHER",
               exchange: item.exchange || "NSE",
-              instrument_key: item.instrument_key && item.instrument_key.includes('|') ? item.instrument_key : null,
+              instrument_key:
+                item.instrument_key && item.instrument_key.includes("|")
+                  ? item.instrument_key
+                  : null,
               // Breakout-specific fields
               breakout_type: item.breakout_type || "breakout",
               breakout_strength: item.breakout_strength || 0,
@@ -1137,7 +1038,6 @@ const DashboardPage = () => {
       breakdowns,
     };
   }, [
-    marketData,
     indicesData,
     topMovers,
     gapAnalysis,
@@ -1145,14 +1045,13 @@ const DashboardPage = () => {
     volumeAnalysis,
     recordMovers,
     breakoutAnalysis,
-  ]);
+  ]); // ⚡ CRITICAL: Removed marketData dependency
 
   // Destructure processed data to make it available in component scope
   const {
     indices,
     majorIndices,
     sectorIndices,
-    // equityStocks, // Commented out - reserved for equity stocks filtering
     mcxStocks,
     topGainers,
     topLosers,
@@ -1166,22 +1065,18 @@ const DashboardPage = () => {
     breakdowns,
   } = processedData;
 
-  // 🚀 SIMPLE FIX: Use WebSocket analytics data if Zustand is empty
-  const getTopMoversData = useCallback(() => {
+  // 🚀 MEMOIZED: Top movers data to prevent multiple calculations per render
+  const topMoversData = useMemo(() => {
     const zustandData = getRealTimeTopMovers();
-    
+
     // If Zustand has data, use it for live updates
     if (zustandData.gainers.length > 0 || zustandData.losers.length > 0) {
-      console.log("✅ Using Zustand data for top movers");
       return zustandData;
     }
-    
+
     // Otherwise use WebSocket analytics data and populate Zustand store
-    console.log("✅ Using WebSocket analytics data for top movers");
-    
-    // Convert WebSocket data to Zustand format so StocksListOptimized can use it
     const webSocketData = {};
-    [...(topGainers || []), ...(topLosers || [])].forEach(stock => {
+    [...(topGainers || []), ...(topLosers || [])].forEach((stock) => {
       if (stock && stock.symbol) {
         webSocketData[stock.symbol] = {
           symbol: stock.symbol,
@@ -1192,30 +1087,113 @@ const DashboardPage = () => {
           high: stock.high || 0,
           low: stock.low || 0,
           open: stock.open || 0,
-          sector: stock.sector || 'OTHER',
-          exchange: stock.exchange || 'NSE',
+          sector: stock.sector || "OTHER",
+          exchange: stock.exchange || "NSE",
           timestamp: new Date().toISOString(),
-          last_updated: Date.now()
+          last_updated: Date.now(),
         };
       }
     });
-    
+
     // Update Zustand store so StocksListOptimized can find the data
     if (Object.keys(webSocketData).length > 0) {
-      console.log("🔧 Populating Zustand with", Object.keys(webSocketData).length, "symbols from analytics");
       useMarketStore.getState().updatePrices(webSocketData);
     }
-    
+
     return {
-      gainers: (topGainers || []).map(stock => stock.symbol).filter(Boolean),
-      losers: (topLosers || []).map(stock => stock.symbol).filter(Boolean)
+      gainers: (topGainers || []).map((stock) => stock.symbol).filter(Boolean),
+      losers: (topLosers || []).map((stock) => stock.symbol).filter(Boolean),
     };
   }, [getRealTimeTopMovers, topGainers, topLosers]);
 
-  // Get enhanced major indices for cards (after majorIndices is available)
+  // Simple getter function that returns memoized data
+  const getTopMoversData = useCallback(() => topMoversData, [topMoversData]);
+
+  // Get enhanced major indices for cards
+  // ⚡ CRITICAL FIX: Always create from Zustand store for real-time data
   const enhancedMajorIndices = useMemo(() => {
-    return getEnhancedIndicesData(majorIndices);
-  }, [majorIndices, getEnhancedIndicesData]);
+    const store = useMarketStore.getState();
+
+    // Get unique prices by instrument_key to avoid duplicates from multiple key mappings
+    const pricesMap = new Map();
+    Object.entries(store.prices).forEach(([key, price]) => {
+      const uniqueKey = price.instrument_key || price.symbol || key;
+      if (!pricesMap.has(uniqueKey)) {
+        pricesMap.set(uniqueKey, price);
+      }
+    });
+    const allPrices = Array.from(pricesMap.values());
+
+    console.log(`🔍 Total unique prices in Zustand store: ${allPrices.length}`);
+    console.log(`🔍 majorIndices from backend: ${majorIndices?.length || 0}`);
+    console.log(
+      `🔍 Sample prices:`,
+      allPrices.slice(0, 3).map((p) => p.symbol)
+    );
+
+    // Filter for indices (NSE_INDEX, BSE_INDEX)
+    const indicesFromStore = allPrices
+      .filter((price) => {
+        const isIndex =
+          price.instrument_key?.includes("INDEX") ||
+          [
+            "NIFTY 50",
+            "SENSEX",
+            "BANKNIFTY",
+            "FINNIFTY",
+            "MIDCPNIFTY",
+            "NIFTY AUTO",
+            "NIFTY IT",
+            "NIFTY FMCG",
+            "NIFTY METAL",
+            "NIFTY PHARMA",
+            "NIFTY REALTY",
+            "NIFTY MEDIA",
+            "NIFTY PSUBANK",
+            "NIFTY OIL AND GAS",
+          ].includes(price.symbol?.toUpperCase());
+
+        if (isIndex) {
+          console.log(
+            `✅ Found index: ${price.symbol} (${price.instrument_key}) ltp=${price.ltp}`
+          );
+        }
+        return isIndex;
+      })
+      .map((price) => ({
+        symbol: price.symbol,
+        name: price.symbol,
+        instrument_key: price.instrument_key,
+        last_price: price.ltp,
+        ltp: price.ltp,
+        change: price.change,
+        change_percent: price.change_percent,
+        volume: price.volume,
+        high: price.high,
+        low: price.low,
+        open: price.open,
+        _live_data_available: true,
+        _source: "zustand_realtime",
+      }));
+
+    console.log(`📊 Final indices count: ${indicesFromStore.length}`);
+    console.log(
+      `📊 Indices symbols:`,
+      indicesFromStore.map((i) => i.symbol)
+    );
+
+    // If backend sent indices, merge/enhance them
+    if (majorIndices && majorIndices.length > 0) {
+      console.log(`🔄 Merging with backend indices: ${majorIndices.length}`);
+      const enhanced = getEnhancedIndicesData(majorIndices);
+      // Return backend indices enhanced with live prices
+      return enhanced.length > 0 ? enhanced : indicesFromStore;
+    }
+
+    // Return Zustand-only indices
+    return indicesFromStore;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majorIndices, getEnhancedIndicesData, refreshTrigger]);
 
   // PERFORMANCE FIX: Memoized market status display
   const marketStatusDisplay = useMemo(() => {
@@ -1690,7 +1668,8 @@ const DashboardPage = () => {
         </Paper>
       )}
       {/* Clean Major Indices Cards - Enhanced with Real-Time Data */}
-      {majorIndices.length > 0 && (
+      {/* ⚡ FIXED: Show if enhancedMajorIndices has data, not majorIndices */}
+      {enhancedMajorIndices.length > 0 && (
         <Card sx={{ mb: 2 }}>
           <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
             <Typography
@@ -1705,11 +1684,9 @@ const DashboardPage = () => {
                 gap: 0.75,
               }}
             >
-              🏛️ MAJOR INDICES ({majorIndices.length})
-              {/* Real-time indicator */}
-              {Object.keys(allLivePrices).some((key) =>
-                ["NIFTY", "SENSEX", "BANKNIFTY", "FINNIFTY"].includes(key)
-              ) && (
+              🏛️ MAJOR INDICES ({enhancedMajorIndices.length})
+              {/* Real-time indicator - check if any major index has live data */}
+              {isConnected && (
                 <Chip
                   size="small"
                   label="LIVE"
@@ -2066,7 +2043,7 @@ const DashboardPage = () => {
             isLoading={!isConnected}
             density="compact" // Use compact density
             compact={true}
-          // Remove fixed containerHeight to allow natural flow
+            // Remove fixed containerHeight to allow natural flow
             // containerHeight={isMobile ? "55vh" : "60vh"}
           />
         </Paper>
@@ -2093,7 +2070,7 @@ const DashboardPage = () => {
             isLoading={!isConnected}
             density="compact" // Use compact density
             compact={true}
-          // Remove fixed containerHeight to allow natural flow
+            // Remove fixed containerHeight to allow natural flow
             // containerHeight={isMobile ? "55vh" : "60vh"}
           />
         </Paper>
@@ -2158,7 +2135,7 @@ const DashboardPage = () => {
             maxItems={50} // Keep maxItems for search results
             isLoading={!isConnected}
             density="standard" // Use standard density for search results
-          // Remove fixed containerHeight to allow natural flow
+            // Remove fixed containerHeight to allow natural flow
             // containerHeight="70vh"
           />
         </Paper>
@@ -2399,7 +2376,7 @@ const DashboardPage = () => {
               isLoading={!isConnected}
               enhanceWithLivePrices={true}
               showLiveIndicator={true}
-          // Remove fixed containerHeight to allow natural flow
+              // Remove fixed containerHeight to allow natural flow
             />
           </Paper>
         )}
@@ -2427,7 +2404,7 @@ const DashboardPage = () => {
               isLoading={!isConnected}
               enhanceWithLivePrices={true}
               showLiveIndicator={true}
-          // Remove fixed containerHeight to allow natural flow
+              // Remove fixed containerHeight to allow natural flow
             />
           </Paper>
         )}
@@ -2634,7 +2611,7 @@ const DashboardPage = () => {
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
+            // Remove fixed containerHeight to allow natural flow
           />
         ) : (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -2674,7 +2651,7 @@ const DashboardPage = () => {
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
+            // Remove fixed containerHeight to allow natural flow
           />
         ) : (
           <Box sx={{ textAlign: "center", py: 2 }}>
@@ -2708,7 +2685,7 @@ const DashboardPage = () => {
           console.log("Refreshing breakout data...");
         }}
       />
-      
+
       {/* Breakout Analysis Widget - Detailed view */}
       <BreakoutAnalysisWidget
         data={breakoutAnalysis}
@@ -3308,7 +3285,7 @@ const DashboardPage = () => {
                 compact={true}
                 enhanceWithLivePrices={true}
                 showLiveIndicator={true}
-          // Remove fixed containerHeight to allow natural flow
+                // Remove fixed containerHeight to allow natural flow
               />
             </Box>
           )}
@@ -3327,7 +3304,7 @@ const DashboardPage = () => {
               density="compact" // Use compact density
               compact={true}
               showOptionChain={true} // Enable option chain integration for F&O stocks
-          // Remove fixed containerHeight to allow natural flow
+              // Remove fixed containerHeight to allow natural flow
               // containerHeight={isMobile ? "55vh" : "60vh"}
             />
           )}
@@ -3492,7 +3469,7 @@ const DashboardPage = () => {
               showSector={!isMobile} // Show sector on larger screens if table
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
+              // Remove fixed containerHeight to allow natural flow
             />
           ) : (
             <Box sx={{ textAlign: "center", py: 2 }}>
@@ -3531,7 +3508,7 @@ const DashboardPage = () => {
               showSector={!isMobile} // Show sector on larger screens if table
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
-          // Remove fixed containerHeight to allow natural flow
+              // Remove fixed containerHeight to allow natural flow
             />
           ) : (
             <Box sx={{ textAlign: "center", py: 2 }}>
@@ -3695,7 +3672,8 @@ const DashboardPage = () => {
         🔴 LIVE | {totalStocks} inst | {sectors.length} sec
       </Typography>
       <Typography variant="caption" sx={{ flexShrink: 0 }}>
-        G: {getTopMoversData().gainers.length} | L: {getTopMoversData().losers.length}
+        G: {getTopMoversData().gainers.length} | L:{" "}
+        {getTopMoversData().losers.length}
       </Typography>
       <Typography variant="caption" sx={{ flexGrow: 1, textAlign: "right" }}>
         {new Date().toLocaleTimeString([], {
