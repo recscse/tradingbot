@@ -455,6 +455,23 @@ class RealtimeMarketEngine:
         self.analytics.new_52_week_lows = new_lows
         self.analytics.calculation_latency_ms = (time.time() - calc_start) * 1000
         self.analytics.last_calculation = time.time()
+
+        logger.info(
+            f"Analytics calculated: {len(top_gainers_dedup)} gainers, {len(top_losers_dedup)} losers"
+        )
+
+        gainer_symbols = [g.get('symbol') for g in top_gainers_dedup]
+        loser_symbols = [l.get('symbol') for l in top_losers_dedup]
+
+        logger.info(f"Top gainers: {gainer_symbols}")
+        logger.info(f"Top losers: {loser_symbols}")
+
+        # Check for duplicates
+        if len(gainer_symbols) != len(set(gainer_symbols)):
+            logger.warning(f"DUPLICATE GAINERS DETECTED: {gainer_symbols}")
+        if len(loser_symbols) != len(set(loser_symbols)):
+            logger.warning(f"DUPLICATE LOSERS DETECTED: {loser_symbols}")
+
         self.event_emitter.emit("analytics_update", self.analytics.to_dict())
 
     def get_instrument(self, instrument_key: str) -> Optional[Instrument]:
