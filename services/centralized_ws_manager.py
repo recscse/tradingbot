@@ -2722,6 +2722,13 @@ class CentralizedWebSocketManager:
         if not callbacks:
             return
 
+        if not isinstance(data, dict):
+            logger.error(
+                f"Invalid data type for {event_type}: expected dict, got {type(data).__name__}. "
+                f"Data: {str(data)[:200]}"
+            )
+            return
+
         if "timestamp" not in data:
             data["timestamp"] = datetime.now().isoformat()
 
@@ -2735,7 +2742,10 @@ class CentralizedWebSocketManager:
                 self.performance_metrics["callbacks_executed"] += 1
 
             except Exception as e:
-                logger.error(f"❌ Error in {event_type} callback: {e}")
+                logger.error(
+                    f"Error in {event_type} callback {callback.__name__}: {e}",
+                    exc_info=True
+                )
 
     async def _send_max_reconnections_email(self):
         """Send critical email when max reconnection attempts reached"""
