@@ -191,24 +191,24 @@ except ImportError:
 
     logger.warning("⚠️ Pre-market data service not available")
 
-# Import premarket candle builder service
+# Import gap detection service (formerly premarket candle builder)
 try:
-    from services.premarket_candle_builder import (
-        get_premarket_candle_service,
-        start_premarket_monitoring,
+    from services.gapdetection_service import (
+        get_gap_detection_service,
+        start_gap_detection_scheduler,
     )
 
-    PREMARKET_CANDLE_AVAILABLE = True
-    logger.info("✅ Premarket candle builder service imported successfully")
+    GAP_DETECTION_AVAILABLE = True
+    logger.info("✅ Gap detection service imported successfully")
 except ImportError as e:
-    PREMARKET_CANDLE_AVAILABLE = False
-    logger.warning(f"⚠️ Premarket candle builder service not available: {e}")
+    GAP_DETECTION_AVAILABLE = False
+    logger.warning(f"⚠️ Gap detection service not available: {e}")
 
     # Dummy functions for fallback
-    def get_premarket_candle_service():
+    def get_gap_detection_service():
         return None
 
-    async def start_premarket_monitoring():
+    async def start_gap_detection_scheduler():
         pass
 
 
@@ -559,20 +559,20 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Failed to start Enhanced Breakout Engine: {e}")
 
-        # Premarket Candle Builder provides gap detection for 9:00-9:08 AM window
+        # Gap Detection Service analyzes market gaps at 9:08 AM daily
 
-        # 7c. 🚀 NEW: Start Premarket Candle Builder Service
-        if PREMARKET_CANDLE_AVAILABLE:
-            logger.info("🕘 Starting Premarket Candle Builder Service...")
+        # 7c. Start Gap Detection Service
+        if GAP_DETECTION_AVAILABLE:
+            logger.info("Starting Gap Detection Service...")
             try:
                 # Start as background task to avoid blocking startup
-                asyncio.create_task(start_premarket_monitoring())
+                asyncio.create_task(start_gap_detection_scheduler())
                 logger.info(
-                    "✅ Premarket Candle Builder Service started for 9:00-9:08 AM gap detection"
+                    "Gap Detection Service started - scheduled for 9:08 AM IST daily"
                 )
             except Exception as e:
                 logger.error(
-                    f"❌ Failed to start Premarket Candle Builder Service: {e}"
+                    f"Failed to start Gap Detection Service: {e}"
                 )
 
         # 8. NEW: Initialize Centralized WebSocket System
