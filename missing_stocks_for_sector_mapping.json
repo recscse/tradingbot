@@ -1,0 +1,397 @@
+[
+  {
+    "isin": "INE003A01024",
+    "instrument_key": "NSE_EQ|INE003A01024",
+    "name": "INE003A01024"
+  },
+  {
+    "isin": "INE006I01046",
+    "instrument_key": "NSE_EQ|INE006I01046",
+    "name": "INE006I01046"
+  },
+  {
+    "isin": "INE00R701025",
+    "instrument_key": "NSE_EQ|INE00R701025",
+    "name": "INE00R701025"
+  },
+  {
+    "isin": "INE018A01030",
+    "instrument_key": "NSE_EQ|INE018A01030",
+    "name": "INE018A01030"
+  },
+  {
+    "isin": "INE021A01026",
+    "instrument_key": "NSE_EQ|INE021A01026",
+    "name": "INE021A01026"
+  },
+  {
+    "isin": "INE027H01010",
+    "instrument_key": "NSE_EQ|INE027H01010",
+    "name": "INE027H01010"
+  },
+  {
+    "isin": "INE040H01021",
+    "instrument_key": "NSE_EQ|INE040H01021",
+    "name": "INE040H01021"
+  },
+  {
+    "isin": "INE047A01021",
+    "instrument_key": "NSE_EQ|INE047A01021",
+    "name": "INE047A01021"
+  },
+  {
+    "isin": "INE053A01029",
+    "instrument_key": "NSE_EQ|INE053A01029",
+    "name": "INE053A01029"
+  },
+  {
+    "isin": "INE066F01020",
+    "instrument_key": "NSE_EQ|INE066F01020",
+    "name": "INE066F01020"
+  },
+  {
+    "isin": "INE066P01011",
+    "instrument_key": "NSE_EQ|INE066P01011",
+    "name": "INE066P01011"
+  },
+  {
+    "isin": "INE067A01029",
+    "instrument_key": "NSE_EQ|INE067A01029",
+    "name": "INE067A01029"
+  },
+  {
+    "isin": "INE070A01015",
+    "instrument_key": "NSE_EQ|INE070A01015",
+    "name": "INE070A01015"
+  },
+  {
+    "isin": "INE073K01018",
+    "instrument_key": "NSE_EQ|INE073K01018",
+    "name": "INE073K01018"
+  },
+  {
+    "isin": "INE079A01024",
+    "instrument_key": "NSE_EQ|INE079A01024",
+    "name": "INE079A01024"
+  },
+  {
+    "isin": "INE089A01031",
+    "instrument_key": "NSE_EQ|INE089A01031",
+    "name": "INE089A01031"
+  },
+  {
+    "isin": "INE092A01019",
+    "instrument_key": "NSE_EQ|INE092A01019",
+    "name": "INE092A01019"
+  },
+  {
+    "isin": "INE095N01031",
+    "instrument_key": "NSE_EQ|INE095N01031",
+    "name": "INE095N01031"
+  },
+  {
+    "isin": "INE0DK501011",
+    "instrument_key": "NSE_EQ|INE0DK501011",
+    "name": "INE0DK501011"
+  },
+  {
+    "isin": "INE111A01025",
+    "instrument_key": "NSE_EQ|INE111A01025",
+    "name": "INE111A01025"
+  },
+  {
+    "isin": "INE117A01022",
+    "instrument_key": "NSE_EQ|INE117A01022",
+    "name": "INE117A01022"
+  },
+  {
+    "isin": "INE121E01018",
+    "instrument_key": "NSE_EQ|INE121E01018",
+    "name": "INE121E01018"
+  },
+  {
+    "isin": "INE138Y01010",
+    "instrument_key": "NSE_EQ|INE138Y01010",
+    "name": "INE138Y01010"
+  },
+  {
+    "isin": "INE148I01020",
+    "instrument_key": "NSE_EQ|INE148I01020",
+    "name": "INE148I01020"
+  },
+  {
+    "isin": "INE148O01028",
+    "instrument_key": "NSE_EQ|INE148O01028",
+    "name": "INE148O01028"
+  },
+  {
+    "isin": "INE160A01022",
+    "instrument_key": "NSE_EQ|INE160A01022",
+    "name": "INE160A01022"
+  },
+  {
+    "isin": "INE171Z01026",
+    "instrument_key": "NSE_EQ|INE171Z01026",
+    "name": "INE171Z01026"
+  },
+  {
+    "isin": "INE192A01025",
+    "instrument_key": "NSE_EQ|INE192A01025",
+    "name": "INE192A01025"
+  },
+  {
+    "isin": "INE195A01028",
+    "instrument_key": "NSE_EQ|INE195A01028",
+    "name": "INE195A01028"
+  },
+  {
+    "isin": "INE200M01039",
+    "instrument_key": "NSE_EQ|INE200M01039",
+    "name": "INE200M01039"
+  },
+  {
+    "isin": "INE202E01016",
+    "instrument_key": "NSE_EQ|INE202E01016",
+    "name": "INE202E01016"
+  },
+  {
+    "isin": "INE239A01024",
+    "instrument_key": "NSE_EQ|INE239A01024",
+    "name": "INE239A01024"
+  },
+  {
+    "isin": "INE245A01021",
+    "instrument_key": "NSE_EQ|INE245A01021",
+    "name": "INE245A01021"
+  },
+  {
+    "isin": "INE249Z01020",
+    "instrument_key": "NSE_EQ|INE249Z01020",
+    "name": "INE249Z01020"
+  },
+  {
+    "isin": "INE257A01026",
+    "instrument_key": "NSE_EQ|INE257A01026",
+    "name": "INE257A01026"
+  },
+  {
+    "isin": "INE262H01021",
+    "instrument_key": "NSE_EQ|INE262H01021",
+    "name": "INE262H01021"
+  },
+  {
+    "isin": "INE263A01024",
+    "instrument_key": "NSE_EQ|INE263A01024",
+    "name": "INE263A01024"
+  },
+  {
+    "isin": "INE296A01032",
+    "instrument_key": "NSE_EQ|INE296A01032",
+    "name": "INE296A01032"
+  },
+  {
+    "isin": "INE298A01020",
+    "instrument_key": "NSE_EQ|INE298A01020",
+    "name": "INE298A01020"
+  },
+  {
+    "isin": "INE318A01026",
+    "instrument_key": "NSE_EQ|INE318A01026",
+    "name": "INE318A01026"
+  },
+  {
+    "isin": "INE335Y01020",
+    "instrument_key": "NSE_EQ|INE335Y01020",
+    "name": "INE335Y01020"
+  },
+  {
+    "isin": "INE343H01029",
+    "instrument_key": "NSE_EQ|INE343H01029",
+    "name": "INE343H01029"
+  },
+  {
+    "isin": "INE364U01010",
+    "instrument_key": "NSE_EQ|INE364U01010",
+    "name": "INE364U01010"
+  },
+  {
+    "isin": "INE388Y01029",
+    "instrument_key": "NSE_EQ|INE388Y01029",
+    "name": "INE388Y01029"
+  },
+  {
+    "isin": "INE397D01024",
+    "instrument_key": "NSE_EQ|INE397D01024",
+    "name": "INE397D01024"
+  },
+  {
+    "isin": "INE405E01023",
+    "instrument_key": "NSE_EQ|INE405E01023",
+    "name": "INE405E01023"
+  },
+  {
+    "isin": "INE415G01027",
+    "instrument_key": "NSE_EQ|INE415G01027",
+    "name": "INE415G01027"
+  },
+  {
+    "isin": "INE417T01026",
+    "instrument_key": "NSE_EQ|INE417T01026",
+    "name": "INE417T01026"
+  },
+  {
+    "isin": "INE455K01017",
+    "instrument_key": "NSE_EQ|INE455K01017",
+    "name": "INE455K01017"
+  },
+  {
+    "isin": "INE457L01029",
+    "instrument_key": "NSE_EQ|INE457L01029",
+    "name": "INE457L01029"
+  },
+  {
+    "isin": "INE481G01011",
+    "instrument_key": "NSE_EQ|INE481G01011",
+    "name": "INE481G01011"
+  },
+  {
+    "isin": "INE528G01035",
+    "instrument_key": "NSE_EQ|INE528G01035",
+    "name": "INE528G01035"
+  },
+  {
+    "isin": "INE530B01024",
+    "instrument_key": "NSE_EQ|INE530B01024",
+    "name": "INE530B01024"
+  },
+  {
+    "isin": "INE531F01015",
+    "instrument_key": "NSE_EQ|INE531F01015",
+    "name": "INE531F01015"
+  },
+  {
+    "isin": "INE572E01012",
+    "instrument_key": "NSE_EQ|INE572E01012",
+    "name": "INE572E01012"
+  },
+  {
+    "isin": "INE591G01025",
+    "instrument_key": "NSE_EQ|INE591G01025",
+    "name": "INE591G01025"
+  },
+  {
+    "isin": "INE603J01030",
+    "instrument_key": "NSE_EQ|INE603J01030",
+    "name": "INE603J01030"
+  },
+  {
+    "isin": "INE615H01020",
+    "instrument_key": "NSE_EQ|INE615H01020",
+    "name": "INE615H01020"
+  },
+  {
+    "isin": "INE628A01036",
+    "instrument_key": "NSE_EQ|INE628A01036",
+    "name": "INE628A01036"
+  },
+  {
+    "isin": "INE646L01027",
+    "instrument_key": "NSE_EQ|INE646L01027",
+    "name": "INE646L01027"
+  },
+  {
+    "isin": "INE647A01010",
+    "instrument_key": "NSE_EQ|INE647A01010",
+    "name": "INE647A01010"
+  },
+  {
+    "isin": "INE663F01032",
+    "instrument_key": "NSE_EQ|INE663F01032",
+    "name": "INE663F01032"
+  },
+  {
+    "isin": "INE670K01029",
+    "instrument_key": "NSE_EQ|INE670K01029",
+    "name": "INE670K01029"
+  },
+  {
+    "isin": "INE721A01047",
+    "instrument_key": "NSE_EQ|INE721A01047",
+    "name": "INE721A01047"
+  },
+  {
+    "isin": "INE733E01010",
+    "instrument_key": "NSE_EQ|INE733E01010",
+    "name": "INE733E01010"
+  },
+  {
+    "isin": "INE742F01042",
+    "instrument_key": "NSE_EQ|INE742F01042",
+    "name": "INE742F01042"
+  },
+  {
+    "isin": "INE752E01010",
+    "instrument_key": "NSE_EQ|INE752E01010",
+    "name": "INE752E01010"
+  },
+  {
+    "isin": "INE758T01015",
+    "instrument_key": "NSE_EQ|INE758T01015",
+    "name": "INE758T01015"
+  },
+  {
+    "isin": "INE761H01022",
+    "instrument_key": "NSE_EQ|INE761H01022",
+    "name": "INE761H01022"
+  },
+  {
+    "isin": "INE776C01039",
+    "instrument_key": "NSE_EQ|INE776C01039",
+    "name": "INE776C01039"
+  },
+  {
+    "isin": "INE797F01020",
+    "instrument_key": "NSE_EQ|INE797F01020",
+    "name": "INE797F01020"
+  },
+  {
+    "isin": "INE813H01021",
+    "instrument_key": "NSE_EQ|INE813H01021",
+    "name": "INE813H01021"
+  },
+  {
+    "isin": "INE848E01016",
+    "instrument_key": "NSE_EQ|INE848E01016",
+    "name": "INE848E01016"
+  },
+  {
+    "isin": "INE849A01020",
+    "instrument_key": "NSE_EQ|INE849A01020",
+    "name": "INE849A01020"
+  },
+  {
+    "isin": "INE868B01028",
+    "instrument_key": "NSE_EQ|INE868B01028",
+    "name": "INE868B01028"
+  },
+  {
+    "isin": "INE878B01027",
+    "instrument_key": "NSE_EQ|INE878B01027",
+    "name": "INE878B01027"
+  },
+  {
+    "isin": "INE918I01026",
+    "instrument_key": "NSE_EQ|INE918I01026",
+    "name": "INE918I01026"
+  },
+  {
+    "isin": "INE918Z01012",
+    "instrument_key": "NSE_EQ|INE918Z01012",
+    "name": "INE918Z01012"
+  },
+  {
+    "isin": "INE931S01010",
+    "instrument_key": "NSE_EQ|INE931S01010",
+    "name": "INE931S01010"
+  }
+]

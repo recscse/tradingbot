@@ -813,6 +813,16 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"⚠️ Error marking startup complete: {e}")
 
+        # Start simple unified WebSocket broadcast task
+        try:
+            logger.info("🚀 Starting Simple Unified WebSocket System...")
+            from router.unified_websocket_routes import start_broadcast_task
+
+            await start_broadcast_task()
+            logger.info("✅ Simple Unified WebSocket broadcast started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Unified WebSocket broadcast: {e}")
+
         yield
 
     except Exception as e:
@@ -821,6 +831,15 @@ async def lifespan(app: FastAPI):
     finally:
         # Enhanced cleanup
         logger.info("🛑 Starting enhanced shutdown...")
+
+        # Stop simple unified WebSocket broadcast
+        try:
+            from router.unified_websocket_routes import stop_broadcast_task
+
+            await stop_broadcast_task()
+            logger.info("✅ Simple Unified WebSocket broadcast stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Unified WebSocket broadcast: {e}")
 
         # NEW: Stop centralized WebSocket system
         if CENTRALIZED_WS_AVAILABLE and centralized_manager:
@@ -991,7 +1010,15 @@ app.include_router(websocket_router, tags=["🗑️ WebSocket Management (REDUND
 app.include_router(debug_router, tags=["Debug"])
 app.include_router(market_analytics_router, tags=["Market Analytics"])
 app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
-# app.include_router(unified_ws_router, tags=["�️ Unified WebSocket (REDUNDANT)"])
+# 🚀 NEW: Simple Unified WebSocket System for Real-Time Market Data
+try:
+    from router.unified_websocket_routes import router as unified_websocket_router
+
+    app.include_router(unified_websocket_router, tags=["🚀 Unified WebSocket - Real-Time"])
+    logger.info("✅ Simple Unified WebSocket routes registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Unified WebSocket routes not available: {e}")
+
 app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(option_router, tags=["Options & Futures"])
 app.include_router(auto_trading_router, tags=["Auto Trading & Stock Selection"])

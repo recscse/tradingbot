@@ -57,6 +57,13 @@ class MarketScheduleService:
         self.nifty_strategy = None
         self.trading_sessions_active = False
 
+        # ✅ FIX: Track daily tasks to prevent repetition
+        self.daily_tasks_completed = {
+            "early_preparation": None,  # Track by date
+            "premarket_analysis": None,
+            "trading_preparation": None,
+        }
+
         # Initialize Redis client with proper error handling
         self.redis_enabled = os.getenv('REDIS_ENABLED', 'true').lower() == 'true'
         self.redis_client = None
@@ -158,32 +165,41 @@ class MarketScheduleService:
                 current_time = datetime.now(self.ist).time()
                 current_date = datetime.now(self.ist).date()
 
+                # Reset daily tasks at midnight (new trading day)
+                self._reset_daily_tasks_if_new_day(current_date)
+
                 # Check if it's a weekday (Monday=0, Sunday=6)
                 if datetime.now(self.ist).weekday() >= 5:
                     logger.info("📅 Weekend - Market closed")
                     await asyncio.sleep(3600)  # Sleep for 1 hour
                     continue
 
-                # Early morning preparation (8:00 AM) - ADD THIS BLOCK
+                # Early morning preparation (8:00 AM) - FIXED: Run only once per day
                 if (
                     current_time >= self.early_preparation
                     and current_time < self.premarket_start
+                    and self.daily_tasks_completed["early_preparation"] != current_date
                 ):
                     await self._run_early_morning_preparation()
+                    self.daily_tasks_completed["early_preparation"] = current_date
 
-                # Pre-market analysis (9:00 AM)
-                if (
+                # Pre-market analysis (9:00 AM) - FIXED: Run only once per day
+                elif (
                     current_time >= self.premarket_start
                     and current_time < self.market_open
+                    and self.daily_tasks_completed["premarket_analysis"] != current_date
                 ):
                     await self._run_premarket_analysis()
+                    self.daily_tasks_completed["premarket_analysis"] = current_date
 
-                # Trading preparation (9:15-9:30 AM)
+                # Trading preparation (9:15-9:30 AM) - FIXED: Run only once per day
                 elif (
                     current_time >= self.market_open
                     and current_time < self.trading_start
+                    and self.daily_tasks_completed["trading_preparation"] != current_date
                 ):
                     await self._prepare_trading_session()
+                    self.daily_tasks_completed["trading_preparation"] = current_date
 
                 # Active trading (9:30 AM - 3:30 PM)
                 elif (
@@ -960,6 +976,23 @@ class MarketScheduleService:
         except Exception as e:
             logger.error(f"Error calculating sentiment: {e}")
             return 0.5
+
+    def _reset_daily_tasks_if_new_day(self, current_date):
+        """Reset daily task tracking if it's a new day"""
+        try:
+            # Check if any completed task is from a previous date
+            for task_name, completed_date in self.daily_tasks_completed.items():
+                if completed_date and completed_date != current_date:
+                    # Reset all tasks for new day
+                    self.daily_tasks_completed = {
+                        "early_preparation": None,
+                        "premarket_analysis": None,
+                        "trading_preparation": None,
+                    }
+                    logger.info(f"🔄 Daily tasks reset for new trading day: {current_date}")
+                    break
+        except Exception as e:
+            logger.error(f"Error resetting daily tasks: {e}")
 
     def stop_scheduler(self):
         """Stop the market scheduler"""

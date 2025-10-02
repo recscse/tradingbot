@@ -1,10 +1,22 @@
 """
 Centralized WebSocket Manager for Trading System
 
-This module implements a singleton WebSocket manager that maintains one
-persistent connection to Upstox and broadcasts data to all components.
+This module implements a singleton WebSocket manager that maintains ONE
+persistent connection to Upstox using admin token and forwards processed
+data to backend services. This service does NOT handle UI WebSocket connections.
 
-FIXED VERSION - Resolves circular import issues and removes redundancies
+Architecture:
+- Single admin WebSocket connection to Upstox
+- Receives and processes live market feed data
+- Forwards processed data to backend services via callbacks
+- NO direct UI WebSocket broadcasting (handled by other services)
+
+Responsibilities:
+1. Manage admin token and WebSocket connection lifecycle
+2. Subscribe to instrument keys and receive market data
+3. Process and normalize incoming Upstox feed format
+4. Forward data to realtime_market_engine and other services
+5. Handle reconnection strategy and token refresh automation
 """
 
 import asyncio
@@ -14,10 +26,9 @@ import os
 import time
 import traceback
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Dict, Set, List, Optional, Callable, Any, Union
 import aiohttp
-from fastapi import WebSocket
-from fastapi.websockets import WebSocketState
 import sqlalchemy.exc
 from core.config import ADMIN_EMAIL
 
@@ -103,8 +114,74 @@ CallbackFunction = Callable[[Dict[str, Any]], Any]
 
 class CentralizedWebSocketManager:
     """
-    Singleton WebSocket manager that maintains one connection to Upstox
-    and broadcasts data to multiple components
+    Singleton WebSocket manager for centralized Upstox market data feed.
+
+    This service maintains a single persistent WebSocket connection to Upstox
+    using admin credentials and forwards processed market data to backend services.
+    It does NOT handle UI WebSocket connections or broadcasting to frontend clients.
+
+    Architecture:
+    - Single admin WebSocket connection to Upstox (using admin token)
+    - Receives live market feed for up to 1500 instruments
+    - Processes and normalizes Upstox feed format
+    - Forwards data to realtime_market_engine for analytics
+    - Notifies registered backend services via callbacks
+    - Handles token refresh automation and reconnection strategies
+
+    Key Responsibilities:
+    1. Admin Token Management:
+       - Load and validate admin token from database
+       - Automated token refresh when expired
+       - Token expiry monitoring and proactive refresh
+
+    2. WebSocket Connection Management:
+       - Single persistent connection to Upstox
+       - Automatic reconnection with exponential backoff
+       - Network connectivity monitoring
+       - Connection health tracking
+
+    3. Market Data Processing:
+       - Subscribe to instrument keys (NSE equity, indices, F&O)
+       - Receive and parse Upstox feed format
+       - Normalize data to standard format
+       - Extract LTPC, OHLC, volume, bid/ask data
+
+    4. Service Integration:
+       - Forward data to realtime_market_engine
+       - Execute registered callbacks for other services
+       - Track performance metrics
+       - NO direct UI WebSocket broadcasting
+
+    5. Error Handling & Monitoring:
+       - Comprehensive error logging
+       - Email alerts for critical failures
+       - Performance metrics tracking
+       - Health check endpoints
+
+    Usage Example:
+        # Get singleton instance
+        manager = get_centralized_manager()
+
+        # Initialize and start
+        await manager.initialize()
+        await manager.start_connection()
+
+        # Register callback for market data
+        def my_callback(data: dict):
+            print(f"Received data: {data}")
+        manager.register_market_data_callback(my_callback)
+
+        # Stop connection
+        await manager.stop()
+
+    Thread Safety:
+        This is a singleton class. Multiple calls to the constructor
+        return the same instance. Safe for concurrent access.
+
+    Note:
+        This service does NOT broadcast to UI WebSocket connections.
+        UI broadcasting is handled by unified_websocket_manager.py
+        and other UI-specific services.
     """
 
     _instance = None
@@ -160,12 +237,47 @@ class CentralizedWebSocketManager:
 
         self.background_tasks = set()
 
+        # Callback management for backend services
+        self.callbacks: Dict[str, List[CallbackFunction]] = {}
+
+        # Performance metrics
+        self.performance_metrics: Dict[str, int] = {
+            "callbacks_executed": 0,
+            "data_updates_processed": 0,
+            "errors_encountered": 0,
+            "reconnection_count": 0,
+        }
+
         # Initialize market data service
         self._initialized = True
-        logger.info("✅ Centralized WebSocket manager initialized")
+        logger.info("Centralized WebSocket manager initialized")
 
     async def initialize(self) -> bool:
-        """Initialize the manager with admin token from database"""
+        """
+        Initialize the centralized WebSocket manager.
+
+        This method loads the admin token from database, loads instrument keys,
+        and prepares the manager for WebSocket connection. It also loads
+        the latest market snapshot for quick data availability.
+
+        Initialization Steps:
+        1. Reset connection state
+        2. Load admin token from database with validation
+        3. Load instrument keys (NSE stocks, indices, F&O)
+        4. Load market snapshot from Redis/file cache
+        5. Determine market hours and decide connection strategy
+        6. Start WebSocket connection if market is open
+
+        Returns:
+            True if initialization successful, False otherwise
+
+        Raises:
+            No exceptions raised - errors are logged and False is returned
+
+        Note:
+            This method should be called before start_connection().
+            It's safe to call multiple times - will reinitialize state.
+        """
         try:
             logger.info("🔧 Initializing Centralized WebSocket manager...")
 
@@ -824,7 +936,7 @@ class CentralizedWebSocketManager:
                         5 * (2**self.reconnect_attempts), 300
                     )  # Max 5 minutes
                     logger.info(
-                        f"⏳ Reconnecting in {backoff_delay}s (attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})"
+                        f"Reconnecting in {backoff_delay}s (attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})"
                     )
 
                     # Enhanced reconnection recovery strategies
@@ -835,8 +947,13 @@ class CentralizedWebSocketManager:
                         await self._send_reconnection_warning_email()
 
                     await asyncio.sleep(backoff_delay)
+
+                    # Update performance metrics
+                    self.performance_metrics["reconnection_count"] = (
+                        self.reconnect_attempts
+                    )
                 else:
-                    logger.error("❌ Max reconnection attempts reached")
+                    logger.error("Max reconnection attempts reached")
                     self.is_running = False
                     await self._send_max_reconnections_email()
 
@@ -886,8 +1003,211 @@ class CentralizedWebSocketManager:
             await self.ws_client.connect_and_stream()
 
         except Exception as e:
-            logger.error(f"❌ Failed to start WebSocket client: {e}")
+            logger.error(f"Failed to start WebSocket client: {e}")
             raise
+
+    async def _broadcast_connection_status(self, status_data: dict) -> None:
+        """
+        Log connection status changes for monitoring purposes.
+
+        This method logs connection status changes but does NOT broadcast
+        to UI WebSocket connections. UI broadcasting is handled by other services.
+
+        Args:
+            status_data: Dictionary containing connection status information
+                - status: Connection status (connected/disconnected/reconnecting)
+                - message: Human-readable status message
+                - timestamp: Optional timestamp of status change
+
+        Returns:
+            None
+
+        Raises:
+            No exceptions raised - errors are logged internally
+        """
+        try:
+            status = status_data.get("status", "unknown")
+            message = status_data.get("message", "No message provided")
+            timestamp = status_data.get("timestamp", datetime.now().isoformat())
+
+            # Log connection status for monitoring
+            log_message = (
+                f"WebSocket connection status changed: {status} - {message} "
+                f"(timestamp: {timestamp})"
+            )
+
+            if status == "connected":
+                logger.info(log_message)
+            elif status == "disconnected":
+                logger.warning(log_message)
+            elif status == "reconnecting":
+                logger.info(log_message)
+            else:
+                logger.debug(log_message)
+
+            # Execute registered callbacks for connection status
+            await self._execute_callbacks("connection_status", status_data)
+
+        except Exception as e:
+            logger.error(f"Error in _broadcast_connection_status: {e}")
+            self.performance_metrics["errors_encountered"] += 1
+
+    async def _apply_reconnection_strategy(self) -> None:
+        """
+        Apply intelligent reconnection strategy before attempting reconnection.
+
+        This method performs necessary validations and token refresh
+        before attempting to reconnect to ensure higher success rate.
+
+        Strategy Steps:
+        1. Validate current admin token expiry
+        2. Attempt automated token refresh if expired/expiring
+        3. Reload admin token from database
+        4. Clear stale connection state
+        5. Check network connectivity
+
+        Returns:
+            None
+
+        Raises:
+            No exceptions raised - errors are logged and handled gracefully
+        """
+        try:
+            logger.info(
+                f"Applying reconnection strategy (attempt {self.reconnect_attempts}/"
+                f"{self.max_reconnect_attempts})"
+            )
+
+            # Step 1: Check if token needs refresh
+            token_validation_needed = False
+
+            if hasattr(self, "_token_validation_status"):
+                validation_status = self._token_validation_status
+                if not validation_status.get("valid", False):
+                    token_validation_needed = True
+                    logger.info(
+                        f"Token validation required: {validation_status.get('reason', 'unknown')}"
+                    )
+
+            # Step 2: Attempt token refresh if needed
+            if token_validation_needed or self.reconnect_attempts > 3:
+                logger.info("Attempting proactive token refresh before reconnection")
+                try:
+                    refresh_success = await self._try_automated_refresh()
+                    if refresh_success:
+                        logger.info("Token refresh successful - reloading token")
+                        await self._load_admin_token()
+                    else:
+                        logger.warning(
+                            "Token refresh failed - proceeding with existing token"
+                        )
+                except Exception as refresh_error:
+                    logger.error(f"Error during token refresh: {refresh_error}")
+
+            # Step 3: Reload admin token from database
+            try:
+                await self._load_admin_token()
+            except Exception as token_error:
+                logger.error(f"Error reloading admin token: {token_error}")
+
+            # Step 4: Clear stale connection state
+            self.connection_ready.clear()
+            if self.ws_client:
+                try:
+                    self.ws_client.stop()
+                    self.ws_client = None
+                except Exception as stop_error:
+                    logger.error(f"Error stopping stale WebSocket client: {stop_error}")
+
+            # Step 5: Check network connectivity
+            network_ok = await self._check_network_connectivity()
+            if not network_ok:
+                logger.warning(
+                    "Network connectivity issues detected before reconnection"
+                )
+
+            # Step 6: Log connection status
+            await self._broadcast_connection_status(
+                {
+                    "status": "reconnecting",
+                    "message": f"Applying reconnection strategy (attempt {self.reconnect_attempts})",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+            logger.info("Reconnection strategy applied successfully")
+
+        except Exception as e:
+            logger.error(f"Error in _apply_reconnection_strategy: {e}")
+            self.performance_metrics["errors_encountered"] += 1
+
+    async def _send_reconnection_warning_email(self) -> None:
+        """
+        Send warning email when approaching maximum reconnection attempts.
+
+        This method sends an alert email to the administrator when the system
+        is approaching the maximum reconnection attempts threshold, allowing
+        proactive intervention before complete failure.
+
+        Returns:
+            None
+
+        Raises:
+            No exceptions raised - errors are logged internally
+        """
+        try:
+            attempts_remaining = self.max_reconnect_attempts - self.reconnect_attempts
+
+            subject = "Warning: WebSocket Reconnection Approaching Limit"
+            message = f"""
+            TRADING SYSTEM RECONNECTION WARNING
+
+            The centralized WebSocket manager is approaching maximum reconnection attempts.
+
+            Current Status:
+            - Reconnection Attempts: {self.reconnect_attempts}/{self.max_reconnect_attempts}
+            - Attempts Remaining: {attempts_remaining}
+            - Last Data Received: {self.last_data_received.isoformat() if self.last_data_received else 'Never'}
+            - Last Connection Attempt: {self.last_connection_attempt.isoformat() if self.last_connection_attempt else 'Unknown'}
+
+            System Impact:
+            - Real-time market data feed is unstable
+            - Trading signals may be delayed or missed
+            - Dashboard updates may be interrupted
+
+            Recommended Actions:
+            1. Check Upstox API service status
+            2. Verify admin token validity and expiration
+            3. Check network connectivity and firewall settings
+            4. Review system logs for error patterns
+            5. Consider manual intervention if issues persist
+
+            If the system reaches maximum attempts, real-time data will stop
+            and manual restart will be required.
+
+            Time: {datetime.now().isoformat()}
+            Admin User ID: {self.admin_user_id}
+            Active Instruments: {len(self.active_instrument_keys)}
+            """
+
+            logger.info("Sending reconnection warning email to administrator")
+
+            try:
+                email_sent = email_service.send_notification(
+                    recipient_email=ADMIN_EMAIL, subject=subject, message=message
+                )
+
+                if email_sent:
+                    logger.info("Reconnection warning email sent successfully")
+                else:
+                    logger.warning("Failed to send reconnection warning email")
+
+            except Exception as email_error:
+                logger.error(f"Error sending reconnection warning email: {email_error}")
+
+        except Exception as e:
+            logger.error(f"Error in _send_reconnection_warning_email: {e}")
+            self.performance_metrics["errors_encountered"] += 1
 
     async def _handle_market_data(self, data: dict):
         """Handle incoming market data with enhanced format handling"""
@@ -979,10 +1299,10 @@ class CentralizedWebSocketManager:
 
         if prev_status != self.market_status:
             logger.info(
-                f"📈 Market status updated: {self.market_status} (active segments: {active_segments})"
+                f"Market status updated: {self.market_status} (active segments: {active_segments})"
             )
-            await self._broadcast_market_status()
 
+            # Notify registered services via callbacks (NO UI broadcasting)
             await self._execute_callbacks(
                 "market_status",
                 {
@@ -1030,172 +1350,287 @@ class CentralizedWebSocketManager:
 
             logger.debug(f"✅ Data routing completed for {len(feeds)} instruments")
 
-    async def _update_analytics_engine(self, feeds: dict):
+    async def _update_analytics_engine(self, feeds: dict) -> None:
         """
-        Update real-time analytics engine with normalized market data
+        Forward processed market data to realtime analytics engine.
 
-        This method:
-        1. Normalizes Upstox feed format to analytics engine format
-        2. Calls analytics engine for atomic updates
-        3. Ensures zero-latency analytics calculations
+        This method normalizes Upstox feed format and forwards it to the
+        realtime_market_engine service for analytics calculations. It does NOT
+        broadcast to UI - that is handled by other services.
+
+        Architecture:
+        1. Extract and normalize market data from Upstox feeds
+        2. Forward to realtime_market_engine via update_live_data()
+        3. Execute registered callbacks for other backend services
+        4. Track performance metrics
+
+        Args:
+            feeds: Dictionary of Upstox feed data keyed by instrument_key
+                Format: {instrument_key: {fullFeed: {...}}}
+
+        Returns:
+            None
+
+        Raises:
+            No exceptions raised - errors are logged and tracked in metrics
         """
         try:
+            # Input validation
+            if not feeds or not isinstance(feeds, dict):
+                logger.debug("No feeds data to process for analytics engine")
+                return
+
             # Import analytics engine safely to avoid circular imports
-            from services.realtime_market_engine import (
-                get_market_engine,
-                update_live_data,
-            )
+            try:
+                from services.realtime_market_engine import update_market_data
+            except ImportError as import_error:
+                logger.warning(f"Analytics engine import failed: {import_error}")
+                logger.warning(
+                    "Real-time analytics engine will not receive data updates"
+                )
+                return
 
             # Normalize Upstox feed format to analytics engine format
             normalized_updates = {}
+            normalization_errors = 0
 
             for instrument_key, feed_data in feeds.items():
                 try:
+                    # Validate instrument key format
+                    if not instrument_key or "|" not in instrument_key:
+                        continue
+
                     # Extract live price data from Upstox format
                     ltp_data = self._extract_ltp_from_feed(feed_data)
 
+                    # Validate extracted data
                     if ltp_data and ltp_data.get("ltp", 0) > 0:
                         normalized_updates[instrument_key] = {
-                            "ltp": ltp_data["ltp"],
-                            "volume": ltp_data.get("volume", 0),
+                            "ltp": float(ltp_data["ltp"]),
+                            "volume": int(ltp_data.get("volume", 0)),
                             "timestamp": ltp_data.get("timestamp"),
-                            "high": ltp_data.get("high"),
-                            "low": ltp_data.get("low"),
-                            "open": ltp_data.get("open"),
-                            "close": ltp_data.get("close"),
+                            "high": float(ltp_data.get("high")) if ltp_data.get("high") else None,
+                            "low": float(ltp_data.get("low")) if ltp_data.get("low") else None,
+                            "open": float(ltp_data.get("open")) if ltp_data.get("open") else None,
+                            "close": float(ltp_data.get("prev_close")) if ltp_data.get("prev_close") else None,
+                            "cp": float(ltp_data.get("prev_close")) if ltp_data.get("prev_close") else None,
                         }
 
-                except Exception as e:
-                    logger.debug(f"⚠️ Error normalizing {instrument_key}: {e}")
+                except Exception as normalization_error:
+                    normalization_errors += 1
+                    logger.debug(
+                        f"Error normalizing {instrument_key}: {normalization_error}"
+                    )
                     continue
 
-            # Update analytics engine with normalized data (atomic operation)
+            # Forward to analytics engine if we have valid data
             if normalized_updates:
                 # Log first update with sample data for debugging
                 if not hasattr(self, "_analytics_first_update_logged"):
                     self._analytics_first_update_logged = True
                     sample_keys = list(normalized_updates.keys())[:3]
                     logger.info(
-                        f"🚀 Sending first update to analytics engine: {len(normalized_updates)} instruments"
+                        f"Sending first update to analytics engine: {len(normalized_updates)} instruments"
                     )
-                    logger.info(f"Sample keys being sent: {sample_keys}")
+                    logger.info(f"Sample keys: {sample_keys}")
                     if sample_keys:
                         logger.info(
-                            f"Sample data structure: {normalized_updates[sample_keys[0]]}"
+                            f"Sample data: {normalized_updates[sample_keys[0]]}"
                         )
 
-                update_live_data(normalized_updates)
-                logger.debug(
-                    f"📊 Updated analytics engine with {len(normalized_updates)} instruments"
+                # Forward to realtime market engine
+                update_market_data(normalized_updates)
+
+                # Update performance metrics
+                self.performance_metrics["data_updates_processed"] += len(
+                    normalized_updates
                 )
 
-        except ImportError as e:
-            # Analytics engine not available - log the issue
-            logger.warning(f"⚠️ Analytics engine import failed: {e}")
-            logger.warning("Real-time analytics engine will not receive data updates")
+                logger.debug(
+                    f"Updated analytics engine with {len(normalized_updates)} instruments"
+                )
+
+                # Execute registered callbacks for price updates (for WebSocket broadcasting)
+                await self._execute_callbacks("price_update", normalized_updates)
+
+                # Execute registered callbacks for analytics updates
+                await self._execute_callbacks(
+                    "analytics_update",
+                    {
+                        "instrument_count": len(normalized_updates),
+                        "timestamp": datetime.now().isoformat(),
+                        "sample_keys": list(normalized_updates.keys())[:5],
+                    },
+                )
+
+            # Log normalization errors if significant
+            if normalization_errors > 10:
+                logger.warning(
+                    f"High normalization error rate: {normalization_errors} errors "
+                    f"out of {len(feeds)} feeds"
+                )
+                self.performance_metrics["errors_encountered"] += normalization_errors
+
         except Exception as e:
-            logger.error(f"❌ Analytics engine update error: {e}")
-            logger.error(
-                f"Failed to update analytics engine with {len(normalized_updates) if 'normalized_updates' in locals() else 0} instruments"
-            )
+            logger.error(f"Analytics engine update error: {e}")
+            logger.error(traceback.format_exc())
+            self.performance_metrics["errors_encountered"] += 1
 
-    def _extract_ltp_from_feed(self, feed_data: dict) -> dict:
+    def _extract_ltp_from_feed(self, feed_data: dict) -> Optional[dict]:
         """
-        Extract Last Traded Price data from Upstox feed format
-
-        Handles both fullFeed.marketFF and fullFeed.indexFF formats
+        Extract LTP and prev_close strictly using ltpc.cp for previous close.
+        Returns dict or None.
         """
         try:
-            full_feed = feed_data.get("fullFeed", {})
-
-            # Handle equity/stock data (marketFF)
+            if not isinstance(feed_data, dict):
+                return None
+            full_feed = feed_data.get("fullFeed") or {}
+            # Equity/stock
             if "marketFF" in full_feed:
-                market_ff = full_feed["marketFF"]
-                ltpc = market_ff.get("ltpc", {})
+                market_ff = full_feed["marketFF"] or {}
+                ltpc = market_ff.get("ltpc") or {}
 
-                if ltpc and ltpc.get("ltp"):
-                    # Get OHLC data
-                    ohlc_data = {}
-                    market_ohlc = market_ff.get("marketOHLC", {}).get("ohlc", [])
+                # require ltp present
+                if "ltp" not in ltpc:
+                    return None
 
-                    # Find daily OHLC (interval "1d")
-                    for ohlc_item in market_ohlc:
-                        if ohlc_item.get("interval") == "1d":
-                            ohlc_data = {
-                                "open": ohlc_item.get("open"),
-                                "high": ohlc_item.get("high"),
-                                "low": ohlc_item.get("low"),
-                                "close": ltpc.get("ltp"),  # Current price as close
-                            }
-                            break
+                # Strict prev_close from ltpc.cp (may be None)
+                prev_close = ltpc.get("cp")  # <--- USE THIS ONLY
 
-                    return {
-                        "ltp": ltpc.get("ltp"),
-                        "volume": (
-                            int(market_ff.get("vtt", 0)) if market_ff.get("vtt") else 0
-                        ),
-                        "timestamp": ltpc.get("ltt"),
-                        "close": ltpc.get("cp"),  # Previous close
-                        **ohlc_data,
-                    }
+                # Parse 1d OHLC for open/high/low/ohlc_close (but do NOT treat as prev_close)
+                ohlc_data = {}
+                for ohlc_item in market_ff.get("marketOHLC", {}).get("ohlc", []) or []:
+                    if ohlc_item.get("interval") == "1d":
+                        ohlc_data = {
+                            "open": ohlc_item.get("open"),
+                            "high": ohlc_item.get("high"),
+                            "low": ohlc_item.get("low"),
+                            "ohlc_close": ohlc_item.get("close"),
+                        }
+                        break
 
-            # Handle index data (indexFF)
-            elif "indexFF" in full_feed:
-                index_ff = full_feed["indexFF"]
-                ltpc = index_ff.get("ltpc", {})
+                return {
+                    "ltp": float(ltpc.get("ltp")),
+                    "prev_close": float(prev_close) if prev_close else None,
+                    "open": float(ohlc_data.get("open")) if ohlc_data.get("open") else None,
+                    "high": float(ohlc_data.get("high")) if ohlc_data.get("high") else None,
+                    "low": float(ohlc_data.get("low")) if ohlc_data.get("low") else None,
+                    "ohlc_close": float(ohlc_data.get("ohlc_close")) if ohlc_data.get("ohlc_close") else None,
+                    "volume": int(market_ff.get("vtt")) if market_ff.get("vtt") else 0,
+                    "avg_price": float(market_ff.get("atp")) if market_ff.get("atp") else None,
+                    "timestamp": ltpc.get("ltt"),
+                    "last_qty": int(ltpc.get("ltq", 0)) if ltpc.get("ltq") else 0,
+                }
 
-                if ltpc and ltpc.get("ltp"):
-                    # Get OHLC data for indices
-                    ohlc_data = {}
-                    index_ohlc = index_ff.get("marketOHLC", {}).get("ohlc", [])
+            # Index handling (same idea)
+            if "indexFF" in full_feed:
+                index_ff = full_feed["indexFF"] or {}
+                ltpc = index_ff.get("ltpc") or {}
+                if "ltp" not in ltpc:
+                    return None
+                prev_close = ltpc.get("cp")
+                ohlc_data = {}
+                for ohlc_item in index_ff.get("marketOHLC", {}).get("ohlc", []) or []:
+                    if ohlc_item.get("interval") == "1d":
+                        ohlc_data = {
+                            "open": ohlc_item.get("open"),
+                            "high": ohlc_item.get("high"),
+                            "low": ohlc_item.get("low"),
+                            "ohlc_close": ohlc_item.get("close"),
+                        }
+                        break
+                return {
+                    "ltp": float(ltpc.get("ltp")),
+                    "prev_close": float(prev_close) if prev_close else None,
+                    "open": float(ohlc_data.get("open")) if ohlc_data.get("open") else None,
+                    "high": float(ohlc_data.get("high")) if ohlc_data.get("high") else None,
+                    "low": float(ohlc_data.get("low")) if ohlc_data.get("low") else None,
+                    "ohlc_close": float(ohlc_data.get("ohlc_close")) if ohlc_data.get("ohlc_close") else None,
+                    "volume": 0,  # Indices don't have volume
+                    "avg_price": None,
+                    "timestamp": ltpc.get("ltt"),
+                    "last_qty": 0,
+                }
 
-                    for ohlc_item in index_ohlc:
-                        if ohlc_item.get("interval") == "1d":
-                            ohlc_data = {
-                                "open": ohlc_item.get("open"),
-                                "high": ohlc_item.get("high"),
-                                "low": ohlc_item.get("low"),
-                                "close": ltpc.get("ltp"),
-                            }
-                            break
-
-                    return {
-                        "ltp": ltpc.get("ltp"),
-                        "volume": 0,  # Indices don't have volume
-                        "timestamp": ltpc.get("ltt"),
-                        "close": ltpc.get("cp"),  # Previous close
-                        **ohlc_data,
-                    }
-
-            return {}
-
+            return None
         except Exception as e:
             logger.debug(f"⚠️ Error extracting LTP data: {e}")
-            return {}
+            logger.debug(traceback.format_exc())
+            return None
 
     def register_analytics_callback(self, callback: CallbackFunction) -> bool:
         """
-        Register callback for analytics events
+        Register callback for analytics events.
+
+        Services can register callbacks to receive real-time analytics updates
+        when market data is processed and forwarded to the analytics engine.
 
         Args:
-            callback: Function to call with analytics updates
+            callback: Async or sync function to call with analytics updates
+                Callback signature: callback(data: dict) -> None
+                Data structure:
+                {
+                    "instrument_count": int,
+                    "timestamp": str (ISO format),
+                    "sample_keys": List[str]
+                }
 
         Returns:
-            bool: True if registered successfully
+            True if registered successfully, False otherwise
+
+        Raises:
+            No exceptions raised - errors are logged internally
         """
         return self.register_callback("analytics_update", callback)
 
     def unregister_analytics_callback(self, callback: CallbackFunction) -> bool:
         """
-        Unregister analytics callback
+        Unregister analytics callback.
 
         Args:
-            callback: Function to unregister
+            callback: Previously registered callback function to remove
 
         Returns:
-            bool: True if unregistered successfully
+            True if unregistered successfully, False if not found
+
+        Raises:
+            No exceptions raised - errors are logged internally
         """
         return self.unregister_callback("analytics_update", callback)
+
+    def register_market_data_callback(self, callback: CallbackFunction) -> bool:
+        """
+        Register callback for raw market data updates.
+
+        Services can register callbacks to receive market data updates
+        as they are received from Upstox WebSocket feed.
+
+        Args:
+            callback: Async or sync function to call with market data
+                Callback signature: callback(data: dict) -> None
+
+        Returns:
+            True if registered successfully
+
+        Raises:
+            No exceptions raised - errors are logged internally
+        """
+        return self.register_callback("price_update", callback)
+
+    def unregister_market_data_callback(self, callback: CallbackFunction) -> bool:
+        """
+        Unregister market data callback.
+
+        Args:
+            callback: Previously registered callback function to remove
+
+        Returns:
+            True if unregistered successfully, False if not found
+
+        Raises:
+            No exceptions raised - errors are logged internally
+        """
+        return self.unregister_callback("price_update", callback)
 
     async def _handle_live_feed_data(self, data: dict):
         """Handle live_feed format data with ZERO-DELAY streaming"""
@@ -2264,15 +2699,9 @@ class CentralizedWebSocketManager:
                 if email_sent:
                     logger.info("📧 Sent admin token expiration alert")
             except Exception as e:
-                logger.error(f"❌ Error sending token expiration email: {e}")
+                logger.error(f"Error sending token expiration email: {e}")
 
-            await self._broadcast_error(
-                {
-                    "reason": "admin_token_expired",
-                    "message": "Admin authentication failed. Please contact administrator.",
-                }
-            )
-
+            # Notify registered services via callbacks (NO UI broadcasting)
             await self._execute_callbacks(
                 "error",
                 {
@@ -2340,20 +2769,63 @@ class CentralizedWebSocketManager:
 
     # ===== PUBLIC API METHODS =====
 
-    def register_callback(self, event_type: str, callback: CallbackFunction):
-        """Register a callback function for specific events"""
+    def register_callback(self, event_type: str, callback: CallbackFunction) -> bool:
+        """
+        Register a callback function for specific event types.
+
+        Services can register callbacks to receive notifications for
+        various events like market data updates, connection status changes,
+        analytics updates, etc.
+
+        Supported Event Types:
+        - price_update: Market data updates
+        - analytics_update: Analytics engine updates
+        - connection_status: Connection state changes
+        - market_status: Market open/close status
+        - error: Error notifications
+        - emergency_disconnect: Emergency disconnection events
+
+        Args:
+            event_type: Type of event to listen for (see supported types above)
+            callback: Async or sync function to call when event occurs
+                Signature: callback(data: dict) -> None
+
+        Returns:
+            True if registered successfully
+
+        Raises:
+            No exceptions raised - errors are logged internally
+
+        Example:
+            def handle_price_update(data: dict):
+                print(f"Received price update: {data}")
+
+            manager.register_callback("price_update", handle_price_update)
+        """
         if event_type not in self.callbacks:
             self.callbacks[event_type] = []
 
         self.callbacks[event_type].append(callback)
-        logger.info(f"✅ Registered callback for {event_type}")
+        logger.info(f"Registered callback for {event_type}")
         return True
 
-    def unregister_callback(self, event_type: str, callback: CallbackFunction):
-        """Unregister a previously registered callback"""
+    def unregister_callback(self, event_type: str, callback: CallbackFunction) -> bool:
+        """
+        Unregister a previously registered callback.
+
+        Args:
+            event_type: Type of event the callback was registered for
+            callback: The callback function to unregister
+
+        Returns:
+            True if unregistered successfully, False if callback not found
+
+        Raises:
+            No exceptions raised - errors are logged internally
+        """
         if event_type in self.callbacks and callback in self.callbacks[event_type]:
             self.callbacks[event_type].remove(callback)
-            logger.info(f"✅ Unregistered callback for {event_type}")
+            logger.info(f"Unregistered callback for {event_type}")
             return True
         return False
 
@@ -2661,7 +3133,7 @@ class CentralizedWebSocketManager:
                 except Exception as e:
                     logger.error(f"❌ Error stopping WebSocket: {e}")
 
-            # Send emergency notifications to all connected clients
+            # Notify registered services via callbacks (NO UI broadcasting)
             emergency_message = {
                 "type": "emergency_disconnect",
                 "reason": reason,
@@ -2669,8 +3141,8 @@ class CentralizedWebSocketManager:
                 "action_required": "manual_restart",
             }
 
-            # Broadcast to all clients
-            await self._broadcast_to_all_clients(emergency_message)
+            # Execute callbacks to notify services
+            await self._execute_callbacks("emergency_disconnect", emergency_message)
 
             # Update connection status
             self.is_running = False

@@ -461,7 +461,7 @@ class TradingInstrumentService:
                 instrument_mappings[instrument_key] = {
                     "symbol": symbol,
                     "name": name,
-                    "trading_symbol": trading_symbol
+                    "trading_symbol": trading_symbol,
                 }
 
         logger.info(f"📈 Extracted {len(instrument_keys)} NSE EQ instrument keys")
@@ -473,7 +473,9 @@ class TradingInstrumentService:
         return instrument_keys, instrument_mappings
 
     async def _save_nse_instrument_keys(
-        self, instrument_keys: List[str], instrument_mappings: Dict[str, Dict[str, str]] = None
+        self,
+        instrument_keys: List[str],
+        instrument_mappings: Dict[str, Dict[str, str]] = None,
     ) -> None:
         """Save NSE instrument keys and mappings to separate JSON files."""
         nse_file_path = self.data_dir / "nse_instrument_keys.json"
@@ -716,7 +718,9 @@ class TradingInstrumentService:
 
         # 3. MCX instruments are now handled by dedicated MCX WebSocket service
         # This ensures no conflicts between centralized manager and MCX service
-        logger.info("🏭 MCX instruments excluded - handled by dedicated MCX WebSocket service")
+        logger.info(
+            "🏭 MCX instruments excluded - handled by dedicated MCX WebSocket service"
+        )
 
         # Ensure we don't exceed the limit
         final_keys = subscription_keys[:max_keys]
@@ -952,7 +956,11 @@ def get_spot_only_instruments() -> List[Dict]:
 
                     try:
                         if "|" in key:
-                            isin = key.split("|")[1] if len(key.split("|")) > 1 else display_symbol
+                            isin = (
+                                key.split("|")[1]
+                                if len(key.split("|")) > 1
+                                else display_symbol
+                            )
                             display_symbol = isin  # Use ISIN as last resort
                             name = isin
                             trading_symbol = isin
@@ -983,9 +991,13 @@ def get_spot_only_instruments() -> List[Dict]:
                     }
                 )
 
-            logger.info(f"📈 Created {len(spot_instruments)} spot instruments with proper symbols")
+            logger.info(
+                f"📈 Created {len(spot_instruments)} spot instruments with proper symbols"
+            )
             if symbol_mappings:
-                logger.info(f"✅ Using actual stock symbols from Upstox instrument data")
+                logger.info(
+                    f"✅ Using actual stock symbols from Upstox instrument data"
+                )
             else:
                 logger.warning("⚠️ No symbol mappings found, using fallback symbols")
 
@@ -1076,3 +1088,372 @@ def get_fno_instrument_keys(symbol: str) -> Dict[str, Any]:
         result["error"] = str(e)
 
     return result
+
+
+def build_analytics_metadata() -> List[Dict[str, Any]]:
+    """
+    Build instrument metadata for real-time market analytics engine
+
+    Combines:
+    - NSE instrument keys from instrument refresh service
+    - Symbol mappings from Upstox data
+    - Sector classifications from enhanced_sector_mapping.json
+    - Market cap and other metadata for analytics calculations
+
+    Returns:
+        List of instrument metadata dictionaries for analytics engine
+    """
+    try:
+        logger.info(
+            "🔧 Building analytics metadata from instrument service and sector mapping..."
+        )
+
+        service = get_trading_service()
+        metadata_list = []
+
+        # Load enhanced sector mapping
+        sector_mapping = _load_enhanced_sector_mapping()
+        if not sector_mapping:
+            logger.warning(
+                "⚠️ Enhanced sector mapping not available, using fallback sectors"
+            )
+
+        # Load NSE instrument keys and symbol mappings
+        nse_file_path = service.data_dir / "nse_instrument_keys.json"
+        nse_mappings_path = service.data_dir / "nse_symbol_mappings.json"
+
+        if not nse_file_path.exists():
+            logger.error(
+                "❌ NSE instrument keys not found - run instrument refresh first"
+            )
+            return []
+
+        # Load NSE keys
+        with open(nse_file_path, "r") as f:
+            nse_keys = json.load(f)
+
+        # Load symbol mappings if available
+        symbol_mappings = {}
+        if nse_mappings_path.exists():
+            try:
+                with open(nse_mappings_path, "r") as f:
+                    symbol_mappings = json.load(f)
+                logger.info(
+                    f"📋 Loaded {len(symbol_mappings)} symbol mappings for analytics"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load symbol mappings: {e}")
+
+        # Build metadata for each NSE instrument
+        for instrument_key in nse_keys:
+            try:
+                # Get symbol information
+                if instrument_key in symbol_mappings:
+                    mapping = symbol_mappings[instrument_key]
+                    symbol = mapping.get("symbol", "").strip().upper()
+                    name = mapping.get("name", "").strip()
+                    trading_symbol = mapping.get("trading_symbol", "").strip().upper()
+                else:
+                    # Fallback: Extract from instrument key
+                    symbol = _extract_symbol_from_key(instrument_key)
+                    name = symbol
+                    trading_symbol = symbol
+
+                # Get sector from enhanced mapping
+                sector_info = _get_sector_from_mapping(symbol, sector_mapping)
+                sector = sector_info.get("sector", "UNKNOWN")
+
+                # Build metadata dictionary
+                metadata = {
+                    "instrument_key": instrument_key,
+                    "symbol": symbol,
+                    "name": name,
+                    "trading_symbol": trading_symbol,
+                    "sector": sector,
+                    "exchange": "NSE",
+                    "segment": "NSE_EQ",
+                    "instrument_type": "EQ",
+                    # Market data for analytics
+                    "market_cap": sector_info.get("market_cap", 0),
+                    "lot_size": sector_info.get("lot_size", 1),
+                    "tick_size": 0.05,
+                    "avg_volume": sector_info.get("avg_volume", 0),
+                    # Additional metadata
+                    "isin": sector_info.get("isin", ""),
+                    "industry": sector_info.get("industry", ""),
+                    "last_updated": datetime.now().isoformat(),
+                }
+
+                metadata_list.append(metadata)
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error processing instrument {instrument_key}: {e}")
+                continue
+
+        # Add MCX instruments if available
+        # mcx_metadata = _build_mcx_analytics_metadata(service)
+        # metadata_list.extend(mcx_metadata)
+
+        # Add major indices for market breadth calculations
+        index_metadata = _build_index_analytics_metadata()
+        metadata_list.extend(index_metadata)
+
+        logger.info(
+            f"✅ Built analytics metadata for {len(metadata_list)} instruments "
+            f"({len(nse_keys)} NSE,  {len(index_metadata)} indices)"
+        )
+
+        return metadata_list
+
+    except Exception as e:
+        logger.error(f"❌ Error building analytics metadata: {e}")
+        return []
+
+
+def _load_enhanced_sector_mapping() -> Dict[str, Any]:
+    """Load enhanced sector mapping configuration"""
+    try:
+        config_path = Path("config") / "enhanced_sector_mapping.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load enhanced sector mapping: {e}")
+    return {}
+
+
+def _get_sector_from_mapping(
+    symbol: str, sector_mapping: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Get sector information for a symbol from enhanced mapping
+
+    Args:
+        symbol: Stock symbol (e.g., 'RELIANCE')
+        sector_mapping: Enhanced sector mapping data
+
+    Returns:
+        Dictionary with sector info including market cap, lot size, etc.
+    """
+    if not sector_mapping or "sectors" not in sector_mapping:
+        return {"sector": "UNKNOWN"}
+
+    # Search through all sectors for the symbol
+    for sector_code, sector_data in sector_mapping["sectors"].items():
+        stocks = sector_data.get("stocks", [])
+        for stock in stocks:
+            stock_symbol = stock.get("symbol", "").upper()
+            if stock_symbol == symbol.upper():
+                return {
+                    "sector": sector_code,
+                    "sector_name": sector_data.get("display_name", sector_code),
+                    "market_cap": stock.get("market_cap", 0),
+                    "lot_size": stock.get("lot_size", 1),
+                    "isin": stock.get("isin", ""),
+                    "industry": stock.get("type", ""),
+                    "avg_volume": stock.get("avg_volume", 0),
+                }
+
+    return {"sector": "UNKNOWN"}
+
+
+def _extract_symbol_from_key(instrument_key: str) -> str:
+    """Extract symbol from instrument key as fallback"""
+    try:
+        # Format: NSE_EQ|INE001A01036
+        if "|" in instrument_key:
+            parts = instrument_key.split("|")
+            if len(parts) > 1:
+                # For ISIN codes, return as is
+                return parts[1].strip()
+        return instrument_key
+    except:
+        return "UNKNOWN"
+
+
+def _build_mcx_analytics_metadata(service) -> List[Dict[str, Any]]:
+    """Build analytics metadata for MCX instruments"""
+    mcx_metadata = []
+
+    try:
+        mcx_file_path = service.data_dir / "mcx_instruments.json"
+        if mcx_file_path.exists():
+            with open(mcx_file_path, "r") as f:
+                mcx_instruments = json.load(f)
+
+            for instrument in mcx_instruments:
+                metadata = {
+                    "instrument_key": instrument.get("instrument_key", ""),
+                    "symbol": instrument.get("name", "").upper(),
+                    "name": instrument.get("name", ""),
+                    "trading_symbol": instrument.get("trading_symbol", ""),
+                    "sector": "COMMODITY",
+                    "exchange": "MCX",
+                    "segment": "MCX_FO",
+                    "instrument_type": instrument.get("instrument_type", "FUT"),
+                    # MCX specific data
+                    "market_cap": 0,  # Not applicable for commodities
+                    "lot_size": instrument.get("lot_size", 1),
+                    "tick_size": instrument.get("tick_size", 1.0),
+                    "strike_price": instrument.get("strike_price"),
+                    "expiry": instrument.get("expiry"),
+                    "avg_volume": 0,
+                    "last_updated": datetime.now().isoformat(),
+                }
+
+                mcx_metadata.append(metadata)
+
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load MCX metadata: {e}")
+
+    return mcx_metadata
+
+
+def _build_index_analytics_metadata() -> List[Dict[str, Any]]:
+    """
+    Build analytics metadata for all major indices
+    Matches the indices defined in _load_index_keys for consistency
+    """
+    indices = [
+        # Core Indices (Highest Priority)
+        {
+            "instrument_key": "NSE_INDEX|Nifty 50",
+            "symbol": "NIFTY",
+            "name": "NIFTY 50",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Bank",
+            "symbol": "BANKNIFTY",
+            "name": "NIFTY BANK",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Fin Nifty",
+            "symbol": "FINNIFTY",
+            "name": "NIFTY FINANCIAL SERVICES",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "BSE_INDEX|SENSEX",
+            "symbol": "SENSEX",
+            "name": "BSE SENSEX",
+            "sector": "INDEX",
+            "exchange": "BSE",
+        },
+        # Major Sectoral Indices
+        {
+            "instrument_key": "NSE_INDEX|Nifty Auto",
+            "symbol": "Nifty Auto",
+            "name": "NIFTY AUTO",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty IT",
+            "symbol": "Nifty IT",
+            "name": "NIFTY IT",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Pharma",
+            "symbol": "Nifty Pharma",
+            "name": "NIFTY PHARMA",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty FMCG",
+            "symbol": "Nifty FMCG",
+            "name": "NIFTY FMCG",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Metal",
+            "symbol": "Nifty Metal",
+            "name": "NIFTY METAL",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Realty",
+            "symbol": "Nifty Realty",
+            "name": "NIFTY REALTY",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Media",
+            "symbol": "Nifty Media",
+            "name": "NIFTY MEDIA",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty PSU Bank",
+            "symbol": "Nifty PSU Bank",
+            "name": "NIFTY PSU BANK",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Private Bank",
+            "symbol": "Nifty Private Bank",
+            "name": "NIFTY PRIVATE BANK",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|NIFTY OIL AND GAS",
+            "symbol": "NIFTY OIL AND GAS",
+            "name": "NIFTY OIL AND GAS",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Consumer Durables",
+            "symbol": "Nifty Consumer Durables",
+            "name": "NIFTY CONSUMER DURABLES",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+        {
+            "instrument_key": "NSE_INDEX|Nifty Healthcare Index",
+            "symbol": "Nifty Healthcare",
+            "name": "NIFTY HEALTHCARE INDEX",
+            "sector": "INDEX",
+            "exchange": "NSE",
+        },
+    ]
+
+    index_metadata = []
+    for index in indices:
+        metadata = {
+            **index,
+            "trading_symbol": index["symbol"],
+            "segment": f"{index['exchange']}_INDEX",
+            "instrument_type": "INDEX",
+            "market_cap": 0,
+            "lot_size": 1,
+            "tick_size": 0.05,
+            "avg_volume": 0,
+            "last_updated": datetime.now().isoformat(),
+        }
+        index_metadata.append(metadata)
+
+    return index_metadata
+
+
+def get_analytics_metadata() -> List[Dict[str, Any]]:
+    """
+    Public API to get analytics metadata
+
+    Returns:
+        List of instrument metadata for analytics engine initialization
+    """
+    return build_analytics_metadata()
