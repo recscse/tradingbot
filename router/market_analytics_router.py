@@ -97,58 +97,58 @@ class SimpleAnalyticsService:
         return {"sentiment": "unknown", "confidence": 0, "metrics": {}}
 
     def get_gap_analysis(self):
-        """Get gap analysis from premarket candle builder"""
+        """Get gap analysis from gap detection service"""
         try:
-            # Import premarket candle builder function
+            # Import gap detection service function
             import asyncio
-            from services.premarket_candle_builder import get_todays_gaps
-            
+            from services.gapdetection_service import get_todays_gap_analysis
+
             # Get today's gaps (both up and down)
             loop = asyncio.get_event_loop()
-            all_gaps = loop.run_until_complete(get_todays_gaps())
-            
+            all_gaps = loop.run_until_complete(get_todays_gap_analysis(limit=50))
+
             # Separate gap up and gap down
             gap_up = []
             gap_down = []
-            
+
             for gap in all_gaps:
                 gap_data = {
                     "symbol": gap["symbol"],
-                    "gap_percentage": gap["gap_percentage"], 
+                    "gap_percentage": gap["gap_percentage"],
                     "gap_strength": gap["gap_strength"],
                     "open_price": gap["open_price"],
-                    "close_price": gap["close_price"],
+                    "close_price": gap.get("current_price", gap["open_price"]),
                     "previous_close": gap["previous_close"],
                     "volume": gap["volume"],
-                    "volume_ratio": gap["volume_ratio"],
                     "sector": gap["sector"],
+                    "market_cap": gap.get("market_cap", "UNKNOWN"),
                     "timestamp": gap["timestamp"],
-                    "last_price": gap["close_price"],  # For compatibility
-                    "change_percent": gap["gap_percentage"],  # For compatibility
+                    "last_price": gap.get("current_price", gap["open_price"]),
+                    "change_percent": gap["gap_percentage"],
                 }
-                
+
                 if gap["gap_percentage"] > 0:
                     gap_up.append(gap_data)
                 else:
                     gap_down.append(gap_data)
-            
+
             # Create summary
             summary = {
                 "total_gaps": len(all_gaps),
-                "gap_up_count": len(gap_up), 
+                "gap_up_count": len(gap_up),
                 "gap_down_count": len(gap_down),
-                "data_source": "premarket_candle_builder",
-                "capture_window": "9:00-9:08 AM IST"
+                "data_source": "gap_detection_service",
+                "analysis_time": "9:08 AM IST"
             }
-            
+
             return {
                 "gap_up": gap_up,
-                "gap_down": gap_down, 
+                "gap_down": gap_down,
                 "summary": summary
             }
-            
+
         except Exception as e:
-            logger.error(f"Error getting premarket gap analysis: {e}")
+            logger.error(f"Error getting gap analysis: {e}")
             return {"gap_up": [], "gap_down": [], "summary": {}}
 
     def get_breakout_analysis(self):

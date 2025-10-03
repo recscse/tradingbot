@@ -371,37 +371,53 @@ export const useUnifiedMarketData = () => {
           // 🚀 REAL-TIME PRICE UPDATE: Direct to Zustand store for maximum speed
           case "price_update":
             if (data.data) {
-              // 🚀 ULTRA-FAST: Single price update directly to Zustand
+              // 🚀 ULTRA-FAST: Process price updates and send to Zustand
               if (data.realtime && data.data.symbol) {
                 // Real-time individual price update
-                useMarketStore.getState().updatePrice(data.data);
+                useMarketStore.getState().updatePrice(data.data, data.data.instrument_key);
                 debugLog("debug", `🚀 Real-time price: ${data.data.symbol} = ${data.data.ltp}`);
               } else if (Array.isArray(data.data)) {
                 // Array format - update each price
                 data.data.forEach((item) => {
-                  if (item && item.symbol) {
-                    useMarketStore.getState().updatePrice(item);
+                  if (item && (item.symbol || item.instrument_key)) {
+                    // Extract symbol from instrument_key if needed
+                    const enrichedItem = {
+                      ...item,
+                      symbol: item.symbol || item.instrument_key?.split('|')[1] || item.instrument_key,
+                      instrument_key: item.instrument_key
+                    };
+                    useMarketStore.getState().updatePrice(enrichedItem, item.instrument_key);
                   }
                 });
                 debugLog("debug", `🚀 Batch price update: ${data.data.length} instruments`);
               } else if (typeof data.data === "object") {
-                // Object format - batch update
-                useMarketStore.getState().updatePrices(data.data);
-                debugLog("debug", `🚀 Object price update: ${Object.keys(data.data).length} instruments`);
-              }
-              
-              // Also update legacy marketData for backward compatibility (analytics)
-              if (typeof data.data === "object" && !Array.isArray(data.data)) {
-                const legacyUpdates = {};
+                // Object format - batch update (keyed by instrument_key)
+                // Convert instrument_key-based object to enriched format
+                const enrichedUpdates = {};
                 Object.entries(data.data).forEach(([key, item]) => {
                   if (item && typeof item === "object") {
-                    legacyUpdates[key] = { ...item, timestamp: Date.now() };
+                    // Extract symbol from instrument_key if not present
+                    const symbol = item.symbol || key.split('|')[1] || key;
+                    enrichedUpdates[key] = {
+                      ...item,
+                      symbol: symbol,
+                      instrument_key: key,
+                      ltp: item.ltp || item.last_price || 0,
+                      change: item.change || 0,
+                      change_percent: item.change_percent || 0,
+                      volume: item.volume || 0,
+                    };
                   }
                 });
-                if (Object.keys(legacyUpdates).length > 0) {
-                  setMarketData((prev) => ({ ...prev, ...legacyUpdates }));
+
+                if (Object.keys(enrichedUpdates).length > 0) {
+                  useMarketStore.getState().updatePrices(enrichedUpdates);
+                  debugLog("debug", `🚀 Object price update: ${Object.keys(enrichedUpdates).length} instruments`);
                 }
               }
+
+              // ⚡ PERFORMANCE FIX: Removed duplicate marketData state updates
+              // Dashboard now uses ONLY Zustand store for prices (prevents double re-renders)
             }
             break;
 

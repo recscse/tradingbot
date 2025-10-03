@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import platform
 from datetime import datetime, time
 from contextlib import asynccontextmanager
 import uvicorn
@@ -12,6 +13,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+
+# Windows-specific fix: Set ProactorEventLoop policy BEFORE any asyncio operations
+# This is required for Playwright subprocess support on Windows
+if platform.system() == 'Windows':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Load environment variables FIRST
 load_dotenv()
@@ -191,24 +197,24 @@ except ImportError:
 
     logger.warning("⚠️ Pre-market data service not available")
 
-# Import premarket candle builder service
+# Import gap detection service (formerly premarket candle builder)
 try:
-    from services.premarket_candle_builder import (
-        get_premarket_candle_service,
-        start_premarket_monitoring,
+    from services.gapdetection_service import (
+        get_gap_detection_service,
+        start_gap_detection_scheduler,
     )
 
-    PREMARKET_CANDLE_AVAILABLE = True
-    logger.info("✅ Premarket candle builder service imported successfully")
+    GAP_DETECTION_AVAILABLE = True
+    logger.info("✅ Gap detection service imported successfully")
 except ImportError as e:
-    PREMARKET_CANDLE_AVAILABLE = False
-    logger.warning(f"⚠️ Premarket candle builder service not available: {e}")
+    GAP_DETECTION_AVAILABLE = False
+    logger.warning(f"⚠️ Gap detection service not available: {e}")
 
     # Dummy functions for fallback
-    def get_premarket_candle_service():
+    def get_gap_detection_service():
         return None
 
-    async def start_premarket_monitoring():
+    async def start_gap_detection_scheduler():
         pass
 
 
@@ -559,28 +565,34 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Failed to start Enhanced Breakout Engine: {e}")
 
-        # Premarket Candle Builder provides gap detection for 9:00-9:08 AM window
+        # Gap Detection Service analyzes market gaps at 9:08 AM daily
 
-        # 7c. 🚀 NEW: Start Premarket Candle Builder Service
-        if PREMARKET_CANDLE_AVAILABLE:
-            logger.info("🕘 Starting Premarket Candle Builder Service...")
+        # 7c. Start Gap Detection Service
+        if GAP_DETECTION_AVAILABLE:
+            logger.info("Starting Gap Detection Service...")
             try:
                 # Start as background task to avoid blocking startup
-                asyncio.create_task(start_premarket_monitoring())
+                asyncio.create_task(start_gap_detection_scheduler())
                 logger.info(
-                    "✅ Premarket Candle Builder Service started for 9:00-9:08 AM gap detection"
+                    "Gap Detection Service started - scheduled for 9:08 AM IST daily"
                 )
             except Exception as e:
                 logger.error(
-                    f"❌ Failed to start Premarket Candle Builder Service: {e}"
+                    f"Failed to start Gap Detection Service: {e}"
                 )
 
-        # 8. NEW: Initialize Centralized WebSocket System
+        # 8. NEW: Initialize Centralized WebSocket System (non-blocking)
         if CENTRALIZED_WS_AVAILABLE:
             logger.info("🔌 Initializing NEW Centralized WebSocket System...")
             try:
                 if await centralized_manager.initialize():
+                    # Start connection in background - non-blocking
+                    logger.info("🔌 Starting Centralized WebSocket connection in background...")
                     await centralized_manager.start_connection()
+                    logger.info("✅ Centralized WebSocket background task started - continuing with other services")
+
+                    # Note: Connection happens asynchronously in background
+                    # Other services will continue to initialize while WebSocket connects
 
                     # 🚀 NEW: Initialize optimized real-time trading system (ZERO DELAY)
                     try:
@@ -614,18 +626,14 @@ async def lifespan(app: FastAPI):
                             f"❌ Error initializing real-time trading system: {e}"
                         )
 
+                    # Check health status (non-blocking)
                     status = await centralized_manager.health_check()
                     logger.info(
-                        f"✅ NEW: Centralized WebSocket system started successfully"
-                    )
-                    logger.info(f"📊 Health Score: {status.get('health_score', 0)}/100")
-                    logger.info(
-                        f"🔗 WebSocket Connected: {status.get('ws_connected', False)}"
+                        f"📊 Centralized WebSocket Status: Health Score {status.get('health_score', 0)}/100"
                     )
                     logger.info(
-                        f"📈 Total Instruments: {status.get('total_instruments', 0)}"
+                        f"📊 WebSocket Connected: {status.get('ws_connected', False)} | Instruments: {status.get('total_instruments', 0)}"
                     )
-                    logger.info(f"👑 Admin Token Strategy: Active")
 
                     # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
                     logger.info(
@@ -649,8 +657,10 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         "❌ NEW: Failed to initialize centralized WebSocket system"
                     )
+                    logger.warning("⚠️ Application will continue without live market data")
             except Exception as e:
                 logger.error(f"❌ NEW: Centralized WebSocket system error: {e}")
+                logger.warning("⚠️ Application will continue without live market data")
         else:
             logger.warning(
                 "⚠️ NEW: Centralized WebSocket system not available - using legacy only"
@@ -801,9 +811,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ MCX WebSocket Service failed to initialize: {e}")
 
-        logger.info(
-            "🟢 All services started successfully with NEW Centralized WebSocket + MCX + Optimized Architecture!"
-        )
+        logger.info("=" * 80)
+        logger.info("🟢 ALL SERVICES STARTED SUCCESSFULLY!")
+        logger.info("=" * 80)
+        logger.info("📊 Trading Application is ready to accept requests")
+        logger.info("🔌 WebSocket connections are running in background")
+        logger.info("⚠️ If WebSocket shows network errors, the app will still work without live data")
+        logger.info("=" * 80)
 
         # Signal that startup is complete and token refresh can now proceed
         if CENTRALIZED_WS_AVAILABLE and centralized_manager:
@@ -813,6 +827,18 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"⚠️ Error marking startup complete: {e}")
 
+        # Start simple unified WebSocket broadcast task
+        try:
+            logger.info("🚀 Starting Simple Unified WebSocket System...")
+            from router.unified_websocket_routes import start_broadcast_task
+
+            await start_broadcast_task()
+            logger.info("✅ Simple Unified WebSocket broadcast started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Unified WebSocket broadcast: {e}")
+
+        logger.info("🎯 Application is fully operational and ready for trading!")
+
         yield
 
     except Exception as e:
@@ -821,6 +847,15 @@ async def lifespan(app: FastAPI):
     finally:
         # Enhanced cleanup
         logger.info("🛑 Starting enhanced shutdown...")
+
+        # Stop simple unified WebSocket broadcast
+        try:
+            from router.unified_websocket_routes import stop_broadcast_task
+
+            await stop_broadcast_task()
+            logger.info("✅ Simple Unified WebSocket broadcast stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Unified WebSocket broadcast: {e}")
 
         # NEW: Stop centralized WebSocket system
         if CENTRALIZED_WS_AVAILABLE and centralized_manager:
@@ -991,7 +1026,15 @@ app.include_router(websocket_router, tags=["🗑️ WebSocket Management (REDUND
 app.include_router(debug_router, tags=["Debug"])
 app.include_router(market_analytics_router, tags=["Market Analytics"])
 app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
-# app.include_router(unified_ws_router, tags=["�️ Unified WebSocket (REDUNDANT)"])
+# 🚀 NEW: Simple Unified WebSocket System for Real-Time Market Data
+try:
+    from router.unified_websocket_routes import router as unified_websocket_router
+
+    app.include_router(unified_websocket_router, tags=["🚀 Unified WebSocket - Real-Time"])
+    logger.info("✅ Simple Unified WebSocket routes registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Unified WebSocket routes not available: {e}")
+
 app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(option_router, tags=["Options & Futures"])
 app.include_router(auto_trading_router, tags=["Auto Trading & Stock Selection"])

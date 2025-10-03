@@ -82,16 +82,36 @@ const sanitizePriceData = (data) => {
   };
 };
 
-// Microtask deferrer helper to ensure set(...) doesn't run synchronously during render
+// ⚡ CRITICAL FIX: Batching mechanism to prevent update storms
+let updateQueue = [];
+let batchTimeout = null;
+const BATCH_DELAY = 50; // 50ms batching window (20 updates/sec max)
+
 const deferSet = (fn) => {
-  Promise.resolve().then(() => {
-    try {
-      fn();
-    } catch (e) {
-      // swallow to avoid unhandled errors during async set
-      console.error("Deferred set error:", e);
-    }
-  });
+  updateQueue.push(fn);
+
+  // Clear existing timeout
+  if (batchTimeout) {
+    clearTimeout(batchTimeout);
+  }
+
+  // Batch updates within 50ms window
+  batchTimeout = setTimeout(() => {
+    const queue = updateQueue;
+    updateQueue = [];
+    batchTimeout = null;
+
+    // Execute all queued updates in one microtask
+    Promise.resolve().then(() => {
+      queue.forEach(fn => {
+        try {
+          fn();
+        } catch (e) {
+          console.error("Deferred set error:", e);
+        }
+      });
+    });
+  }, BATCH_DELAY);
 };
 
 // Small utility: produce canonical keys for storing a sanitizedData instance
@@ -109,6 +129,11 @@ const buildStoreKeysForSanitized = (sanitizedData, feedKey = null) => {
 
   // Also add compact form of RHS (to match feed/popular names compacted)
   if (instKey) keys.add(compactKey(rhsFromPipe(instKey)));
+
+  // Debug for indices
+  if (instKey?.includes('INDEX')) {
+    console.log(`📍 Storing index under keys:`, Array.from(keys), `for symbol: ${symbol}`);
+  }
 
   // Ensure non-empty keys only
   return Array.from(keys).filter(
@@ -230,23 +255,50 @@ const useMarketStore = create(
 
       if (!hasValidUpdates) return;
 
-      // Defer merge to microtask
+      // Defer merge to microtask with batching
       deferSet(() =>
         set((state) => {
           const newPrices = { ...state.prices, ...sanitizedMap };
 
           return {
             prices: newPrices,
-            updateCount: state.updateCount + Object.keys(sanitizedMap).length,
+            updateCount: state.updateCount + 1, // ⚡ FIX: Increment by 1, not by count
             lastUpdate: Date.now(),
           };
         })
       );
     },
 
-    // Get price for specific symbol (tries exact key)
-    getPrice: (symbol) => {
-      return get().prices[symbol] || null;
+    // Get price for specific symbol or instrument_key (tries multiple lookups)
+    getPrice: (symbolOrKey) => {
+      if (!symbolOrKey) return null;
+
+      const state = get();
+
+      // Try exact match first
+      if (state.prices[symbolOrKey]) {
+        return state.prices[symbolOrKey];
+      }
+
+      // Try compact key
+      const compact = compactKey(symbolOrKey);
+      if (compact && state.prices[compact]) {
+        return state.prices[compact];
+      }
+
+      // Try RHS from pipe (for instrument_key format)
+      const rhs = rhsFromPipe(symbolOrKey);
+      if (rhs && state.prices[rhs]) {
+        return state.prices[rhs];
+      }
+
+      // Try compact RHS
+      const compactRhs = compactKey(rhs);
+      if (compactRhs && state.prices[compactRhs]) {
+        return state.prices[compactRhs];
+      }
+
+      return null;
     },
 
     // Get prices for multiple symbols
@@ -294,6 +346,53 @@ const useMarketStore = create(
       return Object.values(state.prices)
         .filter((price) => price.change_percent < 0)
         .sort((a, b) => a.change_percent - b.change_percent)
+        .slice(0, limit);
+    },
+
+    // Get real-time top movers (combines gainers and losers)
+    getRealTimeTopMovers: (limit = 10) => {
+      const state = get();
+      const allPrices = Object.values(state.prices);
+
+      // Deduplicate by symbol (in case same price stored under multiple keys)
+      const uniquePrices = new Map();
+      allPrices.forEach(price => {
+        if (price.symbol && !uniquePrices.has(price.symbol)) {
+          uniquePrices.set(price.symbol, price);
+        }
+      });
+
+      const uniqueArray = Array.from(uniquePrices.values());
+
+      const gainers = uniqueArray
+        .filter((price) => price.change_percent > 0)
+        .sort((a, b) => b.change_percent - a.change_percent)
+        .slice(0, limit);
+
+      const losers = uniqueArray
+        .filter((price) => price.change_percent < 0)
+        .sort((a, b) => a.change_percent - b.change_percent)
+        .slice(0, limit);
+
+      return { gainers, losers };
+    },
+
+    // Get volume leaders (highest volume stocks)
+    getVolumeLeaders: (limit = 10) => {
+      const state = get();
+      const allPrices = Object.values(state.prices);
+
+      // Deduplicate by symbol
+      const uniquePrices = new Map();
+      allPrices.forEach(price => {
+        if (price.symbol && !uniquePrices.has(price.symbol)) {
+          uniquePrices.set(price.symbol, price);
+        }
+      });
+
+      return Array.from(uniquePrices.values())
+        .filter((price) => price.volume > 0)
+        .sort((a, b) => b.volume - a.volume)
         .slice(0, limit);
     },
 

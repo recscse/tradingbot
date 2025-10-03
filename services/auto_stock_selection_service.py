@@ -20,9 +20,8 @@ from database.connection import SessionLocal
 from database.models import SelectedStock, AutoTradingSession, DailyStockSummary
 
 # Service imports
-from services.enhanced_market_analytics import enhanced_analytics
+from services.intelligent_stock_selection_service import IntelligentStockSelectionService
 from services.trading_stock_selector import TradingStockSelector
-from services.live_adapter import live_feed_adapter
 from services.upstox_option_service import upstox_option_service
 from services.market_schedule_service import MarketScheduleService
 from services.high_speed_market_data import high_speed_market_data
@@ -65,9 +64,8 @@ class AutoStockSelectionService:
     
     def __init__(self, user_id: int = 1):
         self.user_id = user_id
-        self.analytics = enhanced_analytics
+        self.intelligent_service = IntelligentStockSelectionService()
         self.option_service = upstox_option_service
-        self.live_adapter = live_feed_adapter
         
         # Configuration
         self.max_stocks_to_select = 2  # Focus on 2 high-quality stocks
@@ -154,11 +152,11 @@ class AutoStockSelectionService:
     async def _analyze_market_sentiment(self) -> Dict[str, Any]:
         """Analyze overall market sentiment using multiple indicators"""
         try:
-            # Get sentiment from enhanced analytics
-            base_sentiment = self.analytics.get_market_sentiment()
-            
+            # Get sentiment from intelligent stock selection service
+            base_sentiment = await self.intelligent_service.get_market_sentiment()
+
             # Get Nifty data for trend analysis
-            nifty_data = self.analytics.get_top_movers()
+            nifty_data = await self.intelligent_service.get_top_movers()
             
             # Analyze FII/DII data if available
             institutional_flow = await self._get_institutional_flow()
@@ -219,7 +217,7 @@ class AutoStockSelectionService:
                     # Get corresponding Indian stock data
                     indian_symbol = self._map_adr_to_indian_symbol(symbol)
                     if indian_symbol:
-                        indian_stock_data = self.analytics.get_stock_data(indian_symbol)
+                        indian_stock_data = await self.intelligent_service.get_stock_data(indian_symbol)
                         if indian_stock_data:
                             correlation = self._calculate_adr_correlation(
                                 us_market_performance, indian_stock_data
@@ -265,8 +263,8 @@ class AutoStockSelectionService:
     async def _analyze_sector_momentum(self, market_sentiment: Dict) -> Dict[str, Any]:
         """Analyze sector-wise momentum to identify the top performing sector"""
         try:
-            # Get sector heatmap from analytics
-            sector_heatmap = self.analytics.get_sector_heatmap()
+            # Get sector heatmap from intelligent service
+            sector_heatmap = await self.intelligent_service.get_sector_heatmap()
             
             if not sector_heatmap or not isinstance(sector_heatmap, dict):
                 logger.warning("No sector heatmap data available")
@@ -818,8 +816,8 @@ class AutoStockSelectionService:
             # Get stocks from each F&O index
             for index_name in self.fno_indices:
                 try:
-                    # Get index constituents from enhanced analytics
-                    index_stocks = self.analytics.get_index_stocks(index_name)
+                    # Get index constituents from intelligent service
+                    index_stocks = await self.intelligent_service.get_index_stocks(index_name)
                     
                     for stock_data in index_stocks:
                         # Validate if stock has F&O availability
@@ -1357,8 +1355,8 @@ class AutoStockSelectionService:
     async def _get_sector_momentum_score(self, sector: str) -> float:
         """Get sector momentum score"""
         try:
-            # Use existing sector analysis
-            sector_data = self.analytics.get_sector_performance()
+            # Use existing sector analysis from intelligent service
+            sector_data = await self.intelligent_service.get_sector_performance()
             
             for sector_info in sector_data:
                 if sector_info.get('name', '').upper() == sector.upper():

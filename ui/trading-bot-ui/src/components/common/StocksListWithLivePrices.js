@@ -250,6 +250,17 @@ const StocksListWithLivePrices = ({
           livePrice.fullFeed?.marketFF?.marketOHLC?.ohlc?.[0]?.vol ??
           0;
 
+        // 🔍 DEBUG: Log extracted values for troubleshooting
+        if (process.env.NODE_ENV === "development" && (change !== 0 || change_percent !== 0 || volume !== 0)) {
+          console.debug(`📊 Extracted data for ${label}:`, {
+            ltp,
+            change,
+            change_percent,
+            volume,
+            source: livePrice
+          });
+        }
+
         return {
           ...item,
           last_price:
