@@ -848,14 +848,8 @@ async def lifespan(app: FastAPI):
         # Enhanced cleanup
         logger.info("🛑 Starting enhanced shutdown...")
 
-        # Stop simple unified WebSocket broadcast
-        try:
-            from router.unified_websocket_routes import stop_broadcast_task
-
-            await stop_broadcast_task()
-            logger.info("✅ Simple Unified WebSocket broadcast stopped")
-        except Exception as e:
-            logger.error(f"Error stopping Unified WebSocket broadcast: {e}")
+        # Unified WebSocket connections cleanup (handled automatically by FastAPI)
+        logger.info("✅ Unified WebSocket connections will be cleaned up by FastAPI")
 
         # NEW: Stop centralized WebSocket system
         if CENTRALIZED_WS_AVAILABLE and centralized_manager:

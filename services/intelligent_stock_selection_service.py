@@ -744,6 +744,30 @@ class IntelligentStockSelectionService:
                 logger.error(f"❌ Database save error: {db_error}")
                 result["database_saved"] = False
 
+            # Enhance final selections with option contracts
+            try:
+                logger.info("🎯 Enhancing final selections with option contracts...")
+                from services.enhanced_intelligent_options_selection import enhanced_options_service
+
+                options_result = await enhanced_options_service.enhance_selected_stocks_with_options(
+                    self.final_selections,
+                    selection_type="final"
+                )
+
+                if options_result.get("success"):
+                    result["options_enhancement"] = {
+                        "enhanced_count": options_result.get("options_contracts_found", 0),
+                        "total_capital_required": options_result.get("total_capital_required", 0),
+                        "options_ready": options_result.get("options_ready", False)
+                    }
+                    logger.info(f"✅ Options enhancement complete: {options_result.get('options_contracts_found', 0)} stocks enhanced")
+                else:
+                    logger.warning(f"⚠️ Options enhancement failed: {options_result.get('error')}")
+                    result["options_enhancement"] = {"error": options_result.get("error")}
+            except Exception as opt_error:
+                logger.error(f"❌ Error enhancing with options: {opt_error}")
+                result["options_enhancement"] = {"error": str(opt_error)}
+
             # Broadcast update via WebSocket
             try:
                 from services.unified_websocket_manager import emit_intelligent_stock_selection_update
