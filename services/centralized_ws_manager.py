@@ -999,11 +999,25 @@ class CentralizedWebSocketManager:
             # Clear connection ready event
             self.connection_ready.clear()
 
-            # Start streaming
+            # Start streaming (this will block until connection completes or fails)
+            logger.info("🔌 Attempting to connect to Upstox WebSocket... (this runs in background)")
             await self.ws_client.connect_and_stream()
 
         except Exception as e:
-            logger.error(f"Failed to start WebSocket client: {e}")
+            error_message = str(e)
+
+            # Check if it's a network connectivity issue
+            is_network_error = any(
+                keyword in error_message.lower()
+                for keyword in ['getaddrinfo failed', 'name resolution', 'connection refused', 'timeout', 'network']
+            )
+
+            if is_network_error:
+                logger.error(f"🌐 Network connectivity error: {error_message[:150]}")
+                logger.warning("⚠️ Unable to reach Upstox servers - network may be down")
+                logger.info("ℹ️ Application will continue running. WebSocket will retry automatically when network is restored.")
+            else:
+                logger.error(f"❌ Failed to start WebSocket client: {e}")
             raise
 
     async def _broadcast_connection_status(self, status_data: dict) -> None:

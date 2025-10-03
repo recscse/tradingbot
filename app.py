@@ -581,12 +581,18 @@ async def lifespan(app: FastAPI):
                     f"Failed to start Gap Detection Service: {e}"
                 )
 
-        # 8. NEW: Initialize Centralized WebSocket System
+        # 8. NEW: Initialize Centralized WebSocket System (non-blocking)
         if CENTRALIZED_WS_AVAILABLE:
             logger.info("🔌 Initializing NEW Centralized WebSocket System...")
             try:
                 if await centralized_manager.initialize():
+                    # Start connection in background - non-blocking
+                    logger.info("🔌 Starting Centralized WebSocket connection in background...")
                     await centralized_manager.start_connection()
+                    logger.info("✅ Centralized WebSocket background task started - continuing with other services")
+
+                    # Note: Connection happens asynchronously in background
+                    # Other services will continue to initialize while WebSocket connects
 
                     # 🚀 NEW: Initialize optimized real-time trading system (ZERO DELAY)
                     try:
@@ -620,18 +626,14 @@ async def lifespan(app: FastAPI):
                             f"❌ Error initializing real-time trading system: {e}"
                         )
 
+                    # Check health status (non-blocking)
                     status = await centralized_manager.health_check()
                     logger.info(
-                        f"✅ NEW: Centralized WebSocket system started successfully"
-                    )
-                    logger.info(f"📊 Health Score: {status.get('health_score', 0)}/100")
-                    logger.info(
-                        f"🔗 WebSocket Connected: {status.get('ws_connected', False)}"
+                        f"📊 Centralized WebSocket Status: Health Score {status.get('health_score', 0)}/100"
                     )
                     logger.info(
-                        f"📈 Total Instruments: {status.get('total_instruments', 0)}"
+                        f"📊 WebSocket Connected: {status.get('ws_connected', False)} | Instruments: {status.get('total_instruments', 0)}"
                     )
-                    logger.info(f"👑 Admin Token Strategy: Active")
 
                     # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
                     logger.info(
@@ -655,8 +657,10 @@ async def lifespan(app: FastAPI):
                     logger.error(
                         "❌ NEW: Failed to initialize centralized WebSocket system"
                     )
+                    logger.warning("⚠️ Application will continue without live market data")
             except Exception as e:
                 logger.error(f"❌ NEW: Centralized WebSocket system error: {e}")
+                logger.warning("⚠️ Application will continue without live market data")
         else:
             logger.warning(
                 "⚠️ NEW: Centralized WebSocket system not available - using legacy only"
@@ -807,9 +811,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ MCX WebSocket Service failed to initialize: {e}")
 
-        logger.info(
-            "🟢 All services started successfully with NEW Centralized WebSocket + MCX + Optimized Architecture!"
-        )
+        logger.info("=" * 80)
+        logger.info("🟢 ALL SERVICES STARTED SUCCESSFULLY!")
+        logger.info("=" * 80)
+        logger.info("📊 Trading Application is ready to accept requests")
+        logger.info("🔌 WebSocket connections are running in background")
+        logger.info("⚠️ If WebSocket shows network errors, the app will still work without live data")
+        logger.info("=" * 80)
 
         # Signal that startup is complete and token refresh can now proceed
         if CENTRALIZED_WS_AVAILABLE and centralized_manager:
@@ -828,6 +836,8 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Simple Unified WebSocket broadcast started")
         except Exception as e:
             logger.error(f"❌ Failed to start Unified WebSocket broadcast: {e}")
+
+        logger.info("🎯 Application is fully operational and ready for trading!")
 
         yield
 
