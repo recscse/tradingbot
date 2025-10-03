@@ -350,11 +350,27 @@ class UpstoxWebSocketClient:
                 self.retry_count += 1
 
             except Exception as e:
-                logger.error(f"🔥 {self.connection_type}: Unexpected error: {e}")
-                logger.error(
-                    traceback.format_exc()
-                )  # Add stack trace for better debugging
-                self.retry_count += 1
+                error_message = str(e)
+
+                # Check if it's a network connectivity issue
+                is_network_error = any(
+                    keyword in error_message.lower()
+                    for keyword in ['getaddrinfo failed', 'name resolution', 'connection refused', 'timeout', 'network']
+                )
+
+                if is_network_error:
+                    logger.error(f"🌐 {self.connection_type}: Network connectivity error: {error_message[:100]}")
+                    logger.warning(f"⚠️ {self.connection_type}: Network appears to be down - application will continue running without live market data")
+                    # For network errors, use longer backoff to avoid spamming logs
+                    self.retry_count += 1
+                    if self.retry_count >= self.max_retries:
+                        logger.error(f"❌ {self.connection_type}: Max retries reached due to network issues - WebSocket will remain disconnected until network is restored")
+                        self.should_run = False
+                        break
+                else:
+                    logger.error(f"🔥 {self.connection_type}: Unexpected error: {e}")
+                    logger.error(traceback.format_exc())
+                    self.retry_count += 1
 
             # Apply retry backoff only if we're still supposed to run
             if self.should_run and self.retry_count <= self.max_retries:
