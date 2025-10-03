@@ -26,15 +26,25 @@ async def broadcast_to_clients(event_type: str, data: dict):
         "timestamp": datetime.now().isoformat(),
     }
 
+    # Log analytics broadcasts
+    if event_type == "analytics_update":
+        gainers_in_msg = message.get("data", {}).get("top_movers", {}).get("gainers", [])
+        logger.debug(f"Message contains {len(gainers_in_msg)} gainers")
+
     disconnected = []
+    sent_count = 0
     for client_id, ws in list(active_connections.items()):
         try:
             if event_type in client_subscriptions.get(client_id, set()):
                 if ws.client_state == WebSocketState.CONNECTED:
                     await ws.send_json(message)
+                    sent_count += 1
         except Exception as e:
             logger.debug(f"Error sending to {client_id}: {e}")
             disconnected.append(client_id)
+
+    if event_type == "analytics_update" and sent_count > 0:
+        logger.info(f"Sent analytics_update to {sent_count} client(s)")
 
     for client_id in disconnected:
         active_connections.pop(client_id, None)
@@ -61,6 +71,12 @@ def register_engine_listeners():
     # Full analytics (top movers, sentiment, sector heatmap, volume analysis)
     def on_analytics_update(data):
         if active_connections:
+            gainers = data.get("top_movers", {}).get("gainers", [])
+            losers = data.get("top_movers", {}).get("losers", [])
+            logger.info(
+                f"Broadcasting analytics to {len(active_connections)} clients: "
+                f"{len(gainers)} gainers, {len(losers)} losers"
+            )
             asyncio.create_task(broadcast_to_clients("analytics_update", data))
 
     # Register engine events
@@ -70,14 +86,31 @@ def register_engine_listeners():
     # Also register with centralized manager for real-time price updates
     def on_centralized_price_update(updates: dict):
         """Handle price updates from centralized WebSocket manager"""
-        if active_connections and updates:
+        if not active_connections or not updates:
+            return
+
+        if not isinstance(updates, dict):
+            logger.error(f"Invalid updates type: {type(updates).__name__}")
+            return
+
+        try:
+            # Extract the actual feed data from the updates dict
+            # The data structure is: {"data": {instrument_key: {price_data}}, ...}
+            feed_data = updates.get("data", {})
+
+            if not feed_data:
+                logger.debug("No feed data in updates")
+                return
+
             # Forward to realtime engine for processing
-            # The engine will emit "price_update" event with complete data via on_price_update callback
             from services.realtime_market_engine import update_market_data
-            update_market_data(updates)
+            update_market_data(feed_data)
 
             # Note: We don't broadcast here because the engine.event_emitter.emit("price_update")
             # will trigger on_price_update() callback above, which broadcasts complete data
+
+        except Exception as e:
+            logger.error(f"Error in on_centralized_price_update: {e}", exc_info=True)
 
     try:
         centralized_manager.register_callback("price_update", on_centralized_price_update)
