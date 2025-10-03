@@ -1058,10 +1058,20 @@ class SelectedStock(Base):
     sector = Column(String(50), default="OTHER")
     score_breakdown = Column(Text)  # JSON string with detailed scoring
 
+    # Market Sentiment at Selection Time
+    market_sentiment = Column(String(20))  # very_bullish, bullish, neutral, bearish, very_bearish
+    market_sentiment_confidence = Column(Float)  # Confidence percentage (0-100)
+    advance_decline_ratio = Column(Float)  # Advance/Decline ratio at selection
+    market_breadth_percent = Column(Float)  # Market breadth percentage
+    advancing_stocks = Column(Integer)  # Number of advancing stocks
+    declining_stocks = Column(Integer)  # Number of declining stocks
+    total_stocks_analyzed = Column(Integer)  # Total stocks in market analysis
+    selection_phase = Column(String(30))  # premarket, market_open, final_selection
+
     # Status
     is_active = Column(Boolean, default=True)
 
-    option_type = Column(String)  # CE / PE / NEUTRAL
+    option_type = Column(String)  # CE (CALL) / PE (PUT) / NEUTRAL - Based on market sentiment
     option_contract = Column(Text)  # JSON string - Single ATM contract
     option_contracts_available = Column(
         Integer, default=0

@@ -1,7 +1,7 @@
 """add_user_notification_preferences_table
 
 Revision ID: cb6244cae710
-Revises: e43786963138
+Revises: cea74a18a738
 Create Date: 2025-08-31 15:12:53.678997
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'cb6244cae710'
-down_revision: Union[str, None] = 'e43786963138'
+down_revision: Union[str, None] = 'cea74a18a738'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
