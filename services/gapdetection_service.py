@@ -34,8 +34,11 @@ from database.models import PremarketCandle
 
 logger = logging.getLogger(__name__)
 
-GAP_ANALYSIS_TIME = time(9, 8, 0)
+GAP_ANALYSIS_TIME = time(9, 15, 0)  # Market opens at 9:15 AM IST
+GAP_ANALYSIS_RETRY_TIME = time(9, 20, 0)  # Retry at 9:20 AM if initial run had insufficient data
+GAP_ANALYSIS_FINAL_TIME = time(9, 30, 0)  # Final attempt at 9:30 AM
 RETENTION_DAYS = 7
+MIN_INSTRUMENTS_THRESHOLD = 100  # Minimum instruments with valid data to consider analysis complete
 
 
 @dataclass
@@ -55,23 +58,28 @@ class GapAnalysisResult:
 
 class GapDetectionService:
     """
-    Service for detecting market gaps at 9:08 AM IST
+    Service for detecting market gaps at market open (9:15 AM IST)
 
-    Simple workflow:
-    1. Get all instruments from market engine
-    2. Calculate gaps
-    3. Store gap-up and gap-down stocks
-    4. Delete old data (>7 days)
-    5. Sleep until next day
+    Workflow:
+    1. First attempt at 9:15 AM (market open)
+    2. Retry at 9:20 AM if insufficient data (<100 instruments)
+    3. Final attempt at 9:30 AM
+    4. Calculate gaps based on actual opening prices
+    5. Store gap-up and gap-down stocks
+    6. Delete old data (>7 days)
+    7. Sleep until next day
     """
 
     def __init__(self):
         self.analysis_time = GAP_ANALYSIS_TIME
+        self.retry_time = GAP_ANALYSIS_RETRY_TIME
+        self.final_time = GAP_ANALYSIS_FINAL_TIME
         self.last_analysis_date: Optional[date] = None
         self.analysis_completed_today = False
+        self.analysis_attempt_count = 0
         self.is_running = False
 
-        logger.info("Gap Detection Service initialized")
+        logger.info("Gap Detection Service initialized - runs at 9:15 AM IST with retries at 9:20 AM and 9:30 AM")
 
     def calculate_gap_percentage(
         self,
@@ -208,14 +216,17 @@ class GapDetectionService:
             logger.error(f"Error deleting old entries: {e}")
             return 0
 
-    async def run_gap_analysis(self) -> Dict[str, Any]:
+    async def run_gap_analysis(self, force: bool = False) -> Dict[str, Any]:
         """
-        Execute gap analysis at 9:08 AM
+        Execute gap analysis at market open
+
+        Args:
+            force: Force analysis even if already completed today
 
         Returns:
-            Analysis statistics
+            Analysis statistics including data quality metrics
         """
-        if await self.check_if_analysis_completed_today():
+        if not force and await self.check_if_analysis_completed_today():
             return {
                 "status": "skipped",
                 "reason": "already_completed_today",
@@ -227,7 +238,8 @@ class GapDetectionService:
         except ImportError as e:
             raise RuntimeError(f"Market engine not available: {e}")
 
-        logger.info("Starting gap analysis at 9:08 AM")
+        self.analysis_attempt_count += 1
+        logger.info(f"Starting gap analysis (attempt #{self.analysis_attempt_count})")
         start_time = datetime.now()
 
         try:
@@ -238,12 +250,21 @@ class GapDetectionService:
             market_engine = get_market_engine()
             all_instruments = market_engine.get_all_instruments()
 
-            logger.info(f"Analyzing {len(all_instruments)} instruments for gaps")
+            total_instruments = len(all_instruments)
+            instruments_with_data = 0
+            instruments_analyzed = 0
+
+            logger.info(f"Analyzing {total_instruments} instruments for gaps")
 
             for inst_key, instrument in all_instruments.items():
                 try:
+                    # Count instruments that have any price data
+                    if instrument.current_price > 0 or instrument.open_price > 0:
+                        instruments_with_data += 1
+
                     result = await self._analyze_instrument(instrument)
                     if result:
+                        instruments_analyzed += 1
                         if result.gap_type == "GAP_UP":
                             gap_up_stocks.append(result)
                         elif result.gap_type == "GAP_DOWN":
@@ -256,27 +277,52 @@ class GapDetectionService:
             gap_up_stocks.sort(key=lambda x: x.gap_percent, reverse=True)
             gap_down_stocks.sort(key=lambda x: x.gap_percent)
 
-            saved_count = await self._save_gaps_to_db(gap_up_stocks, gap_down_stocks)
+            total_gaps_found = len(gap_up_stocks) + len(gap_down_stocks)
+            data_quality = (instruments_analyzed / total_instruments * 100) if total_instruments > 0 else 0
+
+            # Only save if we have meaningful data OR it's the final attempt
+            should_save = (
+                instruments_analyzed >= MIN_INSTRUMENTS_THRESHOLD or
+                self.analysis_attempt_count >= 3 or
+                force
+            )
+
+            saved_count = 0
+            if should_save:
+                saved_count = await self._save_gaps_to_db(gap_up_stocks, gap_down_stocks)
+                self.analysis_completed_today = True
+                self.last_analysis_date = start_time.date()
+            else:
+                logger.warning(
+                    f"Insufficient data quality ({instruments_analyzed} instruments analyzed, "
+                    f"threshold: {MIN_INSTRUMENTS_THRESHOLD}). Will retry later."
+                )
 
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
 
-            self.analysis_completed_today = True
-            self.last_analysis_date = start_time.date()
-
             statistics = {
-                "status": "completed",
+                "status": "completed" if should_save else "insufficient_data",
                 "analysis_date": start_time.date().isoformat(),
+                "analysis_time": start_time.time().isoformat(),
+                "attempt_number": self.analysis_attempt_count,
                 "gap_up_count": len(gap_up_stocks),
                 "gap_down_count": len(gap_down_stocks),
+                "total_gaps_found": total_gaps_found,
                 "total_gaps_stored": saved_count,
-                "duration_seconds": round(duration, 2)
+                "total_instruments": total_instruments,
+                "instruments_with_data": instruments_with_data,
+                "instruments_analyzed": instruments_analyzed,
+                "data_quality_percent": round(data_quality, 2),
+                "duration_seconds": round(duration, 2),
+                "will_retry": not should_save
             }
 
             logger.info(
-                f"Gap analysis complete: {saved_count} gaps stored "
-                f"({len(gap_up_stocks)} up, {len(gap_down_stocks)} down) "
-                f"in {duration:.2f}s"
+                f"Gap analysis attempt #{self.analysis_attempt_count}: "
+                f"{total_gaps_found} gaps found ({len(gap_up_stocks)} up, {len(gap_down_stocks)} down), "
+                f"{instruments_analyzed}/{total_instruments} instruments analyzed ({data_quality:.1f}%), "
+                f"{saved_count} stored, duration: {duration:.2f}s"
             )
 
             return statistics
@@ -291,6 +337,9 @@ class GapDetectionService:
         """
         Analyze single instrument for gap
 
+        Uses opening price from actual market data. If open_price is not set,
+        uses current_price as fallback (first traded price).
+
         Args:
             instrument: Instrument from market engine
 
@@ -298,14 +347,22 @@ class GapDetectionService:
             GapAnalysisResult or None
         """
         try:
-            open_price = instrument.open_price
             prev_close = instrument.close_price
             current_price = instrument.current_price
 
-            if not all([open_price, prev_close, current_price]):
+            # Use open_price if available, otherwise use current_price as opening
+            # This handles cases where instrument started trading but open_price not set
+            open_price = instrument.open_price if instrument.open_price > 0 else current_price
+
+            # Validate required data
+            if not prev_close or prev_close <= 0:
                 return None
 
-            if prev_close <= 0 or open_price <= 0:
+            if not open_price or open_price <= 0:
+                return None
+
+            # Skip if current_price is missing (instrument hasn't traded yet)
+            if not current_price or current_price <= 0:
                 return None
 
             open_price_decimal = Decimal(str(open_price))
@@ -420,11 +477,17 @@ class GapDetectionService:
 
     async def schedule_gap_analysis(self) -> None:
         """
-        Schedule gap analysis at 9:08 AM IST daily
+        Schedule gap analysis at 9:15 AM IST daily with retry logic
 
-        Waits until 9:08 AM, executes once, then sleeps until next day.
+        Execution strategy:
+        - 9:15 AM: First attempt (market open)
+        - 9:20 AM: Retry if insufficient data in first attempt
+        - 9:30 AM: Final attempt regardless of data quality
         """
-        logger.info(f"Gap detection scheduler started - runs at {self.analysis_time}")
+        logger.info(
+            f"Gap detection scheduler started - primary: {self.analysis_time}, "
+            f"retry: {self.retry_time}, final: {self.final_time}"
+        )
 
         while True:
             try:
@@ -432,9 +495,13 @@ class GapDetectionService:
                 current_date = now.date()
                 current_time = now.time()
 
+                # Reset daily flags on new day
                 if self.last_analysis_date != current_date:
                     self.analysis_completed_today = False
+                    self.analysis_attempt_count = 0
+                    logger.info(f"New trading day: {current_date}")
 
+                # Skip weekends
                 if current_date.weekday() >= 5:
                     tomorrow = current_date + timedelta(days=1)
                     next_run_time = datetime.combine(tomorrow, self.analysis_time)
@@ -443,35 +510,88 @@ class GapDetectionService:
                     await asyncio.sleep(wait_seconds)
                     continue
 
+                # Determine next execution time based on current time and completion status
+                next_execution_time = None
+
                 if current_time < self.analysis_time:
-                    next_run_time = datetime.combine(current_date, self.analysis_time)
-                    wait_seconds = (next_run_time - now).total_seconds()
-                    logger.info(f"Waiting {wait_seconds:.0f}s until gap analysis at {next_run_time}")
-                    await asyncio.sleep(wait_seconds)
-                    continue
+                    # Before 9:15 AM - wait for first attempt
+                    next_execution_time = self.analysis_time
+                    logger.info(f"Before market open - waiting for {next_execution_time}")
 
-                if not self.analysis_completed_today:
-                    logger.info("Executing gap analysis NOW")
-                    await self.run_gap_analysis()
+                elif current_time < self.retry_time:
+                    # Between 9:15 and 9:20 - execute if not done
+                    if not self.analysis_completed_today:
+                        logger.info("Market open time - executing gap analysis (attempt #1)")
+                        result = await self.run_gap_analysis()
+
+                        if result.get("status") == "insufficient_data":
+                            next_execution_time = self.retry_time
+                            logger.info(f"Insufficient data - will retry at {next_execution_time}")
+                        else:
+                            logger.info("Gap analysis completed successfully")
+                            self.last_analysis_date = current_date
+                    else:
+                        next_execution_time = self.retry_time
+
+                elif current_time < self.final_time:
+                    # Between 9:20 and 9:30 - execute retry if not completed
+                    if not self.analysis_completed_today:
+                        logger.info("Retry time - executing gap analysis (attempt #2)")
+                        result = await self.run_gap_analysis()
+
+                        if result.get("status") == "insufficient_data":
+                            next_execution_time = self.final_time
+                            logger.info(f"Still insufficient data - final attempt at {next_execution_time}")
+                        else:
+                            logger.info("Gap analysis completed successfully on retry")
+                            self.last_analysis_date = current_date
+                    else:
+                        next_execution_time = self.final_time
+
+                elif current_time >= self.final_time and not self.analysis_completed_today:
+                    # After 9:30 - final attempt
+                    logger.info("Final attempt time - executing gap analysis (attempt #3)")
+                    await self.run_gap_analysis(force=True)  # Force save regardless of quality
                     self.last_analysis_date = current_date
+                    logger.info("Gap analysis completed (final attempt)")
 
-                tomorrow = current_date + timedelta(days=1)
-                next_run_time = datetime.combine(tomorrow, self.analysis_time)
-                wait_seconds = (next_run_time - datetime.now()).total_seconds()
-                logger.info(f"Done. Sleeping until {next_run_time} ({wait_seconds/3600:.1f}h)")
-                await asyncio.sleep(wait_seconds)
+                # If analysis is done for today, sleep until tomorrow
+                if self.analysis_completed_today or current_time >= self.final_time:
+                    tomorrow = current_date + timedelta(days=1)
+                    next_run_time = datetime.combine(tomorrow, self.analysis_time)
+                    wait_seconds = (next_run_time - datetime.now()).total_seconds()
+                    logger.info(f"Analysis complete for today. Sleeping until {next_run_time} ({wait_seconds/3600:.1f}h)")
+                    await asyncio.sleep(wait_seconds)
+                elif next_execution_time:
+                    # Wait until next execution time
+                    next_run_time = datetime.combine(current_date, next_execution_time)
+                    wait_seconds = (next_run_time - datetime.now()).total_seconds()
+                    if wait_seconds > 0:
+                        logger.info(f"Waiting {wait_seconds:.0f}s until next attempt at {next_run_time}")
+                        await asyncio.sleep(wait_seconds)
+                    else:
+                        await asyncio.sleep(10)  # Small delay before retry
+                else:
+                    # Fallback - wait 1 minute
+                    await asyncio.sleep(60)
 
             except Exception as e:
                 logger.error(f"Error in scheduler: {e}", exc_info=True)
-                await asyncio.sleep(300)
+                await asyncio.sleep(300)  # Wait 5 minutes on error
 
     def get_analysis_status(self) -> Dict[str, Any]:
-        """Get current status"""
+        """Get current status including retry information"""
         return {
             "is_running": self.is_running,
             "last_analysis_date": self.last_analysis_date.isoformat() if self.last_analysis_date else None,
             "analysis_completed_today": self.analysis_completed_today,
-            "scheduled_time": self.analysis_time.isoformat()
+            "attempt_count": self.analysis_attempt_count,
+            "scheduled_times": {
+                "primary": self.analysis_time.isoformat(),
+                "retry": self.retry_time.isoformat(),
+                "final": self.final_time.isoformat()
+            },
+            "min_instruments_threshold": MIN_INSTRUMENTS_THRESHOLD
         }
 
 
