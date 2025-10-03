@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import platform
 from datetime import datetime, time
 from contextlib import asynccontextmanager
 import uvicorn
@@ -12,6 +13,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+
+# Windows-specific fix: Set ProactorEventLoop policy BEFORE any asyncio operations
+# This is required for Playwright subprocess support on Windows
+if platform.system() == 'Windows':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Load environment variables FIRST
 load_dotenv()

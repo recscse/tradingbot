@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import schedule
 import threading
 import time
@@ -135,6 +136,161 @@ class UpstoxAutomationService:
             logger.error(f"Error fetching admin broker config: {e}")
             return None
 
+    async def _run_playwright_with_proactor_loop(self, api_key: str, admin_user_id: int) -> bool:
+        """
+        Run Playwright in a separate thread with ProactorEventLoop for Windows compatibility
+        """
+        import concurrent.futures
+
+        def run_in_new_loop():
+            # Create new event loop with ProactorEventLoop policy
+            if platform.system() == 'Windows':
+                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(self._playwright_login_impl(api_key, admin_user_id))
+            finally:
+                new_loop.close()
+
+        # Run in thread pool to avoid blocking
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_new_loop)
+            return future.result(timeout=120)  # 2 minute timeout
+
+    async def _playwright_login_impl(self, api_key: str, admin_user_id: int) -> bool:
+        """
+        Implementation of Playwright login automation
+        """
+        from playwright.async_api import async_playwright
+
+        # Generate auth URL using existing service
+        auth_url = generate_upstox_auth_url(api_key, user_id=admin_user_id)
+        redirect_uri = os.getenv("UPSTOX_REDIRECT_URI")
+
+        logger.info(f"Starting login automation for auth URL: {auth_url}")
+        logger.info(f"Callback will handle token exchange at: {redirect_uri}")
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-web-security",
+                    "--disable-features=VizDisplayCompositor",
+                    "--no-first-run",
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                    "--disable-sync",
+                    "--disable-translate",
+                    "--hide-scrollbars",
+                    "--mute-audio",
+                    "--no-zygote",
+                    "--disable-accelerated-2d-canvas",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows",
+                ],
+            )
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            try:
+                # Navigate to auth URL with timeout
+                logger.info(f"Navigating to: {auth_url}")
+                await page.goto(auth_url, timeout=30000)
+                logger.info("✅ Navigated to Upstox auth page")
+
+                # Fill mobile number
+                logger.info("🔢 Filling mobile number...")
+                await page.wait_for_selector("#mobileNum", timeout=10000)
+                await page.locator("#mobileNum").click()
+                await page.locator("#mobileNum").fill(self.mobile_no)
+                await page.get_by_role("button", name="Get OTP").click()
+                logger.info("✅ Mobile number entered, OTP requested")
+
+                # Wait for OTP field and fill TOTP
+                logger.info("🔐 Waiting for OTP field...")
+                await page.wait_for_selector("#otpNum", timeout=10000)
+                await page.locator("#otpNum").click()
+                if self.totp_key:
+                    otp = pyotp.TOTP(self.totp_key).now()
+                    await page.locator("#otpNum").fill(otp)
+                    logger.info("✅ TOTP entered")
+                else:
+                    logger.error("❌ TOTP key not configured")
+                    return False
+
+                await page.get_by_role("button", name="Continue").click()
+
+                # Fill PIN
+                await page.get_by_label("Enter 6-digit PIN").click()
+                await page.get_by_label("Enter 6-digit PIN").fill(self.pin)
+                logger.info("PIN entered")
+
+                # Click continue - this will trigger the redirect to callback
+                await page.get_by_role("button", name="Continue").click()
+
+                # Wait for redirect to happen and capture the authorization code
+                logger.info("Waiting for redirect with authorization code...")
+
+                try:
+                    max_attempts = 60
+                    attempt = 0
+                    auth_code_found = False
+                    last_url = ""
+
+                    logger.info("⏳ Waiting for authorization redirect...")
+
+                    while attempt < max_attempts and not auth_code_found:
+                        await page.wait_for_timeout(500)
+                        current_url = page.url
+
+                        if current_url != last_url and "code=" in current_url:
+                            logger.info(f"✅ Auth redirect detected: {current_url[:100]}...")
+                            await page.wait_for_timeout(1000)
+
+                            final_url = page.url
+                            if final_url == current_url and "code=" in final_url:
+                                from urllib.parse import urlparse, parse_qs
+
+                                parsed_url = urlparse(final_url)
+                                query_params = parse_qs(parsed_url.query)
+
+                                if "code" in query_params and query_params["code"]:
+                                    auth_code = query_params["code"][0]
+                                    logger.info(f"Authorization code captured: {auth_code[:10]}...")
+
+                                    if len(auth_code) >= 8 and auth_code.isalnum():
+                                        self._captured_auth_code = auth_code
+                                        auth_code_found = True
+                                        logger.info("✅ Login automation completed with auth code captured")
+                                        return True
+                                    else:
+                                        logger.warning(f"Auth code format invalid: {len(auth_code)} chars")
+                            else:
+                                logger.info("URL still changing, waiting for stabilization...")
+
+                        last_url = current_url
+                        attempt += 1
+
+                    if not auth_code_found:
+                        logger.warning("No valid authorization code found after 30 seconds")
+                    return True
+
+                except Exception as redirect_error:
+                    logger.warning(f"Redirect capture failed: {redirect_error}")
+                    logger.info("✅ Login automation completed - fallback to callback")
+                    return True
+
+            finally:
+                await context.close()
+                await browser.close()
+
     def _test_token_validity(self, access_token: str) -> bool:
         """
         Test if the access token is valid by making a simple API call to Upstox
@@ -205,155 +361,16 @@ class UpstoxAutomationService:
         Does NOT handle token exchange - that's done by the callback endpoint
         """
         try:
-            # Generate auth URL using existing service
-            auth_url = generate_upstox_auth_url(api_key, user_id=admin_user_id)
-            redirect_uri = os.getenv("UPSTOX_REDIRECT_URI")
+            # Windows-specific: Set ProactorEventLoop policy for subprocess support
+            if platform.system() == 'Windows':
+                loop = asyncio.get_event_loop()
+                if not isinstance(loop, asyncio.ProactorEventLoop):
+                    logger.info("Setting Windows ProactorEventLoop for Playwright subprocess support")
+                    # We need to run Playwright in a new event loop with ProactorEventLoop
+                    return await self._run_playwright_with_proactor_loop(api_key, admin_user_id)
 
-            logger.info(f"Starting login automation for auth URL: {auth_url}")
-            logger.info(f"Callback will handle token exchange at: {redirect_uri}")
-
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,  # Always headless in production
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--disable-web-security",
-                        "--disable-features=VizDisplayCompositor",
-                        "--no-first-run",
-                        "--disable-default-apps",
-                        "--disable-extensions",
-                        "--disable-sync",
-                        "--disable-translate",
-                        "--hide-scrollbars",
-                        "--mute-audio",
-                        "--no-zygote",
-                        "--disable-accelerated-2d-canvas",
-                        "--disable-background-timer-throttling",
-                        "--disable-renderer-backgrounding",
-                        "--disable-backgrounding-occluded-windows",
-                    ],
-                )
-                context = await browser.new_context()
-                page = await context.new_page()
-
-                try:
-                    # Navigate to auth URL with timeout
-                    logger.info(f"Navigating to: {auth_url}")
-                    await page.goto(auth_url, timeout=30000)  # 30 second timeout
-                    logger.info("✅ Navigated to Upstox auth page")
-
-                    # Fill mobile number
-                    logger.info("🔢 Filling mobile number...")
-                    await page.wait_for_selector("#mobileNum", timeout=10000)
-                    await page.locator("#mobileNum").click()
-                    await page.locator("#mobileNum").fill(self.mobile_no)
-                    await page.get_by_role("button", name="Get OTP").click()
-                    logger.info("✅ Mobile number entered, OTP requested")
-
-                    # Wait for OTP field and fill TOTP
-                    logger.info("🔐 Waiting for OTP field...")
-                    await page.wait_for_selector("#otpNum", timeout=10000)
-                    await page.locator("#otpNum").click()
-                    if self.totp_key:
-                        otp = pyotp.TOTP(self.totp_key).now()
-                        await page.locator("#otpNum").fill(otp)
-                        logger.info("✅ TOTP entered")
-                    else:
-                        logger.error("❌ TOTP key not configured")
-                        return False
-
-                    await page.get_by_role("button", name="Continue").click()
-
-                    # Fill PIN
-                    await page.get_by_label("Enter 6-digit PIN").click()
-                    await page.get_by_label("Enter 6-digit PIN").fill(self.pin)
-                    logger.info("PIN entered")
-
-                    # Click continue - this will trigger the redirect to callback
-                    await page.get_by_role("button", name="Continue").click()
-
-                    # Wait for redirect to happen and capture the authorization code
-                    logger.info("Waiting for redirect with authorization code...")
-
-                    try:
-                        # ✅ CRITICAL FIX: Robust auth code capture with better timing
-                        max_attempts = 60  # Longer wait for auth code
-                        attempt = 0
-                        auth_code_found = False
-                        last_url = ""
-
-                        logger.info("⏳ Waiting for authorization redirect...")
-
-                        while attempt < max_attempts and not auth_code_found:
-                            await page.wait_for_timeout(500)  # Check every 500ms
-                            current_url = page.url
-
-                            # Only process if URL changed to avoid repeated processing
-                            if current_url != last_url and "code=" in current_url:
-                                logger.info(
-                                    f"✅ Auth redirect detected: {current_url[:100]}..."
-                                )
-
-                                # ✅ CRITICAL: Wait for URL to stabilize before extraction
-                                await page.wait_for_timeout(1000)
-
-                                # Verify URL is still the same (not still redirecting)
-                                final_url = page.url
-                                if final_url == current_url and "code=" in final_url:
-                                    # Extract authorization code from URL
-                                    from urllib.parse import urlparse, parse_qs
-
-                                    parsed_url = urlparse(final_url)
-                                    query_params = parse_qs(parsed_url.query)
-
-                                    if "code" in query_params and query_params["code"]:
-                                        auth_code = query_params["code"][0]
-                                        logger.info(
-                                            f"Authorization code captured: {auth_code[:10]}..."
-                                        )
-
-                                        # ✅ CRITICAL: Validate auth code format and length
-                                        if (
-                                            len(auth_code) >= 8 and auth_code.isalnum()
-                                        ):  # Better validation
-                                            self._captured_auth_code = auth_code
-                                            auth_code_found = True
-                                            logger.info(
-                                                "✅ Login automation completed with auth code captured"
-                                            )
-                                            return True
-                                        else:
-                                            logger.warning(
-                                                f"Auth code format invalid: {len(auth_code)} chars, format check failed"
-                                            )
-                                else:
-                                    logger.info(
-                                        "URL still changing, waiting for stabilization..."
-                                    )
-
-                            last_url = current_url
-                            attempt += 1
-
-                        if not auth_code_found:
-                            logger.warning(
-                                "No valid authorization code found after 30 seconds, proceeding with callback method"
-                            )
-                        return True
-
-                    except Exception as redirect_error:
-                        logger.warning(f"Redirect capture failed: {redirect_error}")
-                        # Fallback: proceed anyway
-                        logger.info(
-                            "✅ Login automation completed - fallback to callback"
-                        )
-                        return True
-
-                finally:
-                    await context.close()
-                    await browser.close()
+            # For non-Windows or if already on ProactorEventLoop, use direct implementation
+            return await self._playwright_login_impl(api_key, admin_user_id)
 
         except ImportError as e:
             logger.error(f"Playwright not available: {e}")
@@ -361,12 +378,9 @@ class UpstoxAutomationService:
             return False
         except Exception as e:
             logger.error(f"Login automation failed: {e}")
-            # Log more details for debugging
             logger.error(f"Exception type: {type(e).__name__}")
             if "browser" in str(e).lower() or "chromium" in str(e).lower():
-                logger.error(
-                    "Browser-related error - check if Chromium is properly installed"
-                )
+                logger.error("Browser-related error - check if Chromium is properly installed")
             return False
 
     async def wait_for_token_refresh(
