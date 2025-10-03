@@ -88,13 +88,23 @@ class StockSelection:
 
 class IntelligentStockSelectionService:
     """
-    Intelligent stock selection using market sentiment + sector analysis + value ranking
-    Built on optimized market data service for ultra-fast decisions
+    Intelligent stock selection using market sentiment + sector analysis + value ranking.
+
+    UPDATED: Now uses realtime_market_engine for live market data instead of optimized_market_data_service.
+
+    Data Flow:
+    1. centralized_ws_manager receives live feed from Upstox WebSocket
+    2. Data is forwarded to realtime_market_engine for processing
+    3. This service queries realtime_market_engine for:
+       - Market sentiment (advance/decline ratio, breadth)
+       - Sector performance (avg change%, strength score)
+       - Sector stocks (with live LTP, volume, value)
+    4. Selection algorithm uses real-time data for stock scoring
     """
 
     def __init__(self):
-        # Core dependencies
-        self.optimized_service = None
+        # Core dependencies - UPDATED to use realtime_market_engine
+        self.market_engine = None  # Real-time market engine for live data
         self.analytics_service = None
 
         # Selection state - simplified workflow
@@ -187,17 +197,17 @@ class IntelligentStockSelectionService:
         logger.info("🎯 Intelligent Stock Selection Service initialized")
 
     async def initialize_services(self):
-        """Initialize required services"""
+        """Initialize required services - UPDATED to use realtime_market_engine"""
         try:
-            # Get optimized market data service
-            from services.optimized_market_data_service import optimized_market_service
-            self.optimized_service = optimized_market_service
+            # Get real-time market engine for live market data
+            from services.realtime_market_engine import get_market_engine
+            self.market_engine = get_market_engine()
 
             # Get analytics service
             from services.enhanced_market_analytics import enhanced_analytics
             self.analytics_service = enhanced_analytics
 
-            logger.info("✅ Stock selection services initialized")
+            logger.info("✅ Stock selection services initialized with realtime_market_engine")
             return True
 
         except Exception as e:
@@ -218,19 +228,20 @@ class IntelligentStockSelectionService:
             return TradingPhase.POST_MARKET
 
     async def analyze_market_sentiment(self) -> Tuple[MarketSentiment, Dict[str, Any]]:
-        """Get market sentiment from optimized service - uses proper advance/decline calculation"""
+        """Get market sentiment from realtime_market_engine - uses proper advance/decline calculation"""
         try:
-            if not self.optimized_service:
+            if not self.market_engine:
                 await self.initialize_services()
 
-            # Get pre-calculated sentiment from optimized service
-            sentiment_data = self.optimized_service.get_market_sentiment()
+            # Get real-time sentiment from market engine
+            from services.realtime_market_engine import get_market_sentiment
+            sentiment_data = get_market_sentiment()
 
             if "error" in sentiment_data:
                 logger.warning("⚠️ No market sentiment data available, using neutral")
                 return MarketSentiment.NEUTRAL, sentiment_data
 
-            # Map optimized service sentiment to our enum
+            # Map realtime engine sentiment to our enum
             sentiment_mapping = {
                 "very_bullish": MarketSentiment.VERY_BULLISH,
                 "bullish": MarketSentiment.BULLISH,
@@ -244,7 +255,7 @@ class IntelligentStockSelectionService:
 
             self.current_sentiment = sentiment
 
-            # Enhanced analysis with advance/decline details
+            # Enhanced analysis with advance/decline details from real-time engine
             sentiment_analysis = {
                 "sentiment": sentiment.value,
                 "confidence": sentiment_data.get("confidence", 50),
@@ -266,13 +277,14 @@ class IntelligentStockSelectionService:
             return MarketSentiment.NEUTRAL, {"error": str(e)}
 
     async def analyze_sector_strength(self, sentiment: MarketSentiment) -> Dict[str, float]:
-        """Analyze sector strength based on market sentiment"""
+        """Analyze sector strength based on market sentiment - UPDATED to use realtime_market_engine"""
         try:
-            if not self.optimized_service:
+            if not self.market_engine:
                 await self.initialize_services()
 
-            # Get sector performance
-            sector_performance = self.optimized_service.get_sector_performance()
+            # Get sector performance from real-time market engine
+            from services.realtime_market_engine import get_sector_performance
+            sector_performance = get_sector_performance()
             sentiment_weights = self.sector_sentiment_weights.get(sentiment, {})
 
             sector_scores = {}
@@ -307,9 +319,9 @@ class IntelligentStockSelectionService:
         target_sectors: List[str],
         max_stocks: int = 5
     ) -> List[StockSelection]:
-        """Select stocks based on highest value in target sectors"""
+        """Select stocks based on highest value in target sectors - UPDATED to use realtime_market_engine"""
         try:
-            if not self.optimized_service:
+            if not self.market_engine:
                 await self.initialize_services()
 
             selected_stocks = []
@@ -318,8 +330,9 @@ class IntelligentStockSelectionService:
                 if len(selected_stocks) >= max_stocks:
                     break
 
-                # Get sector stocks
-                sector_stocks = self.optimized_service.get_sector_stocks(sector)
+                # Get sector stocks from real-time market engine
+                from services.realtime_market_engine import get_sector_stocks
+                sector_stocks = get_sector_stocks(sector)
                 stocks = sector_stocks.get(sector, [])
 
                 if not stocks:
@@ -443,9 +456,10 @@ class IntelligentStockSelectionService:
             return 0.5  # Neutral market
 
     def _calculate_sector_score(self, stock_data: Dict[str, Any], sector: str) -> float:
-        """Calculate sector strength score"""
+        """Calculate sector strength score - UPDATED to use realtime_market_engine"""
         try:
-            sector_performance = self.optimized_service.get_sector_performance()
+            from services.realtime_market_engine import get_sector_performance
+            sector_performance = get_sector_performance()
             performance = sector_performance.get(sector, {})
 
             # Sector strength factors
@@ -800,10 +814,22 @@ class IntelligentStockSelectionService:
         }
 
     async def save_selections_to_database(self, selections: List[StockSelection], selection_type: str = "intelligent") -> bool:
-        """Save selected stocks to database for auto-trading integration"""
+        """
+        Save selected stocks to database with complete market sentiment and advance/decline data.
+
+        Stores:
+        - Stock selection details (symbol, score, sector)
+        - Market sentiment at time of selection (bullish/bearish/neutral)
+        - Advance/decline ratio and market breadth
+        - Options trading direction (CE for bullish, PE for bearish)
+        """
         try:
             db = SessionLocal()
             today = date.today()
+
+            # Get current market sentiment for database storage
+            from services.realtime_market_engine import get_market_sentiment
+            sentiment_data = get_market_sentiment()
 
             # Clear existing intelligent selections for today (if any)
             db.query(SelectedStock).filter(
@@ -811,7 +837,10 @@ class IntelligentStockSelectionService:
                 SelectedStock.selection_reason.like(f"{selection_type}%")
             ).delete()
 
-            # Save new selections
+            # Determine selection phase
+            selection_phase = "premarket" if selection_type == "premarket" else "final_selection"
+
+            # Save new selections with complete market context
             for stock in selections:
                 selected_stock = SelectedStock(
                     symbol=stock.symbol,
@@ -823,6 +852,20 @@ class IntelligentStockSelectionService:
                     volume_at_selection=int(stock.volume or 0),
                     change_percent_at_selection=float(stock.change_percent or 0),
                     sector=stock.sector,
+
+                    # Market Sentiment Data - CRITICAL for options trading direction
+                    market_sentiment=sentiment_data.get("sentiment", "neutral"),
+                    market_sentiment_confidence=sentiment_data.get("confidence", 50),
+                    advance_decline_ratio=sentiment_data.get("metrics", {}).get("advance_decline_ratio", 1.0),
+                    market_breadth_percent=sentiment_data.get("metrics", {}).get("market_breadth_percent", 0),
+                    advancing_stocks=sentiment_data.get("metrics", {}).get("advancing", 0),
+                    declining_stocks=sentiment_data.get("metrics", {}).get("declining", 0),
+                    total_stocks_analyzed=sentiment_data.get("metrics", {}).get("total_stocks", 0),
+                    selection_phase=selection_phase,
+
+                    # Options Direction - CE for bullish market, PE for bearish market
+                    option_type=stock.options_direction,  # CE or PE based on market sentiment
+
                     score_breakdown=str({
                         "sentiment_score": stock.sentiment_score,
                         "sector_score": stock.sector_score,
@@ -831,7 +874,9 @@ class IntelligentStockSelectionService:
                         "value_score": stock.value_score,
                         "final_score": stock.final_score,
                         "confidence_level": stock.confidence_level,
-                        "risk_level": stock.risk_level
+                        "risk_level": stock.risk_level,
+                        "options_direction": stock.options_direction,  # CE or PE
+                        "market_sentiment_at_selection": sentiment_data.get("sentiment", "neutral")
                     }),
                     is_active=True
                 )
@@ -839,6 +884,8 @@ class IntelligentStockSelectionService:
 
             db.commit()
             logger.info(f"✅ Saved {len(selections)} intelligent stock selections to database")
+            logger.info(f"📊 Market Context: {sentiment_data.get('sentiment')} sentiment, A/D ratio: {sentiment_data.get('metrics', {}).get('advance_decline_ratio', 1.0):.2f}")
+            logger.info(f"📈 Options Direction: {selections[0].options_direction if selections else 'N/A'} (based on market sentiment)")
             return True
 
         except Exception as e:
