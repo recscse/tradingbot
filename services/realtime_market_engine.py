@@ -541,3 +541,129 @@ def update_market_data(updates: Dict[str, Dict[str, Any]]) -> None:
     """Update market data in the engine"""
     engine = get_market_engine()
     engine.update_market_data(updates)
+
+
+def get_market_sentiment() -> Dict[str, Any]:
+    """
+    Calculate market sentiment based on advance/decline ratio and market breadth.
+
+    Returns:
+        Dict containing sentiment classification, confidence, and metrics
+    """
+    engine = get_market_engine()
+    analytics = engine.analytics
+
+    advancing = analytics.advancing_stocks
+    declining = analytics.declining_stocks
+    total_stocks = analytics.total_stocks
+    ad_ratio = analytics.advance_decline_ratio
+
+    if total_stocks == 0:
+        return {
+            "sentiment": "neutral",
+            "confidence": 0,
+            "metrics": {
+                "advance_decline_ratio": 1.0,
+                "market_breadth_percent": 0,
+                "advancing": 0,
+                "declining": 0,
+                "total_stocks": 0
+            }
+        }
+
+    # Calculate market breadth percentage
+    market_breadth_percent = ((advancing - declining) / total_stocks) * 100
+
+    # Determine sentiment based on multiple factors
+    if market_breadth_percent > 15 and ad_ratio > 2.0:
+        sentiment = "very_bullish"
+        confidence = min(95, abs(market_breadth_percent) * 4)
+    elif market_breadth_percent > 5 and ad_ratio > 1.3:
+        sentiment = "bullish"
+        confidence = min(85, abs(market_breadth_percent) * 5)
+    elif market_breadth_percent < -15 and ad_ratio < 0.5:
+        sentiment = "very_bearish"
+        confidence = min(95, abs(market_breadth_percent) * 4)
+    elif market_breadth_percent < -5 and ad_ratio < 0.8:
+        sentiment = "bearish"
+        confidence = min(85, abs(market_breadth_percent) * 5)
+    else:
+        sentiment = "neutral"
+        confidence = 50 + abs(market_breadth_percent)
+
+    return {
+        "sentiment": sentiment,
+        "confidence": round(confidence, 1),
+        "metrics": {
+            "advance_decline_ratio": round(ad_ratio, 2),
+            "market_breadth_percent": round(market_breadth_percent, 2),
+            "advancing": advancing,
+            "declining": declining,
+            "total_stocks": total_stocks
+        }
+    }
+
+
+def get_sector_performance() -> Dict[str, Any]:
+    """
+    Get sector-wise performance metrics.
+
+    Returns:
+        Dict with sector names as keys and performance metrics as values
+    """
+    engine = get_market_engine()
+    analytics = engine.analytics
+
+    sector_performance = {}
+    for sector, perf_data in analytics.sector_performance.items():
+        sector_performance[sector] = {
+            "avg_change_percent": perf_data.get("avg_change_percent", 0),
+            "advancing": perf_data.get("advancing", 0),
+            "declining": perf_data.get("declining", 0),
+            "total_stocks": perf_data.get("advancing", 0) + perf_data.get("declining", 0),
+            "strength_score": perf_data.get("avg_change_percent", 0) * 10  # Normalized strength score
+        }
+
+    return sector_performance
+
+
+def get_sector_stocks(sector: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Get all stocks in a specific sector with their live data.
+
+    Args:
+        sector: Sector name to filter by
+
+    Returns:
+        Dict with sector name as key and list of stock data as value
+    """
+    engine = get_market_engine()
+
+    if sector not in engine.sector_groups:
+        return {sector: []}
+
+    sector_stocks = []
+    for instrument_key in engine.sector_groups[sector]:
+        if instrument_key in engine.instruments:
+            inst = engine.instruments[instrument_key]
+            sector_stocks.append({
+                "symbol": inst.symbol,
+                "name": inst.name,
+                "instrument_key": inst.instrument_key,
+                "ltp": float(inst.current_price),
+                "change_percent": float(inst.change_percent),
+                "change": float(inst.change),
+                "volume": inst.volume,
+                "value_crores": float(inst.total_traded_value) / 1e7,  # Convert to crores
+                "high": float(inst.high_price),
+                "low": float(inst.low_price),
+                "previous_close": float(inst.close_price),
+                "sector": inst.sector,
+                "is_fno": inst.lot_size > 1,  # Assume F&O if lot_size > 1
+                "lot_size": inst.lot_size
+            })
+
+    # Sort by change_percent descending (gainers first)
+    sector_stocks.sort(key=lambda x: x["change_percent"], reverse=True)
+
+    return {sector: sector_stocks}

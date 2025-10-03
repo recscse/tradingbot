@@ -333,49 +333,48 @@ class MarketScheduleService:
                 await centralized_manager.initialize()
                 logger.info("✅ WebSocket manager refreshed with new keys")
 
-            # 4. Run automated stock selection using the new service
-            logger.info("🎯 Running automated stock selection...")
+            # 4. Run intelligent stock selection - service handles its own database save
+            logger.info("🎯 Triggering intelligent stock selection (realtime engine)...")
             try:
-                from services.auto_stock_selection_service import auto_stock_selection_service
-                
-                # Run the comprehensive auto stock selection
-                selected_results = await auto_stock_selection_service.run_premarket_selection()
-                
-                if selected_results:
-                    logger.info(f"✅ Auto stock selection completed: {len(selected_results)} stocks selected")
-                    
-                    # Convert to the old format for compatibility
+                from services.intelligent_stock_selection_service import intelligent_stock_selector
+
+                # Trigger intelligent premarket selection
+                # NOTE: intelligent_stock_selector handles:
+                #   - Real-time market data queries
+                #   - Stock selection logic
+                #   - Database save (with all market sentiment data)
+                #   - WebSocket broadcast
+                result = await intelligent_stock_selector.run_premarket_selection()
+
+                if result and not result.get("error"):
+                    selected_stocks_data = result.get("selected_stocks", [])
+                    sentiment_analysis = result.get("sentiment_analysis", {})
+
+                    logger.info(f"✅ Intelligent stock selection complete: {len(selected_stocks_data)} stocks")
+                    logger.info(f"📊 Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})")
+
+                    # Store minimal reference for legacy compatibility only
+                    # (Database already has complete data from intelligent_stock_selector)
                     self.selected_stocks = {}
-                    for result in selected_results:
-                        self.selected_stocks[result.symbol] = {
-                            "stock_data": {
-                                "symbol": result.symbol,
-                                "sector": result.sector,
-                                "price_at_selection": result.price_at_selection,
-                                "option_type": result.option_type,
-                                "atm_strike": result.atm_strike,
-                                "selection_score": result.selection_score,
-                                "expiry_date": result.expiry_date
-                            },
-                            "analysis": {
-                                "score": result.selection_score,
-                                "sector_performance": result.sector,
-                                "market_sentiment_aligned": result.market_sentiment_alignment,
-                                "has_options": result.option_contract is not None,
-                                "option_type_recommendation": result.option_type,
-                            },
-                            "instruments": [result.instrument_key],
-                            "options_ready": result.option_contract is not None,
-                        }
+                    for stock_dict in selected_stocks_data:
+                        symbol = stock_dict.get("symbol")
+                        if symbol:
+                            self.selected_stocks[symbol] = {
+                                "symbol": symbol,
+                                "instrument_key": stock_dict.get("instrument_key"),
+                                "sector": stock_dict.get("sector"),
+                                "option_type": stock_dict.get("options_direction")
+                            }
                 else:
-                    logger.warning("❌ Auto stock selection returned no results")
+                    error_msg = result.get("error", "Unknown error") if result else "No result returned"
+                    logger.warning(f"⚠️ Intelligent stock selection failed: {error_msg}")
                     self.selected_stocks = {}
-                    
+
             except Exception as e:
-                logger.error(f"❌ Auto stock selection failed: {e}")
-                # Fallback to original selection method
-                market_analysis = await self._analyze_market_conditions()
-                self.selected_stocks = await self._select_trading_stocks(market_analysis)
+                logger.error(f"❌ Intelligent stock selection failed: {e}")
+                import traceback
+                traceback.print_exc()
+                self.selected_stocks = {}
 
             # 6. Prepare instrument keys for selected stocks
             await self._prepare_selected_stock_instruments()
