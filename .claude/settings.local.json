@@ -27,7 +27,8 @@
       "Task",
       "Read(~/**)",
       "Edit(~/.claude/settings.json)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "additionalDirectories": [
