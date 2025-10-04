@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 # Windows-specific fix: Set ProactorEventLoop policy BEFORE any asyncio operations
 # This is required for Playwright subprocess support on Windows
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Load environment variables FIRST
@@ -27,25 +27,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# ⚠️ DEPRECATED: Legacy enhanced analytics service - DISABLED
-# Replaced by: services/realtime_market_engine.py + router/realtime_analytics_router.py
-try:
-    # Keep import for backward compatibility but don't use
-    from services.enhanced_market_analytics import enhanced_analytics
-
-    enhanced_analytics = None  # Disabled
-    ANALYTICS_SERVICE_AVAILABLE = False
-    logger.warning(
-        "⚠️ DEPRECATED: Enhanced analytics service disabled - using Real-Time Analytics Engine"
-    )
-except ImportError as e:
-    enhanced_analytics = None
-    ANALYTICS_SERVICE_AVAILABLE = False
-    logger.info(
-        "✅ Enhanced analytics service not loaded (replaced by Real-Time Analytics Engine)"
-    )
-
 try:
     from services.centralized_ws_manager import centralized_manager
     from router.market_ws import (
@@ -139,7 +120,6 @@ from router.heatmap_router import router as heatmap_router
 from router.paper_trading_routes import router as paper_trading_router
 from router.option_routes import option_router
 
-# from services.unified_websocket_manager import unified_manager, start_unified_websocket
 
 try:
     from router.auto_trading_routes import router as auto_trading_router
@@ -152,6 +132,18 @@ except ImportError as e:
     auto_trading_router = APIRouter()  # Dummy router
     AUTO_TRADING_AVAILABLE = False
     logger.warning(f"⚠️ Auto Trading services not available: {e}")
+
+try:
+    from router.trading_execution_router import router as trading_execution_router
+
+    TRADING_EXECUTION_AVAILABLE = True
+    logger.info("✅ Trading Execution routes imported successfully")
+except ImportError as e:
+    from fastapi import APIRouter
+
+    trading_execution_router = APIRouter()
+    TRADING_EXECUTION_AVAILABLE = False
+    logger.warning(f"⚠️ Trading Execution services not available: {e}")
 
 
 # Import from market_analytics_router safely
@@ -528,42 +520,11 @@ async def lifespan(app: FastAPI):
 
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
-        # 5. Initialize instrument registry SECOND (for backward compatibility)
-        try:
-            logger.info("🔧 Initializing Instrument Registry...")
-            from services.instrument_registry import instrument_registry
-
-            registry_initialized = await instrument_registry.initialize_registry()
-
-            if registry_initialized:
-                stats = instrument_registry.get_stats()
-                logger.info(
-                    f"✅ Instrument Registry initialized with {stats['spot_instruments']} spot instruments, {stats['fno_instruments']} F&O instruments"
-                )
-            else:
-                logger.error("❌ Instrument registry initialization failed")
-
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize Instrument Registry: {e}")
-            import traceback
-
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-
         # 6. Start Unified WebSocket System (🚀 ENHANCED with Real-Time Analytics Engine)
         # logger.info(
         #     "🔌 Starting Enhanced Unified WebSocket System with Real-Time Analytics..."
         # )
         # await start_unified_websocket()
-
-        # 7. 🚀 Start Enhanced Breakout Engine (consolidated breakout detection)
-        logger.info("🚀 Starting Enhanced Breakout Engine...")
-        try:
-            from services.enhanced_breakout_engine import start_enhanced_breakout_engine
-
-            await start_enhanced_breakout_engine()
-            logger.info("✅ Enhanced Breakout Engine started successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Enhanced Breakout Engine: {e}")
 
         # Gap Detection Service analyzes market gaps at 9:08 AM daily
 
@@ -577,9 +538,7 @@ async def lifespan(app: FastAPI):
                     "Gap Detection Service started - scheduled for 9:08 AM IST daily"
                 )
             except Exception as e:
-                logger.error(
-                    f"Failed to start Gap Detection Service: {e}"
-                )
+                logger.error(f"Failed to start Gap Detection Service: {e}")
 
         # 8. NEW: Initialize Centralized WebSocket System (non-blocking)
         if CENTRALIZED_WS_AVAILABLE:
@@ -587,9 +546,13 @@ async def lifespan(app: FastAPI):
             try:
                 if await centralized_manager.initialize():
                     # Start connection in background - non-blocking
-                    logger.info("🔌 Starting Centralized WebSocket connection in background...")
+                    logger.info(
+                        "🔌 Starting Centralized WebSocket connection in background..."
+                    )
                     await centralized_manager.start_connection()
-                    logger.info("✅ Centralized WebSocket background task started - continuing with other services")
+                    logger.info(
+                        "✅ Centralized WebSocket background task started - continuing with other services"
+                    )
 
                     # Note: Connection happens asynchronously in background
                     # Other services will continue to initialize while WebSocket connects
@@ -639,25 +602,14 @@ async def lifespan(app: FastAPI):
                     logger.info(
                         "🔗 Connecting centralized WebSocket manager to enhanced unified system..."
                     )
-                    try:
-                        from services.unified_websocket_manager import (
-                            integrate_with_centralized_manager,
-                        )
-
-                        integrate_with_centralized_manager()
-                        logger.info(
-                            "✅ ENHANCED: WebSocket managers connected with Real-Time Analytics integration"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"❌ Failed to connect enhanced WebSocket managers: {e}"
-                        )
 
                 else:
                     logger.error(
                         "❌ NEW: Failed to initialize centralized WebSocket system"
                     )
-                    logger.warning("⚠️ Application will continue without live market data")
+                    logger.warning(
+                        "⚠️ Application will continue without live market data"
+                    )
             except Exception as e:
                 logger.error(f"❌ NEW: Centralized WebSocket system error: {e}")
                 logger.warning("⚠️ Application will continue without live market data")
@@ -778,6 +730,17 @@ async def lifespan(app: FastAPI):
                     f"❌ Auto Trade Execution Service failed to initialize: {e}"
                 )
 
+        # 15.5. 🚀 NEW: Start Real-Time PnL Tracker
+        if TRADING_EXECUTION_AVAILABLE:
+            logger.info("📊 Starting Real-Time PnL Tracker...")
+            try:
+                from services.trading_execution.pnl_tracker import pnl_tracker
+
+                await pnl_tracker.start_tracking()
+                logger.info("✅ Real-Time PnL Tracker started")
+            except Exception as e:
+                logger.error(f"❌ Real-Time PnL Tracker failed to start: {e}")
+
         # 16. 🚀 NEW: Initialize Intelligent Stock Selection Service
         logger.info("🧠 Initializing Intelligent Stock Selection Service...")
         try:
@@ -816,7 +779,9 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 80)
         logger.info("📊 Trading Application is ready to accept requests")
         logger.info("🔌 WebSocket connections are running in background")
-        logger.info("⚠️ If WebSocket shows network errors, the app will still work without live data")
+        logger.info(
+            "⚠️ If WebSocket shows network errors, the app will still work without live data"
+        )
         logger.info("=" * 80)
 
         # Signal that startup is complete and token refresh can now proceed
@@ -904,6 +869,17 @@ async def lifespan(app: FastAPI):
             logger.info("✅ Notification Scheduler stopped")
         except Exception as e:
             logger.error(f"Error stopping notification scheduler: {e}")
+
+        # Stop Real-Time PnL Tracker - NEW
+        if TRADING_EXECUTION_AVAILABLE:
+            try:
+                logger.info("🛑 Stopping Real-Time PnL Tracker...")
+                from services.trading_execution.pnl_tracker import pnl_tracker
+
+                await pnl_tracker.stop_tracking()
+                logger.info("✅ Real-Time PnL Tracker stopped")
+            except Exception as e:
+                logger.error(f"Error stopping PnL tracker: {e}")
 
         logger.info(
             "🎯 Enhanced gap and breakout detection services shutdown completed"
@@ -1024,7 +1000,9 @@ app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
 try:
     from router.unified_websocket_routes import router as unified_websocket_router
 
-    app.include_router(unified_websocket_router, tags=["🚀 Unified WebSocket - Real-Time"])
+    app.include_router(
+        unified_websocket_router, tags=["🚀 Unified WebSocket - Real-Time"]
+    )
     logger.info("✅ Simple Unified WebSocket routes registered")
 except ImportError as e:
     logger.warning(f"⚠️ Unified WebSocket routes not available: {e}")
@@ -1032,6 +1010,7 @@ except ImportError as e:
 app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(option_router, tags=["Options & Futures"])
 app.include_router(auto_trading_router, tags=["Auto Trading & Stock Selection"])
+app.include_router(trading_execution_router, tags=["Trading Execution"])
 
 # NIFTY 09:40 Strategy Router
 try:
