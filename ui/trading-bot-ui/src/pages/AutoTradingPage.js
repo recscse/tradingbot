@@ -456,7 +456,7 @@ const AutoTradingPage = () => {
   useEffect(() => {
     const checkAutoTradingStatus = async () => {
       try {
-        const response = await api.get("/v1/trading-execution/auto-trading-status");
+        const response = await api.get("/v1/trading/execution/auto-trading-status");
         if (response.data.success) {
           setAutoTradingRunning(response.data.websocket_running || false);
         }
