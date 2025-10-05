@@ -31,7 +31,6 @@ import {
   ShowChart as ShowChartIcon,
   Timeline as TimelineIcon,
   Assessment as AssessmentIcon,
-  PlayArrow as PlayArrowIcon,
   Stop as StopIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
@@ -42,10 +41,9 @@ import {
 import api from "../services/api";
 
 const AutoTradingPage = () => {
-  // State management
+  // State management - Will be loaded from database
   const [tradingMode, setTradingMode] = useState("paper"); // paper or live
   const [executionMode, setExecutionMode] = useState("multi_demat"); // single_demat or multi_demat
-  const [autoExecuteEnabled, setAutoExecuteEnabled] = useState(false);
   const [selectedStocks, setSelectedStocks] = useState([]);
   const [activePositions, setActivePositions] = useState([]);
   const [tradeHistory, setTradeHistory] = useState([]);
@@ -55,15 +53,15 @@ const AutoTradingPage = () => {
     pnl_percent: 0,
     active_positions_count: 0,
   });
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
-  const [executionResults, setExecutionResults] = useState(null);
+  const [executionResults] = useState(null);
   const [showCapitalBreakdown, setShowCapitalBreakdown] = useState(false);
   const [showExecutionDetails, setShowExecutionDetails] = useState(false);
-  const [showTradingSettings, setShowTradingSettings] = useState(false);
   const [emergencyStopLoading, setEmergencyStopLoading] = useState(false);
+  const [autoTradingRunning, setAutoTradingRunning] = useState(false);
 
   // WebSocket ref
   const socketRef = useRef(null);
@@ -114,6 +112,18 @@ const AutoTradingPage = () => {
       }
     } catch (err) {
       console.error("Error fetching trade history:", err);
+    }
+  }, []);
+
+  const fetchTradingPreferences = useCallback(async () => {
+    try {
+      const response = await api.get("/v1/trading/execution/user-trading-preferences");
+      if (response.data.success) {
+        setTradingMode(response.data.trading_mode || "paper");
+        setExecutionMode(response.data.execution_mode || "multi_demat");
+      }
+    } catch (err) {
+      console.error("Error fetching trading preferences:", err);
     }
   }, []);
 
@@ -187,42 +197,6 @@ const AutoTradingPage = () => {
   }, []);
 
   // ---------- Trading Actions ----------
-  const handleAutoExecute = async () => {
-    setIsLoading(true);
-    setError(null);
-    setExecutionResults(null);
-
-    try {
-      const response = await api.post(
-        `/v1/trading/execution/auto-execute-selected-stocks?trading_mode=${tradingMode}&execution_mode=${executionMode}`
-      );
-
-      if (response.data.success) {
-        setExecutionResults(response.data);
-
-        const executionModeLabel =
-          executionMode === "multi_demat" ? "Multi-Demat" : "Single-Demat";
-
-        setSuccess(
-          `${executionModeLabel} Execution: ${
-            response.data.successful_executions
-          } trades executed. Total Capital: ${formatCurrency(
-            response.data.total_allocated_capital || 0
-          )}`
-        );
-        await fetchActivePositions();
-        await fetchPnLSummary();
-        await fetchCapitalOverview();
-      } else {
-        setError(response.data.message || "Auto-execute failed");
-      }
-    } catch (err) {
-      setError(err.response?.data?.detail || "Failed to auto-execute trades");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleClosePosition = async (positionId) => {
     if (!window.confirm("Are you sure you want to close this position?")) {
       return;
@@ -303,10 +277,21 @@ const AutoTradingPage = () => {
       }
     }
 
-    setTradingMode(newMode);
+    try {
+      // Save to database
+      const response = await api.post(
+        `/v1/trading/execution/user-trading-preferences?trading_mode=${newMode}&execution_mode=${executionMode}`
+      );
 
-    // Refresh capital data for new mode
-    await fetchCapitalOverview();
+      if (response.data.success) {
+        setTradingMode(newMode);
+        // Refresh capital data for new mode
+        await fetchCapitalOverview();
+      }
+    } catch (err) {
+      console.error("Error updating trading mode:", err);
+      setError("Failed to update trading mode");
+    }
   };
 
   // ---------- WebSocket for Real-time PnL ----------
@@ -377,6 +362,29 @@ const AutoTradingPage = () => {
             fetchPnLSummary();
             fetchTradeHistory();
           }
+
+          // Handle live price updates for selected stocks
+          if (message.type === "selected_stock_price_update") {
+            const data = message.data;
+            setSelectedStocks((prev) =>
+              prev.map((stock) =>
+                stock.option_instrument_key === data.option_instrument_key ||
+                stock.symbol === data.symbol
+                  ? {
+                      ...stock,
+                      live_price: data.live_option_premium,
+                      live_spot_price: data.live_spot_price,
+                      price_change: data.price_change,
+                      price_change_percent: data.price_change_percent,
+                      unrealized_pnl: data.unrealized_pnl,
+                      unrealized_pnl_percent: data.unrealized_pnl_percent,
+                      state: data.state,
+                      last_updated: data.timestamp,
+                    }
+                  : stock
+              )
+            );
+          }
         } catch (parseError) {
           console.error("Error parsing WebSocket message:", parseError);
         }
@@ -403,13 +411,19 @@ const AutoTradingPage = () => {
   }, [fetchActivePositions, fetchPnLSummary, fetchTradeHistory]);
 
   // ---------- Effects ----------
+  // Load trading preferences first, then load other data
   useEffect(() => {
-    fetchCapitalOverview();
-    fetchSelectedStocks();
-    fetchActivePositions();
-    fetchPnLSummary();
-    fetchTradeHistory();
-    initializeWebSocket();
+    const loadInitialData = async () => {
+      await fetchTradingPreferences(); // Load preferences first
+      fetchCapitalOverview();
+      fetchSelectedStocks();
+      fetchActivePositions();
+      fetchPnLSummary();
+      fetchTradeHistory();
+      initializeWebSocket();
+    };
+
+    loadInitialData();
 
     return () => {
       if (socketRef.current) {
@@ -418,6 +432,7 @@ const AutoTradingPage = () => {
       }
     };
   }, [
+    fetchTradingPreferences,
     fetchCapitalOverview,
     fetchSelectedStocks,
     fetchActivePositions,
@@ -436,6 +451,29 @@ const AutoTradingPage = () => {
 
     return () => clearInterval(interval);
   }, [fetchCapitalOverview, fetchActivePositions, fetchPnLSummary]);
+
+  // Poll auto-trading status every 5 seconds
+  useEffect(() => {
+    const checkAutoTradingStatus = async () => {
+      try {
+        const response = await api.get("/v1/trading-execution/auto-trading-status");
+        if (response.data.success) {
+          setAutoTradingRunning(response.data.websocket_running || false);
+        }
+      } catch (err) {
+        // Silently fail - status check is not critical
+        console.error("Failed to get auto-trading status:", err);
+      }
+    };
+
+    // Check immediately
+    checkAutoTradingStatus();
+
+    // Then poll every 5 seconds
+    const interval = setInterval(checkAutoTradingStatus, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat("en-IN", {
@@ -664,189 +702,147 @@ const AutoTradingPage = () => {
           </Card>
         </Grid>
 
-        {/* Trading Settings - Collapsible */}
+        {/* Trading Settings */}
         <Grid item xs={12}>
           <Card elevation={2}>
-            <CardContent sx={{ pb: showTradingSettings ? 2 : 1 }}>
-              <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-              >
-                <Typography variant="h6" fontWeight={600}>
-                  Trading Settings & Execution
-                </Typography>
-                <Button
-                  size="small"
-                  onClick={() => setShowTradingSettings(!showTradingSettings)}
-                  endIcon={
-                    showTradingSettings ? (
-                      <ExpandLessIcon />
-                    ) : (
-                      <ExpandMoreIcon />
-                    )
-                  }
-                >
-                  {showTradingSettings ? "Hide" : "Show"} Settings
-                </Button>
-              </Stack>
+            <CardContent>
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
+                Trading Settings
+              </Typography>
 
-              <Collapse in={showTradingSettings}>
-                <Box sx={{ mt: 2.5 }}>
-                  <Grid container spacing={2.5}>
-                    {/* Trading Mode */}
-                    <Grid item xs={12} sm={6} md={4}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 1 }}
-                        >
-                          Trading Mode
-                        </Typography>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={tradingMode === "live"}
-                              onChange={handleTradingModeToggle}
-                              color="error"
-                            />
-                          }
-                          label={
-                            <Typography variant="body2" fontWeight={500}>
-                              {tradingMode === "paper" ? "Paper" : "Live"}
-                            </Typography>
-                          }
+              <Grid container spacing={2.5}>
+                {/* Trading Mode */}
+                <Grid item xs={12} sm={6}>
+                  <Box
+                    sx={{
+                      p: 2,
+                      bgcolor: "background.default",
+                      borderRadius: 1,
+                      border: tradingMode === "live" ? "2px solid" : "1px solid",
+                      borderColor: tradingMode === "live" ? "error.main" : "divider",
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mb: 1 }}
+                    >
+                      Trading Mode
+                    </Typography>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={tradingMode === "live"}
+                          onChange={handleTradingModeToggle}
+                          color="error"
                         />
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mt: 0.5 }}
-                        >
-                          {tradingMode === "paper"
-                            ? "Simulated trading"
-                            : "Real money trading"}
+                      }
+                      label={
+                        <Typography variant="body2" fontWeight={500}>
+                          {tradingMode === "paper" ? "Paper Trading" : "Live Trading"}
                         </Typography>
-                      </Box>
-                    </Grid>
+                      }
+                    />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      {tradingMode === "paper"
+                        ? "Virtual ₹10 lakhs - No real money"
+                        : "⚠️ Real money trading - Actual broker API"}
+                    </Typography>
+                  </Box>
+                </Grid>
 
-                    {/* Execution Mode */}
-                    <Grid item xs={12} sm={6} md={4}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 1 }}
-                        >
-                          Execution Mode
-                        </Typography>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={executionMode === "multi_demat"}
-                              onChange={(e) =>
-                                setExecutionMode(
-                                  e.target.checked
-                                    ? "multi_demat"
-                                    : "single_demat"
-                                )
+                {/* Execution Mode */}
+                <Grid item xs={12} sm={6}>
+                  <Box
+                    sx={{
+                      p: 2,
+                      bgcolor: "background.default",
+                      borderRadius: 1,
+                      border: "1px solid",
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mb: 1 }}
+                    >
+                      Execution Mode
+                    </Typography>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={executionMode === "multi_demat"}
+                          onChange={async (e) => {
+                            const newMode = e.target.checked
+                              ? "multi_demat"
+                              : "single_demat";
+                            try {
+                              const response = await api.post(
+                                `/v1/trading/execution/user-trading-preferences?trading_mode=${tradingMode}&execution_mode=${newMode}`
+                              );
+                              if (response.data.success) {
+                                setExecutionMode(newMode);
                               }
-                              color="primary"
-                            />
-                          }
-                          label={
-                            <Typography variant="body2" fontWeight={500}>
-                              {executionMode === "multi_demat"
-                                ? "Multi-Demat"
-                                : "Single-Demat"}
-                            </Typography>
-                          }
+                            } catch (err) {
+                              console.error("Error updating execution mode:", err);
+                            }
+                          }}
+                          color="primary"
                         />
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mt: 0.5 }}
-                        >
+                      }
+                      label={
+                        <Typography variant="body2" fontWeight={500}>
                           {executionMode === "multi_demat"
-                            ? "Execute across all active demats"
-                            : "Execute on default demat only"}
+                            ? "Multi-Demat"
+                            : "Single-Demat"}
                         </Typography>
-                      </Box>
-                    </Grid>
+                      }
+                    />
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mt: 0.5 }}
+                    >
+                      {executionMode === "multi_demat"
+                        ? "Distribute across all active demats"
+                        : "Execute on default demat only"}
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
 
-                    {/* Auto Execute */}
-                    <Grid item xs={12} sm={6} md={4}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 1 }}
-                        >
-                          Auto Execute
-                        </Typography>
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={autoExecuteEnabled}
-                              onChange={(e) =>
-                                setAutoExecuteEnabled(e.target.checked)
-                              }
-                              color="primary"
-                            />
-                          }
-                          label={
-                            <Typography variant="body2" fontWeight={500}>
-                              {autoExecuteEnabled ? "Enabled" : "Disabled"}
-                            </Typography>
-                          }
-                        />
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mt: 0.5 }}
-                        >
-                          {autoExecuteEnabled
-                            ? "Automatically execute after stock selection"
-                            : "Manual execution required"}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  </Grid>
-                </Box>
-              </Collapse>
-
-              {/* Execute Button - Always Visible */}
-              <Box sx={{ mt: 2 }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  fullWidth
-                  startIcon={<PlayArrowIcon />}
-                  onClick={handleAutoExecute}
-                  disabled={isLoading || selectedStocks.length === 0}
-                  sx={{ py: 1.5, fontWeight: 600 }}
-                >
-                  Execute Selected Stocks ({selectedStocks.length})
-                </Button>
+              {/* Auto-Trading Status Indicator */}
+              <Box sx={{ mt: 2.5, p: 2, bgcolor: autoTradingRunning ? "success.50" : "grey.50", borderRadius: 1 }}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Box
+                    sx={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      bgcolor: autoTradingRunning ? "success.main" : "grey.400",
+                      animation: autoTradingRunning ? "pulse 2s infinite" : "none",
+                      "@keyframes pulse": {
+                        "0%, 100%": { opacity: 1 },
+                        "50%": { opacity: 0.5 },
+                      },
+                    }}
+                  />
+                  <Typography variant="body2" fontWeight={600} color={autoTradingRunning ? "success.main" : "text.secondary"}>
+                    {autoTradingRunning
+                      ? `Auto-Trading Active - Monitoring ${selectedStocks.length} stocks`
+                      : "Auto-Trading will start automatically when stocks are selected"}
+                  </Typography>
+                </Stack>
+                {autoTradingRunning && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, ml: 3 }}>
+                    Strategy running on live data • Trades execute automatically on valid signals • Real-time PnL tracking active
+                  </Typography>
+                )}
               </Box>
             </CardContent>
           </Card>
@@ -1549,7 +1545,13 @@ const AutoTradingPage = () => {
                             Expiry
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Premium
+                            Live Price
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Change
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Unrealized PnL
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             Lot Size
@@ -1599,9 +1601,54 @@ const AutoTradingPage = () => {
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatCurrency(stock.premium || 0)}
+                              <Typography
+                                variant="body2"
+                                fontWeight={600}
+                                color="primary"
+                              >
+                                {formatCurrency(stock.live_price || stock.premium || 0)}
                               </Typography>
+                              {stock.live_price && (
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                >
+                                  At sel: {formatCurrency(stock.premium || 0)}
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              {stock.price_change_percent !== undefined && stock.price_change_percent !== null ? (
+                                <Chip
+                                  label={`${stock.price_change_percent >= 0 ? "+" : ""}${stock.price_change_percent.toFixed(2)}%`}
+                                  color={stock.price_change_percent >= 0 ? "success" : "error"}
+                                  size="small"
+                                  icon={stock.price_change_percent >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
+                                />
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">-</Typography>
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              {stock.unrealized_pnl !== undefined && stock.unrealized_pnl !== null ? (
+                                <>
+                                  <Typography
+                                    variant="body2"
+                                    fontWeight={600}
+                                    color={stock.unrealized_pnl >= 0 ? "success.main" : "error.main"}
+                                  >
+                                    {formatCurrency(stock.unrealized_pnl)}
+                                  </Typography>
+                                  <Typography
+                                    variant="caption"
+                                    color={stock.unrealized_pnl >= 0 ? "success.main" : "error.main"}
+                                  >
+                                    {stock.unrealized_pnl_percent >= 0 ? "+" : ""}{stock.unrealized_pnl_percent?.toFixed(2) || 0}%
+                                  </Typography>
+                                </>
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">-</Typography>
+                              )}
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2">
