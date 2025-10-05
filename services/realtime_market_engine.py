@@ -506,6 +506,25 @@ class RealtimeMarketEngine:
             for key, inst in self.instruments.items()
         }
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Get engine statistics and metadata"""
+        current_time = time.time()
+        analytics_latency = (
+            (current_time - self.last_analytics_update) * 1000
+            if self.last_analytics_update > 0
+            else 0
+        )
+
+        return {
+            "total_instruments": len(self.instruments),
+            "sectors": len(self.sector_groups),
+            "analytics_latency_ms": analytics_latency,
+            "last_update": self.last_analytics_update,
+            "instruments_with_prices": sum(
+                1 for inst in self.instruments.values() if inst.current_price > 0
+            ),
+        }
+
 
 # Singleton instance
 _market_engine_instance: Optional[RealtimeMarketEngine] = None
