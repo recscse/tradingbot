@@ -1039,14 +1039,86 @@ class EnhancedIntelligentOptionsService:
             logger.error(f"Error saving enhanced selections: {e}")
             return False
 
-    def get_final_options_selections(self) -> List[EnhancedStockSelection]:
+    def get_final_options_selections(self, db: Session = None) -> List[Dict[str, Any]]:
         """
-        Get final options selections for trading
+        Get final options selections for trading from database
+
+        Args:
+            db: Database session
 
         Returns:
-            List of final enhanced selections
+            List of selections with option contract details
         """
-        return self.final_options_selections
+        try:
+            if db is None:
+                from database.connection import SessionLocal
+                db = SessionLocal()
+                should_close = True
+            else:
+                should_close = False
+
+            try:
+                from datetime import date
+                import json
+
+                # Query SelectedStock table for today's selections with options
+                selected_stocks = db.query(SelectedStock).filter(
+                    SelectedStock.selection_date == date.today(),
+                    SelectedStock.is_active == True,
+                    SelectedStock.option_contract.isnot(None)
+                ).all()
+
+                selections = []
+                for stock in selected_stocks:
+                    # Parse option_contract JSON
+                    option_data = {}
+                    if stock.option_contract:
+                        try:
+                            option_data = json.loads(stock.option_contract)
+                        except:
+                            option_data = {}
+
+                    # Parse score_breakdown JSON for capital details
+                    score_data = {}
+                    if stock.score_breakdown:
+                        try:
+                            score_data = json.loads(stock.score_breakdown)
+                        except:
+                            score_data = {}
+
+                    selection = {
+                        "id": stock.id,
+                        "symbol": stock.symbol,
+                        "instrument_key": stock.instrument_key,
+                        "option_type": stock.option_type,
+                        "option_instrument_key": option_data.get("option_instrument_key"),
+                        "strike_price": option_data.get("strike_price", 0),
+                        "expiry_date": stock.option_expiry_date,
+                        "premium": option_data.get("premium", 0),
+                        "lot_size": option_data.get("lot_size", 0),
+                        "volume": option_data.get("volume", 0),
+                        "open_interest": option_data.get("open_interest", 0),
+                        "implied_volatility": option_data.get("implied_volatility", 0),
+                        "delta": option_data.get("delta", 0),
+                        "capital_allocation": score_data.get("capital_allocation", 0),
+                        "max_loss": score_data.get("max_loss", 0),
+                        "target_profit": score_data.get("target_profit", 0),
+                        "position_size_lots": score_data.get("position_size_lots", 1),
+                        "selection_score": stock.selection_score,
+                        "sector": stock.sector
+                    }
+                    selections.append(selection)
+
+                logger.info(f"Retrieved {len(selections)} final options selections from database")
+                return selections
+
+            finally:
+                if should_close:
+                    db.close()
+
+        except Exception as e:
+            logger.error(f"Error getting final options selections: {e}")
+            return []
 
     def get_options_trading_summary(self) -> Dict[str, Any]:
         """

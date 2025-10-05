@@ -723,6 +723,8 @@ class UserTradingConfig(Base):
 
     # Trading Mode and Basic Settings
     trade_mode = Column(String(20), default="PAPER")  # LIVE, PAPER, SIMULATION
+    trading_mode = Column(String(20), default="paper", index=True)  # paper or live (normalized lowercase)
+    execution_mode = Column(String(20), default="multi_demat", index=True)  # single_demat or multi_demat
     default_qty = Column(Integer, default=1)  # Default quantity for trades
 
     # Risk Management Settings
@@ -947,6 +949,7 @@ class AutoTradingSession(Base):
     screening_config = Column(JSON, nullable=True)  # Screening parameters used
     stocks_screened = Column(Integer, nullable=True)  # Total stocks screened
     session_type = Column(String, nullable=False)  # AUTO_PAPER_TRADING, MANUAL, etc.
+    trading_mode = Column(String(20), default="paper", index=True)  # paper or live
     status = Column(String, default="ACTIVE")  # ACTIVE, COMPLETED, FAILED
     total_trades = Column(Integer, default=0)
     successful_trades = Column(Integer, default=0)
@@ -1260,6 +1263,13 @@ class AutoTradeExecution(Base):
     order_execution_latency_ms = Column(Integer)
     total_execution_latency_ms = Column(Integer)
     time_in_trade_minutes = Column(Integer)
+
+    # Multi-Demat Execution Support
+    broker_name = Column(String(50), nullable=True, index=True)  # Which broker executed this trade
+    broker_config_id = Column(Integer, ForeignKey("broker_configs.id"), nullable=True)  # Broker config reference
+    allocated_capital = Column(Numeric(15, 2), nullable=True)  # Capital allocated for this demat
+    parent_trade_id = Column(String(100), nullable=True, index=True)  # Link multiple demat executions
+    trading_mode = Column(String(20), default="paper", index=True)  # paper or live
 
     # Status & Metadata
     status = Column(

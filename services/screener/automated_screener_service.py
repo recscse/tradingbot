@@ -366,6 +366,7 @@ class AutomatedScreenerService:
                 screening_config=self.screening_config,
                 stocks_screened=len(self._get_stock_universe()),
                 session_type="AUTO_PAPER_TRADING",
+                trading_mode="paper",  # Default to paper trading
                 status="ACTIVE",
             )
 

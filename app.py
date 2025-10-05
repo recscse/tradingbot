@@ -145,6 +145,20 @@ except ImportError as e:
     TRADING_EXECUTION_AVAILABLE = False
     logger.warning(f"⚠️ Trading Execution services not available: {e}")
 
+try:
+    from router.trading_stock_selection_router_old import (
+        router as trading_stock_selection_router,
+    )
+
+    TRADING_STOCK_SELECTION_AVAILABLE = True
+    logger.info("✅ Trading Stock Selection routes imported successfully")
+except ImportError as e:
+    from fastapi import APIRouter
+
+    trading_stock_selection_router = APIRouter()
+    TRADING_STOCK_SELECTION_AVAILABLE = False
+    logger.warning(f"⚠️ Trading Stock Selection services not available: {e}")
+
 
 # Import from market_analytics_router safely
 try:
@@ -741,6 +755,47 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Real-Time PnL Tracker failed to start: {e}")
 
+        # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
+        if TRADING_EXECUTION_AVAILABLE:
+            logger.info("⏰ Starting Auto-Trade Scheduler...")
+            try:
+                from services.trading_execution.auto_trade_scheduler import (
+                    auto_trade_scheduler,
+                )
+
+                # Get first active user with broker config for scheduler
+                db = next(get_db())
+                first_user_with_broker = (
+                    db.query(User)
+                    .join(BrokerConfig, BrokerConfig.user_id == User.id)
+                    .filter(
+                        BrokerConfig.is_active == True,
+                        BrokerConfig.access_token.isnot(None),
+                    )
+                    .first()
+                )
+                db.close()
+
+                if first_user_with_broker:
+                    asyncio.create_task(
+                        auto_trade_scheduler.start_scheduler(
+                            user_id=first_user_with_broker.id,
+                            trading_mode="paper",  # Default to paper trading for safety
+                        )
+                    )
+                    logger.info(
+                        f"✅ Auto-Trade Scheduler started for user {first_user_with_broker.id}"
+                    )
+                    logger.info(
+                        "📌 Auto-trading will start at 9:15 AM when stocks are selected"
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ No active user with broker config - scheduler not started"
+                    )
+            except Exception as e:
+                logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
+
         # 16. 🚀 NEW: Initialize Intelligent Stock Selection Service
         logger.info("🧠 Initializing Intelligent Stock Selection Service...")
         try:
@@ -859,6 +914,19 @@ async def lifespan(app: FastAPI):
                 market_scheduler.stop_scheduler()
             except Exception as e:
                 logger.error(f"Error stopping market scheduler: {e}")
+
+        # Stop Auto-Trade Scheduler
+        if TRADING_EXECUTION_AVAILABLE:
+            try:
+                from services.trading_execution.auto_trade_scheduler import (
+                    auto_trade_scheduler,
+                )
+
+                logger.info("🛑 Stopping Auto-Trade Scheduler...")
+                await auto_trade_scheduler.stop()
+                logger.info("✅ Auto-Trade Scheduler stopped")
+            except Exception as e:
+                logger.error(f"Error stopping auto-trade scheduler: {e}")
 
         # Stop Notification Scheduler - NEW
         try:
@@ -1011,6 +1079,7 @@ app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(option_router, tags=["Options & Futures"])
 app.include_router(auto_trading_router, tags=["Auto Trading & Stock Selection"])
 app.include_router(trading_execution_router, tags=["Trading Execution"])
+app.include_router(trading_stock_selection_router, tags=["Trading Stock Selection"])
 
 # NIFTY 09:40 Strategy Router
 try:
@@ -1088,14 +1157,6 @@ async def root():
     except Exception:
         centralized_status = {"status": "error"}
 
-    # NEW: Get instrument registry status
-    try:
-        from services.instrument_registry import instrument_registry
-
-        registry_stats = instrument_registry.get_stats()
-    except Exception:
-        registry_stats = {"status": "error"}
-
     return {
         "status": "running",
         "version": "3.0.0",
@@ -1107,13 +1168,6 @@ async def root():
             "ws_connected": centralized_status.get("ws_connected", False),
             "total_instruments": centralized_status.get("total_instruments", 0),
             "admin_token_strategy": True,
-        },
-        "instrument_registry": {
-            "status": "active",
-            "spot_instruments": registry_stats.get("spot_instruments", 0),
-            "fno_instruments": registry_stats.get("fno_instruments", 0),
-            "symbols": registry_stats.get("symbols", 0),
-            "live_prices": registry_stats.get("live_prices", 0),
         },
         "existing_systems": {
             "optimized_instrument_service": instrument_service_instance is not None,
@@ -1139,7 +1193,7 @@ async def root():
         "redis_status": redis_status["status"],
         "timestamp": datetime.now().isoformat(),
         "market_analytics_system": {
-            "available": ANALYTICS_SERVICE_AVAILABLE,
+            "available": "",
             "websocket_endpoint": "/ws/market-analytics",
             "active_connections": 0,  # Will be updated dynamically
             "features": [
@@ -1165,20 +1219,8 @@ async def get_trading_data(symbol: str):
     try:
         from services.instrument_registry import instrument_registry
 
-        # Get spot price
-        # spot_data = instrument_registry.get_spot_price(symbol.upper())
-        # if not spot_data:
-        #     return {
-        #         "success": False,
-        #         "error": f"Symbol {symbol} not found",
-        #     }
-
-        # Get options chain
-
         return {
             "success": True,
-            # "spot": spot_data,
-            # "options_chain": options_chain,
             "updated_at": datetime.now().isoformat(),
         }
     except Exception as e:
@@ -1261,7 +1303,6 @@ async def enhanced_health_check():
         "new_centralized_websocket_details": centralized_health,
         "redis_details": redis_status,
         "cache_stats": cache_stats,
-        "market_analytics": ("ok" if ANALYTICS_SERVICE_AVAILABLE else "not_available"),
     }
 
     # Check trading engine
@@ -1561,12 +1602,6 @@ if __name__ == "__main__":
     logger.info(
         f"🔧 Trading Scheduler: {'Available' if TRADING_SCHEDULER_AVAILABLE else 'Not Available'}"
     )
-    logger.info(
-        f"🔧 Analytics Service: {'Available' if ANALYTICS_SERVICE_AVAILABLE else 'Not Available'}"
-    )
-    # logger.info(
-    #     f"🔧 Analytics Processor: {'Available' if ANALYTICS_PROCESSOR_AVAILABLE else 'Not Available'}"
-    # )
 
     uvicorn.run(
         "app:sio_app",
