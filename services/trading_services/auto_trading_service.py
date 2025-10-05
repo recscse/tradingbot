@@ -28,6 +28,7 @@ class AutoTradingService:
             screening_config=screening_config,
             stocks_screened=len(selected_stocks),
             session_type=session_type,
+            trading_mode="paper",  # Default to paper trading
             status="ACTIVE",
             start_capital=start_capital,
             end_capital=start_capital,

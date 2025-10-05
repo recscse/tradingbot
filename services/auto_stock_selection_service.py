@@ -473,6 +473,7 @@ class AutoStockSelectionService:
                 },
                 stocks_screened=len(results),
                 session_type="AUTO_PREMARKET_SELECTION",
+                trading_mode="paper",  # Default to paper trading
                 status="ACTIVE"
             )
             
