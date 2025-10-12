@@ -19,12 +19,16 @@ Architecture:
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime
 from decimal import Decimal
+import ssl
 from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
+
+import requests
 
 from database.connection import SessionLocal
 from database.models import SelectedStock, ActivePosition, AutoTradeExecution
@@ -36,6 +40,11 @@ from services.trading_execution.strategy_engine import (
 )
 from services.trading_execution.execution_handler import execution_handler
 from services.trading_execution.trade_prep import trade_prep_service, TradingMode
+from services.centralized_ws_manager import CentralizedWebSocketManager
+import websockets
+import MarketDataFeed_pb2 as pb
+from google.protobuf.json_format import MessageToDict
+
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +132,7 @@ class AutoTradeLiveFeed:
     def __init__(self):
         """Initialize auto-trading live feed service"""
         self.is_running = False
-        self.ws_client: Optional[UpstoxWebSocketClient] = None
+        self.ws_task: Optional[asyncio.Task] = None
         self.trading_mode: TradingMode = TradingMode.PAPER  # Default to paper trading
 
         # Instruments being monitored
@@ -176,20 +185,25 @@ class AutoTradeLiveFeed:
             logger.info(f"   Subscribing to {len(instrument_keys)} instrument keys")
 
             # Step 3: Start WebSocket connection
-            self.ws_client = UpstoxWebSocketClient(
-                access_token=access_token,
-                instrument_keys=instrument_keys,
-                callback=self._handle_market_data,
-                connection_type="auto_trading",
-                subscription_mode="full",  # Need full data for Greeks
-            )
+            await self.self_mananged_ws_connection()
 
-            # Step 4: Connect and stream
-            await self.ws_client.connect_and_stream()
+            # Step 4: Connect and stream in background
+            if not self.ws_task or self.ws_task_done():
+                self.ws_task = asyncio.create_task(self._ws_connection_loop())
 
         except Exception as e:
             logger.error(f"Error starting auto-trading: {e}")
             self.is_running = False
+
+    async def _ws_connection_loop(self):
+        """Background WebSocket loop with automatic reconnect"""
+        while self.is_running:
+            try:
+                await self.self_mananged_ws_connection()
+            except Exception as e:
+                logger.error(f"Websocket conenction error: {e}")
+            logger.warning("WebSocket disconnected, retrying in 5 seconds...")
+            await asyncio.sleep(5)
 
     async def _load_selected_instruments(self, user_id: int):
         """
@@ -269,6 +283,58 @@ class AutoTradeLiveFeed:
 
         except Exception as e:
             logger.error(f"Error loading selected instruments: {e}")
+
+    async def self_mananged_ws_connection(self):
+        """
+        Manage WebSocket connection for auto trading
+
+        Args:
+            access_token: User access token
+            instrument_keys: List of instrument keys to subscribe
+        """
+
+        try:
+
+            access_token = CentralizedWebSocketManager._load_admin_token()
+            headers = {"Authorization": f"Bearer {access_token}"}
+            url = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
+            response = requests.get(url=url, headers=headers)
+
+            if response.status_code != 200:
+                logger.error("Failed to authorize market data feed")
+                return
+            websocket_url = (
+                response.json().get("data", {}).get("authorized_redirect_uri")
+            )
+            if not websocket_url:
+                logger.error("No authorized_redirect_uri in response")
+                return
+            instrument_keys = list(self.subscribed_keys)
+
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+
+            async with websockets.connect(websocket_url, ssl=ssl_context) as websocket:
+                logger.info("WebSocket connection established")
+                # Subscribe to instrument keys
+                subscribe_message = {
+                    "guide": "auto_trade_feed",
+                    "method": "subscribe",
+                    "data": {"mode": "full", "instrumentKeys": instrument_keys},
+                }
+                await websocket.send(json.dumps(subscribe_message).encode("utf-8"))
+                logger.info(f"Subscribed to {len(instrument_keys)} instrument keys")
+                while self.is_running:
+                    message = await websocket.recv()
+                    feed_response = pb.FeedResponse()
+                    feed_response.ParseFromString(message)
+                    data_dict = MessageToDict(feed_response)
+                    await self._handle_market_data(data_dict)
+
+        except Exception as e:
+            logger.error(f"Error in self managed ws connection: {e}")
+            return
 
     def _prepare_subscription_keys(self) -> List[str]:
         """
@@ -964,8 +1030,12 @@ class AutoTradeLiveFeed:
         """Stop auto-trading service"""
         self.is_running = False
 
-        if self.ws_client:
-            self.ws_client.stop()
+        if self.ws_task:
+            self.ws_client.cancle()
+            try:
+                await self.ws_task
+            except asyncio.CancelledError:
+                pass
 
         logger.info("🛑 Auto-trading live feed stopped")
         logger.info(f"📊 Final Stats: {self.stats}")
