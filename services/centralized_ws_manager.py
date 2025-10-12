@@ -804,7 +804,7 @@ class CentralizedWebSocketManager:
                 # Core Indices
                 "NSE_INDEX|Nifty 50",
                 "NSE_INDEX|Nifty Bank",
-                "NSE_INDEX|Fin Nifty",
+                "NSE_INDEX|Nifty Fin Service",
                 "BSE_INDEX|SENSEX",
                 # Major Sectoral Indices
                 "NSE_INDEX|Nifty Auto",
@@ -817,8 +817,8 @@ class CentralizedWebSocketManager:
                 "NSE_INDEX|Nifty PSU Bank",
                 "NSE_INDEX|Nifty Private Bank",
                 "NSE_INDEX|Nifty Oil & Gas",
-                "NSE_INDEX|Nifty Consumer Durables",
-                "NSE_INDEX|Nifty Healthcare Index",
+                "NSE_INDEX|NIFTY CONSR DURBL",
+                "NSE_INDEX|NIFTY HEALTHCARE",
             ]
 
             # Add top FNO stocks for better data coverage
@@ -1000,7 +1000,9 @@ class CentralizedWebSocketManager:
             self.connection_ready.clear()
 
             # Start streaming (this will block until connection completes or fails)
-            logger.info("🔌 Attempting to connect to Upstox WebSocket... (this runs in background)")
+            logger.info(
+                "🔌 Attempting to connect to Upstox WebSocket... (this runs in background)"
+            )
             await self.ws_client.connect_and_stream()
 
         except Exception as e:
@@ -1009,13 +1011,21 @@ class CentralizedWebSocketManager:
             # Check if it's a network connectivity issue
             is_network_error = any(
                 keyword in error_message.lower()
-                for keyword in ['getaddrinfo failed', 'name resolution', 'connection refused', 'timeout', 'network']
+                for keyword in [
+                    "getaddrinfo failed",
+                    "name resolution",
+                    "connection refused",
+                    "timeout",
+                    "network",
+                ]
             )
 
             if is_network_error:
                 logger.error(f"🌐 Network connectivity error: {error_message[:150]}")
                 logger.warning("⚠️ Unable to reach Upstox servers - network may be down")
-                logger.info("ℹ️ Application will continue running. WebSocket will retry automatically when network is restored.")
+                logger.info(
+                    "ℹ️ Application will continue running. WebSocket will retry automatically when network is restored."
+                )
             else:
                 logger.error(f"❌ Failed to start WebSocket client: {e}")
             raise
@@ -1423,11 +1433,31 @@ class CentralizedWebSocketManager:
                             "ltp": float(ltp_data["ltp"]),
                             "volume": int(ltp_data.get("volume", 0)),
                             "timestamp": ltp_data.get("timestamp"),
-                            "high": float(ltp_data.get("high")) if ltp_data.get("high") else None,
-                            "low": float(ltp_data.get("low")) if ltp_data.get("low") else None,
-                            "open": float(ltp_data.get("open")) if ltp_data.get("open") else None,
-                            "close": float(ltp_data.get("prev_close")) if ltp_data.get("prev_close") else None,
-                            "cp": float(ltp_data.get("prev_close")) if ltp_data.get("prev_close") else None,
+                            "high": (
+                                float(ltp_data.get("high"))
+                                if ltp_data.get("high")
+                                else None
+                            ),
+                            "low": (
+                                float(ltp_data.get("low"))
+                                if ltp_data.get("low")
+                                else None
+                            ),
+                            "open": (
+                                float(ltp_data.get("open"))
+                                if ltp_data.get("open")
+                                else None
+                            ),
+                            "close": (
+                                float(ltp_data.get("prev_close"))
+                                if ltp_data.get("prev_close")
+                                else None
+                            ),
+                            "cp": (
+                                float(ltp_data.get("prev_close"))
+                                if ltp_data.get("prev_close")
+                                else None
+                            ),
                         }
 
                 except Exception as normalization_error:
@@ -1526,12 +1556,24 @@ class CentralizedWebSocketManager:
                 return {
                     "ltp": float(ltpc.get("ltp")),
                     "prev_close": float(prev_close) if prev_close else None,
-                    "open": float(ohlc_data.get("open")) if ohlc_data.get("open") else None,
-                    "high": float(ohlc_data.get("high")) if ohlc_data.get("high") else None,
-                    "low": float(ohlc_data.get("low")) if ohlc_data.get("low") else None,
-                    "ohlc_close": float(ohlc_data.get("ohlc_close")) if ohlc_data.get("ohlc_close") else None,
+                    "open": (
+                        float(ohlc_data.get("open")) if ohlc_data.get("open") else None
+                    ),
+                    "high": (
+                        float(ohlc_data.get("high")) if ohlc_data.get("high") else None
+                    ),
+                    "low": (
+                        float(ohlc_data.get("low")) if ohlc_data.get("low") else None
+                    ),
+                    "ohlc_close": (
+                        float(ohlc_data.get("ohlc_close"))
+                        if ohlc_data.get("ohlc_close")
+                        else None
+                    ),
                     "volume": int(market_ff.get("vtt")) if market_ff.get("vtt") else 0,
-                    "avg_price": float(market_ff.get("atp")) if market_ff.get("atp") else None,
+                    "avg_price": (
+                        float(market_ff.get("atp")) if market_ff.get("atp") else None
+                    ),
                     "timestamp": ltpc.get("ltt"),
                     "last_qty": int(ltpc.get("ltq", 0)) if ltpc.get("ltq") else 0,
                 }
@@ -1556,10 +1598,20 @@ class CentralizedWebSocketManager:
                 return {
                     "ltp": float(ltpc.get("ltp")),
                     "prev_close": float(prev_close) if prev_close else None,
-                    "open": float(ohlc_data.get("open")) if ohlc_data.get("open") else None,
-                    "high": float(ohlc_data.get("high")) if ohlc_data.get("high") else None,
-                    "low": float(ohlc_data.get("low")) if ohlc_data.get("low") else None,
-                    "ohlc_close": float(ohlc_data.get("ohlc_close")) if ohlc_data.get("ohlc_close") else None,
+                    "open": (
+                        float(ohlc_data.get("open")) if ohlc_data.get("open") else None
+                    ),
+                    "high": (
+                        float(ohlc_data.get("high")) if ohlc_data.get("high") else None
+                    ),
+                    "low": (
+                        float(ohlc_data.get("low")) if ohlc_data.get("low") else None
+                    ),
+                    "ohlc_close": (
+                        float(ohlc_data.get("ohlc_close"))
+                        if ohlc_data.get("ohlc_close")
+                        else None
+                    ),
                     "volume": 0,  # Indices don't have volume
                     "avg_price": None,
                     "timestamp": ltpc.get("ltt"),
@@ -2758,7 +2810,7 @@ class CentralizedWebSocketManager:
             except Exception as e:
                 logger.error(
                     f"Error in {event_type} callback {callback.__name__}: {e}",
-                    exc_info=True
+                    exc_info=True,
                 )
 
     async def _send_max_reconnections_email(self):
