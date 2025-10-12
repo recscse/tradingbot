@@ -23,6 +23,14 @@ from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock
 
+# Import services at module level for better performance
+from services.realtime_market_engine import (
+    get_market_engine,
+    get_market_sentiment,
+    get_sector_performance,
+    get_sector_stocks,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,21 +43,21 @@ class MarketSentiment(Enum):
 
 
 class TradingPhase(Enum):
-    PREMARKET = "premarket"        # Before 9:15
-    MARKET_OPEN = "market_open"    # 9:15-9:25 validation
+    PREMARKET = "premarket"  # Before 9:15
+    MARKET_OPEN = "market_open"  # 9:15-9:25 validation
     LIVE_TRADING = "live_trading"  # 9:25+ active trading
-    POST_MARKET = "post_market"    # After 3:30
+    POST_MARKET = "post_market"  # After 3:30
 
 
 @dataclass
 class StockSelection:
     """Complete stock selection with metadata and scoring"""
+
     # Static metadata (from optimized service)
     symbol: str
     name: str
     instrument_key: str
     sector: str
-    is_fno: bool
     lot_size: Optional[int]
 
     # Live market data
@@ -63,12 +71,12 @@ class StockSelection:
     previous_close: float
 
     # Selection scoring
-    sentiment_score: float      # Market sentiment alignment
-    sector_score: float        # Sector strength score
-    technical_score: float     # Technical indicators
-    volume_score: float        # Volume analysis
-    value_score: float         # Trading value score
-    final_score: float         # Combined weighted score
+    sentiment_score: float  # Market sentiment alignment
+    sector_score: float  # Sector strength score
+    technical_score: float  # Technical indicators
+    volume_score: float  # Volume analysis
+    value_score: float  # Trading value score
+    final_score: float  # Combined weighted score
 
     # Selection metadata
     selection_reason: str
@@ -79,7 +87,9 @@ class StockSelection:
     stop_loss: float
 
     # Options trading direction based on market sentiment
-    options_direction: str  # "CE" (CALL) for positive market, "PE" (PUT) for negative market
+    options_direction: (
+        str  # "CE" (CALL) for positive market, "PE" (PUT) for negative market
+    )
 
     # Timestamps
     selected_at: str
@@ -109,16 +119,22 @@ class IntelligentStockSelectionService:
 
         # Selection state - simplified workflow
         self.premarket_selections: List[StockSelection] = []
-        self.final_selections: List[StockSelection] = []  # Final selections for the day - NO MORE CHANGES
+        self.final_selections: List[StockSelection] = (
+            []
+        )  # Final selections for the day - NO MORE CHANGES
 
         # Market state
         self.premarket_sentiment: MarketSentiment = MarketSentiment.NEUTRAL
         self.market_open_sentiment: MarketSentiment = MarketSentiment.NEUTRAL
-        self.current_sentiment: MarketSentiment = MarketSentiment.NEUTRAL  # Current market sentiment
+        self.current_sentiment: MarketSentiment = (
+            MarketSentiment.NEUTRAL
+        )  # Current market sentiment
         self.current_phase: TradingPhase = TradingPhase.PREMARKET
         self.last_selection_time: Optional[datetime] = None
         self.sentiment_changed: bool = False
-        self.final_selection_done: bool = False  # Once true, NO MORE stock selection changes
+        self.final_selection_done: bool = (
+            False  # Once true, NO MORE stock selection changes
+        )
 
         # Configuration
         self.selection_config = {
@@ -136,78 +152,140 @@ class IntelligentStockSelectionService:
         }
 
         # Sector weightings based on market sentiment
+        # Using EXACT sector names from config/sector_mapping.json
+        # Now compatible with dynamic sector discovery from realtime_market_engine
+        # Any sector not listed here will use default weight of 0.6
         self.sector_sentiment_weights = {
             MarketSentiment.VERY_BULLISH: {
                 "BANKING_FINANCIAL_SERVICES": 0.9,
                 "INFORMATION_TECHNOLOGY": 0.8,
-                "AUTOMOTIVE": 0.8,
-                "ENERGY": 0.7,
-                "PHARMACEUTICAL": 0.6,
-                "FMCG": 0.6,
+                "AUTOMOBILE": 0.8,
+                "OIL_GAS": 0.7,
+                "POWER_UTILITIES": 0.75,
+                "PHARMACEUTICALS": 0.6,
+                "CONSUMER_GOODS_FMCG": 0.6,
                 "METALS_MINING": 0.9,
-                "TELECOMMUNICATIONS": 0.5,
+                "CEMENT_CONSTRUCTION": 0.85,
                 "REAL_ESTATE": 0.8,
+                "INDUSTRIAL_MANUFACTURING": 0.75,
+                "CONSUMER_SERVICES": 0.7,
+                "DIVERSIFIED_CONGLOMERATES": 0.85,
+                "TELECOMMUNICATIONS": 0.75,
+                "CHEMICALS_FERTILIZERS": 0.8,
+                "ELECTRICAL_EQUIPMENT": 0.75,
+                "SPECIALTY_RETAIL": 0.7,
+                "LOGISTICS_TRANSPORTATION": 0.75,
+                "CAPITAL_MARKETS": 0.8,
+                "ECOMMERCE_FINTECH": 0.75,
+                "TEXTILES_APPAREL": 0.65,
             },
             MarketSentiment.BULLISH: {
                 "BANKING_FINANCIAL_SERVICES": 0.8,
                 "INFORMATION_TECHNOLOGY": 0.9,
-                "AUTOMOTIVE": 0.7,
-                "ENERGY": 0.6,
-                "PHARMACEUTICAL": 0.7,
-                "FMCG": 0.8,
+                "AUTOMOBILE": 0.7,
+                "OIL_GAS": 0.6,
+                "POWER_UTILITIES": 0.65,
+                "PHARMACEUTICALS": 0.7,
+                "CONSUMER_GOODS_FMCG": 0.8,
                 "METALS_MINING": 0.7,
-                "TELECOMMUNICATIONS": 0.6,
+                "CEMENT_CONSTRUCTION": 0.7,
                 "REAL_ESTATE": 0.6,
+                "INDUSTRIAL_MANUFACTURING": 0.7,
+                "CONSUMER_SERVICES": 0.75,
+                "DIVERSIFIED_CONGLOMERATES": 0.8,
+                "TELECOMMUNICATIONS": 0.7,
+                "CHEMICALS_FERTILIZERS": 0.75,
+                "ELECTRICAL_EQUIPMENT": 0.7,
+                "SPECIALTY_RETAIL": 0.75,
+                "LOGISTICS_TRANSPORTATION": 0.7,
+                "CAPITAL_MARKETS": 0.75,
+                "ECOMMERCE_FINTECH": 0.8,
+                "TEXTILES_APPAREL": 0.65,
             },
             MarketSentiment.NEUTRAL: {
                 "BANKING_FINANCIAL_SERVICES": 0.6,
                 "INFORMATION_TECHNOLOGY": 0.7,
-                "AUTOMOTIVE": 0.5,
-                "ENERGY": 0.5,
-                "PHARMACEUTICAL": 0.8,
-                "FMCG": 0.9,
+                "AUTOMOBILE": 0.5,
+                "OIL_GAS": 0.5,
+                "POWER_UTILITIES": 0.5,
+                "PHARMACEUTICALS": 0.8,
+                "CONSUMER_GOODS_FMCG": 0.9,
                 "METALS_MINING": 0.4,
-                "TELECOMMUNICATIONS": 0.7,
+                "CEMENT_CONSTRUCTION": 0.5,
                 "REAL_ESTATE": 0.4,
+                "INDUSTRIAL_MANUFACTURING": 0.6,
+                "CONSUMER_SERVICES": 0.7,
+                "DIVERSIFIED_CONGLOMERATES": 0.65,
+                "TELECOMMUNICATIONS": 0.6,
+                "CHEMICALS_FERTILIZERS": 0.55,
+                "ELECTRICAL_EQUIPMENT": 0.6,
+                "SPECIALTY_RETAIL": 0.7,
+                "LOGISTICS_TRANSPORTATION": 0.6,
+                "CAPITAL_MARKETS": 0.65,
+                "ECOMMERCE_FINTECH": 0.7,
+                "TEXTILES_APPAREL": 0.6,
             },
             MarketSentiment.BEARISH: {
                 "BANKING_FINANCIAL_SERVICES": 0.4,
                 "INFORMATION_TECHNOLOGY": 0.6,
-                "AUTOMOTIVE": 0.3,
-                "ENERGY": 0.4,
-                "PHARMACEUTICAL": 0.9,
-                "FMCG": 0.8,
+                "AUTOMOBILE": 0.3,
+                "OIL_GAS": 0.4,
+                "POWER_UTILITIES": 0.4,
+                "PHARMACEUTICALS": 0.9,
+                "CONSUMER_GOODS_FMCG": 0.8,
                 "METALS_MINING": 0.2,
-                "TELECOMMUNICATIONS": 0.7,
+                "CEMENT_CONSTRUCTION": 0.3,
                 "REAL_ESTATE": 0.2,
+                "INDUSTRIAL_MANUFACTURING": 0.4,
+                "CONSUMER_SERVICES": 0.5,
+                "DIVERSIFIED_CONGLOMERATES": 0.45,
+                "TELECOMMUNICATIONS": 0.5,
+                "CHEMICALS_FERTILIZERS": 0.4,
+                "ELECTRICAL_EQUIPMENT": 0.4,
+                "SPECIALTY_RETAIL": 0.5,
+                "LOGISTICS_TRANSPORTATION": 0.4,
+                "CAPITAL_MARKETS": 0.45,
+                "ECOMMERCE_FINTECH": 0.5,
+                "TEXTILES_APPAREL": 0.4,
             },
             MarketSentiment.VERY_BEARISH: {
                 "BANKING_FINANCIAL_SERVICES": 0.2,
                 "INFORMATION_TECHNOLOGY": 0.4,
-                "AUTOMOTIVE": 0.1,
-                "ENERGY": 0.2,
-                "PHARMACEUTICAL": 0.8,
-                "FMCG": 0.9,
+                "AUTOMOBILE": 0.1,
+                "OIL_GAS": 0.2,
+                "POWER_UTILITIES": 0.2,
+                "PHARMACEUTICALS": 0.8,
+                "CONSUMER_GOODS_FMCG": 0.9,
                 "METALS_MINING": 0.1,
-                "TELECOMMUNICATIONS": 0.6,
+                "CEMENT_CONSTRUCTION": 0.15,
                 "REAL_ESTATE": 0.1,
+                "INDUSTRIAL_MANUFACTURING": 0.3,
+                "CONSUMER_SERVICES": 0.4,
+                "DIVERSIFIED_CONGLOMERATES": 0.3,
+                "TELECOMMUNICATIONS": 0.4,
+                "CHEMICALS_FERTILIZERS": 0.25,
+                "ELECTRICAL_EQUIPMENT": 0.3,
+                "SPECIALTY_RETAIL": 0.4,
+                "LOGISTICS_TRANSPORTATION": 0.3,
+                "CAPITAL_MARKETS": 0.3,
+                "ECOMMERCE_FINTECH": 0.35,
+                "TEXTILES_APPAREL": 0.3,
             },
         }
 
-        logger.info("🎯 Intelligent Stock Selection Service initialized")
+        logger.info("Intelligent Stock Selection Service initialized")
 
     async def initialize_services(self):
         """Initialize required services - UPDATED to use realtime_market_engine"""
         try:
             # Get real-time market engine for live market data
-            from services.realtime_market_engine import get_market_engine
             self.market_engine = get_market_engine()
 
             # Get analytics service
-            from services.enhanced_market_analytics import enhanced_analytics
-            self.analytics_service = enhanced_analytics
 
-            logger.info("✅ Stock selection services initialized with realtime_market_engine")
+            logger.info(
+                "✅ Stock selection services initialized with realtime_market_engine"
+            )
             return True
 
         except Exception as e:
@@ -234,12 +312,22 @@ class IntelligentStockSelectionService:
                 await self.initialize_services()
 
             # Get real-time sentiment from market engine
-            from services.realtime_market_engine import get_market_sentiment
             sentiment_data = get_market_sentiment()
 
             if "error" in sentiment_data:
                 logger.warning("⚠️ No market sentiment data available, using neutral")
                 return MarketSentiment.NEUTRAL, sentiment_data
+
+            # Check if market data is available
+            total_stocks = sentiment_data.get("metrics", {}).get("total_stocks", 0)
+            if total_stocks == 0:
+                logger.warning(
+                    "⚠️ No market data available yet - waiting for WebSocket feed to populate data"
+                )
+                return MarketSentiment.NEUTRAL, {
+                    **sentiment_data,
+                    "warning": "No market data available - service waiting for live feed"
+                }
 
             # Map realtime engine sentiment to our enum
             sentiment_mapping = {
@@ -247,7 +335,7 @@ class IntelligentStockSelectionService:
                 "bullish": MarketSentiment.BULLISH,
                 "neutral": MarketSentiment.NEUTRAL,
                 "bearish": MarketSentiment.BEARISH,
-                "very_bearish": MarketSentiment.VERY_BEARISH
+                "very_bearish": MarketSentiment.VERY_BEARISH,
             }
 
             sentiment_str = sentiment_data.get("sentiment", "neutral")
@@ -260,54 +348,89 @@ class IntelligentStockSelectionService:
                 "sentiment": sentiment.value,
                 "confidence": sentiment_data.get("confidence", 50),
                 "metrics": sentiment_data.get("metrics", {}),
-                "advance_decline_ratio": sentiment_data.get("metrics", {}).get("advance_decline_ratio", 1.0),
-                "market_breadth_percent": sentiment_data.get("metrics", {}).get("market_breadth_percent", 0),
-                "advancing_stocks": sentiment_data.get("metrics", {}).get("advancing", 0),
-                "declining_stocks": sentiment_data.get("metrics", {}).get("declining", 0),
-                "total_stocks": sentiment_data.get("metrics", {}).get("total_stocks", 0),
+                "advance_decline_ratio": sentiment_data.get("metrics", {}).get(
+                    "advance_decline_ratio", 1.0
+                ),
+                "market_breadth_percent": sentiment_data.get("metrics", {}).get(
+                    "market_breadth_percent", 0
+                ),
+                "advancing_stocks": sentiment_data.get("metrics", {}).get(
+                    "advancing", 0
+                ),
+                "declining_stocks": sentiment_data.get("metrics", {}).get(
+                    "declining", 0
+                ),
+                "total_stocks": sentiment_data.get("metrics", {}).get(
+                    "total_stocks", 0
+                ),
                 "recommendation": self._get_sentiment_recommendation(sentiment),
                 "timestamp": datetime.now().isoformat(),
             }
 
-            logger.info(f"📊 Market sentiment: {sentiment.value} (A/D ratio: {sentiment_analysis['advance_decline_ratio']:.2f})")
+            logger.info(
+                f"📊 Market sentiment: {sentiment.value} (A/D ratio: {sentiment_analysis['advance_decline_ratio']:.2f})"
+            )
             return sentiment, sentiment_analysis
 
         except Exception as e:
             logger.error(f"❌ Error getting market sentiment: {e}")
             return MarketSentiment.NEUTRAL, {"error": str(e)}
 
-    async def analyze_sector_strength(self, sentiment: MarketSentiment) -> Dict[str, float]:
-        """Analyze sector strength based on market sentiment - UPDATED to use realtime_market_engine"""
+    async def analyze_sector_strength(
+        self, sentiment: MarketSentiment
+    ) -> Dict[str, float]:
+        """
+        Analyze sector strength based on market sentiment - UPDATED to use realtime_market_engine.
+
+        Uses dynamic sector weights based on sentiment and actual sector performance from analytics.
+        """
         try:
             if not self.market_engine:
                 await self.initialize_services()
 
-            # Get sector performance from real-time market engine
-            from services.realtime_market_engine import get_sector_performance
+            # Get sector performance from real-time market engine (uses actual sector names from config)
             sector_performance = get_sector_performance()
-            sentiment_weights = self.sector_sentiment_weights.get(sentiment, {})
+
+            if not sector_performance:
+                logger.warning("⚠️ No sector performance data available")
+                return {}
 
             sector_scores = {}
 
             for sector, performance in sector_performance.items():
-                # Base score from actual performance
-                performance_score = (
-                    performance.get("avg_change_percent", 0) / 100 +
-                    performance.get("strength_score", 0) / 100 +
-                    (performance.get("advancing", 0) / max(performance.get("total_stocks", 1), 1))
+                # Base score from actual real-time performance
+                avg_change = performance.get("avg_change_percent", 0)
+                strength = performance.get("strength_score", 0)
+                advancing_ratio = (
+                    performance.get("advancing", 0) / max(performance.get("total_stocks", 1), 1)
                 )
 
-                # Apply sentiment weight
-                sentiment_weight = sentiment_weights.get(sector, 0.5)
+                # Performance score (0-1 scale)
+                performance_score = (
+                    min(max(avg_change / 5.0, -1), 1) * 0.5  # Normalize avg_change to -1 to 1
+                    + min(max(strength / 50.0, -1), 1) * 0.3   # Normalize strength_score
+                    + advancing_ratio * 0.2                      # Advancing ratio already 0-1
+                )
 
-                # Combined score
-                final_score = performance_score * sentiment_weight
-                sector_scores[sector] = round(final_score, 3)
+                # Get sentiment weight for this sector (default 0.6 if not in predefined weights)
+                sentiment_weights = self.sector_sentiment_weights.get(sentiment, {})
+                sentiment_weight = sentiment_weights.get(sector, 0.6)  # Default 0.6 for unknown sectors
 
-            # Sort by score
-            sorted_sectors = dict(sorted(sector_scores.items(), key=lambda x: x[1], reverse=True))
+                # Combined score with sentiment adjustment
+                final_score = max(performance_score * sentiment_weight, 0)  # Ensure non-negative
+                sector_scores[sector] = round(final_score, 4)
 
-            logger.info(f"🏢 Top sectors for {sentiment.value}: {list(sorted_sectors.keys())[:3]}")
+            # Sort by score (highest first)
+            sorted_sectors = dict(
+                sorted(sector_scores.items(), key=lambda x: x[1], reverse=True)
+            )
+
+            logger.info(
+                f"🏢 Analyzed {len(sector_scores)} sectors for {sentiment.value}"
+            )
+            logger.info(
+                f"🏢 Top 3 sectors: {list(sorted_sectors.keys())[:3]}"
+            )
             return sorted_sectors
 
         except Exception as e:
@@ -315,9 +438,7 @@ class IntelligentStockSelectionService:
             return {}
 
     async def select_stocks_by_value(
-        self,
-        target_sectors: List[str],
-        max_stocks: int = 5
+        self, target_sectors: List[str], max_stocks: int = 5
     ) -> List[StockSelection]:
         """Select stocks based on highest value in target sectors - UPDATED to use realtime_market_engine"""
         try:
@@ -331,7 +452,6 @@ class IntelligentStockSelectionService:
                     break
 
                 # Get sector stocks from real-time market engine
-                from services.realtime_market_engine import get_sector_stocks
                 sector_stocks = get_sector_stocks(sector)
                 stocks = sector_stocks.get(sector, [])
 
@@ -340,16 +460,20 @@ class IntelligentStockSelectionService:
 
                 # Filter eligible stocks (F&O stocks only, no value filter)
                 eligible_stocks = [
-                    stock for stock in stocks
+                    stock
+                    for stock in stocks
                     if (
-                        stock.get("volume", 0) >= self.selection_config["min_volume"] and
-                        stock.get("is_fno", False) and  # F&O stocks only
-                        stock.get("ltp", 0) > 0
+                        stock.get("volume", 0) >= self.selection_config["min_volume"]
+                        and stock.get("ltp", 0) > 0
+                        and stock.get("lot_size") is not None
+                        and stock.get("lot_size", 0) > 0
                     )
                 ]
 
                 # Sort by value (highest first)
-                eligible_stocks.sort(key=lambda x: x.get("value_crores", 0), reverse=True)
+                eligible_stocks.sort(
+                    key=lambda x: x.get("value_crores", 0), reverse=True
+                )
 
                 # Select top stock from this sector
                 for stock in eligible_stocks[:2]:  # Max 2 per sector
@@ -358,20 +482,28 @@ class IntelligentStockSelectionService:
 
                     # Calculate selection scores
                     selection = await self._create_stock_selection(stock, sector)
-                    if selection and selection.final_score > self.selection_config["min_score_threshold"]:
+                    if (
+                        selection
+                        and selection.final_score
+                        > self.selection_config["min_score_threshold"]
+                    ):
                         selected_stocks.append(selection)
 
             # Sort final selections by score
             selected_stocks.sort(key=lambda x: x.final_score, reverse=True)
 
-            logger.info(f"📈 Selected {len(selected_stocks)} stocks: {[s.symbol for s in selected_stocks]}")
+            logger.info(
+                f"📈 Selected {len(selected_stocks)} stocks: {[s.symbol for s in selected_stocks]}"
+            )
             return selected_stocks[:max_stocks]
 
         except Exception as e:
             logger.error(f"❌ Error selecting stocks by value: {e}")
             return []
 
-    async def _create_stock_selection(self, stock_data: Dict[str, Any], sector: str) -> Optional[StockSelection]:
+    async def _create_stock_selection(
+        self, stock_data: Dict[str, Any], sector: str
+    ) -> Optional[StockSelection]:
         """Create detailed stock selection with scoring"""
         try:
             # Calculate individual scores
@@ -383,11 +515,11 @@ class IntelligentStockSelectionService:
 
             # Calculate weighted final score
             final_score = (
-                sentiment_score * self.selection_config["sentiment_weight"] +
-                sector_score * self.selection_config["sector_weight"] +
-                technical_score * self.selection_config["technical_weight"] +
-                volume_score * self.selection_config["volume_weight"] +
-                value_score * self.selection_config["value_weight"]
+                sentiment_score * self.selection_config["sentiment_weight"]
+                + sector_score * self.selection_config["sector_weight"]
+                + technical_score * self.selection_config["technical_weight"]
+                + volume_score * self.selection_config["volume_weight"]
+                + value_score * self.selection_config["value_weight"]
             )
 
             # Risk assessment
@@ -406,9 +538,7 @@ class IntelligentStockSelectionService:
                 name=stock_data["name"],
                 instrument_key=stock_data["instrument_key"],
                 sector=sector,
-                is_fno=stock_data.get("is_fno", False),
                 lot_size=stock_data.get("lot_size"),
-
                 ltp=stock_data["ltp"],
                 change_percent=stock_data["change_percent"],
                 change=stock_data["change"],
@@ -417,23 +547,19 @@ class IntelligentStockSelectionService:
                 high=stock_data["high"],
                 low=stock_data["low"],
                 previous_close=stock_data["previous_close"],
-
                 sentiment_score=round(sentiment_score, 3),
                 sector_score=round(sector_score, 3),
                 technical_score=round(technical_score, 3),
                 volume_score=round(volume_score, 3),
                 value_score=round(value_score, 3),
                 final_score=round(final_score, 3),
-
                 selection_reason=f"High value ({stock_data['value_crores']:.1f}Cr) in strong {sector} sector",
                 confidence_level=round(confidence_level, 2),
                 risk_level=risk_level,
                 recommended_quantity=recommended_quantity,
                 target_value=stock_data["value_crores"],
                 stop_loss=round(stock_data["ltp"] * 0.95, 2),  # 5% stop loss
-
                 options_direction=options_direction,
-
                 selected_at=datetime.now().isoformat(),
                 valid_until=(datetime.now().replace(hour=15, minute=30)).isoformat(),
             )
@@ -448,17 +574,26 @@ class IntelligentStockSelectionService:
         """Calculate sentiment alignment score"""
         change_percent = stock_data.get("change_percent", 0)
 
-        if self.current_sentiment in [MarketSentiment.BULLISH, MarketSentiment.VERY_BULLISH]:
-            return min(max(change_percent / 5.0, 0), 1.0)  # Positive stocks score higher
-        elif self.current_sentiment in [MarketSentiment.BEARISH, MarketSentiment.VERY_BEARISH]:
-            return min(max(-change_percent / 5.0, 0), 1.0)  # Negative stocks score higher (short)
+        if self.current_sentiment in [
+            MarketSentiment.BULLISH,
+            MarketSentiment.VERY_BULLISH,
+        ]:
+            return min(
+                max(change_percent / 5.0, 0), 1.0
+            )  # Positive stocks score higher
+        elif self.current_sentiment in [
+            MarketSentiment.BEARISH,
+            MarketSentiment.VERY_BEARISH,
+        ]:
+            return min(
+                max(-change_percent / 5.0, 0), 1.0
+            )  # Negative stocks score higher (short)
         else:
             return 0.5  # Neutral market
 
     def _calculate_sector_score(self, stock_data: Dict[str, Any], sector: str) -> float:
         """Calculate sector strength score - UPDATED to use realtime_market_engine"""
         try:
-            from services.realtime_market_engine import get_sector_performance
             sector_performance = get_sector_performance()
             performance = sector_performance.get(sector, {})
 
@@ -489,7 +624,7 @@ class IntelligentStockSelectionService:
             momentum_score = min(abs(change_percent) / 10.0, 1.0)
 
             # Combined technical score
-            return (price_position * 0.6 + momentum_score * 0.4)
+            return price_position * 0.6 + momentum_score * 0.4
 
         except Exception:
             return 0.5
@@ -505,7 +640,7 @@ class IntelligentStockSelectionService:
             return 0.8
         elif volume >= 1000000:  # 10L+
             return 0.6
-        elif volume >= 500000:   # 5L+
+        elif volume >= 500000:  # 5L+
             return 0.4
         else:
             return 0.2
@@ -515,13 +650,13 @@ class IntelligentStockSelectionService:
         value_crores = stock_data.get("value_crores", 0)
 
         # Value categories
-        if value_crores >= 100:    # 100Cr+
+        if value_crores >= 100:  # 100Cr+
             return 1.0
-        elif value_crores >= 50:   # 50Cr+
+        elif value_crores >= 50:  # 50Cr+
             return 0.8
-        elif value_crores >= 10:   # 10Cr+
+        elif value_crores >= 10:  # 10Cr+
             return 0.6
-        elif value_crores >= 5:    # 5Cr+
+        elif value_crores >= 5:  # 5Cr+
             return 0.4
         else:
             return 0.2
@@ -568,11 +703,16 @@ class IntelligentStockSelectionService:
     def _get_options_direction(self) -> str:
         """Determine options trading direction based on market sentiment"""
         # Use current sentiment (premarket or market open)
-        current_sentiment = getattr(self, 'market_open_sentiment', self.premarket_sentiment)
+        current_sentiment = getattr(
+            self, "market_open_sentiment", self.premarket_sentiment
+        )
 
         if current_sentiment in [MarketSentiment.BULLISH, MarketSentiment.VERY_BULLISH]:
             return "CE"  # CALL options for positive market
-        elif current_sentiment in [MarketSentiment.BEARISH, MarketSentiment.VERY_BEARISH]:
+        elif current_sentiment in [
+            MarketSentiment.BEARISH,
+            MarketSentiment.VERY_BEARISH,
+        ]:
             return "PE"  # PUT options for negative market
         else:
             return "CE"  # Default to CALL for neutral market
@@ -588,8 +728,10 @@ class IntelligentStockSelectionService:
                 return {
                     "success": False,
                     "message": "Premarket selection already done today",
-                    "existing_selections": [asdict(stock) for stock in self.premarket_selections],
-                    "phase": "premarket"
+                    "existing_selections": [
+                        asdict(stock) for stock in self.premarket_selections
+                    ],
+                    "phase": "premarket",
                 }
 
             logger.info("🌅 Starting premarket stock selection...")
@@ -601,6 +743,18 @@ class IntelligentStockSelectionService:
             # Analyze sector strength
             sector_scores = await self.analyze_sector_strength(sentiment)
             top_sectors = list(sector_scores.keys())[:3]
+
+            # Check if we have any sectors with data
+            if not top_sectors:
+                logger.warning(
+                    "⚠️ No sector data available - market engine waiting for live WebSocket feed"
+                )
+                return {
+                    "error": "No market data available",
+                    "phase": "premarket",
+                    "message": "Realtime market engine has no data yet. Ensure WebSocket feed is connected and streaming.",
+                    "timestamp": datetime.now().isoformat(),
+                }
 
             # Select stocks
             selected_stocks = await self.select_stocks_by_value(top_sectors)
@@ -615,7 +769,9 @@ class IntelligentStockSelectionService:
             result = {
                 "phase": "premarket",
                 "sentiment_analysis": sentiment_analysis,
-                "top_sectors": {sector: sector_scores[sector] for sector in top_sectors},
+                "top_sectors": {
+                    sector: sector_scores[sector] for sector in top_sectors
+                },
                 "selected_stocks": [asdict(stock) for stock in selected_stocks],
                 "selection_count": len(selected_stocks),
                 "next_validation": "09:15:00",
@@ -624,11 +780,15 @@ class IntelligentStockSelectionService:
 
             # Save to database for auto-trading integration
             try:
-                saved = await self.save_selections_to_database(selected_stocks, "premarket")
+                saved = await self.save_selections_to_database(
+                    selected_stocks, "premarket"
+                )
                 if saved:
                     result["database_saved"] = True
                     result["available_for_autotrading"] = True
-                    logger.info("✅ Premarket selections saved to database for auto-trading")
+                    logger.info(
+                        "✅ Premarket selections saved to database for auto-trading"
+                    )
                 else:
                     result["database_saved"] = False
                     logger.warning("⚠️ Failed to save premarket selections to database")
@@ -637,17 +797,24 @@ class IntelligentStockSelectionService:
                 result["database_saved"] = False
 
             # Broadcast update via WebSocket
-            try:
-                from services.unified_websocket_manager import emit_intelligent_stock_selection_update
-                emit_intelligent_stock_selection_update({
-                    "type": "premarket_selection_completed",
-                    "data": result,
-                    "timestamp": datetime.now().isoformat()
-                })
-            except Exception as ws_error:
-                logger.warning(f"⚠️ Failed to broadcast premarket selection: {ws_error}")
+            # try:
+            # from services.unified_websocket_manager import (
+            #     emit_intelligent_stock_selection_update,
+            # )
 
-            logger.info(f"✅ Premarket selection complete: {len(selected_stocks)} stocks selected")
+            # emit_intelligent_stock_selection_update(
+            #     {
+            #         "type": "premarket_selection_completed",
+            #         "data": result,
+            #         "timestamp": datetime.now().isoformat(),
+            #     }
+            # )
+            # except Exception as ws_error:
+            #     logger.warning(f"⚠️ Failed to broadcast premarket selection: {ws_error}")
+
+            logger.info(
+                f"✅ Premarket selection complete: {len(selected_stocks)} stocks selected"
+            )
             return result
 
         except Exception as e:
@@ -657,22 +824,28 @@ class IntelligentStockSelectionService:
     async def validate_market_open_selection(self) -> Dict[str, Any]:
         """Market open validation - Check sentiment and finalize selections (9:15-9:25) - FINAL DECISION"""
         try:
-            logger.info("🔍 Market open validation - Making FINAL stock selection for the day...")
+            logger.info(
+                "🔍 Market open validation - Making FINAL stock selection for the day..."
+            )
 
             # Check if final selection already done
             if self.final_selection_done:
-                logger.warning("⚠️ Final selection already completed - no more changes today")
+                logger.warning(
+                    "⚠️ Final selection already completed - no more changes today"
+                )
                 return {
                     "success": False,
                     "message": "Final selections already done today - no more changes allowed",
-                    "final_selections": [asdict(stock) for stock in self.final_selections],
-                    "phase": "final_selection_done"
+                    "final_selections": [
+                        asdict(stock) for stock in self.final_selections
+                    ],
+                    "phase": "final_selection_done",
                 }
 
             if not self.premarket_selections:
                 return {
                     "error": "No premarket selections found. Run premarket selection first.",
-                    "phase": "market_open_validation"
+                    "phase": "market_open_validation",
                 }
 
             # Check current market sentiment at market open
@@ -680,7 +853,7 @@ class IntelligentStockSelectionService:
             self.market_open_sentiment = market_sentiment
 
             # Compare sentiments
-            self.sentiment_changed = (market_sentiment != self.premarket_sentiment)
+            self.sentiment_changed = market_sentiment != self.premarket_sentiment
 
             logger.info(f"📊 Premarket sentiment: {self.premarket_sentiment.value}")
             logger.info(f"📊 Market open sentiment: {market_sentiment.value}")
@@ -688,7 +861,9 @@ class IntelligentStockSelectionService:
 
             # FINAL DECISION LOGIC
             if self.sentiment_changed:
-                logger.info("🔄 Sentiment changed - Running NEW stock selection (FINAL)")
+                logger.info(
+                    "🔄 Sentiment changed - Running NEW stock selection (FINAL)"
+                )
 
                 # Run completely fresh selection with new sentiment
                 sector_scores = await self.analyze_sector_strength(market_sentiment)
@@ -700,7 +875,9 @@ class IntelligentStockSelectionService:
                 selection_source = "market_open_fresh"
 
             else:
-                logger.info("✅ Sentiment unchanged - Using premarket selections (FINAL)")
+                logger.info(
+                    "✅ Sentiment unchanged - Using premarket selections (FINAL)"
+                )
 
                 # Use premarket selections as final (no changes needed)
                 self.final_selections = self.premarket_selections.copy()
@@ -712,7 +889,9 @@ class IntelligentStockSelectionService:
             self.current_phase = TradingPhase.MARKET_OPEN
             self.last_selection_time = datetime.now()
 
-            logger.info(f"🎯 FINAL SELECTIONS CONFIRMED: {len(self.final_selections)} stocks selected for the day")
+            logger.info(
+                f"🎯 FINAL SELECTIONS CONFIRMED: {len(self.final_selections)} stocks selected for the day"
+            )
 
             result = {
                 "phase": "market_open_validation",
@@ -732,11 +911,15 @@ class IntelligentStockSelectionService:
 
             # Save FINAL selections to database for auto-trading
             try:
-                saved = await self.save_selections_to_database(self.final_selections, "final_selection")
+                saved = await self.save_selections_to_database(
+                    self.final_selections, "final_selection"
+                )
                 if saved:
                     result["database_saved"] = True
                     result["available_for_autotrading"] = True
-                    logger.info("✅ Validated selections saved to database for auto-trading")
+                    logger.info(
+                        "✅ Validated selections saved to database for auto-trading"
+                    )
                 else:
                     result["database_saved"] = False
                     logger.warning("⚠️ Failed to save validated selections to database")
@@ -747,37 +930,57 @@ class IntelligentStockSelectionService:
             # Enhance final selections with option contracts
             try:
                 logger.info("🎯 Enhancing final selections with option contracts...")
-                from services.enhanced_intelligent_options_selection import enhanced_options_service
+                from services.enhanced_intelligent_options_selection import (
+                    enhanced_options_service,
+                )
 
-                options_result = await enhanced_options_service.enhance_selected_stocks_with_options(
-                    self.final_selections,
-                    selection_type="final"
+                options_result = (
+                    await enhanced_options_service.enhance_selected_stocks_with_options(
+                        self.final_selections, selection_type="final"
+                    )
                 )
 
                 if options_result.get("success"):
                     result["options_enhancement"] = {
-                        "enhanced_count": options_result.get("options_contracts_found", 0),
-                        "total_capital_required": options_result.get("total_capital_required", 0),
-                        "options_ready": options_result.get("options_ready", False)
+                        "enhanced_count": options_result.get(
+                            "options_contracts_found", 0
+                        ),
+                        "total_capital_required": options_result.get(
+                            "total_capital_required", 0
+                        ),
+                        "options_ready": options_result.get("options_ready", False),
                     }
-                    logger.info(f"✅ Options enhancement complete: {options_result.get('options_contracts_found', 0)} stocks enhanced")
+                    logger.info(
+                        f"✅ Options enhancement complete: {options_result.get('options_contracts_found', 0)} stocks enhanced"
+                    )
                 else:
-                    logger.warning(f"⚠️ Options enhancement failed: {options_result.get('error')}")
-                    result["options_enhancement"] = {"error": options_result.get("error")}
+                    logger.warning(
+                        f"⚠️ Options enhancement failed: {options_result.get('error')}"
+                    )
+                    result["options_enhancement"] = {
+                        "error": options_result.get("error")
+                    }
             except Exception as opt_error:
                 logger.error(f"❌ Error enhancing with options: {opt_error}")
                 result["options_enhancement"] = {"error": str(opt_error)}
 
             # Broadcast update via WebSocket
             try:
-                from services.unified_websocket_manager import emit_intelligent_stock_selection_update
-                emit_intelligent_stock_selection_update({
-                    "type": "market_open_validation_completed",
-                    "data": result,
-                    "timestamp": datetime.now().isoformat()
-                })
+                from services.unified_websocket_manager import (
+                    emit_intelligent_stock_selection_update,
+                )
+
+                emit_intelligent_stock_selection_update(
+                    {
+                        "type": "market_open_validation_completed",
+                        "data": result,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
             except Exception as ws_error:
-                logger.warning(f"⚠️ Failed to broadcast market open validation: {ws_error}")
+                logger.warning(
+                    f"⚠️ Failed to broadcast market open validation: {ws_error}"
+                )
 
             logger.info(f"✅ Market open validation complete: {validation_action}")
             return result
@@ -795,7 +998,7 @@ class IntelligentStockSelectionService:
                     "error": "No final selections available. Complete market open validation first.",
                     "phase": "awaiting_final_selection",
                     "message": "Final stock selection not completed yet. Run premarket selection and market open validation first.",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 }
 
             # Return final selections (no more changes allowed)
@@ -812,7 +1015,9 @@ class IntelligentStockSelectionService:
                 "last_updated": datetime.now().isoformat(),
             }
 
-            logger.info(f"📊 Returning FINAL selections: {len(self.final_selections)} stocks")
+            logger.info(
+                f"📊 Returning FINAL selections: {len(self.final_selections)} stocks"
+            )
             return result
 
         except Exception as e:
@@ -831,13 +1036,19 @@ class IntelligentStockSelectionService:
             "premarket_selections": len(self.premarket_selections),
             "final_selections": len(self.final_selections),
             "final_selection_done": self.final_selection_done,
-            "last_selection_time": self.last_selection_time.isoformat() if self.last_selection_time else None,
+            "last_selection_time": (
+                self.last_selection_time.isoformat()
+                if self.last_selection_time
+                else None
+            ),
             "next_action": self._get_next_action_recommendation(current_phase),
             "workflow_complete": self.final_selection_done,
             "timestamp": datetime.now().isoformat(),
         }
 
-    async def save_selections_to_database(self, selections: List[StockSelection], selection_type: str = "intelligent") -> bool:
+    async def save_selections_to_database(
+        self, selections: List[StockSelection], selection_type: str = "intelligent"
+    ) -> bool:
         """
         Save selected stocks to database with complete market sentiment and advance/decline data.
 
@@ -852,17 +1063,18 @@ class IntelligentStockSelectionService:
             today = date.today()
 
             # Get current market sentiment for database storage
-            from services.realtime_market_engine import get_market_sentiment
             sentiment_data = get_market_sentiment()
 
             # Clear existing intelligent selections for today (if any)
             db.query(SelectedStock).filter(
                 SelectedStock.selection_date == today,
-                SelectedStock.selection_reason.like(f"{selection_type}%")
+                SelectedStock.selection_reason.like(f"{selection_type}%"),
             ).delete()
 
             # Determine selection phase
-            selection_phase = "premarket" if selection_type == "premarket" else "final_selection"
+            selection_phase = (
+                "premarket" if selection_type == "premarket" else "final_selection"
+            )
 
             # Save new selections with complete market context
             for stock in selections:
@@ -876,40 +1088,57 @@ class IntelligentStockSelectionService:
                     volume_at_selection=int(stock.volume or 0),
                     change_percent_at_selection=float(stock.change_percent or 0),
                     sector=stock.sector,
-
                     # Market Sentiment Data - CRITICAL for options trading direction
                     market_sentiment=sentiment_data.get("sentiment", "neutral"),
                     market_sentiment_confidence=sentiment_data.get("confidence", 50),
-                    advance_decline_ratio=sentiment_data.get("metrics", {}).get("advance_decline_ratio", 1.0),
-                    market_breadth_percent=sentiment_data.get("metrics", {}).get("market_breadth_percent", 0),
-                    advancing_stocks=sentiment_data.get("metrics", {}).get("advancing", 0),
-                    declining_stocks=sentiment_data.get("metrics", {}).get("declining", 0),
-                    total_stocks_analyzed=sentiment_data.get("metrics", {}).get("total_stocks", 0),
+                    advance_decline_ratio=sentiment_data.get("metrics", {}).get(
+                        "advance_decline_ratio", 1.0
+                    ),
+                    market_breadth_percent=sentiment_data.get("metrics", {}).get(
+                        "market_breadth_percent", 0
+                    ),
+                    advancing_stocks=sentiment_data.get("metrics", {}).get(
+                        "advancing", 0
+                    ),
+                    declining_stocks=sentiment_data.get("metrics", {}).get(
+                        "declining", 0
+                    ),
+                    total_stocks_analyzed=sentiment_data.get("metrics", {}).get(
+                        "total_stocks", 0
+                    ),
                     selection_phase=selection_phase,
-
                     # Options Direction - CE for bullish market, PE for bearish market
                     option_type=stock.options_direction,  # CE or PE based on market sentiment
-
-                    score_breakdown=str({
-                        "sentiment_score": stock.sentiment_score,
-                        "sector_score": stock.sector_score,
-                        "technical_score": stock.technical_score,
-                        "volume_score": stock.volume_score,
-                        "value_score": stock.value_score,
-                        "final_score": stock.final_score,
-                        "confidence_level": stock.confidence_level,
-                        "risk_level": stock.risk_level,
-                        "options_direction": stock.options_direction,  # CE or PE
-                        "market_sentiment_at_selection": sentiment_data.get("sentiment", "neutral")
-                    }),
-                    is_active=True
+                    score_breakdown=str(
+                        {
+                            "sentiment_score": stock.sentiment_score,
+                            "sector_score": stock.sector_score,
+                            "technical_score": stock.technical_score,
+                            "volume_score": stock.volume_score,
+                            "value_score": stock.value_score,
+                            "final_score": stock.final_score,
+                            "confidence_level": stock.confidence_level,
+                            "risk_level": stock.risk_level,
+                            "options_direction": stock.options_direction,  # CE or PE
+                            "market_sentiment_at_selection": sentiment_data.get(
+                                "sentiment", "neutral"
+                            ),
+                        }
+                    ),
+                    is_active=True,
                 )
                 db.add(selected_stock)
 
             db.commit()
-            logger.info(f"✅ Saved {len(selections)} intelligent stock selections to database")
-            logger.info(f"📊 Market Context: {sentiment_data.get('sentiment')} sentiment, A/D ratio: {sentiment_data.get('metrics', {}).get('advance_decline_ratio', 1.0):.2f}")
-            logger.info(f"📈 Options Direction: {selections[0].options_direction if selections else 'N/A'} (based on market sentiment)")
+            logger.info(
+                f"✅ Saved {len(selections)} intelligent stock selections to database"
+            )
+            logger.info(
+                f"📊 Market Context: {sentiment_data.get('sentiment')} sentiment, A/D ratio: {sentiment_data.get('metrics', {}).get('advance_decline_ratio', 1.0):.2f}"
+            )
+            logger.info(
+                f"📈 Options Direction: {selections[0].options_direction if selections else 'N/A'} (based on market sentiment)"
+            )
             return True
 
         except Exception as e:
@@ -936,7 +1165,7 @@ class IntelligentStockSelectionService:
             TradingPhase.PREMARKET: "🌅 Run premarket selection",
             TradingPhase.MARKET_OPEN: "🔍 Complete market open validation",
             TradingPhase.LIVE_TRADING: "📊 Use final selections for trading",
-            TradingPhase.POST_MARKET: "💤 Wait for next trading day"
+            TradingPhase.POST_MARKET: "💤 Wait for next trading day",
         }
         return recommendations.get(phase, "Monitor market conditions")
 
