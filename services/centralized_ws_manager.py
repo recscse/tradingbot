@@ -2196,6 +2196,10 @@ class CentralizedWebSocketManager:
             "Nifty Energy": {"symbol": "NIFTYENERGY", "name": "Nifty Energy"},
             "NIFTY ENERGY": {"symbol": "NIFTYENERGY", "name": "Nifty Energy"},
             "Nifty PSU Bank": {"symbol": "PSUBNK", "name": "Nifty PSU Bank"},
+            "NIFTY HEALTHCARE": {
+                "symbol": "NIFTY HEALTHCARE",
+                "name": "NIFTY HEALTHCARE",
+            },
             "PSUBNK": {"symbol": "PSUBNK", "name": "Nifty PSU Bank"},
             "NIFTY OIL AND GAS": {
                 "symbol": "Nifty Oil and Gas",
@@ -2205,6 +2209,10 @@ class CentralizedWebSocketManager:
             "Nifty Private Bank": {
                 "symbol": "NIFTYPRIVB",
                 "name": "Nifty Private Bank",
+            },
+            "NIFTY CONSR DURBL": {
+                "symbol": "NIFTY CONSR DURBL",
+                "name": "NIFTY CONSR DURBL",
             },
         }
 
