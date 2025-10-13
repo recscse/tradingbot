@@ -815,7 +815,7 @@ class CentralizedWebSocketManager:
                 "NSE_INDEX|Nifty Realty",
                 "NSE_INDEX|Nifty Media",
                 "NSE_INDEX|Nifty PSU Bank",
-                "NSE_INDEX|Nifty Private Bank",
+                "NSE_INDEX|Nifty Pvt Bank",
                 "NSE_INDEX|Nifty Oil & Gas",
                 "NSE_INDEX|NIFTY CONSR DURBL",
                 "NSE_INDEX|NIFTY HEALTHCARE",
@@ -2206,8 +2206,8 @@ class CentralizedWebSocketManager:
                 "name": "Nifty Oil and Gas",
             },
             "Nifty Media": {"symbol": "NIFTYMEDIA", "name": "Nifty Media"},
-            "Nifty Private Bank": {
-                "symbol": "NIFTYPRIVB",
+            "Nifty Pvt Bank": {
+                "symbol": "Nifty Pvt Bank",
                 "name": "Nifty Private Bank",
             },
             "NIFTY CONSR DURBL": {
