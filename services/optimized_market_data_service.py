@@ -410,14 +410,14 @@ class OptimizedMarketDataService:
                 "name": "Nifty Oil and Gas",
             },
             {
-                "key": "NSE_INDEX|Nifty Consumer Durables",
+                "key": "NSE_INDEX|NIFTY CONSR DURBL",
                 "symbol": "CNXCONSUMER",
                 "name": "Nifty Consumer Durables",
             },
             {
-                "key": "NSE_INDEX|Nifty Healthcare Index",
+                "key": "NSE_INDEX|Nifty Healthcare",
                 "symbol": "CNXHEALTHCARE",
-                "name": "Nifty Healthcare Index",
+                "name": "Nifty Healthcare",
             },
         ]
 

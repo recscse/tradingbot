@@ -88,19 +88,28 @@ class RealTimePnLTracker:
         self.is_running = False
         logger.info("Real-Time PnL Tracker initialized")
 
-    async def start_tracking(self, db: Session):
+    async def start_tracking(self, db: Session = None):
         """
         Start real-time PnL tracking loop
 
         Args:
-            db: Database session
+            db: Database session (optional, will create own session if not provided)
         """
         self.is_running = True
         logger.info("🔴 Starting real-time PnL tracking...")
 
+        # Import database connection
+        from database.connection import SessionLocal
+
         try:
             while self.is_running:
-                await self.update_all_positions(db)
+                # Create new session for each iteration to avoid stale connections
+                session = SessionLocal()
+                try:
+                    await self.update_all_positions(session)
+                finally:
+                    session.close()
+
                 await asyncio.sleep(self.update_interval_seconds)
 
         except Exception as e:

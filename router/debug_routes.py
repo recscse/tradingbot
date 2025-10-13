@@ -8,6 +8,71 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/debug", tags=["Debug"])
 
 
+@router.get("/analytics")
+async def debug_realtime_analytics():
+    """Debug endpoints to test real time marekt engine annalytics"""
+
+    try:
+        from services.realtime_market_engine import get_analytics, get_market_engine
+
+        engine = get_market_engine()
+        last_calc_ts = getattr(engine.analytics, "last_calculation", 0)
+        last_update_ts = getattr(engine, "last_analytics_update", 0)
+        prices = engine.get_live_prices()
+
+        heatmap = engine._generate_sector_heatmap
+
+        analytics = get_analytics()
+
+        return {
+            "success": True,
+            "last_calc_time": last_calc_ts,
+            "price": prices,
+            "heatmap": heatmap,
+            "analytics": analytics,
+        }
+
+    except Exception as e:
+        logger.error(f"error debugging in the rela time markket engine analytics")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+
+@router.get("/debug-run-stock-selection")
+async def debug_run_stock_selection():
+    """Debug endpoint for the stocks selection service"""
+
+    try:
+        from services.intelligent_stock_selection_service import (
+            intelligent_stock_selector,
+        )
+
+        result = await intelligent_stock_selector.run_premarket_selection()
+
+        if result and not result.get("error"):
+            selected_stocks_data = result.get("selected_stocks", [])
+            sentiment_analysis = result.get("sentiment_analysis", {})
+
+            logger.info(
+                f"✅ Intelligent stock selection complete: {len(selected_stocks_data)} stocks"
+            )
+            logger.info(
+                f"📊 Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})"
+            )
+
+            return {"success": True, "result": result}
+    except Exception as e:
+        logger.error(f"Error running stocks selectionservice")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+
 @router.get("/registry")
 async def debug_registry():
     """Debug endpoint for instrument registry"""

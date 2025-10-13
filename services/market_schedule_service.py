@@ -402,17 +402,65 @@ class MarketScheduleService:
             logger.error(f"❌ Pre-market analysis failed: {e}")
 
     async def _prepare_trading_session(self):
-        """Prepare for trading session (9:15-9:30 AM)"""
+        """
+        Prepare for trading session (9:15-9:30 AM).
+
+        This is the market open validation phase where:
+        1. Check if market sentiment changed from premarket
+        2. Re-run stock selection if sentiment changed
+        3. Finalize selections for the day
+        """
         logger.info("🔧 Preparing trading session...")
 
         try:
+            # CRITICAL: Run market open validation (9:15-9:25 AM window)
+            logger.info("🔍 Running market open validation - finalizing stock selections...")
+            try:
+                from services.intelligent_stock_selection_service import intelligent_stock_selector
+
+                validation_result = await intelligent_stock_selector.validate_market_open_selection()
+
+                if validation_result and not validation_result.get("error"):
+                    validation_action = validation_result.get("validation_action", "UNKNOWN")
+                    sentiment_changed = validation_result.get("sentiment_changed", False)
+                    final_count = validation_result.get("final_count", 0)
+
+                    logger.info(f"✅ Market open validation complete: {validation_action}")
+                    logger.info(f"📊 Sentiment changed: {sentiment_changed}")
+                    logger.info(f"🎯 Final selections: {final_count} stocks locked for trading")
+
+                    # Update our reference with final selections
+                    final_stocks = validation_result.get("final_stocks", [])
+                    self.selected_stocks = {}
+                    for stock_dict in final_stocks:
+                        symbol = stock_dict.get("symbol")
+                        if symbol:
+                            self.selected_stocks[symbol] = {
+                                "symbol": symbol,
+                                "instrument_key": stock_dict.get("instrument_key"),
+                                "sector": stock_dict.get("sector"),
+                                "option_type": stock_dict.get("options_direction"),
+                                "final_score": stock_dict.get("final_score"),
+                                "selection_finalized": True
+                            }
+
+                    logger.info(f"✅ Final selections confirmed: {len(self.selected_stocks)} stocks ready for auto-trading")
+                else:
+                    error_msg = validation_result.get("error", "Unknown error") if validation_result else "No result returned"
+                    logger.warning(f"⚠️ Market open validation issue: {error_msg}")
+                    logger.warning("⚠️ Will use premarket selections (if any)")
+
+            except Exception as validation_error:
+                logger.error(f"❌ Market open validation failed: {validation_error}")
+                logger.warning("⚠️ Continuing with premarket selections")
+
             # Generate OHLC data for dashboard
             await self._generate_dashboard_ohlc()
 
             # Validate broker connections
             await self._validate_broker_connections()
 
-            # Final stock selection confirmation
+            # Final stock selection confirmation (legacy - already done by intelligent_stock_selector)
             await self._confirm_stock_selection()
 
             logger.info("✅ Trading session preparation complete")

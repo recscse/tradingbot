@@ -759,7 +759,7 @@ class TradingInstrumentService:
             # Core Indices (Highest Priority)
             "NSE_INDEX|Nifty 50",
             "NSE_INDEX|Nifty Bank",
-            "NSE_INDEX|Fin Nifty",
+            "NSE_INDEX|Nifty Fin Service",
             "BSE_INDEX|SENSEX",
             # Major Sectoral Indices
             "NSE_INDEX|Nifty Auto",
@@ -772,8 +772,8 @@ class TradingInstrumentService:
             "NSE_INDEX|Nifty PSU Bank",
             "NSE_INDEX|Nifty Private Bank",
             "NSE_INDEX|NIFTY OIL AND GAS",
-            "NSE_INDEX|Nifty Consumer Durables",
-            "NSE_INDEX|Nifty Healthcare Index",
+            "NSE_INDEX|NIFTY CONSR DURBL",
+            "NSE_INDEX|NIFTY HEALTHCARE",
         ]
 
         # Return up to max_keys, prioritized by order in list
@@ -1331,9 +1331,9 @@ def _build_index_analytics_metadata() -> List[Dict[str, Any]]:
             "exchange": "NSE",
         },
         {
-            "instrument_key": "NSE_INDEX|Fin Nifty",
+            "instrument_key": "NSE_INDEX|Nifty Fin Service",
             "symbol": "FINNIFTY",
-            "name": "NIFTY FINANCIAL SERVICES",
+            "name": "Nifty Fin Service",
             "sector": "INDEX",
             "exchange": "NSE",
         },
@@ -1416,16 +1416,16 @@ def _build_index_analytics_metadata() -> List[Dict[str, Any]]:
             "exchange": "NSE",
         },
         {
-            "instrument_key": "NSE_INDEX|Nifty Consumer Durables",
+            "instrument_key": "NSE_INDEX|NIFTY CONSR DURBL",
             "symbol": "Nifty Consumer Durables",
             "name": "NIFTY CONSUMER DURABLES",
             "sector": "INDEX",
             "exchange": "NSE",
         },
         {
-            "instrument_key": "NSE_INDEX|Nifty Healthcare Index",
+            "instrument_key": "NSE_INDEX|NIFTY HEALTHCARE",
             "symbol": "Nifty Healthcare",
-            "name": "NIFTY HEALTHCARE INDEX",
+            "name": "NIFTY HEALTHCARE",
             "sector": "INDEX",
             "exchange": "NSE",
         },

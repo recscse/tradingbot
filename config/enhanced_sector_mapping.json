@@ -1718,9 +1718,9 @@
       "color": "#E53935",
       "description": "Healthcare services, hospitals, pharmaceuticals and biotechnology",
       "index": {
-        "symbol": "CNXHEALTHCARE",
-        "name": "Nifty Healthcare Index",
-        "instrument_key": "NSE_INDEX|NIFTY HEALTHCARE INDEX"
+        "symbol": "NIFTY HEALTHCARE",
+        "name": "Nifty Healthcare",
+        "instrument_key": "NSE_INDEX|NIFTY HEALTHCARE"
       },
       "stocks": [
         {
@@ -1964,7 +1964,7 @@
       "index": {
         "symbol": "CNXCONSUMERDUR",
         "name": "Nifty Consumer Durables",
-        "instrument_key": "NSE_INDEX|NIFTY CONSUMER DURABLES"
+        "instrument_key": "NSE_INDEX|NIFTY CONSR DURBL"
       },
       "stocks": [
         {
@@ -2468,8 +2468,8 @@
     "NSE_INDEX|NIFTY MEDIA": "MEDIA",
     "NSE_INDEX|NIFTY PSU BANK": "PSU_BANK",
     "NSE_INDEX|NIFTY PVT BANK": "PRIVATE_BANK",
-    "NSE_INDEX|NIFTY HEALTHCARE INDEX": "HEALTHCARE",
-    "NSE_INDEX|NIFTY CONSUMER DURABLES": "CONSUMER_DURABLES",
+    "NSE_INDEX|NIFTY HEALTHCARE": "HEALTHCARE",
+    "NSE_INDEX|NIFTY CONSR DURBL": "CONSUMER_DURABLES",
     "NSE_INDEX|NIFTY OIL & GAS": "ENERGY",
     "NSE_INDEX|NIFTY MIDSMALL HEALTHCARE": "HEALTHCARE",
     "NSE_INDEX|NIFTY FINANCIAL SERVICES EX-BANK": "FINANCIAL",
