@@ -4,6 +4,8 @@ API endpoints for automated trading with paper/live modes, real-time PnL, and po
 """
 
 import asyncio
+from datetime import date
+import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -14,6 +16,7 @@ from decimal import Decimal
 from database.connection import get_db
 from database.models import (
     BrokerConfig,
+    SelectedStock,
     User,
     ActivePosition,
     AutoTradeExecution,
@@ -703,6 +706,151 @@ async def get_auto_trading_status(current_user: User = Depends(get_current_user)
 
     except Exception as e:
         logger.error(f"Error getting auto-trading status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/selected-stocks")
+async def get_selected_stock(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get Auto selected stock for trading"""
+    try:
+
+        # Query today's active selections
+        selected_records = (
+            db.query(SelectedStock)
+            .filter(
+                SelectedStock.selection_date == date.today(),
+                SelectedStock.is_active == True,
+            )
+            .all()
+        )
+
+        def safe_parse_json(maybe_json):
+            if not maybe_json:
+                return {}
+            if isinstance(maybe_json, dict):
+                return maybe_json
+            if isinstance(maybe_json, str):
+                s = maybe_json.strip()
+                if not s:
+                    return {}
+                try:
+                    return json.loads(s)
+                except Exception:
+                    return {}
+            return {}
+
+        stocks = []
+        for record in selected_records:
+            try:
+                # Parse stored JSON text columns
+                score_breakdown_raw = getattr(record, "score_breakdown", None)
+                score_breakdown = safe_parse_json(score_breakdown_raw)
+
+                option_contract_raw = getattr(record, "option_contract", None)
+                option_contract = safe_parse_json(option_contract_raw)
+
+                # If option_contract missing, try to build a minimal contract from available columns
+                # We treat instrument_key (SelectedStock.instrument_key) as the primary instrument identifier
+                if not option_contract:
+                    option_contract = {
+                        "option_instrument_key": getattr(record, "instrument_key", "")
+                        or "",
+                        "option_type": getattr(record, "option_type", None) or "N/A",
+                        # 'strike_price' might live inside score_breakdown under atm_strike or not exist
+                        "strike_price": score_breakdown.get("atm_strike")
+                        or getattr(record, "price_at_selection", 0)
+                        or 0,
+                        "expiry_date": getattr(record, "option_expiry_date", "") or "",
+                        "premium": float(getattr(record, "price_at_selection", 0) or 0),
+                        # lot_size may not be available on the SelectedStock row; default 0
+                        "lot_size": int(score_breakdown.get("lot_size", 0) or 0),
+                    }
+
+                # Ensure instrument_key is present on the contract (helpful for websocket matching)
+                if (
+                    "option_instrument_key" not in option_contract
+                    or not option_contract.get("option_instrument_key")
+                ):
+                    option_contract["option_instrument_key"] = (
+                        getattr(record, "instrument_key", "") or ""
+                    )
+
+                # Normalize numeric types in score_breakdown
+                normalized_score = {
+                    "capital_allocation": float(
+                        score_breakdown.get("capital_allocation", 0) or 0
+                    ),
+                    "position_size_lots": int(
+                        score_breakdown.get("position_size_lots", 0) or 0
+                    ),
+                    "max_loss": float(score_breakdown.get("max_loss", 0) or 0),
+                    "target_profit": float(
+                        score_breakdown.get("target_profit", 0) or 0
+                    ),
+                }
+                if "components" in score_breakdown and isinstance(
+                    score_breakdown["components"], dict
+                ):
+                    normalized_score["components"] = score_breakdown["components"]
+
+                # Build market_sentiment object from model columns (if present)
+                market_sentiment_obj = {}
+                if getattr(record, "market_sentiment", None):
+                    market_sentiment_obj["sentiment"] = record.market_sentiment
+                    market_sentiment_obj["confidence"] = float(
+                        record.market_sentiment_confidence or 0
+                    )
+                    market_sentiment_obj["advance_decline_ratio"] = float(
+                        record.advance_decline_ratio or 0
+                    )
+                    market_sentiment_obj["market_breadth_percent"] = float(
+                        record.market_breadth_percent or 0
+                    )
+                    market_sentiment_obj["advancing_stocks"] = int(
+                        record.advancing_stocks or 0
+                    )
+                    market_sentiment_obj["declining_stocks"] = int(
+                        record.declining_stocks or 0
+                    )
+                # If not present, leave empty dict (frontend should treat {} as "no data")
+
+                stock_data = {
+                    "id": record.id,
+                    "symbol": record.symbol,
+                    "sector": record.sector,
+                    "selection_score": record.selection_score,
+                    "selection_reason": record.selection_reason,
+                    "price_at_selection": record.price_at_selection,
+                    "option_type": record.option_type or "NEUTRAL",
+                    "atm_strike": score_breakdown.get("atm_strike", 0.0),
+                    "adr_score": score_breakdown.get("adr_score", 0.5),
+                    "sector_momentum": score_breakdown.get("sector_momentum", 0.0),
+                    "volume_score": score_breakdown.get("volume_score", 0.5),
+                    "technical_score": score_breakdown.get("technical_score", 0.5),
+                    "expiry_date": record.option_expiry_date or "",
+                    "market_sentiment_alignment": record.option_type in ["CE", "PE"],
+                    "selection_date": record.selection_date.isoformat(),
+                    "change_percent": 0.0,  # Will be updated with real-time data
+                }
+                stocks.append(stock_data)
+            except Exception as e:
+                logger.exception(
+                    f"selected-stocks: failed to process record {getattr(record,'symbol','?')}: {e}"
+                )
+                continue
+        market_sentiment = {}
+        # If global auto_stock_selection_service or another provider is present, prefer it.
+        return {
+            "success": True,
+            "stocks": stocks,
+            "market_sentiment": market_sentiment,
+        }
+
+    except Exception as e:
+        logger.exception(f"Error getting selected stocks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
