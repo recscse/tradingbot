@@ -624,15 +624,15 @@
     "name": "AVENUE SUPERMARTS LIMITED",
     "trading_symbol": "DMART"
   },
-  "NSE_EQ|INE732I01013": {
-    "symbol": "ANGELONE",
-    "name": "ANGEL ONE LIMITED",
-    "trading_symbol": "ANGELONE"
-  },
   "NSE_EQ|INE059A01026": {
     "symbol": "CIPLA",
     "name": "CIPLA LTD",
     "trading_symbol": "CIPLA"
+  },
+  "NSE_EQ|INE732I01013": {
+    "symbol": "ANGELONE",
+    "name": "ANGEL ONE LIMITED",
+    "trading_symbol": "ANGELONE"
   },
   "NSE_EQ|INE138Y01010": {
     "symbol": "KFINTECH",
