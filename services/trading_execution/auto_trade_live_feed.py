@@ -254,13 +254,23 @@ class AutoTradeLiveFeed:
                         logger.warning(f"No option instrument key for {stock.symbol}")
                         continue
 
+                    # Determine option type - CRITICAL: Never use defaults
+                    option_type = stock.option_type or option_data.get("option_type")
+
+                    if not option_type or option_type not in ["CE", "PE"]:
+                        logger.error(
+                            f"Invalid or missing option_type for {stock.symbol} - "
+                            f"stock.option_type={stock.option_type}, "
+                            f"option_data.option_type={option_data.get('option_type')} - SKIPPING"
+                        )
+                        continue
+
                     # Create auto-trade instrument
                     instrument = AutoTradeInstrument(
                         stock_symbol=stock.symbol,
                         spot_instrument_key=spot_key,
                         option_instrument_key=option_key,
-                        option_type=stock.option_type
-                        or option_data.get("option_type", "CE"),
+                        option_type=option_type,
                         strike_price=Decimal(str(option_data.get("strike_price", 0))),
                         expiry_date=stock.option_expiry_date
                         or option_data.get("expiry_date"),

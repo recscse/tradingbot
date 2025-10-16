@@ -14,6 +14,9 @@ from database.connection import get_db
 from database.models import SelectedStock
 from services.market_timing_service import market_timing_service
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/trading", tags=["Trading Stock Selection"])
 

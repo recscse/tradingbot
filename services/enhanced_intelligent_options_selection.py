@@ -19,12 +19,69 @@ from services.intelligent_stock_selection_service import (
     intelligent_stock_selector,
     MarketSentiment,
     TradingPhase,
-    StockSelection
+    StockSelection,
 )
 from services.upstox_option_service import upstox_option_service
 from services.dynamic_risk_config import dynamic_risk_manager, MarketVolatility
 
 logger = logging.getLogger(__name__)
+
+
+def determine_option_direction_from_sentiment(
+    sentiment: MarketSentiment, change_percent: float = 0.0
+) -> str:
+    """
+    Determine option direction (CE/PE) based on market sentiment and stock movement
+
+    CRITICAL: Never use default values without considering market sentiment.
+    Wrong direction selection can lead to catastrophic losses.
+
+    Args:
+        sentiment: Current market sentiment
+        change_percent: Stock's change percentage for additional confirmation
+
+    Returns:
+        "CE" for bullish sentiment (buy calls), "PE" for bearish sentiment (buy puts)
+
+    Raises:
+        ValueError: If sentiment is invalid or cannot be determined
+    """
+    if not sentiment:
+        raise ValueError(
+            "Market sentiment is REQUIRED - cannot determine option direction without it"
+        )
+
+    # Map market sentiment to option direction
+    if sentiment in [MarketSentiment.VERY_BULLISH, MarketSentiment.BULLISH]:
+        # Bullish market - buy CALL options
+        logger.info(
+            f"Bullish sentiment ({sentiment.value}) - selecting CE (Call) options"
+        )
+        return "CE"
+    elif sentiment in [MarketSentiment.VERY_BEARISH, MarketSentiment.BEARISH]:
+        # Bearish market - buy PUT options
+        logger.info(
+            f"Bearish sentiment ({sentiment.value}) - selecting PE (Put) options"
+        )
+        return "PE"
+    else:
+        # Neutral market - use stock's own momentum as tiebreaker
+        if change_percent > 0.5:
+            logger.info(
+                f"Neutral sentiment with positive momentum ({change_percent:.2f}%) - selecting CE (Call) options"
+            )
+            return "CE"
+        elif change_percent < -0.5:
+            logger.info(
+                f"Neutral sentiment with negative momentum ({change_percent:.2f}%) - selecting PE (Put) options"
+            )
+            return "PE"
+        else:
+            # True neutral - this is risky, log warning
+            logger.warning(
+                f"NEUTRAL sentiment with minimal movement ({change_percent:.2f}%) - defaulting to CE but this is RISKY"
+            )
+            return "CE"
 
 
 @dataclass
@@ -58,6 +115,7 @@ class OptionContract:
         selected_at: Timestamp of selection
         valid_until: Validity timestamp
     """
+
     # Contract identification
     stock_symbol: str
     option_instrument_key: str
@@ -113,17 +171,18 @@ class EnhancedStockSelection(StockSelection):
         exit_conditions: Exit criteria for trade
         trailing_stop_loss: Trailing stop loss configuration
     """
+
     # Options contract information
     selected_option_contract: Optional[OptionContract] = None
     available_expiry_dates: List[str] = field(default_factory=list)
-    atm_strike: Decimal = Decimal('0.0')
-    recommended_strike: Decimal = Decimal('0.0')
+    atm_strike: Decimal = Decimal("0.0")
+    recommended_strike: Decimal = Decimal("0.0")
 
     # Options strategy parameters
-    capital_allocation: Decimal = Decimal('0.0')
-    max_loss: Decimal = Decimal('0.0')
-    target_profit: Decimal = Decimal('0.0')
-    risk_reward_ratio: Decimal = Decimal('0.0')
+    capital_allocation: Decimal = Decimal("0.0")
+    max_loss: Decimal = Decimal("0.0")
+    target_profit: Decimal = Decimal("0.0")
+    risk_reward_ratio: Decimal = Decimal("0.0")
 
     # Entry and exit conditions
     entry_conditions: Dict[str, Any] = field(default_factory=dict)
@@ -133,10 +192,11 @@ class EnhancedStockSelection(StockSelection):
 
 class ExpirySelectionStrategy(Enum):
     """Expiry selection strategies based on market conditions"""
-    NEAREST_WEEKLY = "nearest_weekly"      # Nearest Thursday expiry
-    NEAREST_MONTHLY = "nearest_monthly"    # Nearest monthly expiry
-    OPTIMAL_THETA = "optimal_theta"        # Best theta decay balance
-    HIGH_LIQUIDITY = "high_liquidity"      # Highest OI and volume
+
+    NEAREST_WEEKLY = "nearest_weekly"  # Nearest Thursday expiry
+    NEAREST_MONTHLY = "nearest_monthly"  # Nearest monthly expiry
+    OPTIMAL_THETA = "optimal_theta"  # Best theta decay balance
+    HIGH_LIQUIDITY = "high_liquidity"  # Highest OI and volume
 
 
 class EnhancedIntelligentOptionsService:
@@ -166,19 +226,17 @@ class EnhancedIntelligentOptionsService:
             "strike_selection_range": 5,
             "min_option_volume": 100,
             "min_open_interest": 500,
-            "max_premium_percentage": Decimal('5.0'),
-            "min_iv_threshold": Decimal('15.0'),
-            "max_iv_threshold": Decimal('40.0'),
-            "capital_per_stock": Decimal('50000'),
-            "max_risk_per_trade": Decimal('0.02'),
+            "max_premium_percentage": Decimal("5.0"),
+            "min_iv_threshold": Decimal("15.0"),
+            "max_iv_threshold": Decimal("40.0"),
+            "capital_per_stock": Decimal("50000"),
+            "max_risk_per_trade": Decimal("0.02"),
         }
 
         logger.info("Enhanced Intelligent Options Service initialized")
 
     async def enhance_selected_stocks_with_options(
-        self,
-        selected_stocks: List[StockSelection],
-        selection_type: str = "final"
+        self, selected_stocks: List[StockSelection], selection_type: str = "final"
     ) -> Dict[str, Any]:
         """
         Enhance already-selected stocks with option contracts
@@ -201,10 +259,12 @@ class EnhancedIntelligentOptionsService:
                 return {
                     "success": False,
                     "error": "No stocks provided for option enhancement",
-                    "enhanced_selections": []
+                    "enhanced_selections": [],
                 }
 
-            logger.info(f"Enhancing {len(selected_stocks)} selected stocks with option contracts")
+            logger.info(
+                f"Enhancing {len(selected_stocks)} selected stocks with option contracts"
+            )
 
             # Enhance with options contracts
             enhanced_selections = []
@@ -215,10 +275,14 @@ class EnhancedIntelligentOptionsService:
                     enhanced_stock = await self._enhance_stock_with_options(stock, db)
                     if enhanced_stock and enhanced_stock.selected_option_contract:
                         enhanced_selections.append(enhanced_stock)
-                        logger.info(f"Enhanced {stock.symbol} with {enhanced_stock.selected_option_contract.option_type} "
-                                  f"option at strike {enhanced_stock.selected_option_contract.strike_price}")
+                        logger.info(
+                            f"Enhanced {stock.symbol} with {enhanced_stock.selected_option_contract.option_type} "
+                            f"option at strike {enhanced_stock.selected_option_contract.strike_price}"
+                        )
                     else:
-                        logger.warning(f"Could not find suitable option contract for {stock.symbol}")
+                        logger.warning(
+                            f"Could not find suitable option contract for {stock.symbol}"
+                        )
             finally:
                 db.close()
 
@@ -237,16 +301,20 @@ class EnhancedIntelligentOptionsService:
                 "total_stocks": len(selected_stocks),
                 "enhanced_selections": [asdict(stock) for stock in enhanced_selections],
                 "options_contracts_found": len(enhanced_selections),
-                "total_capital_required": float(sum(s.capital_allocation for s in enhanced_selections)),
+                "total_capital_required": float(
+                    sum(s.capital_allocation for s in enhanced_selections)
+                ),
                 "options_ready": len(enhanced_selections) > 0,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
             # Save enhanced selections to database
             db_type = f"{selection_type}_options"
             await self._save_enhanced_selections_to_db(enhanced_selections, db_type)
 
-            logger.info(f"Options enhancement complete: {len(enhanced_selections)}/{len(selected_stocks)} stocks enhanced")
+            logger.info(
+                f"Options enhancement complete: {len(enhanced_selections)}/{len(selected_stocks)} stocks enhanced"
+            )
             return result
 
         except ValueError as ve:
@@ -256,11 +324,8 @@ class EnhancedIntelligentOptionsService:
             logger.error(f"Error in options enhancement: {e}")
             return {"success": False, "error": str(e)}
 
-
     async def _enhance_stock_with_options(
-        self,
-        stock_selection: StockSelection,
-        db: Session
+        self, stock_selection: StockSelection, db: Session
     ) -> Optional[EnhancedStockSelection]:
         """
         Enhance stock selection with options contract details
@@ -291,26 +356,58 @@ class EnhancedIntelligentOptionsService:
                 return None
 
             # Step 2: Select optimal expiry
-            selected_expiry = await self._select_optimal_expiry(expiry_dates, underlying_key, db)
+            selected_expiry = await self._select_optimal_expiry(
+                expiry_dates, underlying_key, db
+            )
             if not selected_expiry:
                 logger.warning(f"No suitable expiry found for {stock_selection.symbol}")
                 return None
 
             # Step 3: Get option chain for selected expiry
-            option_chain = await self._get_option_chain_async(underlying_key, selected_expiry, db)
-            if not option_chain or not option_chain.get('data'):
+            option_chain = await self._get_option_chain_async(
+                underlying_key, selected_expiry, db
+            )
+            if not option_chain or not option_chain.get("data"):
                 logger.warning(f"No option chain data for {stock_selection.symbol}")
                 return None
 
             # Step 4: Select optimal strike and option type
+            # CRITICAL: Determine option direction based on market sentiment
+            # Never default without considering market conditions
+            # TODO to check to correct the the ce or pe based on the marekt sentiment
+
+            options_direction = getattr(
+                stock_selection, "options_direction", None
+            ) or getattr(stock_selection, "option_type", None)
+
+            # If not available in selection, determine from current market sentiment
+            if not options_direction:
+                current_sentiment = self.base_selector.current_sentiment
+                change_percent = float(getattr(stock_selection, "change_percent", 0.0))
+
+                if not current_sentiment:
+                    error_msg = f"Cannot determine option direction for {stock_selection.symbol} - market sentiment unavailable"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+
+                options_direction = determine_option_direction_from_sentiment(
+                    current_sentiment, change_percent
+                )
+                logger.info(
+                    f"Determined option direction for {stock_selection.symbol}: {options_direction} based on {current_sentiment.value} sentiment"
+                )
+
+            # TODO correct as per the current price as it should be ltp at time of stock selected for selcting the ATM strike price
             optimal_contract = await self._select_optimal_option_contract(
                 option_chain,
-                stock_selection.options_direction,
-                Decimal(str(stock_selection.ltp))
+                options_direction,
+                Decimal(str(stock_selection.price_at_selection)),
             )
 
             if not optimal_contract:
-                logger.warning(f"No suitable option contract for {stock_selection.symbol}")
+                logger.warning(
+                    f"No suitable option contract for {stock_selection.symbol}"
+                )
                 return None
 
             # Step 5: Create enhanced selection
@@ -318,7 +415,7 @@ class EnhancedIntelligentOptionsService:
                 **asdict(stock_selection),
                 selected_option_contract=optimal_contract,
                 available_expiry_dates=expiry_dates,
-                atm_strike=Decimal(str(option_chain.get('atm_strike', 0.0))),
+                atm_strike=Decimal(str(option_chain.get("atm_strike", 0.0))),
                 recommended_strike=optimal_contract.strike_price,
             )
 
@@ -328,16 +425,18 @@ class EnhancedIntelligentOptionsService:
             return enhanced_selection
 
         except ValueError as ve:
-            logger.error(f"Validation error enhancing stock with options for {stock_selection.symbol}: {ve}")
+            logger.error(
+                f"Validation error enhancing stock with options for {stock_selection.symbol}: {ve}"
+            )
             return None
         except Exception as e:
-            logger.error(f"Error enhancing stock with options for {stock_selection.symbol}: {e}")
+            logger.error(
+                f"Error enhancing stock with options for {stock_selection.symbol}: {e}"
+            )
             return None
 
     async def _get_available_expiry_dates(
-        self,
-        underlying_key: str,
-        db: Session
+        self, underlying_key: str, db: Session
     ) -> List[str]:
         """
         Get available expiry dates for the underlying
@@ -362,30 +461,36 @@ class EnhancedIntelligentOptionsService:
                 return []
 
             # Extract unique expiry dates
-            expiry_dates = list(set(contract.get('expiry') for contract in contracts if contract.get('expiry')))
+            expiry_dates = list(
+                set(
+                    contract.get("expiry")
+                    for contract in contracts
+                    if contract.get("expiry")
+                )
+            )
             expiry_dates.sort()
 
             # Filter only future expiry dates
             today = datetime.now().date()
             future_expiries = [
-                expiry for expiry in expiry_dates
-                if datetime.strptime(expiry, '%Y-%m-%d').date() > today
+                expiry
+                for expiry in expiry_dates
+                if datetime.strptime(expiry, "%Y-%m-%d").date() > today
             ]
 
             return future_expiries[:10]
 
         except ValueError as ve:
-            logger.error(f"Validation error getting expiry dates for {underlying_key}: {ve}")
+            logger.error(
+                f"Validation error getting expiry dates for {underlying_key}: {ve}"
+            )
             return []
         except Exception as e:
             logger.error(f"Error getting expiry dates for {underlying_key}: {e}")
             return []
 
     async def _select_optimal_expiry(
-        self,
-        expiry_dates: List[str],
-        underlying_key: str,
-        db: Session
+        self, expiry_dates: List[str], underlying_key: str, db: Session
     ) -> Optional[str]:
         """
         Select optimal expiry based on strategy and liquidity
@@ -411,7 +516,7 @@ class EnhancedIntelligentOptionsService:
             if strategy == ExpirySelectionStrategy.NEAREST_WEEKLY:
                 # Find nearest Thursday (weekly expiry)
                 for expiry in expiry_dates:
-                    expiry_date = datetime.strptime(expiry, '%Y-%m-%d').date()
+                    expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
                     if expiry_date.weekday() == 3:  # Thursday
                         return expiry
 
@@ -421,7 +526,7 @@ class EnhancedIntelligentOptionsService:
             elif strategy == ExpirySelectionStrategy.NEAREST_MONTHLY:
                 # Find nearest monthly expiry (last Thursday of month)
                 for expiry in expiry_dates:
-                    expiry_date = datetime.strptime(expiry, '%Y-%m-%d').date()
+                    expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
                     if expiry_date.weekday() == 3:  # Thursday
                         # Check if it's last Thursday of month
                         next_week = expiry_date + timedelta(days=7)
@@ -435,7 +540,7 @@ class EnhancedIntelligentOptionsService:
                 # Select expiry with optimal time decay (7-21 days)
                 optimal_expiries = []
                 for expiry in expiry_dates:
-                    expiry_date = datetime.strptime(expiry, '%Y-%m-%d').date()
+                    expiry_date = datetime.strptime(expiry, "%Y-%m-%d").date()
                     days_to_expiry = (expiry_date - today).days
                     if 7 <= days_to_expiry <= 21:
                         optimal_expiries.append(expiry)
@@ -448,9 +553,13 @@ class EnhancedIntelligentOptionsService:
                 max_liquidity_score = 0
 
                 for expiry in expiry_dates[:3]:
-                    chain = await self._get_option_chain_async(underlying_key, expiry, db)
-                    if chain and chain.get('analytics'):
-                        total_oi = chain['analytics'].get('total_call_oi', 0) + chain['analytics'].get('total_put_oi', 0)
+                    chain = await self._get_option_chain_async(
+                        underlying_key, expiry, db
+                    )
+                    if chain and chain.get("analytics"):
+                        total_oi = chain["analytics"].get("total_call_oi", 0) + chain[
+                            "analytics"
+                        ].get("total_put_oi", 0)
                         liquidity_score = total_oi
 
                         if liquidity_score > max_liquidity_score:
@@ -470,10 +579,7 @@ class EnhancedIntelligentOptionsService:
             return expiry_dates[0] if expiry_dates else None
 
     async def _get_option_chain_async(
-        self,
-        underlying_key: str,
-        expiry_date: str,
-        db: Session
+        self, underlying_key: str, expiry_date: str, db: Session
     ) -> Optional[Dict[str, Any]]:
         """
         Async wrapper for option chain fetching
@@ -500,7 +606,7 @@ class EnhancedIntelligentOptionsService:
                 self.option_service.get_option_chain,
                 underlying_key,
                 expiry_date,
-                db
+                db,
             )
             return option_chain
         except ValueError as ve:
@@ -514,7 +620,7 @@ class EnhancedIntelligentOptionsService:
         self,
         option_chain: Dict[str, Any],
         option_direction: str,
-        underlying_price: Decimal
+        underlying_price: Decimal,
     ) -> Optional[OptionContract]:
         """
         Select optimal option contract based on direction and criteria
@@ -538,38 +644,38 @@ class EnhancedIntelligentOptionsService:
             raise ValueError("Underlying price must be positive")
 
         try:
-            chain_data = option_chain.get('data', [])
+            chain_data = option_chain.get("data", [])
             if not chain_data:
                 return None
 
-            atm_strike = Decimal(str(option_chain.get('atm_strike', underlying_price)))
-            spot_price = Decimal(str(option_chain.get('spot_price', underlying_price)))
+            atm_strike = Decimal(str(option_chain.get("atm_strike", underlying_price)))
+            spot_price = Decimal(str(option_chain.get("spot_price", underlying_price)))
 
             # Filter contracts by option type and liquidity
             eligible_contracts = []
 
             for strike_data in chain_data:
-                strike_price = Decimal(str(strike_data.get('strike_price', 0)))
+                strike_price = Decimal(str(strike_data.get("strike_price", 0)))
 
                 # Get option data based on direction
                 option_data = None
                 option_type = option_direction
 
-                if option_direction == "CE" and strike_data.get('call_options'):
-                    option_data = strike_data['call_options']
-                elif option_direction == "PE" and strike_data.get('put_options'):
-                    option_data = strike_data['put_options']
+                if option_direction == "CE" and strike_data.get("call_options"):
+                    option_data = strike_data["call_options"]
+                elif option_direction == "PE" and strike_data.get("put_options"):
+                    option_data = strike_data["put_options"]
                 else:
                     continue
 
-                market_data = option_data.get('market_data', {})
-                option_greeks = option_data.get('option_greeks', {})
+                market_data = option_data.get("market_data", {})
+                option_greeks = option_data.get("option_greeks", {})
 
                 # Extract and validate data
-                volume = int(market_data.get('volume', 0))
-                oi = int(market_data.get('oi', 0))
-                premium = Decimal(str(market_data.get('ltp', 0)))
-                iv = Decimal(str(option_greeks.get('iv', 0)))
+                volume = int(market_data.get("volume", 0))
+                oi = int(market_data.get("oi", 0))
+                premium = Decimal(str(market_data.get("ltp", 0)))
+                iv = Decimal(str(option_greeks.get("iv", 0)))
 
                 # Apply filters
                 min_volume = self.options_config["min_option_volume"]
@@ -577,71 +683,83 @@ class EnhancedIntelligentOptionsService:
                 min_iv = self.options_config["min_iv_threshold"]
                 max_iv = self.options_config["max_iv_threshold"]
 
-                if (volume >= min_volume and
-                    oi >= min_oi and
-                    premium > 0 and
-                    min_iv <= iv <= max_iv):
+                if (
+                    volume >= min_volume
+                    and oi >= min_oi
+                    and premium > 0
+                    and min_iv <= iv <= max_iv
+                ):
 
                     # Calculate selection criteria
                     distance_from_atm = abs(strike_price - atm_strike)
-                    premium_percentage = (premium / spot_price) * Decimal('100')
+                    premium_percentage = (premium / spot_price) * Decimal("100")
 
-                    if premium_percentage <= self.options_config["max_premium_percentage"]:
+                    if (
+                        premium_percentage
+                        <= self.options_config["max_premium_percentage"]
+                    ):
                         selection_score = self._calculate_option_selection_score(
                             distance_from_atm, premium, volume, oi, iv
                         )
 
-                        eligible_contracts.append({
-                            'strike_data': strike_data,
-                            'option_data': option_data,
-                            'option_type': option_type,
-                            'strike_price': strike_price,
-                            'distance_from_atm': distance_from_atm,
-                            'premium': premium,
-                            'volume': volume,
-                            'oi': oi,
-                            'iv': iv,
-                            'market_data': market_data,
-                            'option_greeks': option_greeks,
-                            'selection_score': selection_score
-                        })
+                        eligible_contracts.append(
+                            {
+                                "strike_data": strike_data,
+                                "option_data": option_data,
+                                "option_type": option_type,
+                                "strike_price": strike_price,
+                                "distance_from_atm": distance_from_atm,
+                                "premium": premium,
+                                "volume": volume,
+                                "oi": oi,
+                                "iv": iv,
+                                "market_data": market_data,
+                                "option_greeks": option_greeks,
+                                "selection_score": selection_score,
+                            }
+                        )
 
             if not eligible_contracts:
                 logger.warning(f"No eligible {option_direction} contracts found")
                 return None
 
             # Select best contract based on selection score
-            best_contract = max(eligible_contracts, key=lambda x: x['selection_score'])
+            best_contract = max(eligible_contracts, key=lambda x: x["selection_score"])
 
             # Create OptionContract object
             option_contract = OptionContract(
-                stock_symbol=option_chain.get('underlying_key', '').split('|')[-1],
-                option_instrument_key=best_contract['option_data'].get('instrument_key', ''),
-                underlying_instrument_key=option_chain.get('underlying_key', ''),
-                option_type=best_contract['option_type'],
-                strike_price=best_contract['strike_price'],
-                expiry_date=option_chain.get('expiry', ''),
-
-                premium=best_contract['premium'],
-                volume=best_contract['volume'],
-                open_interest=best_contract['oi'],
-                bid_price=Decimal(str(best_contract['market_data'].get('bid_price', 0))),
-                ask_price=Decimal(str(best_contract['market_data'].get('ask_price', 0))),
-
-                delta=Decimal(str(best_contract['option_greeks'].get('delta', 0))),
-                gamma=Decimal(str(best_contract['option_greeks'].get('gamma', 0))),
-                theta=Decimal(str(best_contract['option_greeks'].get('theta', 0))),
-                vega=Decimal(str(best_contract['option_greeks'].get('vega', 0))),
-                implied_volatility=best_contract['iv'],
-
-                lot_size=int(best_contract['option_data'].get('lot_size', 25)),
-                minimum_lot=int(best_contract['option_data'].get('minimum_lot', 1)),
-                freeze_quantity=int(best_contract['option_data'].get('freeze_quantity', 500)),
-
+                stock_symbol=option_chain.get("underlying_key", "").split("|")[-1],
+                option_instrument_key=best_contract["option_data"].get(
+                    "instrument_key", ""
+                ),
+                underlying_instrument_key=option_chain.get("underlying_key", ""),
+                option_type=best_contract["option_type"],
+                strike_price=best_contract["strike_price"],
+                expiry_date=option_chain.get("expiry", ""),
+                premium=best_contract["premium"],
+                volume=best_contract["volume"],
+                open_interest=best_contract["oi"],
+                bid_price=Decimal(
+                    str(best_contract["market_data"].get("bid_price", 0))
+                ),
+                ask_price=Decimal(
+                    str(best_contract["market_data"].get("ask_price", 0))
+                ),
+                delta=Decimal(str(best_contract["option_greeks"].get("delta", 0))),
+                gamma=Decimal(str(best_contract["option_greeks"].get("gamma", 0))),
+                theta=Decimal(str(best_contract["option_greeks"].get("theta", 0))),
+                vega=Decimal(str(best_contract["option_greeks"].get("vega", 0))),
+                implied_volatility=best_contract["iv"],
+                lot_size=int(best_contract["option_data"].get("lot_size", 25)),
+                minimum_lot=int(best_contract["option_data"].get("minimum_lot", 1)),
+                freeze_quantity=int(
+                    best_contract["option_data"].get("freeze_quantity", 500)
+                ),
                 selection_reason=f"Best {option_direction} contract: Strike {best_contract['strike_price']}, IV {best_contract['iv']:.1f}%, OI {best_contract['oi']}",
-                confidence_score=min(best_contract['selection_score'] / Decimal('100'), Decimal('1.0')),
-                risk_reward_ratio=Decimal('0.0'),
-
+                confidence_score=min(
+                    best_contract["selection_score"] / Decimal("100"), Decimal("1.0")
+                ),
+                risk_reward_ratio=Decimal("0.0"),
                 selected_at=datetime.now().isoformat(),
                 valid_until=(datetime.now().replace(hour=15, minute=30)).isoformat(),
             )
@@ -661,7 +779,7 @@ class EnhancedIntelligentOptionsService:
         premium: Decimal,
         volume: int,
         oi: int,
-        iv: Decimal
+        iv: Decimal,
     ) -> Decimal:
         """
         Calculate selection score for option contract
@@ -680,33 +798,42 @@ class EnhancedIntelligentOptionsService:
             # Scoring factors (0-100 scale)
 
             # 1. Distance from ATM (prefer ATM or slightly OTM)
-            distance_score = max(Decimal('0'), Decimal('100') - (distance_from_atm / Decimal('50')) * Decimal('100'))
+            distance_score = max(
+                Decimal("0"),
+                Decimal("100") - (distance_from_atm / Decimal("50")) * Decimal("100"),
+            )
 
             # 2. Liquidity (volume + OI)
-            liquidity_score = min(Decimal('100'), (Decimal(str(volume + oi)) / Decimal('100')))
+            liquidity_score = min(
+                Decimal("100"), (Decimal(str(volume + oi)) / Decimal("100"))
+            )
 
             # 3. IV score (prefer moderate IV)
-            iv_optimal = Decimal('25.0')
-            iv_score = max(Decimal('0'), Decimal('100') - abs(iv - iv_optimal) * Decimal('2'))
+            iv_optimal = Decimal("25.0")
+            iv_score = max(
+                Decimal("0"), Decimal("100") - abs(iv - iv_optimal) * Decimal("2")
+            )
 
             # 4. Premium score (prefer reasonable premiums)
-            premium_score = min(Decimal('100'), premium * Decimal('10'))
+            premium_score = min(Decimal("100"), premium * Decimal("10"))
 
             # Weighted final score
             final_score = (
-                distance_score * Decimal('0.4') +
-                liquidity_score * Decimal('0.3') +
-                iv_score * Decimal('0.2') +
-                premium_score * Decimal('0.1')
+                distance_score * Decimal("0.4")
+                + liquidity_score * Decimal("0.3")
+                + iv_score * Decimal("0.2")
+                + premium_score * Decimal("0.1")
             )
 
             return final_score
 
         except Exception as e:
             logger.error(f"Error calculating option selection score: {e}")
-            return Decimal('0.0')
+            return Decimal("0.0")
 
-    async def _calculate_capital_allocation(self, selections: List[EnhancedStockSelection]):
+    async def _calculate_capital_allocation(
+        self, selections: List[EnhancedStockSelection]
+    ):
         """
         Calculate capital allocation and risk parameters using dynamic risk config
 
@@ -722,7 +849,11 @@ class EnhancedIntelligentOptionsService:
                 return
 
             # Get current market sentiment for risk adjustment
-            current_sentiment = self.base_selector.current_sentiment.value if self.base_selector.current_sentiment else "neutral"
+            current_sentiment = (
+                self.base_selector.current_sentiment.value
+                if self.base_selector.current_sentiment
+                else "neutral"
+            )
 
             # Determine market volatility
             volatility_level = MarketVolatility.MEDIUM
@@ -733,13 +864,19 @@ class EnhancedIntelligentOptionsService:
             )
 
             # Get position size limits
-            total_capital = self.options_config["capital_per_stock"] * Decimal('10')
-            position_limits = dynamic_risk_manager.get_position_size_limits(float(total_capital))
+            total_capital = self.options_config["capital_per_stock"] * Decimal("10")
+            position_limits = dynamic_risk_manager.get_position_size_limits(
+                float(total_capital)
+            )
 
             # Dynamic risk parameters
-            max_loss_per_position = Decimal(str(adjusted_risk_config.max_loss_per_position))
+            max_loss_per_position = Decimal(
+                str(adjusted_risk_config.max_loss_per_position)
+            )
             max_total_exposure = Decimal(str(adjusted_risk_config.max_total_exposure))
-            position_size_multiplier = Decimal(str(adjusted_risk_config.position_size_multiplier))
+            position_size_multiplier = Decimal(
+                str(adjusted_risk_config.position_size_multiplier)
+            )
 
             logger.info("Dynamic Risk Config Applied:")
             logger.info(f"   Max loss per position: {max_loss_per_position*100:.1f}%")
@@ -756,8 +893,12 @@ class EnhancedIntelligentOptionsService:
 
                 if premium > 0 and lot_size > 0:
                     # Calculate position size
-                    base_capital_per_position = Decimal(str(position_limits["recommended_position_capital"]))
-                    adjusted_capital = base_capital_per_position * position_size_multiplier
+                    base_capital_per_position = Decimal(
+                        str(position_limits["recommended_position_capital"])
+                    )
+                    adjusted_capital = (
+                        base_capital_per_position * position_size_multiplier
+                    )
 
                     # Calculate maximum lots
                     max_lots_by_capital = int(adjusted_capital / (premium * lot_size))
@@ -765,21 +906,35 @@ class EnhancedIntelligentOptionsService:
                     max_lots_by_risk = int(max_loss_amount / (premium * lot_size))
 
                     max_allowed_lots = min(adjusted_risk_config.max_positions, 10)
-                    recommended_lots = min(max_lots_by_capital, max_lots_by_risk, max_allowed_lots)
+                    recommended_lots = min(
+                        max_lots_by_capital, max_lots_by_risk, max_allowed_lots
+                    )
                     recommended_lots = max(1, recommended_lots)
 
                     # Calculate capital allocation
                     selection.capital_allocation = premium * lot_size * recommended_lots
                     selection.max_loss = selection.capital_allocation
 
-                    target_multiplier = Decimal(str(adjusted_risk_config.profit_booking_levels[-1])) if adjusted_risk_config.profit_booking_levels else Decimal('1.5')
-                    selection.target_profit = selection.capital_allocation * target_multiplier
-                    selection.risk_reward_ratio = selection.target_profit / selection.max_loss if selection.max_loss > 0 else Decimal('0')
+                    target_multiplier = (
+                        Decimal(str(adjusted_risk_config.profit_booking_levels[-1]))
+                        if adjusted_risk_config.profit_booking_levels
+                        else Decimal("1.5")
+                    )
+                    selection.target_profit = (
+                        selection.capital_allocation * target_multiplier
+                    )
+                    selection.risk_reward_ratio = (
+                        selection.target_profit / selection.max_loss
+                        if selection.max_loss > 0
+                        else Decimal("0")
+                    )
 
                     contract.risk_reward_ratio = selection.risk_reward_ratio
 
                     logger.info(f"Dynamic capital allocation for {selection.symbol}:")
-                    logger.info(f"   Capital: Rs.{selection.capital_allocation:,.0f} ({recommended_lots} lots)")
+                    logger.info(
+                        f"   Capital: Rs.{selection.capital_allocation:,.0f} ({recommended_lots} lots)"
+                    )
                     logger.info(f"   Max Loss: Rs.{selection.max_loss:,.0f}")
                     logger.info(f"   Target Profit: Rs.{selection.target_profit:,.0f}")
 
@@ -823,9 +978,13 @@ class EnhancedIntelligentOptionsService:
 
             # Trailing stop loss
             selection.trailing_stop_loss = {
-                "activation_profit": float(selection.capital_allocation * Decimal('0.5')),
+                "activation_profit": float(
+                    selection.capital_allocation * Decimal("0.5")
+                ),
                 "trail_percentage": 20,
-                "minimum_profit_lock": float(selection.capital_allocation * Decimal('0.3')),
+                "minimum_profit_lock": float(
+                    selection.capital_allocation * Decimal("0.3")
+                ),
             }
 
         except ValueError as ve:
@@ -833,7 +992,9 @@ class EnhancedIntelligentOptionsService:
         except Exception as e:
             logger.error(f"Error calculating entry/exit conditions: {e}")
 
-    async def _validate_existing_options_contracts(self) -> List[EnhancedStockSelection]:
+    async def _validate_existing_options_contracts(
+        self,
+    ) -> List[EnhancedStockSelection]:
         """
         Validate existing options contracts are still tradeable
 
@@ -853,14 +1014,13 @@ class EnhancedIntelligentOptionsService:
                     option_chain = await self._get_option_chain_async(
                         selection.selected_option_contract.underlying_instrument_key,
                         selection.selected_option_contract.expiry_date,
-                        db
+                        db,
                     )
 
-                    if option_chain and option_chain.get('data'):
+                    if option_chain and option_chain.get("data"):
                         # Update contract with latest data
                         updated_contract = await self._update_option_contract_data(
-                            selection.selected_option_contract,
-                            option_chain
+                            selection.selected_option_contract, option_chain
                         )
 
                         if updated_contract:
@@ -876,9 +1036,7 @@ class EnhancedIntelligentOptionsService:
             return []
 
     async def _update_option_contract_data(
-        self,
-        contract: OptionContract,
-        option_chain: Dict[str, Any]
+        self, contract: OptionContract, option_chain: Dict[str, Any]
     ) -> Optional[OptionContract]:
         """
         Update option contract with latest market data
@@ -897,33 +1055,58 @@ class EnhancedIntelligentOptionsService:
             raise ValueError("Contract and option chain are required")
 
         try:
-            chain_data = option_chain.get('data', [])
+            chain_data = option_chain.get("data", [])
 
             for strike_data in chain_data:
-                if Decimal(str(strike_data.get('strike_price'))) == contract.strike_price:
+                if (
+                    Decimal(str(strike_data.get("strike_price")))
+                    == contract.strike_price
+                ):
                     # Find matching option type
                     option_data = None
-                    if contract.option_type == "CE" and strike_data.get('call_options'):
-                        option_data = strike_data['call_options']
-                    elif contract.option_type == "PE" and strike_data.get('put_options'):
-                        option_data = strike_data['put_options']
+                    if contract.option_type == "CE" and strike_data.get("call_options"):
+                        option_data = strike_data["call_options"]
+                    elif contract.option_type == "PE" and strike_data.get(
+                        "put_options"
+                    ):
+                        option_data = strike_data["put_options"]
 
                     if option_data:
-                        market_data = option_data.get('market_data', {})
-                        option_greeks = option_data.get('option_greeks', {})
+                        market_data = option_data.get("market_data", {})
+                        option_greeks = option_data.get("option_greeks", {})
 
                         # Update with fresh data
-                        contract.premium = Decimal(str(market_data.get('ltp', contract.premium)))
-                        contract.volume = int(market_data.get('volume', contract.volume))
-                        contract.open_interest = int(market_data.get('oi', contract.open_interest))
-                        contract.bid_price = Decimal(str(market_data.get('bid_price', contract.bid_price)))
-                        contract.ask_price = Decimal(str(market_data.get('ask_price', contract.ask_price)))
+                        contract.premium = Decimal(
+                            str(market_data.get("ltp", contract.premium))
+                        )
+                        contract.volume = int(
+                            market_data.get("volume", contract.volume)
+                        )
+                        contract.open_interest = int(
+                            market_data.get("oi", contract.open_interest)
+                        )
+                        contract.bid_price = Decimal(
+                            str(market_data.get("bid_price", contract.bid_price))
+                        )
+                        contract.ask_price = Decimal(
+                            str(market_data.get("ask_price", contract.ask_price))
+                        )
 
-                        contract.delta = Decimal(str(option_greeks.get('delta', contract.delta)))
-                        contract.gamma = Decimal(str(option_greeks.get('gamma', contract.gamma)))
-                        contract.theta = Decimal(str(option_greeks.get('theta', contract.theta)))
-                        contract.vega = Decimal(str(option_greeks.get('vega', contract.vega)))
-                        contract.implied_volatility = Decimal(str(option_greeks.get('iv', contract.implied_volatility)))
+                        contract.delta = Decimal(
+                            str(option_greeks.get("delta", contract.delta))
+                        )
+                        contract.gamma = Decimal(
+                            str(option_greeks.get("gamma", contract.gamma))
+                        )
+                        contract.theta = Decimal(
+                            str(option_greeks.get("theta", contract.theta))
+                        )
+                        contract.vega = Decimal(
+                            str(option_greeks.get("vega", contract.vega))
+                        )
+                        contract.implied_volatility = Decimal(
+                            str(option_greeks.get("iv", contract.implied_volatility))
+                        )
 
                         return contract
 
@@ -937,9 +1120,7 @@ class EnhancedIntelligentOptionsService:
             return None
 
     async def _save_enhanced_selections_to_db(
-        self,
-        selections: List[EnhancedStockSelection],
-        selection_type: str
+        self, selections: List[EnhancedStockSelection], selection_type: str
     ) -> bool:
         """
         Save enhanced selections with options data to database
@@ -968,7 +1149,7 @@ class EnhancedIntelligentOptionsService:
                 # Clear existing selections
                 db.query(SelectedStock).filter(
                     SelectedStock.selection_date == today,
-                    SelectedStock.selection_reason.like(f"{selection_type}%")
+                    SelectedStock.selection_reason.like(f"{selection_type}%"),
                 ).delete()
 
                 # Save new selections
@@ -979,10 +1160,15 @@ class EnhancedIntelligentOptionsService:
                     contract = selection.selected_option_contract
 
                     # Prepare metadata
+                    # Handle both StockSelection dataclass (has options_direction) and database model (has option_type)
+                    sentiment_direction = getattr(
+                        selection, "options_direction", None
+                    ) or getattr(selection, "option_type", contract.option_type)
+
                     enhanced_metadata = {
                         "stock_symbol": selection.symbol,
                         "sector": selection.sector,
-                        "sentiment_direction": selection.options_direction,
+                        "sentiment_direction": sentiment_direction,
                         "final_score": float(selection.final_score),
                         "option_instrument_key": contract.option_instrument_key,
                         "option_type": contract.option_type,
@@ -1017,12 +1203,14 @@ class EnhancedIntelligentOptionsService:
                         change_percent_at_selection=float(selection.change_percent),
                         sector=selection.sector,
                         score_breakdown=str(enhanced_metadata),
-                        is_active=True
+                        is_active=True,
                     )
                     db.add(selected_stock)
 
                 db.commit()
-                logger.info(f"Saved {len(selections)} enhanced options selections to database")
+                logger.info(
+                    f"Saved {len(selections)} enhanced options selections to database"
+                )
                 return True
 
             except Exception as e:
@@ -1052,6 +1240,7 @@ class EnhancedIntelligentOptionsService:
         try:
             if db is None:
                 from database.connection import SessionLocal
+
                 db = SessionLocal()
                 should_close = True
             else:
@@ -1062,11 +1251,15 @@ class EnhancedIntelligentOptionsService:
                 import json
 
                 # Query SelectedStock table for today's selections with options
-                selected_stocks = db.query(SelectedStock).filter(
-                    SelectedStock.selection_date == date.today(),
-                    SelectedStock.is_active == True,
-                    SelectedStock.option_contract.isnot(None)
-                ).all()
+                selected_stocks = (
+                    db.query(SelectedStock)
+                    .filter(
+                        SelectedStock.selection_date == date.today(),
+                        SelectedStock.is_active == True,
+                        SelectedStock.option_contract.isnot(None),
+                    )
+                    .all()
+                )
 
                 selections = []
                 for stock in selected_stocks:
@@ -1091,7 +1284,9 @@ class EnhancedIntelligentOptionsService:
                         "symbol": stock.symbol,
                         "instrument_key": stock.instrument_key,
                         "option_type": stock.option_type,
-                        "option_instrument_key": option_data.get("option_instrument_key"),
+                        "option_instrument_key": option_data.get(
+                            "option_instrument_key"
+                        ),
                         "strike_price": option_data.get("strike_price", 0),
                         "expiry_date": stock.option_expiry_date,
                         "premium": option_data.get("premium", 0),
@@ -1105,11 +1300,13 @@ class EnhancedIntelligentOptionsService:
                         "target_profit": score_data.get("target_profit", 0),
                         "position_size_lots": score_data.get("position_size_lots", 1),
                         "selection_score": stock.selection_score,
-                        "sector": stock.sector
+                        "sector": stock.sector,
                     }
                     selections.append(selection)
 
-                logger.info(f"Retrieved {len(selections)} final options selections from database")
+                logger.info(
+                    f"Retrieved {len(selections)} final options selections from database"
+                )
                 return selections
 
             finally:
@@ -1134,7 +1331,7 @@ class EnhancedIntelligentOptionsService:
                 return {
                     "status": "no_selections",
                     "message": "No final options selections available",
-                    "ready_for_trading": False
+                    "ready_for_trading": False,
                 }
 
             total_capital = sum(s.capital_allocation for s in final_selections)
@@ -1145,21 +1342,39 @@ class EnhancedIntelligentOptionsService:
                 "status": "ready",
                 "total_selections": len(final_selections),
                 "ready_for_trading": True,
-
                 "capital_summary": {
                     "total_capital_required": float(total_capital),
                     "total_max_loss": float(total_max_loss),
                     "total_target_profit": float(total_target_profit),
-                    "overall_risk_reward": float(total_target_profit / total_max_loss) if total_max_loss > 0 else 0,
+                    "overall_risk_reward": (
+                        float(total_target_profit / total_max_loss)
+                        if total_max_loss > 0
+                        else 0
+                    ),
                 },
-
                 "selections_breakdown": [
                     {
                         "symbol": s.symbol,
-                        "option_type": s.selected_option_contract.option_type if s.selected_option_contract else "N/A",
-                        "strike": float(s.selected_option_contract.strike_price) if s.selected_option_contract else 0,
-                        "expiry": s.selected_option_contract.expiry_date if s.selected_option_contract else "N/A",
-                        "premium": float(s.selected_option_contract.premium) if s.selected_option_contract else 0,
+                        "option_type": (
+                            s.selected_option_contract.option_type
+                            if s.selected_option_contract
+                            else "N/A"
+                        ),
+                        "strike": (
+                            float(s.selected_option_contract.strike_price)
+                            if s.selected_option_contract
+                            else 0
+                        ),
+                        "expiry": (
+                            s.selected_option_contract.expiry_date
+                            if s.selected_option_contract
+                            else "N/A"
+                        ),
+                        "premium": (
+                            float(s.selected_option_contract.premium)
+                            if s.selected_option_contract
+                            else 0
+                        ),
                         "capital": float(s.capital_allocation),
                         "max_loss": float(s.max_loss),
                         "target_profit": float(s.target_profit),
@@ -1167,11 +1382,9 @@ class EnhancedIntelligentOptionsService:
                     }
                     for s in final_selections
                 ],
-
                 "expiry_distribution": {},
                 "option_type_distribution": {},
                 "sector_distribution": {},
-
                 "timestamp": datetime.now().isoformat(),
             }
 
@@ -1186,7 +1399,9 @@ class EnhancedIntelligentOptionsService:
                     expiry_counts[expiry] = expiry_counts.get(expiry, 0) + 1
 
                     option_type = selection.selected_option_contract.option_type
-                    option_type_counts[option_type] = option_type_counts.get(option_type, 0) + 1
+                    option_type_counts[option_type] = (
+                        option_type_counts.get(option_type, 0) + 1
+                    )
 
                 sector = selection.sector
                 sector_counts[sector] = sector_counts.get(sector, 0) + 1
@@ -1199,11 +1414,7 @@ class EnhancedIntelligentOptionsService:
 
         except Exception as e:
             logger.error(f"Error getting options trading summary: {e}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "ready_for_trading": False
-            }
+            return {"status": "error", "error": str(e), "ready_for_trading": False}
 
 
 # Create singleton instance

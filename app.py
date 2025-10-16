@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import platform
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from contextlib import asynccontextmanager
 import uvicorn
 import socketio
@@ -85,6 +85,14 @@ except ImportError as e:
     market_analytics_router = APIRouter()  # Dummy router
     MARKET_ANALYTICS_ROUTER_AVAILABLE = False
 
+from services.realtime_market_engine import (
+    get_market_engine,
+    get_live_analytics,
+    is_analytics_data_ready,
+    get_analytics_status,
+)
+
+
 # Import other services
 # Removed auto_stock_selection_service - using intelligent_stock_selection_service instead
 
@@ -107,7 +115,8 @@ from ws_router.upstox_ltp_ws import ws_upstox_router
 from router.backtest_router import backtesting_router
 from router.stock_router import router as stock_router
 from router.profile_router import router as profile_router
-from router.paper_trading_router import router as paper_trading_router
+
+# from router.paper_trading_router import router as paper_trading_router
 from router.notification_router import router as notification_router
 
 # from router.instrument_routes import router as instrument_router
@@ -121,17 +130,17 @@ from router.paper_trading_routes import router as paper_trading_router
 from router.option_routes import option_router
 
 
-try:
-    from router.auto_trading_routes import router as auto_trading_router
+# try:
+#     from router.auto_trading_routes import router as auto_trading_router
 
-    AUTO_TRADING_AVAILABLE = True
-    logger.info("✅ Auto Trading routes imported successfully")
-except ImportError as e:
-    from fastapi import APIRouter
+#     AUTO_TRADING_AVAILABLE = True
+#     logger.info("✅ Auto Trading routes imported successfully")
+# except ImportError as e:
+#     from fastapi import APIRouter
 
-    auto_trading_router = APIRouter()  # Dummy router
-    AUTO_TRADING_AVAILABLE = False
-    logger.warning(f"⚠️ Auto Trading services not available: {e}")
+#     auto_trading_router = APIRouter()  # Dummy router
+#     AUTO_TRADING_AVAILABLE = False
+#     logger.warning(f"⚠️ Auto Trading services not available: {e}")
 
 try:
     from router.trading_execution_router import router as trading_execution_router
@@ -145,19 +154,19 @@ except ImportError as e:
     TRADING_EXECUTION_AVAILABLE = False
     logger.warning(f"⚠️ Trading Execution services not available: {e}")
 
-try:
-    from router.trading_stock_selection_router_old import (
-        router as trading_stock_selection_router,
-    )
+# try:
+#     from router.trading_stock_selection_router_old import (
+#         router as trading_stock_selection_router,
+#     )
 
-    TRADING_STOCK_SELECTION_AVAILABLE = True
-    logger.info("✅ Trading Stock Selection routes imported successfully")
-except ImportError as e:
-    from fastapi import APIRouter
+#     TRADING_STOCK_SELECTION_AVAILABLE = True
+#     logger.info("✅ Trading Stock Selection routes imported successfully")
+# except ImportError as e:
+#     from fastapi import APIRouter
 
-    trading_stock_selection_router = APIRouter()
-    TRADING_STOCK_SELECTION_AVAILABLE = False
-    logger.warning(f"⚠️ Trading Stock Selection services not available: {e}")
+#     trading_stock_selection_router = APIRouter()
+#     TRADING_STOCK_SELECTION_AVAILABLE = False
+#     logger.warning(f"⚠️ Trading Stock Selection services not available: {e}")
 
 
 # Import from market_analytics_router safely
@@ -711,14 +720,11 @@ async def lifespan(app: FastAPI):
         )
 
         # 13. ✅ NEW: Start Auto Trading WebSocket Service
-        if AUTO_TRADING_AVAILABLE:
+        # TODO Handled this later to stsrt when it nedded
+        if True:
             logger.info("🔴 Starting Auto Trading WebSocket Service...")
             try:
-                from services.websocket.auto_trading_websocket import (
-                    start_auto_trading_websocket,
-                )
 
-                await start_auto_trading_websocket()
                 logger.info("✅ Auto Trading WebSocket Service started")
             except Exception as e:
                 logger.error(f"❌ Auto Trading WebSocket Service failed to start: {e}")
@@ -729,72 +735,72 @@ async def lifespan(app: FastAPI):
             "✅ Intelligent Stock Selection Service available via /api/v1/intelligent-stock-selection"
         )
 
-        # 15. ✅ NEW: Initialize Auto Trade Execution Service
-        if AUTO_TRADING_AVAILABLE:
-            logger.info("⚡ Initializing Auto Trade Execution Service...")
-            try:
-                from services.execution.auto_trade_execution_service import (
-                    start_auto_trade_execution,
-                )
+        # # 15. ✅ NEW: Initialize Auto Trade Execution Service
+        # if AUTO_TRADING_AVAILABLE:
+        #     logger.info("⚡ Initializing Auto Trade Execution Service...")
+        #     try:
+        #         from services.execution.auto_trade_execution_service import (
+        #             start_auto_trade_execution,
+        #         )
 
-                await start_auto_trade_execution()
-                logger.info("✅ Auto Trade Execution Service initialized")
-            except Exception as e:
-                logger.error(
-                    f"❌ Auto Trade Execution Service failed to initialize: {e}"
-                )
+        #         await start_auto_trade_execution()
+        #         logger.info("✅ Auto Trade Execution Service initialized")
+        #     except Exception as e:
+        #         logger.error(
+        #             f"❌ Auto Trade Execution Service failed to initialize: {e}"
+        #         )
 
-        # 15.5. 🚀 NEW: Start Real-Time PnL Tracker
-        if TRADING_EXECUTION_AVAILABLE:
-            logger.info("📊 Starting Real-Time PnL Tracker...")
-            try:
-                from services.trading_execution.pnl_tracker import pnl_tracker
+        # # 15.5. 🚀 NEW: Start Real-Time PnL Tracker
+        # if TRADING_EXECUTION_AVAILABLE:
+        #     logger.info("📊 Starting Real-Time PnL Tracker...")
+        #     try:
+        #         from services.trading_execution.pnl_tracker import pnl_tracker
 
-                await pnl_tracker.start_tracking()
-                logger.info("✅ Real-Time PnL Tracker started")
-            except Exception as e:
-                logger.error(f"❌ Real-Time PnL Tracker failed to start: {e}")
+        #         await pnl_tracker.start_tracking()
+        #         logger.info("✅ Real-Time PnL Tracker started")
+        #     except Exception as e:
+        #         logger.error(f"❌ Real-Time PnL Tracker failed to start: {e}")
 
-        # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
-        if TRADING_EXECUTION_AVAILABLE:
-            logger.info("⏰ Starting Auto-Trade Scheduler...")
-            try:
-                from services.trading_execution.auto_trade_scheduler import (
-                    auto_trade_scheduler,
-                )
+        # # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
+        # if TRADING_EXECUTION_AVAILABLE:
+        #     logger.info("⏰ Starting Auto-Trade Scheduler...")
+        #     try:
+        #         from services.trading_execution.auto_trade_scheduler import (
+        #             auto_trade_scheduler,
+        #         )
 
-                # Get first active user with broker config for scheduler
-                db = next(get_db())
-                first_user_with_broker = (
-                    db.query(User)
-                    .join(BrokerConfig, BrokerConfig.user_id == User.id)
-                    .filter(
-                        BrokerConfig.is_active == True,
-                        BrokerConfig.access_token.isnot(None),
-                    )
-                    .first()
-                )
-                db.close()
+        #         # Get first active user with broker config for scheduler
+        #         db = next(get_db())
+        #         first_user_with_broker = (
+        #             db.query(User)
+        #             .join(BrokerConfig, BrokerConfig.user_id == User.id)
+        #             .filter(
+        #                 BrokerConfig.is_active == True,
+        #                 BrokerConfig.access_token.isnot(None),
+        #             )
+        #             .first()
+        #         )
+        #         db.close()
 
-                if first_user_with_broker:
-                    asyncio.create_task(
-                        auto_trade_scheduler.start_scheduler(
-                            user_id=first_user_with_broker.id,
-                            trading_mode="paper",  # Default to paper trading for safety
-                        )
-                    )
-                    logger.info(
-                        f"✅ Auto-Trade Scheduler started for user {first_user_with_broker.id}"
-                    )
-                    logger.info(
-                        "📌 Auto-trading will start at 9:15 AM when stocks are selected"
-                    )
-                else:
-                    logger.warning(
-                        "⚠️ No active user with broker config - scheduler not started"
-                    )
-            except Exception as e:
-                logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
+        #         if first_user_with_broker:
+        #             asyncio.create_task(
+        #                 auto_trade_scheduler.start_scheduler(
+        #                     user_id=first_user_with_broker.id,
+        #                     trading_mode="paper",  # Default to paper trading for safety
+        #                 )
+        #             )
+        #             logger.info(
+        #                 f"✅ Auto-Trade Scheduler started for user {first_user_with_broker.id}"
+        #             )
+        #             logger.info(
+        #                 "📌 Auto-trading will start at 9:15 AM when stocks are selected"
+        #             )
+        #         else:
+        #             logger.warning(
+        #                 "⚠️ No active user with broker config - scheduler not started"
+        #             )
+        #     except Exception as e:
+        #         logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
 
         # 16. 🚀 NEW: Initialize Intelligent Stock Selection Service
         logger.info("🧠 Initializing Intelligent Stock Selection Service...")
@@ -850,9 +856,9 @@ async def lifespan(app: FastAPI):
         # Start simple unified WebSocket broadcast task
         try:
             logger.info("🚀 Starting Simple Unified WebSocket System...")
-            from router.unified_websocket_routes import start_broadcast_task
+            from router.unified_websocket_routes import register_engine_listeners
 
-            await start_broadcast_task()
+            register_engine_listeners()
             logger.info("✅ Simple Unified WebSocket broadcast started")
         except Exception as e:
             logger.error(f"❌ Failed to start Unified WebSocket broadcast: {e}")
@@ -916,38 +922,38 @@ async def lifespan(app: FastAPI):
                 logger.error(f"Error stopping market scheduler: {e}")
 
         # Stop Auto-Trade Scheduler
-        if TRADING_EXECUTION_AVAILABLE:
-            try:
-                from services.trading_execution.auto_trade_scheduler import (
-                    auto_trade_scheduler,
-                )
+        # if TRADING_EXECUTION_AVAILABLE:
+        #     try:
+        #         from services.trading_execution.auto_trade_scheduler import (
+        #             auto_trade_scheduler,
+        #         )
 
-                logger.info("🛑 Stopping Auto-Trade Scheduler...")
-                await auto_trade_scheduler.stop()
-                logger.info("✅ Auto-Trade Scheduler stopped")
-            except Exception as e:
-                logger.error(f"Error stopping auto-trade scheduler: {e}")
+        #         logger.info("🛑 Stopping Auto-Trade Scheduler...")
+        #         await auto_trade_scheduler.stop()
+        #         logger.info("✅ Auto-Trade Scheduler stopped")
+        #     except Exception as e:
+        #         logger.error(f"Error stopping auto-trade scheduler: {e}")
 
-        # Stop Notification Scheduler - NEW
-        try:
-            logger.info("🛑 Stopping Notification Scheduler...")
-            from services.notification_scheduler import notification_scheduler
+        # # Stop Notification Scheduler - NEW
+        # try:
+        #     logger.info("🛑 Stopping Notification Scheduler...")
+        #     from services.notification_scheduler import notification_scheduler
 
-            notification_scheduler.stop_scheduler()
-            logger.info("✅ Notification Scheduler stopped")
-        except Exception as e:
-            logger.error(f"Error stopping notification scheduler: {e}")
+        #     notification_scheduler.stop_scheduler()
+        #     logger.info("✅ Notification Scheduler stopped")
+        # except Exception as e:
+        #     logger.error(f"Error stopping notification scheduler: {e}")
 
-        # Stop Real-Time PnL Tracker - NEW
-        if TRADING_EXECUTION_AVAILABLE:
-            try:
-                logger.info("🛑 Stopping Real-Time PnL Tracker...")
-                from services.trading_execution.pnl_tracker import pnl_tracker
+        # # Stop Real-Time PnL Tracker - NEW
+        # if TRADING_EXECUTION_AVAILABLE:
+        #     try:
+        #         logger.info("🛑 Stopping Real-Time PnL Tracker...")
+        #         from services.trading_execution.pnl_tracker import pnl_tracker
 
-                await pnl_tracker.stop_tracking()
-                logger.info("✅ Real-Time PnL Tracker stopped")
-            except Exception as e:
-                logger.error(f"Error stopping PnL tracker: {e}")
+        #         await pnl_tracker.stop_tracking()
+        #         logger.info("✅ Real-Time PnL Tracker stopped")
+        #     except Exception as e:
+        #         logger.error(f"Error stopping PnL tracker: {e}")
 
         logger.info(
             "🎯 Enhanced gap and breakout detection services shutdown completed"
@@ -1077,9 +1083,9 @@ except ImportError as e:
 
 app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(option_router, tags=["Options & Futures"])
-app.include_router(auto_trading_router, tags=["Auto Trading & Stock Selection"])
+# app.include_router(auto_trading_router, tags=["Auto Trading"])
 app.include_router(trading_execution_router, tags=["Trading Execution"])
-app.include_router(trading_stock_selection_router, tags=["Trading Stock Selection"])
+# app.include_router(trading_stock_selection_router, tags=["Trading Stock Selection"])
 
 # NIFTY 09:40 Strategy Router
 try:
@@ -1157,6 +1163,60 @@ async def root():
     except Exception:
         centralized_status = {"status": "error"}
 
+    def sync_check_market_engine():
+        engine = get_market_engine()
+        last_calc_ts = getattr(engine.analytics, "last_calculation", 0)
+        last_update_ts = getattr(engine, "last_analytics_update", 0)
+        prices = engine.get_live_prices()
+
+        instruments_with_prices = sum(
+            1 for i in engine.instruments.values() if i.current_price > 0
+        )
+        total_instruments = len(engine.instruments)
+
+        analytics_ready = is_analytics_data_ready()
+        analytics_dict = (
+            engine.analytics.to_dict() if hasattr(engine, "analytics") else {}
+        )
+        status_info = get_analytics_status()
+
+        top_gainers = analytics_dict["top_movers"]["gainers"]
+        top_loosers = analytics_dict["top_movers"]["losers"]
+        marekt_breadth = analytics_dict["market_breadth"]
+        sector_analysis = analytics_dict["sector_analytics"]
+        volume_analysis = analytics_dict["volume_analytics"]
+        marekt_sentiment = analytics_dict["market_sentiment"]
+
+        return {
+            "last_calc_ts": last_calc_ts,
+            "last_update_ts": last_update_ts,
+            "analytics_ready": analytics_ready,
+            "analytics_dict": analytics_dict,
+            "instruments_with_prices": instruments_with_prices,
+            "total_instruments": total_instruments,
+            "status_info": status_info,
+            "top_gainers": top_gainers,
+            "top_loosers": top_loosers,
+            "market_breadth": marekt_breadth,
+            "market_sentiment": marekt_sentiment,
+            "sector_analysis": sector_analysis,
+            "volume_analysis": volume_analysis,
+        }
+
+    checks = await asyncio.to_thread(sync_check_market_engine)
+    now_ts = datetime.now(tz=timezone.utc).timestamp()
+    analytics_age = now_ts - checks["last_calc_ts"] if checks["last_calc_ts"] else None
+    checks["analytics_age_seconds"] = analytics_age
+    checks["is_fresh"] = (
+        analytics_age is not None and analytics_age <= 3.0
+    )  # 3 sec window
+
+    # derive readiness
+    overall_ok = (
+        checks["analytics_ready"]
+        and checks["instruments_with_prices"] > 0
+        and checks["is_fresh"]
+    )
     return {
         "status": "running",
         "version": "3.0.0",
@@ -1209,6 +1269,39 @@ async def root():
                 "/api/analytics/status",
                 "/api/analytics/quick-data",
             ],
+        },
+        # --- market analytics system (direct engine access check) ---
+        "market_analytics_system": {
+            "available": overall_ok,
+            "is_fresh": checks["is_fresh"],
+            "analytics_age_seconds": (
+                round(checks["analytics_age_seconds"], 3)
+                if checks["analytics_age_seconds"]
+                else None
+            ),
+            "total_instruments": checks["total_instruments"],
+            "instruments_with_prices": checks["instruments_with_prices"],
+            "analytics_ready": checks["analytics_ready"],
+            "last_update_ts": checks["last_update_ts"],
+            "top_gainers_count": len(
+                checks["analytics_dict"].get("top_movers", {}).get("gainers", [])
+            ),
+            "top_gainers": checks["top_gainers"],
+            "top_losers_count": len(
+                checks["analytics_dict"].get("top_movers", {}).get("losers", [])
+            ),
+            "top_loosers": checks["top_loosers"],
+            "market_breadth": checks["analytics_dict"]
+            .get("market_breadth", {})
+            .get("total_stocks", 0),
+            "engine_status": checks["status_info"],
+            "features": [
+                "real_time_market_data",
+                "top_movers",
+                "volume_analysis",
+                "market_sentiment",
+            ],
+            "analytics": checks,
         },
     }
 

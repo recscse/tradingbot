@@ -326,7 +326,7 @@ class IntelligentStockSelectionService:
                 )
                 return MarketSentiment.NEUTRAL, {
                     **sentiment_data,
-                    "warning": "No market data available - service waiting for live feed"
+                    "warning": "No market data available - service waiting for live feed",
                 }
 
             # Map realtime engine sentiment to our enum
@@ -401,23 +401,28 @@ class IntelligentStockSelectionService:
                 # Base score from actual real-time performance
                 avg_change = performance.get("avg_change_percent", 0)
                 strength = performance.get("strength_score", 0)
-                advancing_ratio = (
-                    performance.get("advancing", 0) / max(performance.get("total_stocks", 1), 1)
+                advancing_ratio = performance.get("advancing", 0) / max(
+                    performance.get("total_stocks", 1), 1
                 )
 
                 # Performance score (0-1 scale)
                 performance_score = (
-                    min(max(avg_change / 5.0, -1), 1) * 0.5  # Normalize avg_change to -1 to 1
-                    + min(max(strength / 50.0, -1), 1) * 0.3   # Normalize strength_score
-                    + advancing_ratio * 0.2                      # Advancing ratio already 0-1
+                    min(max(avg_change / 5.0, -1), 1)
+                    * 0.5  # Normalize avg_change to -1 to 1
+                    + min(max(strength / 50.0, -1), 1) * 0.3  # Normalize strength_score
+                    + advancing_ratio * 0.2  # Advancing ratio already 0-1
                 )
 
                 # Get sentiment weight for this sector (default 0.6 if not in predefined weights)
                 sentiment_weights = self.sector_sentiment_weights.get(sentiment, {})
-                sentiment_weight = sentiment_weights.get(sector, 0.6)  # Default 0.6 for unknown sectors
+                sentiment_weight = sentiment_weights.get(
+                    sector, 0.6
+                )  # Default 0.6 for unknown sectors
 
                 # Combined score with sentiment adjustment
-                final_score = max(performance_score * sentiment_weight, 0)  # Ensure non-negative
+                final_score = max(
+                    performance_score * sentiment_weight, 0
+                )  # Ensure non-negative
                 sector_scores[sector] = round(final_score, 4)
 
             # Sort by score (highest first)
@@ -428,9 +433,7 @@ class IntelligentStockSelectionService:
             logger.info(
                 f"🏢 Analyzed {len(sector_scores)} sectors for {sentiment.value}"
             )
-            logger.info(
-                f"🏢 Top 3 sectors: {list(sorted_sectors.keys())[:3]}"
-            )
+            logger.info(f"🏢 Top 3 sectors: {list(sorted_sectors.keys())[:3]}")
             return sorted_sectors
 
         except Exception as e:

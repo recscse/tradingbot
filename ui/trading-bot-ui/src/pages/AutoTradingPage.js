@@ -117,7 +117,9 @@ const AutoTradingPage = () => {
 
   const fetchTradingPreferences = useCallback(async () => {
     try {
-      const response = await api.get("/v1/trading/execution/user-trading-preferences");
+      const response = await api.get(
+        "/v1/trading/execution/user-trading-preferences"
+      );
       if (response.data.success) {
         setTradingMode(response.data.trading_mode || "paper");
         setExecutionMode(response.data.execution_mode || "multi_demat");
@@ -142,57 +144,101 @@ const AutoTradingPage = () => {
 
   const fetchSelectedStocks = useCallback(async () => {
     try {
-      // Get final options selections from database
-      const response = await api.get("/v1/trading/stocks/selected");
-      if (response.data && response.data.stocks) {
-        // Parse option_contract and score_breakdown JSON fields
-        const parsedStocks = response.data.stocks.map((stock) => {
-          let optionData = {};
-          let scoreData = {};
+      // Adjust path depending on your api.baseURL
+      const response = await api.get("/v1/trading/execution/selected-stocks");
 
-          try {
-            // Parse option_contract JSON field
-            if (stock.option_contract) {
-              optionData =
-                typeof stock.option_contract === "string"
-                  ? JSON.parse(stock.option_contract)
-                  : stock.option_contract;
-            }
+      console.debug("fetchSelectedStocks response:", response?.data);
 
-            // Parse score_breakdown JSON field
-            if (stock.score_breakdown) {
-              scoreData =
-                typeof stock.score_breakdown === "string"
-                  ? JSON.parse(stock.score_breakdown)
-                  : stock.score_breakdown;
-            }
-          } catch (parseError) {
-            console.error(
-              `Error parsing JSON for ${stock.symbol}:`,
-              parseError
-            );
-          }
+      const payload = response?.data;
+      let stocks = [];
 
-          return {
-            ...stock,
-            option_type: stock.option_type || optionData.option_type || "N/A",
-            strike_price: optionData.strike_price || 0,
-            expiry_date:
-              stock.option_expiry_date || optionData.expiry_date || "N/A",
-            premium: optionData.premium || 0,
-            lot_size: optionData.lot_size || 0,
-            option_instrument_key: optionData.option_instrument_key || "",
-            capital_allocation: scoreData.capital_allocation || 0,
-            position_size_lots: scoreData.position_size_lots || 0,
-            max_loss: scoreData.max_loss || 0,
-            target_profit: scoreData.target_profit || 0,
-          };
-        });
-
-        setSelectedStocks(parsedStocks);
+      if (!payload) {
+        stocks = [];
+      } else if (Array.isArray(payload.stocks)) {
+        stocks = payload.stocks;
+      } else if (payload.data && Array.isArray(payload.data.stocks)) {
+        stocks = payload.data.stocks;
+      } else if (Array.isArray(payload)) {
+        stocks = payload;
+      } else {
+        stocks = payload.stocks || payload.data || payload.result || [];
+        if (!Array.isArray(stocks)) stocks = [];
       }
+
+      const safeParse = (val) => {
+        if (!val) return {};
+        if (typeof val === "object") return val;
+        if (typeof val === "string") {
+          const t = val.trim();
+          if (!t) return {};
+          try {
+            return JSON.parse(t);
+          } catch (e) {
+            console.warn("safeParse JSON failed:", e, val);
+            return {};
+          }
+        }
+        return {};
+      };
+
+      const parsedStocks = stocks.map((stock = {}) => {
+        const optionData = safeParse(
+          stock.option_contract || stock.optionContract || stock.option || {}
+        );
+        const scoreData = safeParse(
+          stock.score_breakdown || stock.scoreBreakdown || stock.score || {}
+        );
+
+        const strike =
+          optionData.strike_price ??
+          optionData.strike ??
+          stock.strike_price ??
+          stock.atm_strike ??
+          0;
+
+        const expiry =
+          stock.option_expiry_date ??
+          optionData.expiry_date ??
+          optionData.expiry ??
+          stock.expiry_date ??
+          stock.expiry ??
+          "";
+
+        const optionKey =
+          optionData.option_instrument_key ??
+          optionData.instrument_key ??
+          stock.option_instrument_key ??
+          stock.instrument_key ??
+          "";
+
+        return {
+          ...stock,
+          option_type:
+            stock.option_type ??
+            optionData.option_type ??
+            optionData.type ??
+            "N/A",
+          strike_price: strike,
+          expiry_date: expiry,
+          premium:
+            optionData.premium ?? optionData.last_price ?? stock.premium ?? 0,
+          lot_size: optionData.lot_size ?? stock.lot_size ?? 0,
+          option_instrument_key: optionKey,
+          capital_allocation:
+            scoreData.capital_allocation ?? scoreData.allocation ?? 0,
+          position_size_lots:
+            scoreData.position_size_lots ?? scoreData.lots ?? 0,
+          max_loss: scoreData.max_loss ?? 0,
+          target_profit: scoreData.target_profit ?? 0,
+          raw_option_contract: optionData,
+          raw_score_breakdown: scoreData,
+        };
+      });
+
+      setSelectedStocks(parsedStocks);
     } catch (err) {
       console.error("Error fetching selected stocks:", err);
+      setSelectedStocks([]);
     }
   }, []);
 
@@ -456,7 +502,9 @@ const AutoTradingPage = () => {
   useEffect(() => {
     const checkAutoTradingStatus = async () => {
       try {
-        const response = await api.get("/v1/trading/execution/auto-trading-status");
+        const response = await api.get(
+          "/v1/trading/execution/auto-trading-status"
+        );
         if (response.data.success) {
           setAutoTradingRunning(response.data.websocket_running || false);
         }
@@ -718,8 +766,10 @@ const AutoTradingPage = () => {
                       p: 2,
                       bgcolor: "background.default",
                       borderRadius: 1,
-                      border: tradingMode === "live" ? "2px solid" : "1px solid",
-                      borderColor: tradingMode === "live" ? "error.main" : "divider",
+                      border:
+                        tradingMode === "live" ? "2px solid" : "1px solid",
+                      borderColor:
+                        tradingMode === "live" ? "error.main" : "divider",
                     }}
                   >
                     <Typography
@@ -739,7 +789,9 @@ const AutoTradingPage = () => {
                       }
                       label={
                         <Typography variant="body2" fontWeight={500}>
-                          {tradingMode === "paper" ? "Paper Trading" : "Live Trading"}
+                          {tradingMode === "paper"
+                            ? "Paper Trading"
+                            : "Live Trading"}
                         </Typography>
                       }
                     />
@@ -789,7 +841,10 @@ const AutoTradingPage = () => {
                                 setExecutionMode(newMode);
                               }
                             } catch (err) {
-                              console.error("Error updating execution mode:", err);
+                              console.error(
+                                "Error updating execution mode:",
+                                err
+                              );
                             }
                           }}
                           color="primary"
@@ -817,7 +872,14 @@ const AutoTradingPage = () => {
               </Grid>
 
               {/* Auto-Trading Status Indicator */}
-              <Box sx={{ mt: 2.5, p: 2, bgcolor: autoTradingRunning ? "success.50" : "grey.50", borderRadius: 1 }}>
+              <Box
+                sx={{
+                  mt: 2.5,
+                  p: 2,
+                  bgcolor: autoTradingRunning ? "success.50" : "grey.50",
+                  borderRadius: 1,
+                }}
+              >
                 <Stack direction="row" alignItems="center" spacing={1}>
                   <Box
                     sx={{
@@ -825,22 +887,35 @@ const AutoTradingPage = () => {
                       height: 12,
                       borderRadius: "50%",
                       bgcolor: autoTradingRunning ? "success.main" : "grey.400",
-                      animation: autoTradingRunning ? "pulse 2s infinite" : "none",
+                      animation: autoTradingRunning
+                        ? "pulse 2s infinite"
+                        : "none",
                       "@keyframes pulse": {
                         "0%, 100%": { opacity: 1 },
                         "50%": { opacity: 0.5 },
                       },
                     }}
                   />
-                  <Typography variant="body2" fontWeight={600} color={autoTradingRunning ? "success.main" : "text.secondary"}>
+                  <Typography
+                    variant="body2"
+                    fontWeight={600}
+                    color={
+                      autoTradingRunning ? "success.main" : "text.secondary"
+                    }
+                  >
                     {autoTradingRunning
                       ? `Auto-Trading Active - Monitoring ${selectedStocks.length} stocks`
                       : "Auto-Trading will start automatically when stocks are selected"}
                   </Typography>
                 </Stack>
                 {autoTradingRunning && (
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, ml: 3 }}>
-                    Strategy running on live data • Trades execute automatically on valid signals • Real-time PnL tracking active
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: "block", mt: 1, ml: 3 }}
+                  >
+                    Strategy running on live data • Trades execute automatically
+                    on valid signals • Real-time PnL tracking active
                   </Typography>
                 )}
               </Box>
@@ -1606,7 +1681,9 @@ const AutoTradingPage = () => {
                                 fontWeight={600}
                                 color="primary"
                               >
-                                {formatCurrency(stock.live_price || stock.premium || 0)}
+                                {formatCurrency(
+                                  stock.live_price || stock.premium || 0
+                                )}
                               </Typography>
                               {stock.live_price && (
                                 <Typography
@@ -1618,36 +1695,73 @@ const AutoTradingPage = () => {
                               )}
                             </TableCell>
                             <TableCell align="right">
-                              {stock.price_change_percent !== undefined && stock.price_change_percent !== null ? (
+                              {stock.price_change_percent !== undefined &&
+                              stock.price_change_percent !== null ? (
                                 <Chip
-                                  label={`${stock.price_change_percent >= 0 ? "+" : ""}${stock.price_change_percent.toFixed(2)}%`}
-                                  color={stock.price_change_percent >= 0 ? "success" : "error"}
+                                  label={`${
+                                    stock.price_change_percent >= 0 ? "+" : ""
+                                  }${stock.price_change_percent.toFixed(2)}%`}
+                                  color={
+                                    stock.price_change_percent >= 0
+                                      ? "success"
+                                      : "error"
+                                  }
                                   size="small"
-                                  icon={stock.price_change_percent >= 0 ? <TrendingUpIcon /> : <TrendingDownIcon />}
+                                  icon={
+                                    stock.price_change_percent >= 0 ? (
+                                      <TrendingUpIcon />
+                                    ) : (
+                                      <TrendingDownIcon />
+                                    )
+                                  }
                                 />
                               ) : (
-                                <Typography variant="body2" color="text.secondary">-</Typography>
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                >
+                                  -
+                                </Typography>
                               )}
                             </TableCell>
                             <TableCell align="right">
-                              {stock.unrealized_pnl !== undefined && stock.unrealized_pnl !== null ? (
+                              {stock.unrealized_pnl !== undefined &&
+                              stock.unrealized_pnl !== null ? (
                                 <>
                                   <Typography
                                     variant="body2"
                                     fontWeight={600}
-                                    color={stock.unrealized_pnl >= 0 ? "success.main" : "error.main"}
+                                    color={
+                                      stock.unrealized_pnl >= 0
+                                        ? "success.main"
+                                        : "error.main"
+                                    }
                                   >
                                     {formatCurrency(stock.unrealized_pnl)}
                                   </Typography>
                                   <Typography
                                     variant="caption"
-                                    color={stock.unrealized_pnl >= 0 ? "success.main" : "error.main"}
+                                    color={
+                                      stock.unrealized_pnl >= 0
+                                        ? "success.main"
+                                        : "error.main"
+                                    }
                                   >
-                                    {stock.unrealized_pnl_percent >= 0 ? "+" : ""}{stock.unrealized_pnl_percent?.toFixed(2) || 0}%
+                                    {stock.unrealized_pnl_percent >= 0
+                                      ? "+"
+                                      : ""}
+                                    {stock.unrealized_pnl_percent?.toFixed(2) ||
+                                      0}
+                                    %
                                   </Typography>
                                 </>
                               ) : (
-                                <Typography variant="body2" color="text.secondary">-</Typography>
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                >
+                                  -
+                                </Typography>
                               )}
                             </TableCell>
                             <TableCell align="right">
