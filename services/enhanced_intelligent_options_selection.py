@@ -398,10 +398,14 @@ class EnhancedIntelligentOptionsService:
                 )
 
             # TODO correct as per the current price as it should be ltp at time of stock selected for selcting the ATM strike price
+            # Handle both StockSelection (has ltp) and SelectedStock (has price_at_selection)
+            underlying_price = getattr(stock_selection, "ltp", None) or getattr(
+                stock_selection, "price_at_selection", 0
+            )
             optimal_contract = await self._select_optimal_option_contract(
                 option_chain,
                 options_direction,
-                Decimal(str(stock_selection.price_at_selection)),
+                Decimal(str(underlying_price)),
             )
 
             if not optimal_contract:
@@ -411,8 +415,42 @@ class EnhancedIntelligentOptionsService:
                 return None
 
             # Step 5: Create enhanced selection
+            # Handle both StockSelection dataclass and SelectedStock database model
+            # SelectedStock doesn't have all fields, so we use getattr with defaults
             enhanced_selection = EnhancedStockSelection(
-                **asdict(stock_selection),
+                # Required fields (with fallbacks for database model)
+                symbol=stock_selection.symbol,
+                name=getattr(stock_selection, "name", stock_selection.symbol),  # Fallback to symbol
+                instrument_key=stock_selection.instrument_key,
+                sector=getattr(stock_selection, "sector", "UNKNOWN"),
+                lot_size=getattr(stock_selection, "lot_size", None),
+                # Price fields (handle both ltp and price_at_selection)
+                ltp=getattr(stock_selection, "ltp", None) or getattr(stock_selection, "price_at_selection", 0.0),
+                change_percent=getattr(stock_selection, "change_percent", 0.0) or getattr(stock_selection, "change_percent_at_selection", 0.0),
+                change=getattr(stock_selection, "change", 0.0),
+                volume=getattr(stock_selection, "volume", 0) or getattr(stock_selection, "volume_at_selection", 0),
+                value_crores=getattr(stock_selection, "value_crores", 0.0),
+                high=getattr(stock_selection, "high", 0.0),
+                low=getattr(stock_selection, "low", 0.0),
+                previous_close=getattr(stock_selection, "previous_close", 0.0),
+                # Scoring fields (with defaults)
+                sentiment_score=getattr(stock_selection, "sentiment_score", 0.5),
+                sector_score=getattr(stock_selection, "sector_score", 0.5),
+                technical_score=getattr(stock_selection, "technical_score", 0.5),
+                volume_score=getattr(stock_selection, "volume_score", 0.5),
+                value_score=getattr(stock_selection, "value_score", 0.5),
+                final_score=getattr(stock_selection, "final_score", 0.0) or getattr(stock_selection, "selection_score", 0.0),
+                # Selection metadata
+                selection_reason=getattr(stock_selection, "selection_reason", "options_enhancement") or getattr(stock_selection, "selection_reason", ""),
+                confidence_level=getattr(stock_selection, "confidence_level", 0.5),
+                risk_level=getattr(stock_selection, "risk_level", "MEDIUM"),
+                recommended_quantity=getattr(stock_selection, "recommended_quantity", 1),
+                target_value=getattr(stock_selection, "target_value", 0.0),
+                stop_loss=getattr(stock_selection, "stop_loss", 0.0),
+                options_direction=getattr(stock_selection, "options_direction", None) or getattr(stock_selection, "option_type", "CE"),
+                selected_at=getattr(stock_selection, "selected_at", datetime.now().isoformat()),
+                valid_until=getattr(stock_selection, "valid_until", (datetime.now().replace(hour=15, minute=30)).isoformat()),
+                # Add enhanced fields
                 selected_option_contract=optimal_contract,
                 available_expiry_dates=expiry_dates,
                 atm_strike=Decimal(str(option_chain.get("atm_strike", 0.0))),

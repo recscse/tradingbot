@@ -136,6 +136,9 @@ class IntelligentStockSelectionService:
             False  # Once true, NO MORE stock selection changes
         )
 
+        # Synchronization flag to prevent WebSocket start during selection
+        self.selection_in_progress: bool = False
+
         # Configuration
         self.selection_config = {
             "max_stocks_per_selection": 5,
@@ -281,7 +284,16 @@ class IntelligentStockSelectionService:
             # Get real-time market engine for live market data
             self.market_engine = get_market_engine()
 
-            # Get analytics service
+            # Verify market engine has data
+            sentiment_data = get_market_sentiment()
+            total_stocks = sentiment_data.get("metrics", {}).get("total_stocks", 0)
+
+            if total_stocks == 0:
+                logger.warning(
+                    "⚠️ Market engine initialized but no data available yet - waiting for WebSocket feed"
+                )
+            else:
+                logger.info(f"✅ Market engine has data for {total_stocks} stocks")
 
             logger.info(
                 "✅ Stock selection services initialized with realtime_market_engine"
@@ -724,6 +736,7 @@ class IntelligentStockSelectionService:
 
     async def run_premarket_selection(self) -> Dict[str, Any]:
         """Run premarket stock selection (before 9:15 AM) - ONLY ONCE"""
+        self.selection_in_progress = True
         try:
             # Check if premarket selection already done
             if self.premarket_selections:
@@ -738,6 +751,18 @@ class IntelligentStockSelectionService:
                 }
 
             logger.info("🌅 Starting premarket stock selection...")
+
+            # Initialize services if not already done
+            if not self.market_engine:
+                logger.info("🔧 Initializing services for stock selection...")
+                initialized = await self.initialize_services()
+                if not initialized:
+                    return {
+                        "error": "Failed to initialize services",
+                        "phase": "premarket",
+                        "message": "Service initialization failed",
+                        "timestamp": datetime.now().isoformat(),
+                    }
 
             # Analyze market sentiment and store it
             sentiment, sentiment_analysis = await self.analyze_market_sentiment()
@@ -781,10 +806,12 @@ class IntelligentStockSelectionService:
                 "timestamp": datetime.now().isoformat(),
             }
 
-            # Save to database for auto-trading integration
+            # Save to database for auto-trading integration (with timeout protection)
             try:
-                saved = await self.save_selections_to_database(
-                    selected_stocks, "premarket"
+                # Add 10-second timeout for database operation to prevent blocking
+                saved = await asyncio.wait_for(
+                    self.save_selections_to_database(selected_stocks, "premarket"),
+                    timeout=10.0
                 )
                 if saved:
                     result["database_saved"] = True
@@ -795,26 +822,12 @@ class IntelligentStockSelectionService:
                 else:
                     result["database_saved"] = False
                     logger.warning("⚠️ Failed to save premarket selections to database")
+            except asyncio.TimeoutError:
+                logger.error("❌ Database save timed out (10s) - continuing anyway")
+                result["database_saved"] = False
             except Exception as db_error:
                 logger.error(f"❌ Database save error: {db_error}")
                 result["database_saved"] = False
-
-            # Broadcast update via WebSocket
-            # try:
-            # from services.unified_websocket_manager import (
-            #     emit_intelligent_stock_selection_update,
-            # )
-
-            # emit_intelligent_stock_selection_update(
-            #     {
-            #         "type": "premarket_selection_completed",
-            #         "data": result,
-            #         "timestamp": datetime.now().isoformat(),
-            #     }
-            # )
-            # except Exception as ws_error:
-            #     logger.warning(f"⚠️ Failed to broadcast premarket selection: {ws_error}")
-
             logger.info(
                 f"✅ Premarket selection complete: {len(selected_stocks)} stocks selected"
             )
@@ -823,9 +836,12 @@ class IntelligentStockSelectionService:
         except Exception as e:
             logger.error(f"❌ Error in premarket selection: {e}")
             return {"error": str(e), "phase": "premarket"}
+        finally:
+            self.selection_in_progress = False
 
     async def validate_market_open_selection(self) -> Dict[str, Any]:
         """Market open validation - Check sentiment and finalize selections (9:15-9:25) - FINAL DECISION"""
+        self.selection_in_progress = True
         try:
             logger.info(
                 "🔍 Market open validation - Making FINAL stock selection for the day..."
@@ -991,6 +1007,8 @@ class IntelligentStockSelectionService:
         except Exception as e:
             logger.error(f"❌ Error in market open validation: {e}")
             return {"error": str(e), "phase": "market_open_validation"}
+        finally:
+            self.selection_in_progress = False
 
     async def get_live_trading_recommendations(self) -> Dict[str, Any]:
         """Get live trading recommendations - Returns FINAL selections (NO MORE CHANGES)"""

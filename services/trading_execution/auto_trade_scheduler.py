@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 class AutoTradeScheduler:
     """
     Manages auto-trading lifecycle based on market hours and stock selection
+    Monitors ALL active users with broker configs automatically
     """
 
     def __init__(self):
@@ -34,26 +35,24 @@ class AutoTradeScheduler:
         self.check_interval = 60  # Check every 60 seconds
         self.market_start_time = dt_time(9, 15)  # 9:15 AM
         self.market_end_time = dt_time(15, 30)  # 3:30 PM
-        self.auto_started_today = False
-        self.current_user_id: Optional[int] = None
-        self.current_trading_mode: TradingMode = TradingMode.PAPER
+        self.auto_started_users = {}  # Track which users have auto-started today: {user_id: True/False}
+        self.default_trading_mode: TradingMode = TradingMode.PAPER
 
-        logger.info("Auto-Trade Scheduler initialized")
+        logger.info("Auto-Trade Scheduler initialized (multi-user mode)")
 
-    async def start_scheduler(self, user_id: int, trading_mode: TradingMode = TradingMode.PAPER):
+    async def start_scheduler(self, trading_mode: TradingMode = TradingMode.PAPER):
         """
-        Start the auto-trading scheduler
+        Start the auto-trading scheduler for ALL active users
 
         Args:
-            user_id: User identifier
-            trading_mode: Paper or Live trading
+            trading_mode: Default paper or Live trading mode
         """
         try:
             self.is_running = True
-            self.current_user_id = user_id
-            self.current_trading_mode = trading_mode
+            self.default_trading_mode = trading_mode
 
-            logger.info(f"🕐 Auto-trade scheduler started for user {user_id}")
+            logger.info(f"🕐 Auto-trade scheduler started (monitoring ALL active users)")
+            logger.info(f"📊 Default trading mode: {trading_mode.value}")
 
             while self.is_running:
                 try:
@@ -63,15 +62,15 @@ class AutoTradeScheduler:
 
                     # Reset daily flag at midnight
                     if current_time.hour == 0 and current_time.minute == 0:
-                        self.auto_started_today = False
-                        logger.info("📅 New trading day - reset auto-start flag")
+                        self.auto_started_users.clear()
+                        logger.info("📅 New trading day - reset auto-start flags for all users")
 
                     # Check if market is open
                     is_market_hours = self.market_start_time <= current_time <= self.market_end_time
 
                     if is_market_hours:
-                        # Auto-start logic
-                        await self._check_and_start_trading()
+                        # Auto-start logic for ALL eligible users
+                        await self._check_and_start_trading_all_users()
 
                         # Auto-stop logic
                         if auto_trade_live_feed.is_running:
@@ -92,83 +91,112 @@ class AutoTradeScheduler:
             logger.error(f"Error starting scheduler: {e}")
             self.is_running = False
 
-    async def _check_and_start_trading(self):
+    async def _check_and_start_trading_all_users(self):
         """
-        Check if auto-trading should start based on stock selection
+        Check if auto-trading should start for ANY user with stocks selected
+        Monitors ALL users automatically - no need to pass user_id
         """
         try:
-            # Don't auto-start if already started today
-            if self.auto_started_today:
-                return
-
             # Don't auto-start if already running
             if auto_trade_live_feed.is_running:
                 return
 
+            # Check if stock selection is in progress to prevent race conditions
+            try:
+                from services.intelligent_stock_selection_service import intelligent_stock_selector
+                if intelligent_stock_selector.selection_in_progress:
+                    logger.debug("⏳ Stock selection in progress - waiting to avoid race condition...")
+                    return
+            except Exception as e:
+                logger.warning(f"Could not check selection status: {e}")
+
             db = SessionLocal()
 
             try:
-                # Check if stocks are selected for today
+                # Check ALL users with active broker configs
                 today = date.today()
-                selected_stocks = db.query(SelectedStock).filter(
-                    SelectedStock.selection_date == today,
-                    SelectedStock.is_active == True,
-                    SelectedStock.option_contract.isnot(None)
-                ).count()
 
-                if selected_stocks == 0:
-                    logger.debug("No stocks selected yet - waiting...")
-                    return
-
-                # Check if we have active broker config
-                broker_config = db.query(BrokerConfig).filter(
-                    BrokerConfig.user_id == self.current_user_id,
-                    BrokerConfig.is_active == True,
-                    BrokerConfig.access_token.isnot(None)
-                ).first()
-
-                if not broker_config:
-                    logger.warning("No active broker config - cannot auto-start")
-                    return
-
-                # Validate token expiry
-                if broker_config.access_token_expiry and broker_config.access_token_expiry < datetime.now():
-                    logger.warning("Broker token expired - cannot auto-start")
-                    return
-
-                # All conditions met - AUTO-START
-                logger.info(f"🚀 AUTO-STARTING auto-trading: {selected_stocks} stocks selected")
-
-                # Start auto-trading
-                asyncio.create_task(
-                    auto_trade_live_feed.start_auto_trading(
-                        user_id=self.current_user_id,
-                        access_token=broker_config.access_token,
-                        trading_mode=self.current_trading_mode
+                # Find users with stocks selected today AND active broker configs
+                users_with_selections = (
+                    db.query(BrokerConfig)
+                    .join(SelectedStock, SelectedStock.user_id == BrokerConfig.user_id)
+                    .filter(
+                        BrokerConfig.is_active == True,
+                        BrokerConfig.access_token.isnot(None),
+                        SelectedStock.selection_date == today,
+                        SelectedStock.is_active == True,
+                        SelectedStock.option_contract.isnot(None)
                     )
+                    .distinct()
+                    .all()
                 )
 
-                self.auto_started_today = True
+                if not users_with_selections:
+                    logger.debug("No users with stock selections and active broker configs - waiting...")
+                    return
 
-                logger.info(f"✅ Auto-trading started at {datetime.now().strftime('%H:%M:%S')}")
+                # Process each user (typically there will be only one, but supports multiple)
+                for broker_config in users_with_selections:
+                    user_id = broker_config.user_id
+
+                    # Check if already auto-started for this user today
+                    if self.auto_started_users.get(user_id):
+                        continue
+
+                    # Validate token expiry
+                    if broker_config.access_token_expiry and broker_config.access_token_expiry < datetime.now():
+                        logger.warning(f"Broker token expired for user {user_id} - cannot auto-start")
+                        continue
+
+                    # Count stocks for this user
+                    stock_count = (
+                        db.query(SelectedStock)
+                        .filter(
+                            SelectedStock.user_id == user_id,
+                            SelectedStock.selection_date == today,
+                            SelectedStock.is_active == True,
+                            SelectedStock.option_contract.isnot(None)
+                        )
+                        .count()
+                    )
+
+                    # All conditions met - AUTO-START for this user
+                    logger.info(f"🚀 AUTO-STARTING auto-trading for user {user_id}: {stock_count} stocks selected")
+
+                    # Start auto-trading
+                    asyncio.create_task(
+                        auto_trade_live_feed.start_auto_trading(
+                            user_id=user_id,
+                            access_token=broker_config.access_token,
+                            trading_mode=self.default_trading_mode
+                        )
+                    )
+
+                    # Mark as auto-started for today
+                    self.auto_started_users[user_id] = True
+
+                    logger.info(f"✅ Auto-trading started for user {user_id} at {datetime.now().strftime('%H:%M:%S')}")
+
+                    # Note: Currently supports single user at a time due to singleton auto_trade_live_feed
+                    # For multi-user support, would need separate feed instances per user
+                    break
 
             finally:
                 db.close()
 
         except Exception as e:
-            logger.error(f"Error checking auto-start: {e}")
+            logger.error(f"Error checking auto-start for users: {e}")
 
     async def _check_and_stop_trading(self):
         """
-        Check if auto-trading should stop based on positions
+        Check if auto-trading should stop based on positions for ANY active user
         """
         try:
             db = SessionLocal()
 
             try:
-                # Check if any positions are still open
+                # Check if any positions are still open for ANY user
                 active_positions = db.query(ActivePosition).filter(
-                    ActivePosition.user_id == self.current_user_id,
                     ActivePosition.is_active == True
                 ).count()
 

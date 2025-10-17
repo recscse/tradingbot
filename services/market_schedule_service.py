@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta
 from typing import List, Dict, Optional
 import pytz
 import json
+
 try:
     import redis
 except ImportError:
@@ -12,12 +13,9 @@ except ImportError:
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import User, BrokerConfig
-from services.stock_analyzer import StockAnalyzer
 from services.instrument_refresh_service import TradingInstrumentService
-from services.trading_stock_selector import TradingStockSelector
 
 # Import the optimized service
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,32 +23,20 @@ class MarketScheduleService:
     def __init__(self):
         self.ist = pytz.timezone("Asia/Kolkata")
         self.early_preparation = time(8, 0)  # 8:00 AM
-        self.premarket_start = time(9, 0)  # 9:00 AM
-        self.market_open = time(9, 15)  # 9:15 AM
+        self.preopen_start = time(9, 0)  # 9:00 AM - Pre-open session starts (LIVE data)
+        self.market_open = time(9, 15)  # 9:15 AM - Official trading starts
         self.trading_start = time(9, 30)  # 9:30 AM
         self.market_close = time(15, 30)  # 3:30 PM
-
-        self.stock_analyzer = StockAnalyzer()
         self.instrument_service = TradingInstrumentService()
 
         # ✅ ENHANCED: Initialize TradingStockSelector with optimized settings for options trading
-        from services.enhanced_market_analytics import enhanced_analytics
         from database.connection import SessionLocal
 
-        self.stock_selector = TradingStockSelector(
-            analytics=enhanced_analytics,  # Use enhanced analytics with real-time data
-            db_session_factory=SessionLocal,  # Use proper session factory
-            option_service=None,  # Will use default upstox_option_service
-            sectors_to_pick=1,  # Pick only the TOP performing sector
-            per_sector_limit=2,  # Exactly 2 stocks per sector
-            max_total_stocks=2,  # Maximum 2 stocks total for focused trading
-            user_id=1,  # Default admin user - will be parameterized later
-        )
         # Initialize the optimized service
         self.selected_stocks = {}
         self.is_running = False
         self.cache = {}  # In-memory cache fallback
-        
+
         # ✅ INTEGRATION: Auto-trading components
         self.auto_trading_coordinator = None
         self.fibonacci_strategy = None
@@ -60,23 +46,23 @@ class MarketScheduleService:
         # ✅ FIX: Track daily tasks to prevent repetition
         self.daily_tasks_completed = {
             "early_preparation": None,  # Track by date
-            "premarket_analysis": None,
-            "trading_preparation": None,
+            "preopen_stock_selection": None,
+            "market_open_validation": None,
         }
 
         # Initialize Redis client with proper error handling
-        self.redis_enabled = os.getenv('REDIS_ENABLED', 'true').lower() == 'true'
+        self.redis_enabled = os.getenv("REDIS_ENABLED", "true").lower() == "true"
         self.redis_client = None
-        
+
         if self.redis_enabled and redis is not None:
             try:
                 self.redis_client = redis.Redis(
-                    host=os.getenv('REDIS_HOST', 'localhost'), 
-                    port=int(os.getenv('REDIS_PORT', 6379)), 
-                    db=int(os.getenv('REDIS_DB', 0)), 
+                    host=os.getenv("REDIS_HOST", "localhost"),
+                    port=int(os.getenv("REDIS_PORT", 6379)),
+                    db=int(os.getenv("REDIS_DB", 0)),
                     decode_responses=True,
                     socket_connect_timeout=5,
-                    socket_timeout=5
+                    socket_timeout=5,
                 )
                 # Test connection
                 self.redis_client.ping()
@@ -87,7 +73,7 @@ class MarketScheduleService:
                 self.redis_enabled = False
         else:
             logger.info("🚫 Redis disabled via configuration")
-    
+
     def _safe_redis_set(self, key: str, value: str, ex: int = None) -> bool:
         """Safely set Redis value with fallback to memory cache"""
         try:
@@ -99,17 +85,23 @@ class MarketScheduleService:
                 return True
             else:
                 # Fallback to memory cache
-                self.cache[key] = {'value': value, 'expires': datetime.now() + timedelta(seconds=ex) if ex else None}
+                self.cache[key] = {
+                    "value": value,
+                    "expires": datetime.now() + timedelta(seconds=ex) if ex else None,
+                }
                 return True
         except Exception as e:
             logger.error(f"Error updating {key}: {e}")
             # Fallback to memory cache
             try:
-                self.cache[key] = {'value': value, 'expires': datetime.now() + timedelta(seconds=ex) if ex else None}
+                self.cache[key] = {
+                    "value": value,
+                    "expires": datetime.now() + timedelta(seconds=ex) if ex else None,
+                }
                 return True
             except:
                 return False
-    
+
     def _safe_redis_get(self, key: str) -> Optional[str]:
         """Safely get Redis value with fallback to memory cache"""
         try:
@@ -119,8 +111,8 @@ class MarketScheduleService:
                 # Fallback to memory cache
                 cached = self.cache.get(key)
                 if cached:
-                    if cached['expires'] is None or datetime.now() < cached['expires']:
-                        return cached['value']
+                    if cached["expires"] is None or datetime.now() < cached["expires"]:
+                        return cached["value"]
                     else:
                         del self.cache[key]  # Expired
                 return None
@@ -130,14 +122,14 @@ class MarketScheduleService:
             try:
                 cached = self.cache.get(key)
                 if cached:
-                    if cached['expires'] is None or datetime.now() < cached['expires']:
-                        return cached['value']
+                    if cached["expires"] is None or datetime.now() < cached["expires"]:
+                        return cached["value"]
                     else:
                         del self.cache[key]  # Expired
                 return None
             except:
                 return None
-    
+
     def _safe_redis_delete(self, key: str) -> bool:
         """Safely delete Redis key with fallback to memory cache"""
         try:
@@ -177,29 +169,31 @@ class MarketScheduleService:
                 # Early morning preparation (8:00 AM) - FIXED: Run only once per day
                 if (
                     current_time >= self.early_preparation
-                    and current_time < self.premarket_start
+                    and current_time < self.preopen_start
                     and self.daily_tasks_completed["early_preparation"] != current_date
                 ):
                     await self._run_early_morning_preparation()
                     self.daily_tasks_completed["early_preparation"] = current_date
 
-                # Pre-market analysis (9:00 AM) - FIXED: Run only once per day
+                # Pre-open stock selection (9:00-9:15 AM) - Uses LIVE pre-open data
                 elif (
-                    current_time >= self.premarket_start
+                    current_time >= self.preopen_start
                     and current_time < self.market_open
-                    and self.daily_tasks_completed["premarket_analysis"] != current_date
+                    and self.daily_tasks_completed["preopen_stock_selection"]
+                    != current_date
                 ):
-                    await self._run_premarket_analysis()
-                    self.daily_tasks_completed["premarket_analysis"] = current_date
+                    await self._run_preopen_stock_selection()
+                    self.daily_tasks_completed["preopen_stock_selection"] = current_date
 
-                # Trading preparation (9:15-9:30 AM) - FIXED: Run only once per day
+                # Market open validation (9:15-9:30 AM) - Validates and finalizes selections
                 elif (
                     current_time >= self.market_open
                     and current_time < self.trading_start
-                    and self.daily_tasks_completed["trading_preparation"] != current_date
+                    and self.daily_tasks_completed["market_open_validation"]
+                    != current_date
                 ):
-                    await self._prepare_trading_session()
-                    self.daily_tasks_completed["trading_preparation"] = current_date
+                    await self._validate_market_open_selection()
+                    self.daily_tasks_completed["market_open_validation"] = current_date
 
                 # Active trading (9:30 AM - 3:30 PM)
                 elif (
@@ -219,215 +213,282 @@ class MarketScheduleService:
                 await asyncio.sleep(300)  # Wait 5 minutes on error
 
     async def _run_early_morning_preparation(self):
-        """FIXED: Run at 8:00 AM - FNO service ALWAYS runs BEFORE instrument service"""
-        logger.info("🌅 Starting early morning preparation...")
+        """
+        Run at 8:00 AM - FNO service ALWAYS runs BEFORE instrument service.
 
+        FIXED: Runs in background task - NEVER blocks the application!
+        """
+        logger.info("🌅 Starting early morning preparation in BACKGROUND...")
+
+        # Run as background task - DON'T WAIT FOR IT!
+        asyncio.create_task(self._background_early_prep())
+
+        logger.info(
+            "✅ Early morning preparation started in background - application remains responsive"
+        )
+
+    async def _background_early_prep(self):
+        """
+        Background task for early morning preparation.
+
+        This runs independently and doesn't block the main scheduler or application.
+        """
         try:
+            logger.info(
+                "🔧 Background: Starting FNO and instrument service initialization..."
+            )
+
             # Check if it's Monday (weekday 0) for weekly FNO refresh
             current_weekday = datetime.now(self.ist).weekday()
             should_refresh_fno = current_weekday == 0  # Monday only
 
-            # FIXED: ALWAYS run FNO service first (either refresh or verify existing data)
-            logger.info("🔧 Step 1: FNO stock list preparation...")
-            from services.fno_stock_service import FnoStockListService
+            # STEP 1: FNO service (runs in background, won't block)
+            logger.info("🔧 Background: Step 1 - FNO stock list preparation...")
+            try:
+                from services.fno_stock_service import FnoStockListService
 
-            fno_service = FnoStockListService()
+                fno_service = FnoStockListService()
 
-            if should_refresh_fno:
-                # WEEKLY: Full refresh on Mondays
-                logger.info("📊 Running weekly FNO stock list refresh (Monday)...")
-                fno_result = fno_service.update_fno_list()
-
-                if fno_result["status"] == "success":
+                if should_refresh_fno:
+                    # WEEKLY: Full refresh on Mondays
                     logger.info(
-                        f"✅ Weekly FNO refresh: {fno_result['total_stocks']} stocks"
+                        "📊 Background: Running weekly FNO stock list refresh (Monday)..."
                     )
-                else:
-                    logger.error(
-                        f"❌ Weekly FNO refresh failed: {fno_result.get('error')}"
-                    )
-                    # Don't continue if FNO data is corrupted
-                    return
-            else:
-                # DAILY: Verify existing FNO data is available
-                logger.info(f"🔍 Verifying existing FNO data (Tuesday-Sunday)...")
-                existing_stocks = fno_service.load_from_json()
+                    fno_result = await asyncio.to_thread(fno_service.update_fno_list)
 
-                if not existing_stocks:
-                    logger.warning(
-                        "⚠️ No existing FNO data found, running emergency refresh..."
-                    )
-                    fno_result = fno_service.update_fno_list()
-                    if fno_result["status"] != "success":
+                    if fno_result["status"] == "success":
+                        logger.info(
+                            f"✅ Background: Weekly FNO refresh complete: {fno_result['total_stocks']} stocks"
+                        )
+                    else:
                         logger.error(
-                            f"❌ Emergency FNO refresh failed: {fno_result.get('error')}"
+                            f"❌ Background: Weekly FNO refresh failed: {fno_result.get('error')}"
                         )
                         return
                 else:
+                    # DAILY: Verify existing FNO data is available
                     logger.info(
-                        f"✅ FNO data verified: {len(existing_stocks)} stocks available"
+                        f"🔍 Background: Verifying existing FNO data (Tuesday-Sunday)..."
+                    )
+                    existing_stocks = await asyncio.to_thread(
+                        fno_service.load_from_json
                     )
 
-            # FIXED: Step 2 now ALWAYS runs AFTER FNO service has completed successfully
+                    if not existing_stocks:
+                        logger.warning(
+                            "⚠️ Background: No existing FNO data found, running emergency refresh..."
+                        )
+                        fno_result = await asyncio.to_thread(
+                            fno_service.update_fno_list
+                        )
+                        if fno_result["status"] != "success":
+                            logger.error(
+                                f"❌ Background: Emergency FNO refresh failed: {fno_result.get('error')}"
+                            )
+                            return
+                    else:
+                        logger.info(
+                            f"✅ Background: FNO data verified: {len(existing_stocks)} stocks available"
+                        )
+
+            except Exception as fno_error:
+                logger.error(f"❌ Background: FNO service error: {fno_error}")
+                return
+
+            # STEP 2: Instrument service initialization
             logger.info(
-                "🔧 Step 2: Building instrument service (depends on FNO data)..."
+                "🔧 Background: Step 2 - Building instrument service (depends on FNO data)..."
             )
-            from services.instrument_refresh_service import get_trading_service
+            try:
+                from services.instrument_refresh_service import get_trading_service
 
-            instrument_service = get_trading_service()
-            result = await instrument_service.initialize_service()
+                instrument_service = get_trading_service()
 
-            if result.status == "success":
-                logger.info(
-                    f"✅ Instrument service ready with {result.websocket_instruments} keys"
-                )
-            else:
-                logger.error(f"❌ Instrument service failed: {result.error}")
+                # Initialize service (runs in background)
+                result = await instrument_service.initialize_service()
 
-            logger.info("✅ Early morning preparation complete")
+                if result.status == "success":
+                    logger.info(
+                        f"✅ Background: Instrument service ready with {result.websocket_instruments} keys"
+                    )
+                else:
+                    logger.error(
+                        f"❌ Background: Instrument service failed: {result.error}"
+                    )
+
+            except Exception as inst_error:
+                logger.error(f"❌ Background: Instrument service error: {inst_error}")
+
+            logger.info("✅ Background: Early morning preparation complete")
 
         except Exception as e:
-            logger.error(f"❌ Early morning preparation failed: {e}")
+            logger.error(f"❌ Background: Early morning preparation failed: {e}")
 
-    async def _run_premarket_analysis(self):
-        """Run pre-market analysis from 9:00-9:15 AM"""
-        logger.info("📊 Starting pre-market analysis...")
+    async def _run_preopen_stock_selection(self):
+        """
+        Run pre-open stock selection from 9:00-9:15 AM.
+
+        IMPORTANT: During pre-open session (9:00-9:15 AM), LIVE CURRENT DAY data
+        is available from the market. This is NOT yesterday's data - it's today's
+        pre-open auction prices and sentiment.
+
+        This uses REAL-TIME data from realtime_market_engine which receives live
+        WebSocket feeds during pre-open session.
+
+        FIXED: Non-blocking with retries, never stops the application.
+        """
+        logger.info(
+            "📊 Starting pre-open stock selection (9:00-9:15 AM) with LIVE data..."
+        )
 
         try:
-            # 1. Refresh instrument keys
-            # from services.instrument_refresh_service import get_trading_service
+            from services.intelligent_stock_selection_service import (
+                intelligent_stock_selector,
+            )
 
-            # instrument_service = get_trading_service()
+            # Check if market data is available with non-blocking retry logic
+            from services.realtime_market_engine import is_analytics_data_ready
 
-            # Re-initialize the service (this will download fresh data and rebuild everything)
-            # result = await instrument_service.initialize_service()
+            # Retry up to 6 times with 5-second intervals (max 30 seconds total)
+            max_retries = 6
+            retry_interval = 5
+            data_ready = False
 
-            # if result.status == "success":
-            #     logger.info(
-            #         f"✅ Instrument service re-initialized successfully with {result.websocket_instruments} WebSocket keys"
-            #     )
-            # else:
-            #     logger.error(
-            #         f"❌ Instrument service re-initialization failed: {result.error}"
-            #     )
-
-            # 2. Initialize instrument registry with new data
-            try:
-                from services.instrument_registry import instrument_registry
-
-                await instrument_registry.initialize_registry()
-
-                registry_stats = instrument_registry.get_stats()
-                logger.info(
-                    f"✅ Instrument registry initialized with {registry_stats['spot_instruments']} spot instruments, "
-                    f"{registry_stats['fno_instruments']} F&O instruments"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize instrument registry: {e}")
-
-            # 3. Refresh the centralized WebSocket manager to use the new keys
-            from services.centralized_ws_manager import centralized_manager
-
-            if centralized_manager:
-                # Tell the WebSocket manager to reload instrument keys
-                await centralized_manager.initialize()
-                logger.info("✅ WebSocket manager refreshed with new keys")
-
-            # 4. Run intelligent stock selection - service handles its own database save
-            logger.info("🎯 Triggering intelligent stock selection (realtime engine)...")
-            try:
-                from services.intelligent_stock_selection_service import intelligent_stock_selector
-
-                # Trigger intelligent premarket selection
-                # NOTE: intelligent_stock_selector handles:
-                #   - Real-time market data queries
-                #   - Stock selection logic
-                #   - Database save (with all market sentiment data)
-                #   - WebSocket broadcast
-                result = await intelligent_stock_selector.run_premarket_selection()
-
-                if result and not result.get("error"):
-                    selected_stocks_data = result.get("selected_stocks", [])
-                    sentiment_analysis = result.get("sentiment_analysis", {})
-
-                    logger.info(f"✅ Intelligent stock selection complete: {len(selected_stocks_data)} stocks")
-                    logger.info(f"📊 Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})")
-
-                    # Store minimal reference for legacy compatibility only
-                    # (Database already has complete data from intelligent_stock_selector)
-                    self.selected_stocks = {}
-                    for stock_dict in selected_stocks_data:
-                        symbol = stock_dict.get("symbol")
-                        if symbol:
-                            self.selected_stocks[symbol] = {
-                                "symbol": symbol,
-                                "instrument_key": stock_dict.get("instrument_key"),
-                                "sector": stock_dict.get("sector"),
-                                "option_type": stock_dict.get("options_direction")
-                            }
+            logger.info("🔍 Checking centralized_ws_manager data availability...")
+            for attempt in range(1, max_retries + 1):
+                if is_analytics_data_ready():
+                    data_ready = True
+                    logger.info(
+                        f"✅ LIVE market data ready (attempt {attempt}/{max_retries})"
+                    )
+                    break
                 else:
-                    error_msg = result.get("error", "Unknown error") if result else "No result returned"
-                    logger.warning(f"⚠️ Intelligent stock selection failed: {error_msg}")
-                    self.selected_stocks = {}
+                    if attempt < max_retries:
+                        logger.info(
+                            f"⏳ Market data not ready yet (attempt {attempt}/{max_retries}) - checking again in {retry_interval}s..."
+                        )
+                        await asyncio.sleep(retry_interval)
+                    else:
+                        logger.warning(
+                            f"⚠️ Market data not available after {max_retries} attempts - will proceed anyway"
+                        )
 
-            except Exception as e:
-                logger.error(f"❌ Intelligent stock selection failed: {e}")
-                import traceback
-                traceback.print_exc()
+            # ALWAYS continue even if data not ready - don't block the application
+            if not data_ready:
+                logger.warning(
+                    "⚠️ Proceeding with stock selection using available data (WebSocket may still be connecting)"
+                )
+
+            # Run pre-open stock selection with LIVE data
+            logger.info("✅ LIVE pre-open data available - running stock selection...")
+            preopen_result = await intelligent_stock_selector.run_premarket_selection()
+
+            if preopen_result and not preopen_result.get("error"):
+                selected_stocks_data = preopen_result.get("selected_stocks", [])
+                sentiment_analysis = preopen_result.get("sentiment_analysis", {})
+
+                logger.info(
+                    f"✅ Pre-open stock selection complete: {len(selected_stocks_data)} stocks selected using LIVE data"
+                )
+                logger.info(
+                    f"📊 LIVE Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})"
+                )
+
+                # Store minimal reference for legacy compatibility
+                self.selected_stocks = {}
+                for stock_dict in selected_stocks_data:
+                    symbol = stock_dict.get("symbol")
+                    if symbol:
+                        self.selected_stocks[symbol] = {
+                            "symbol": symbol,
+                            "instrument_key": stock_dict.get("instrument_key"),
+                            "sector": stock_dict.get("sector"),
+                            "option_type": stock_dict.get("options_direction"),
+                        }
+
+                logger.info(
+                    "✅ Pre-open stock selection complete - will validate at market open (9:15 AM)"
+                )
+
+            else:
+                error_msg = (
+                    preopen_result.get("error", "Unknown error")
+                    if preopen_result
+                    else "No result returned"
+                )
+                logger.warning(f"⚠️ Pre-open stock selection failed: {error_msg}")
                 self.selected_stocks = {}
 
-            # 6. Prepare instrument keys for selected stocks
-            await self._prepare_selected_stock_instruments()
-            await self._prepare_selected_stock_instruments_enhanced()
-
-            # 7. Update instrument registry with selected stocks
-            try:
-                from services.instrument_registry import instrument_registry
-
-                # Flag these stocks as selected in the registry
-                for symbol in self.selected_stocks.keys():
-                    instrument_registry.mark_stock_as_selected(symbol)
-
-                logger.info(
-                    f"✅ Updated instrument registry with {len(self.selected_stocks)} selected stocks"
-                )
-            except Exception as e:
-                logger.error(f"❌ Failed to update selected stocks in registry: {e}")
-
-            logger.info(
-                f"✅ Pre-market analysis complete. Selected {len(self.selected_stocks)} stocks"
-            )
-
         except Exception as e:
-            logger.error(f"❌ Pre-market analysis failed: {e}")
+            logger.error(f"❌ Pre-open stock selection failed: {e}")
+            import traceback
 
-    async def _prepare_trading_session(self):
-        """
-        Prepare for trading session (9:15-9:30 AM).
+            traceback.print_exc()
+            self.selected_stocks = {}
 
-        This is the market open validation phase where:
-        1. Check if market sentiment changed from premarket
-        2. Re-run stock selection if sentiment changed
-        3. Finalize selections for the day
+    async def _validate_market_open_selection(self):
         """
-        logger.info("🔧 Preparing trading session...")
+        Validate and finalize stock selections at market open (9:15-9:30 AM).
+
+        UPDATED FLOW:
+        1. Market open validation ONLY (pre-open selection already done at 9:00-9:15 AM)
+        2. Check if sentiment changed after market officially opened
+        3. Finalize stock selections for the day
+        4. Validate broker connections
+        """
+        logger.info("🔧 Market open validation (9:15-9:30 AM)...")
 
         try:
-            # CRITICAL: Run market open validation (9:15-9:25 AM window)
-            logger.info("🔍 Running market open validation - finalizing stock selections...")
-            try:
-                from services.intelligent_stock_selection_service import intelligent_stock_selector
+            from services.intelligent_stock_selection_service import (
+                intelligent_stock_selector,
+            )
 
-                validation_result = await intelligent_stock_selector.validate_market_open_selection()
+            # Check if pre-open selections exist
+            if not self.selected_stocks:
+                logger.warning(
+                    "⚠️ No pre-open selections found - pre-open selection may have failed"
+                )
+                logger.info("Attempting to run pre-open selection now...")
+
+                # Fallback: Run pre-open selection if it didn't run at 9:00 AM
+                await self._run_preopen_stock_selection()
+
+                # If still no selections, log error
+                if not self.selected_stocks:
+                    logger.error(
+                        "❌ No stocks selected - cannot proceed with trading session"
+                    )
+                    return
+
+            # Wait for market to stabilize after opening
+            logger.info("⏳ Waiting 5 seconds for market data to stabilize...")
+            await asyncio.sleep(5)
+
+            # Run market open validation (finalizes selections)
+            logger.info(
+                "🔍 Running market open validation - finalizing stock selections..."
+            )
+            try:
+                validation_result = (
+                    await intelligent_stock_selector.validate_market_open_selection()
+                )
 
                 if validation_result and not validation_result.get("error"):
-                    validation_action = validation_result.get("validation_action", "UNKNOWN")
-                    sentiment_changed = validation_result.get("sentiment_changed", False)
+                    validation_action = validation_result.get(
+                        "validation_action", "UNKNOWN"
+                    )
+                    sentiment_changed = validation_result.get(
+                        "sentiment_changed", False
+                    )
                     final_count = validation_result.get("final_count", 0)
 
-                    logger.info(f"✅ Market open validation complete: {validation_action}")
+                    logger.info(
+                        f"✅ Market open validation complete: {validation_action}"
+                    )
                     logger.info(f"📊 Sentiment changed: {sentiment_changed}")
-                    logger.info(f"🎯 Final selections: {final_count} stocks locked for trading")
+                    logger.info(
+                        f"🎯 Final selections: {final_count} stocks locked for trading"
+                    )
 
                     # Update our reference with final selections
                     final_stocks = validation_result.get("final_stocks", [])
@@ -441,12 +502,18 @@ class MarketScheduleService:
                                 "sector": stock_dict.get("sector"),
                                 "option_type": stock_dict.get("options_direction"),
                                 "final_score": stock_dict.get("final_score"),
-                                "selection_finalized": True
+                                "selection_finalized": True,
                             }
 
-                    logger.info(f"✅ Final selections confirmed: {len(self.selected_stocks)} stocks ready for auto-trading")
+                    logger.info(
+                        f"✅ Final selections confirmed: {len(self.selected_stocks)} stocks ready for auto-trading"
+                    )
                 else:
-                    error_msg = validation_result.get("error", "Unknown error") if validation_result else "No result returned"
+                    error_msg = (
+                        validation_result.get("error", "Unknown error")
+                        if validation_result
+                        else "No result returned"
+                    )
                     logger.warning(f"⚠️ Market open validation issue: {error_msg}")
                     logger.warning("⚠️ Will use premarket selections (if any)")
 
@@ -454,38 +521,38 @@ class MarketScheduleService:
                 logger.error(f"❌ Market open validation failed: {validation_error}")
                 logger.warning("⚠️ Continuing with premarket selections")
 
-            # Generate OHLC data for dashboard
-            await self._generate_dashboard_ohlc()
-
             # Validate broker connections
             await self._validate_broker_connections()
 
-            # Final stock selection confirmation (legacy - already done by intelligent_stock_selector)
-            await self._confirm_stock_selection()
-
-            logger.info("✅ Trading session preparation complete")
+            logger.info(
+                "✅ Market open validation complete - ready for trading at 9:30 AM"
+            )
 
         except Exception as e:
-            logger.error(f"❌ Trading preparation failed: {e}")
+            logger.error(f"❌ Market open validation failed: {e}")
 
     async def _monitor_active_trading(self):
         """Monitor active trading session (9:30 AM - 3:30 PM)"""
         logger.info("📈 Monitoring active trading session...")
 
         try:
-            # ✅ AUTO-START: Initialize trading systems at 9:30 AM (FIRST TIME ONLY)
-            current_time = datetime.now(self.ist).time()
-            if current_time >= time(9, 30) and current_time < time(9, 35) and not self.trading_sessions_active:
-                await self._initialize_auto_trading_systems()
+            # ❌ DISABLED: Auto-trading is now handled by AutoTradeScheduler (auto_trade_scheduler.py)
+            # This prevents conflicts - AutoTradeScheduler manages WebSocket lifecycle
+            # current_time = datetime.now(self.ist).time()
+            # if (
+            #     current_time >= time(9, 30)
+            #     and current_time < time(9, 35)
+            #     and not self.trading_sessions_active
+            # ):
+            #     await self._initialize_auto_trading_systems()
 
             # Update market status
             await self._update_market_status("normal_open")
 
-            # ✅ LIVE TRADING: Monitor active strategies and execute trades
-            if self.trading_sessions_active:
-                await self._monitor_fibonacci_strategies()
-                await self._monitor_nifty_strategy()
-                await self._execute_pending_trades()
+            # ❌ DISABLED: Trading monitoring now handled by AutoTradeScheduler
+            # if self.trading_sessions_active:
+            #     await self._monitor_nifty_strategy()
+            #     await self._execute_pending_trades()
 
             # Monitor portfolio performance
             await self._monitor_portfolio_performance()
@@ -506,9 +573,9 @@ class MarketScheduleService:
         logger.info("🧹 Starting post-market cleanup...")
 
         try:
-            # ✅ AUTO-STOP: Stop all trading systems
-            if self.trading_sessions_active:
-                await self._stop_auto_trading_systems()
+            # ❌ DISABLED: Trading stop now handled by AutoTradeScheduler
+            # if self.trading_sessions_active:
+            #     await self._stop_auto_trading_systems()
 
             # Update market status
             await self._update_market_status("closed")
@@ -552,320 +619,7 @@ class MarketScheduleService:
             logger.error(f"❌ Market analysis failed: {e}")
             return {}
 
-    async def _select_trading_stocks(self, market_analysis: Dict) -> Dict:
-        """🚀 ENHANCED: Select stocks using TradingStockSelector with OPTIONS INTEGRATION"""
-        try:
-            logger.info(
-                "🔍 Running advanced stock selection with options integration..."
-            )
-
-            # ✅ STEP 1: Use the advanced TradingStockSelector with options support
-            # This selector integrates with enhanced analytics and includes option chain data
-            selected_candidates = self.stock_selector.run_selection_sync()
-
-            if not selected_candidates:
-                logger.warning("❌ No stocks selected by TradingStockSelector")
-                return {}
-
-            logger.info(
-                f"✅ TradingStockSelector found {len(selected_candidates)} candidates"
-            )
-
-            # ✅ STEP 2: Convert to the expected format with enhanced data
-            selected = {}
-
-            for candidate in selected_candidates:
-                try:
-                    symbol = candidate.get("symbol")
-                    if not symbol:
-                        continue
-
-                    # ✅ STEP 3: Prepare comprehensive stock data with options
-                    stock_data = {
-                        "symbol": symbol,
-                        "instrument_key": candidate.get("instrument_key"),
-                        "sector": candidate.get("sector"),
-                        "price_at_selection": candidate.get("price_at_selection"),
-                        "selection_score": candidate.get("selection_score"),
-                        "selection_reason": candidate.get("selection_reason"),
-                        # ✅ OPTIONS DATA - Ready for trading
-                        "option_type": candidate.get(
-                            "option_type"
-                        ),  # CE/PE based on market sentiment
-                        "option_contract": candidate.get(
-                            "option_contract"
-                        ),  # ATM contract details
-                        "option_chain_data": candidate.get(
-                            "option_chain_data"
-                        ),  # Complete chain
-                        "option_expiry_date": candidate.get(
-                            "option_expiry_date"
-                        ),  # Nearest expiry
-                        "option_expiry_dates": candidate.get(
-                            "option_expiry_dates", []
-                        ),  # All expiries
-                        "option_contracts_available": candidate.get(
-                            "option_contracts_available", 0
-                        ),
-                        # Enhanced metadata
-                        "strategy_score": candidate.get("strategy_score", 0),
-                        "strategy_details": candidate.get("strategy_details", {}),
-                        "has_option_chain": candidate.get("option_chain_data")
-                        is not None,
-                        "selected_at": datetime.now(self.ist).isoformat(),
-                    }
-
-                    # ✅ STEP 4: Get instrument keys for both stock and options
-                    stock_instruments = await self._get_stock_instruments(symbol)
-                    stock_data["instruments"] = stock_instruments
-
-                    # ✅ STEP 5: Add option instrument keys if available
-                    if candidate.get("option_contract"):
-                        option_instrument_key = candidate["option_contract"].get(
-                            "instrument_key"
-                        )
-                        if option_instrument_key:
-                            stock_data["option_instrument_key"] = option_instrument_key
-                            stock_data["instruments"]["option"] = option_instrument_key
-                            logger.info(
-                                f"✅ {symbol}: Stock + Option instruments ready"
-                            )
-
-                    selected[symbol] = {
-                        "stock_data": stock_data,
-                        "analysis": {
-                            "score": candidate.get("selection_score", 0),
-                            "sector_performance": candidate.get("sector"),
-                            "market_sentiment_aligned": True,  # Selected based on sentiment
-                            "has_options": stock_data["has_option_chain"],
-                            "option_type_recommendation": candidate.get("option_type"),
-                        },
-                        "instruments": stock_instruments,
-                        "options_ready": stock_data["has_option_chain"],
-                    }
-
-                    logger.info(
-                        f"📊 {symbol}: Selected with {candidate.get('option_contracts_available', 0)} option contracts"
-                    )
-
-                except Exception as e:
-                    logger.error(
-                        f"❌ Error processing selected stock {candidate.get('symbol')}: {e}"
-                    )
-                    continue
-
-            # ✅ STEP 6: Store selection results for later access
-            self._store_selection_results(selected_candidates)
-
-            logger.info(
-                f"🎯 SELECTION COMPLETE: {len(selected)} stocks with options integration"
-            )
-            for symbol, data in selected.items():
-                option_status = (
-                    "✅ Options Ready" if data["options_ready"] else "❌ No Options"
-                )
-                logger.info(
-                    f"  📈 {symbol} ({data['stock_data']['sector']}) - {option_status}"
-                )
-
-            return selected
-
-        except Exception as e:
-            logger.error(f"❌ Enhanced stock selection failed: {e}")
-            # Fallback to empty selection rather than crash
-            return {}
-
-    def _store_selection_results(self, selected_candidates: List[Dict]):
-        """🗃️ Store selection results in Redis for easy access"""
-        try:
-            if not selected_candidates:
-                return
-
-            # Store individual stock data
-            for candidate in selected_candidates:
-                symbol = candidate.get("symbol")
-                if symbol:
-                    key = f"selected_stock:{symbol}:{datetime.now(self.ist).date().isoformat()}"
-                    self._safe_redis_set(
-                        key, json.dumps(candidate), ex=86400
-                    )  # 24 hour expiry
-
-            # Store summary data
-            summary_data = {
-                "selection_date": datetime.now(self.ist).date().isoformat(),
-                "selection_time": datetime.now(self.ist).time().isoformat(),
-                "total_selected": len(selected_candidates),
-                "stocks": [c.get("symbol") for c in selected_candidates],
-                "sectors": list(
-                    set(c.get("sector") for c in selected_candidates if c.get("sector"))
-                ),
-                "options_ready_count": sum(
-                    1 for c in selected_candidates if c.get("option_chain_data")
-                ),
-            }
-
-            summary_key = (
-                f"stock_selection_summary:{datetime.now(self.ist).date().isoformat()}"
-            )
-            self._safe_redis_set(summary_key, json.dumps(summary_data), ex=86400)
-
-            logger.info(
-                f"✅ Stored selection results in Redis: {len(selected_candidates)} stocks"
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Failed to store selection results: {e}")
-
-    def get_selected_stocks_from_storage(self, date_str: str = None) -> List[Dict]:
-        """📖 Retrieve stored selection results from Redis"""
-        try:
-            if not date_str:
-                date_str = datetime.now(self.ist).date().isoformat()
-
-            # Get summary first
-            summary_key = f"stock_selection_summary:{date_str}"
-            summary_data = self._safe_redis_get(summary_key)
-
-            if not summary_data:
-                logger.warning(f"No selection summary found for {date_str}")
-                return []
-
-            summary = json.loads(summary_data)
-            stocks = summary.get("stocks", [])
-
-            # Get individual stock data
-            selected_stocks = []
-            for symbol in stocks:
-                stock_key = f"selected_stock:{symbol}:{date_str}"
-                stock_data = self._safe_redis_get(stock_key)
-
-                if stock_data:
-                    selected_stocks.append(json.loads(stock_data))
-
-            logger.info(
-                f"📖 Retrieved {len(selected_stocks)} selected stocks from storage"
-            )
-            return selected_stocks
-
-        except Exception as e:
-            logger.error(f"❌ Failed to retrieve selection results: {e}")
-            return []
-
-    async def _prepare_selected_stock_instruments_enhanced(self):
-        """ENHANCED: Use instrument registry for comprehensive instrument keys"""
-        try:
-            if not self.selected_stocks:
-                logger.warning("No stocks selected for instrument preparation")
-                return
-
-            from services.instrument_registry import instrument_registry
-
-            all_trading_instruments = []
-
-            for symbol, stock_data in self.selected_stocks.items():
-                try:
-                    # Get trading keys from registry
-                    trading_keys = instrument_registry.get_instrument_keys_for_trading(
-                        symbol
-                    )
-
-                    if trading_keys:
-                        all_trading_instruments.extend(trading_keys)
-                        logger.info(
-                            f"📋 Added {len(trading_keys)} instruments for {symbol} from registry"
-                        )
-                    else:
-                        # Fallback to fast retrieval if registry doesn't have the data
-                        from services.optimized_instrument_service import fast_retrieval
-
-                        stock_mapping = fast_retrieval.get_stock_instruments(symbol)
-                        if stock_mapping:
-                            instruments = stock_mapping.get("instruments", {})
-                            primary_key = stock_mapping.get("primary_instrument_key")
-                            if primary_key:
-                                all_trading_instruments.append(primary_key)
-
-                            # Add futures
-                            futures = instruments.get("FUT", [])[:3]
-                            for future in futures:
-                                if future.get("instrument_key"):
-                                    all_trading_instruments.append(
-                                        future["instrument_key"]
-                                    )
-
-                            # Add options
-                            current_price = stock_data.get("analysis", {}).get(
-                                "current_price", 0
-                            )
-                            if current_price > 0:
-                                atm_strike = round(current_price / 50) * 50
-                                min_strike = atm_strike - 1000
-                                max_strike = atm_strike + 1000
-
-                                for option_type in ["CE", "PE"]:
-                                    for option in instruments.get(option_type, []):
-                                        strike = option.get("strike_price", 0)
-                                        if min_strike <= strike <= max_strike:
-                                            if option.get("instrument_key"):
-                                                all_trading_instruments.append(
-                                                    option["instrument_key"]
-                                                )
-
-                            logger.info(
-                                f"📋 Generated instruments for {symbol} from fast retrieval"
-                            )
-
-                except Exception as e:
-                    logger.error(f"Error getting instruments for {symbol}: {e}")
-                    continue
-
-            unique_instruments = list(set(all_trading_instruments))
-            await self._cache_trading_instruments(unique_instruments)
-
-            logger.info(
-                f"✅ Prepared {len(unique_instruments)} unique trading instruments"
-            )
-
-        except Exception as e:
-            logger.error(f"❌ Failed to prepare enhanced trading instruments: {e}")
-
     # === MISSING METHODS IMPLEMENTATION ===
-
-    async def _prepare_selected_stock_instruments(self):
-        """Basic instrument preparation (legacy method)"""
-        try:
-            if not self.selected_stocks:
-                return
-
-            instruments = []
-            for symbol in self.selected_stocks.keys():
-                # Add basic spot instrument
-                instruments.append(f"NSE_EQ|INE{symbol}")
-
-            await self._cache_selected_instruments(instruments)
-            logger.info(f"📋 Prepared {len(instruments)} basic instruments")
-
-        except Exception as e:
-            logger.error(f"Error preparing basic instruments: {e}")
-
-    async def _cache_selected_instruments(self, instruments):
-        """Cache selected instruments for WebSocket access"""
-        try:
-            self._safe_redis_set(
-                "selected_trading_instruments", json.dumps(instruments), ex=3600
-            )
-            logger.info(f"💾 Cached {len(instruments)} selected instruments")
-        except Exception as e:
-            logger.error(f"Error caching selected instruments: {e}")
-
-    async def _generate_dashboard_ohlc(self):
-        """Generate OHLC data for dashboard"""
-        try:
-            logger.info("📊 Generating dashboard OHLC data...")
-            # Implementation for OHLC generation
-            await asyncio.sleep(1)  # Placeholder
-        except Exception as e:
-            logger.error(f"Error generating OHLC: {e}")
 
     async def _validate_broker_connections(self):
         """Validate broker connections"""
@@ -879,13 +633,6 @@ class MarketScheduleService:
         except Exception as e:
             logger.error(f"Error validating broker connections: {e}")
 
-    async def _confirm_stock_selection(self):
-        """Confirm final stock selection"""
-        try:
-            logger.info(f"✅ Confirmed {len(self.selected_stocks)} stocks for trading")
-        except Exception as e:
-            logger.error(f"Error confirming stock selection: {e}")
-
     async def _update_market_status(self, status: str):
         """Update market status in cache"""
         try:
@@ -894,7 +641,7 @@ class MarketScheduleService:
                 json.dumps(
                     {"status": status, "updated_at": datetime.now().isoformat()}
                 ),
-                ex=3600
+                ex=3600,
             )
             logger.info(f"📊 Market status updated: {status}")
         except Exception as e:
@@ -953,9 +700,6 @@ class MarketScheduleService:
 
             # Reset selection status in instrument registry
             try:
-                from services.instrument_registry import instrument_registry
-
-                instrument_registry.clear_selected_stocks()
                 logger.info("✅ Cleared selected stocks in instrument registry")
             except Exception as e:
                 logger.error(f"Error clearing selected stocks in registry: {e}")
@@ -1033,10 +777,12 @@ class MarketScheduleService:
                     # Reset all tasks for new day
                     self.daily_tasks_completed = {
                         "early_preparation": None,
-                        "premarket_analysis": None,
-                        "trading_preparation": None,
+                        "preopen_stock_selection": None,
+                        "market_open_validation": None,
                     }
-                    logger.info(f"🔄 Daily tasks reset for new trading day: {current_date}")
+                    logger.info(
+                        f"🔄 Daily tasks reset for new trading day: {current_date}"
+                    )
                     break
         except Exception as e:
             logger.error(f"Error resetting daily tasks: {e}")
@@ -1057,20 +803,18 @@ class MarketScheduleService:
 
             # 1. Initialize Auto-Trading Coordinator
             from services.auto_trading_coordinator import AutoTradingCoordinator
+
             self.auto_trading_coordinator = AutoTradingCoordinator()
-            
-            # 2. Initialize Fibonacci Strategy for selected stocks
-            await self._initialize_fibonacci_strategy()
-            
-            # 3. Initialize NIFTY 9:40 Strategy (will activate at 9:40 AM)
+
+            # 2. Initialize NIFTY 9:40 Strategy (will activate at 9:40 AM)
             await self._initialize_nifty_strategy()
-            
-            # 4. Start live data feeds for selected instruments
+
+            # 3. Start live data feeds for selected instruments
             await self._activate_live_data_feeds()
-            
-            # 5. Initialize risk management systems
+
+            # 4. Initialize risk management systems
             await self._initialize_risk_management()
-            
+
             # Mark trading systems as active
             self.trading_sessions_active = True
             logger.info("✅ AUTO-TRADING SYSTEMS INITIALIZED - LIVE TRADING ACTIVE")
@@ -1079,68 +823,32 @@ class MarketScheduleService:
             logger.error(f"❌ Failed to initialize auto-trading systems: {e}")
             raise
 
-    async def _initialize_fibonacci_strategy(self):
-        """Initialize Fibonacci + EMA strategy for selected stocks"""
-        try:
-            logger.info("🔄 Initializing Fibonacci strategy for selected stocks...")
-            
-            # Import Fibonacci strategy
-            from services.strategies.fibonacci_ema_strategy import FibonacciEMAStrategy
-            self.fibonacci_strategy = FibonacciEMAStrategy()
-            
-            # Subscribe to live data for selected stocks
-            for symbol, stock_data in self.selected_stocks.items():
-                instrument_key = stock_data.get('instrument_key')
-                if instrument_key:
-                    # Register strategy callback for live price updates
-                    from services.live_adapter import live_adapter
-                    live_adapter.register_fibonacci_strategy_callback(
-                        strategy_name="fibonacci_ema",
-                        instruments=[instrument_key],
-                        callback=self._fibonacci_signal_callback,
-                        priority_level=1
-                    )
-                    logger.info(f"✅ Fibonacci strategy activated for {symbol}")
-
-        except Exception as e:
-            logger.error(f"❌ Fibonacci strategy initialization failed: {e}")
-
     async def _initialize_nifty_strategy(self):
         """Initialize NIFTY 9:40 strategy"""
         try:
             logger.info("🔄 Initializing NIFTY 9:40 strategy...")
-            
+
             # Import NIFTY strategy integration
-            from services.strategies.nifty_09_40_integration import get_nifty_strategy_integration
+            from services.strategies.nifty_09_40_integration import (
+                get_nifty_strategy_integration,
+            )
+
             self.nifty_strategy = await get_nifty_strategy_integration()
-            
+
             # Strategy will auto-activate at 9:40 AM
             logger.info("✅ NIFTY 9:40 strategy initialized - will activate at 9:40 AM")
 
         except Exception as e:
             logger.error(f"❌ NIFTY strategy initialization failed: {e}")
 
-    async def _monitor_fibonacci_strategies(self):
-        """Monitor Fibonacci strategy signals and execute trades"""
-        try:
-            if not self.fibonacci_strategy:
-                return
-                
-            # Strategy monitoring is handled by live data callbacks
-            # This method can be used for additional monitoring logic
-            pass
-
-        except Exception as e:
-            logger.error(f"❌ Fibonacci strategy monitoring failed: {e}")
-
     async def _monitor_nifty_strategy(self):
         """Monitor NIFTY 9:40 strategy"""
         try:
             if not self.nifty_strategy:
                 return
-                
+
             current_time = datetime.now(self.ist).time()
-            
+
             # NIFTY strategy active from 9:40 AM to 3:15 PM
             if time(9, 40) <= current_time <= time(15, 15):
                 # Strategy is running automatically via callbacks
@@ -1154,7 +862,7 @@ class MarketScheduleService:
         try:
             # Get unified trading executor
             from services.unified_trading_executor import unified_trading_executor
-            
+
             # Check for any pending trades that need execution
             # This is handled automatically by the strategies
             pass
@@ -1166,31 +874,37 @@ class MarketScheduleService:
         """Activate live data feeds for all trading instruments"""
         try:
             logger.info("📡 Activating live data feeds...")
-            
+
             # Get centralized WebSocket manager
             from services.centralized_ws_manager import centralized_ws_manager
-            
+
             # Create priority subscription for selected stocks
             selected_instruments = []
             for symbol, stock_data in self.selected_stocks.items():
-                instrument_key = stock_data.get('instrument_key')
+                instrument_key = stock_data.get("instrument_key")
                 if instrument_key:
-                    selected_instruments.append({
-                        'symbol': symbol,
-                        'instrument_key': instrument_key,
-                        'priority': 'HIGH'
-                    })
-            
+                    selected_instruments.append(
+                        {
+                            "symbol": symbol,
+                            "instrument_key": instrument_key,
+                            "priority": "HIGH",
+                        }
+                    )
+
             # Add NIFTY index for 9:40 strategy
-            selected_instruments.append({
-                'symbol': 'NIFTY',
-                'instrument_key': 'NSE_INDEX|99926000',
-                'priority': 'HIGH'
-            })
-            
+            selected_instruments.append(
+                {
+                    "symbol": "NIFTY",
+                    "instrument_key": "NSE_INDEX|99926000",
+                    "priority": "HIGH",
+                }
+            )
+
             # Activate priority subscription
             await centralized_ws_manager.priority_subscription(selected_instruments)
-            logger.info(f"✅ Live data feeds activated for {len(selected_instruments)} instruments")
+            logger.info(
+                f"✅ Live data feeds activated for {len(selected_instruments)} instruments"
+            )
 
         except Exception as e:
             logger.error(f"❌ Live data feed activation failed: {e}")
@@ -1199,11 +913,12 @@ class MarketScheduleService:
         """Initialize risk management and circuit breakers"""
         try:
             logger.info("🛡️ Initializing risk management systems...")
-            
+
             # Initialize circuit breaker
             from services.circuit_breaker import circuit_breaker
+
             circuit_breaker.reset_daily_limits()
-            
+
             logger.info("✅ Risk management systems initialized")
 
         except Exception as e:
@@ -1213,19 +928,19 @@ class MarketScheduleService:
         """Stop all auto-trading systems at market close"""
         try:
             logger.info("🛑 STOPPING AUTO-TRADING SYSTEMS AT MARKET CLOSE")
-            
+
             # 1. Stop NIFTY strategy
             if self.nifty_strategy:
                 logger.info("Stopping NIFTY strategy...")
                 await self.nifty_strategy.stop_daily_session()
-            
+
             # 2. Stop auto-trading coordinator
             if self.auto_trading_coordinator:
                 await self.auto_trading_coordinator.shutdown_system()
-            
+
             # 3. Generate trading reports
             await self._generate_trading_performance_report()
-            
+
             # Mark trading systems as inactive
             self.trading_sessions_active = False
             logger.info("✅ AUTO-TRADING SYSTEMS STOPPED")
@@ -1233,77 +948,19 @@ class MarketScheduleService:
         except Exception as e:
             logger.error(f"❌ Failed to stop auto-trading systems: {e}")
 
-    async def _fibonacci_signal_callback(self, instrument_key: str, tick_data: dict):
-        """Callback function for Fibonacci strategy signals"""
-        try:
-            # Find symbol for instrument key
-            symbol = None
-            for sym, data in self.selected_stocks.items():
-                if data.get('instrument_key') == instrument_key:
-                    symbol = sym
-                    break
-            
-            if symbol:
-                # Update current price
-                self.selected_stocks[symbol]['current_price'] = tick_data.get('ltp', 0)
-                
-                # Generate signal using Fibonacci strategy
-                signal = await self.fibonacci_strategy.generate_signal(
-                    symbol=symbol,
-                    current_price=tick_data.get('ltp', 0),
-                    volume=tick_data.get('volume', 0)
-                )
-                
-                if signal and signal.get('strength', 0) >= 70:
-                    logger.info(f"🎯 Fibonacci signal: {symbol} - {signal['signal']} (Strength: {signal['strength']}%)")
-                    await self._execute_fibonacci_trade(signal)
-
-        except Exception as e:
-            logger.error(f"❌ Fibonacci signal callback failed: {e}")
-
-    async def _execute_fibonacci_trade(self, signal: dict):
-        """Execute Fibonacci strategy trade"""
-        try:
-            from services.unified_trading_executor import unified_trading_executor, UnifiedTradeSignal, TradingMode
-            
-            # Create unified trade signal
-            unified_signal = UnifiedTradeSignal(
-                user_id=1,  # Default system user
-                symbol=signal['symbol'],
-                instrument_key=signal.get('instrument_key'),
-                option_type=signal['signal'],  # BUY_CE or BUY_PE
-                signal_type="BUY",
-                entry_price=signal['entry_price'],
-                stop_loss=signal.get('stop_loss'),
-                target=signal.get('target_1'),
-                confidence_score=signal.get('strength', 0),
-                strategy_name="fibonacci_ema",
-                trading_mode=TradingMode.PAPER  # Default to paper trading
-            )
-            
-            # Execute trade
-            result = await unified_trading_executor.execute_trade_signal(unified_signal)
-            
-            if result.get('status') == 'SUCCESS':
-                logger.info(f"✅ Fibonacci trade executed: {signal['symbol']} {signal['signal']}")
-            else:
-                logger.error(f"❌ Fibonacci trade failed: {result.get('message')}")
-
-        except Exception as e:
-            logger.error(f"❌ Fibonacci trade execution failed: {e}")
-
     async def _generate_trading_performance_report(self):
         """Generate daily trading performance report"""
         try:
             logger.info("📊 Generating daily trading performance report...")
-            
+
             # Get trading database service
             from services.database.trading_db_service import TradingDatabaseService
+
             db_service = TradingDatabaseService()
-            
+
             # Calculate daily performance
             await db_service.calculate_and_store_daily_performance(user_id=1)
             logger.info("✅ Daily performance report generated")
-            
+
         except Exception as e:
             logger.error(f"❌ Performance report generation failed: {e}")

@@ -655,24 +655,31 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ TradingScheduler not available")
 
-        # 7.1. Initialize Upstox Token Automation
-        logger.info("🔄 Starting Upstox Token Automation (2GB RAM)...")
+        # 7.1. Initialize Upstox Token Automation (IN BACKGROUND - NON-BLOCKING)
+        logger.info("🔄 Starting Upstox Token Automation in background...")
         try:
-            from services.upstox_automation_service import start_upstox_automation
+            async def start_upstox_in_background():
+                """Start Upstox automation in background to avoid blocking startup"""
+                try:
+                    from services.upstox_automation_service import start_upstox_automation
+                    upstox_automation = start_upstox_automation()
+                    if upstox_automation:
+                        logger.info(
+                            "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
+                        )
+                    else:
+                        logger.warning("⚠️ Upstox token automation failed to start")
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️ Upstox automation error: {e} - continuing without automation"
+                    )
 
-            upstox_automation = start_upstox_automation()
-            if upstox_automation:
-                logger.info(
-                    "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
-                )
-            else:
-                logger.warning("⚠️ Upstox token automation failed to start")
+            # Start in background - DON'T WAIT FOR IT!
+            asyncio.create_task(start_upstox_in_background())
+            logger.info("✅ Upstox automation starting in background - application remains responsive")
         except Exception as e:
             logger.warning(
-                f"⚠️ Upstox automation error: {e} - continuing without automation"
-            )
-            logger.warning(
-                "💡 Configure UPSTOX_MOBILE, UPSTOX_PIN, and UPSTOX_TOTP_KEY to enable automation"
+                f"⚠️ Upstox automation task creation failed: {e} - continuing without automation"
             )
 
         # 7.2. Initialize MarketScheduleService - CRITICAL for FNO and Instrument automation
@@ -761,46 +768,28 @@ async def lifespan(app: FastAPI):
         #     except Exception as e:
         #         logger.error(f"❌ Real-Time PnL Tracker failed to start: {e}")
 
-        # # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
-        # if TRADING_EXECUTION_AVAILABLE:
-        #     logger.info("⏰ Starting Auto-Trade Scheduler...")
-        #     try:
-        #         from services.trading_execution.auto_trade_scheduler import (
-        #             auto_trade_scheduler,
-        #         )
+        # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
+        if TRADING_EXECUTION_AVAILABLE:
+            logger.info("⏰ Starting Auto-Trade Scheduler...")
+            try:
+                from services.trading_execution.auto_trade_scheduler import (
+                    auto_trade_scheduler,
+                )
+                from services.trading_execution.capital_manager import TradingMode
 
-        #         # Get first active user with broker config for scheduler
-        #         db = next(get_db())
-        #         first_user_with_broker = (
-        #             db.query(User)
-        #             .join(BrokerConfig, BrokerConfig.user_id == User.id)
-        #             .filter(
-        #                 BrokerConfig.is_active == True,
-        #                 BrokerConfig.access_token.isnot(None),
-        #             )
-        #             .first()
-        #         )
-        #         db.close()
+                # Start scheduler - it will automatically monitor ALL users with broker configs
+                # No need to pass user_id - scheduler finds users automatically
+                asyncio.create_task(
+                    auto_trade_scheduler.start_scheduler(
+                        trading_mode=TradingMode.PAPER  # Default to paper trading for safety
+                    )
+                )
+                logger.info("✅ Auto-Trade Scheduler started (multi-user mode)")
+                logger.info("📌 Auto-trading will start at 9:15 AM when ANY user has stocks selected")
+                logger.info("📌 Monitoring ALL users with active broker configs automatically")
 
-        #         if first_user_with_broker:
-        #             asyncio.create_task(
-        #                 auto_trade_scheduler.start_scheduler(
-        #                     user_id=first_user_with_broker.id,
-        #                     trading_mode="paper",  # Default to paper trading for safety
-        #                 )
-        #             )
-        #             logger.info(
-        #                 f"✅ Auto-Trade Scheduler started for user {first_user_with_broker.id}"
-        #             )
-        #             logger.info(
-        #                 "📌 Auto-trading will start at 9:15 AM when stocks are selected"
-        #             )
-        #         else:
-        #             logger.warning(
-        #                 "⚠️ No active user with broker config - scheduler not started"
-        #             )
-        #     except Exception as e:
-        #         logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
+            except Exception as e:
+                logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
 
         # 16. 🚀 NEW: Initialize Intelligent Stock Selection Service
         logger.info("🧠 Initializing Intelligent Stock Selection Service...")

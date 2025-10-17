@@ -188,7 +188,7 @@ class AutoTradeLiveFeed:
             await self.self_mananged_ws_connection()
 
             # Step 4: Connect and stream in background
-            if not self.ws_task or self.ws_task_done():
+            if not self.ws_task or self.ws_task.done():
                 self.ws_task = asyncio.create_task(self._ws_connection_loop())
 
         except Exception as e:
@@ -1041,7 +1041,7 @@ class AutoTradeLiveFeed:
         self.is_running = False
 
         if self.ws_task:
-            self.ws_client.cancle()
+            self.ws_task.cancel()
             try:
                 await self.ws_task
             except asyncio.CancelledError:
