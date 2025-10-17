@@ -46,6 +46,9 @@ from services.upstox import MarketDataFeed_pb2 as pb
 from google.protobuf.json_format import MessageToDict
 
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
