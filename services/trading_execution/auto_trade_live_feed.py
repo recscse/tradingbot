@@ -42,7 +42,7 @@ from services.trading_execution.execution_handler import execution_handler
 from services.trading_execution.trade_prep import trade_prep_service, TradingMode
 from services.centralized_ws_manager import CentralizedWebSocketManager
 import websockets
-import MarketDataFeed_pb2 as pb
+from services.upstox import MarketDataFeed_pb2 as pb
 from google.protobuf.json_format import MessageToDict
 
 
