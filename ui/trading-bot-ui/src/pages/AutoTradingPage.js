@@ -1801,7 +1801,7 @@ const AutoTradingPage = () => {
                 ) : (
                   <Alert severity="info" sx={{ mt: 2 }}>
                     No stocks selected yet. Stock selection runs automatically
-                    during market hours (9:15-9:25 AM).
+                    during market hours (9:15-9:30 AM).
                   </Alert>
                 )}
               </CardContent>
