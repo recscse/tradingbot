@@ -543,6 +543,58 @@ async def lifespan(app: FastAPI):
 
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
+        # 4.6. 🚀 NEW: Initialize Enhanced Breakout Detection Engine
+        try:
+            logger.info("🎯 Initializing Enhanced Breakout Detection Engine...")
+            from services.enhanced_breakout_engine import (
+                initialize_breakout_engine,
+                connect_to_market_engine,
+                get_breakout_stats
+            )
+
+            # Get WebSocket managers for broadcasting
+            unified_manager = None
+            try:
+                from services.unified_websocket_manager import unified_manager as unified_ws
+                unified_manager = unified_ws
+            except ImportError:
+                logger.debug("Unified WebSocket manager not available for breakout broadcasting")
+
+            # Initialize breakout engine
+            breakout_engine = initialize_breakout_engine(
+                unified_manager=unified_manager,
+                centralized_manager=centralized_manager if CENTRALIZED_WS_AVAILABLE else None,
+                min_volume=1000,  # Minimum 1000 volume
+                min_price=10,     # Minimum price Rs. 10
+                momentum_threshold=0.015,  # 1.5% momentum threshold
+                history_len=50    # Track last 50 data points
+            )
+
+            # Connect to realtime market engine for live data feed
+            if connect_to_market_engine():
+                stats = get_breakout_stats()
+                logger.info(
+                    f"✅ Enhanced Breakout Engine initialized and connected to market data"
+                )
+                logger.info(
+                    f"📊 Breakout Detection: Min Volume={stats['min_volume']}, "
+                    f"Min Price={stats['min_price']}, Momentum Threshold={stats['momentum_threshold']*100}%"
+                )
+                logger.info(
+                    "🔥 Real-time breakout/breakdown detection is now active!"
+                )
+            else:
+                logger.warning(
+                    "⚠️ Breakout engine initialized but not connected to market data"
+                )
+
+        except ImportError as e:
+            logger.warning(f"⚠️ Enhanced Breakout Engine not available: {e}")
+        except Exception as e:
+            logger.error(f"❌ Enhanced Breakout Engine initialization failed: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
         # 6. Start Unified WebSocket System (🚀 ENHANCED with Real-Time Analytics Engine)
         # logger.info(
         #     "🔌 Starting Enhanced Unified WebSocket System with Real-Time Analytics..."
@@ -1409,6 +1461,39 @@ async def enhanced_health_check():
 
     # FIXED: Return the health_status
     return health_status
+
+
+# Breakout Engine status endpoint
+@app.get("/api/v1/system/breakout-status")
+async def get_breakout_engine_status():
+    """Get Enhanced Breakout Detection Engine status"""
+    try:
+        from services.enhanced_breakout_engine import get_breakout_stats, get_breakout_engine
+
+        stats = get_breakout_stats()
+        engine = get_breakout_engine()
+
+        return {
+            "success": True,
+            "breakout_engine": stats,
+            "data_flow": {
+                "connected_to_market_engine": stats.get("initialized", False),
+                "realtime_detection_active": stats.get("active", False)
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Breakout engine not available",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 # FIXED: Centralized WebSocket system management endpoints (always available)
