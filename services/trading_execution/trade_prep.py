@@ -121,7 +121,6 @@ class TradePrepService:
         lot_size: int,
         db: Session,
         trading_mode: TradingMode = TradingMode.PAPER,
-        use_spot_strategy: bool = True,
         broker_name: Optional[str] = None
     ) -> PreparedTrade:
         """
@@ -186,8 +185,13 @@ class TradePrepService:
             )
 
             if current_premium <= 0:
-                logger.warning(f"Could not fetch premium for {option_instrument_key}")
-                current_premium = Decimal('50.0')  # Fallback premium for testing
+                logger.error(f"Could not fetch premium for {option_instrument_key} - REJECTING TRADE")
+                return self._create_error_trade(
+                    TradeStatus.ERROR,
+                    user_id, stock_symbol, option_instrument_key,
+                    option_type, strike_price, expiry_date, lot_size,
+                    trading_mode, "Cannot fetch live option premium - real-time price required for safe trading"
+                )
 
             # Step 4: Calculate position size based on capital
             capital_allocation = capital_manager.calculate_position_size(
@@ -214,55 +218,30 @@ class TradePrepService:
                     f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}"
                 )
 
-            # Step 6 & 7: Generate trading signal (spot-based or option-based)
-            signal = None
+            # Step 6 & 7: Generate trading signal using option premium-based strategy
+            logger.info(f"Generating signal for {stock_symbol} using option premium strategy")
 
-            if use_spot_strategy:
-                # Use SPOT-based strategy (more accurate signals)
-                try:
-                    from services.trading_execution.spot_strategy_executor import spot_strategy_executor
-                    from services.trading_execution.spot_instrument_mapper import spot_instrument_mapper
+            # Fetch historical data for option
+            historical_data = self._get_historical_data(
+                stock_symbol, option_instrument_key, broker_config, trading_mode
+            )
 
-                    # Get spot instrument key for this stock
-                    spot_instrument_key = spot_instrument_mapper.get_spot_instrument_for_option(
-                        option_instrument_key, db
-                    )
-
-                    if spot_instrument_key:
-                        logger.info(f"Using SPOT strategy for {stock_symbol} (spot key: {spot_instrument_key})")
-
-                        # Generate signal based on SPOT price analysis
-                        signal = await spot_strategy_executor.generate_spot_based_signal(
-                            spot_instrument_key=spot_instrument_key,
-                            access_token=broker_config.access_token,
-                            option_type=option_type,
-                            interval="1minute"
-                        )
-
-                        logger.info(f"SPOT signal: {signal.signal_type.value}, Confidence: {signal.confidence}")
-                    else:
-                        logger.warning(f"No spot instrument found for {stock_symbol}, falling back to option-based strategy")
-                        use_spot_strategy = False  # Fallback
-
-                except Exception as e:
-                    logger.error(f"Error in spot strategy: {e}, falling back to option-based strategy")
-                    use_spot_strategy = False  # Fallback
-
-            if not use_spot_strategy or signal is None:
-                # Fallback: Use option premium-based strategy
-                logger.info(f"Using OPTION premium strategy for {stock_symbol}")
-
-                # Fetch historical data for option
-                historical_data = self._get_historical_data(
-                    stock_symbol, option_instrument_key, broker_config, trading_mode
+            # CRITICAL: Reject trade if no real historical data available
+            if not historical_data:
+                logger.error(f"Cannot generate signal without real historical data for {option_instrument_key}")
+                return self._create_error_trade(
+                    TradeStatus.ERROR,
+                    user_id, stock_symbol, option_instrument_key,
+                    option_type, strike_price, expiry_date, lot_size,
+                    trading_mode, "Cannot fetch real historical market data - required for strategy signal generation"
                 )
 
-                # Generate signal from option premium
-                signal = strategy_engine.generate_signal(
-                    current_premium,
-                    historical_data,
-                    option_type
-                )
+            # Generate signal from option premium
+            signal = strategy_engine.generate_signal(
+                current_premium,
+                historical_data,
+                option_type
+            )
 
             # Check signal validity
             if signal.signal_type == SignalType.HOLD:
@@ -329,52 +308,58 @@ class TradePrepService:
     def _get_current_option_premium(
         self,
         option_instrument_key: str,
-        broker_config: Any,
+        broker_config: Optional[Any],
         trading_mode: TradingMode
     ) -> Decimal:
         """
         Fetch current option premium from live market data
 
+        CRITICAL: Always uses REAL market prices, even for paper trading.
+        Paper trading needs accurate prices for realistic simulation.
+
         Args:
             option_instrument_key: Option instrument key
-            broker_config: Broker configuration
+            broker_config: Broker configuration (optional for paper trading)
             trading_mode: Trading mode
 
         Returns:
-            Current option premium
+            Current option premium (0 if not available)
         """
         try:
-            if trading_mode == TradingMode.PAPER:
-                # For paper trading, use mock data or last known price
-                logger.info("Paper trading mode: using mock premium")
-                return Decimal('50.0')
-
-            # Fetch live premium from market data
+            # Always fetch REAL market prices - NO MOCK DATA
             from services.realtime_market_engine import get_market_engine
             engine = get_market_engine()
 
             if option_instrument_key in engine.instruments:
                 instrument = engine.instruments[option_instrument_key]
                 premium = Decimal(str(instrument.current_price))
-                logger.info(f"Live premium for {option_instrument_key}: Rs.{premium}")
-                return premium
+
+                if premium > 0:
+                    logger.info(f"{'Paper' if trading_mode == TradingMode.PAPER else 'Live'} premium for {option_instrument_key}: Rs.{premium}")
+                    return premium
+                else:
+                    logger.error(f"Premium is zero for {option_instrument_key}")
+                    return Decimal('0')
             else:
-                logger.warning(f"Instrument not found in market engine: {option_instrument_key}")
-                return Decimal('50.0')
+                logger.error(f"Instrument not found in market engine: {option_instrument_key}")
+                return Decimal('0')
 
         except Exception as e:
             logger.error(f"Error fetching option premium: {e}")
-            return Decimal('50.0')
+            return Decimal('0')
 
     def _get_historical_data(
         self,
         stock_symbol: str,
         option_instrument_key: str,
-        broker_config: Any,
+        broker_config: Optional[Any],
         trading_mode: TradingMode
-    ) -> Dict[str, List[float]]:
+    ) -> Optional[Dict[str, List[float]]]:
         """
-        Fetch historical candle data for strategy calculation
+        Fetch historical candle data for strategy calculation from REAL market data
+
+        CRITICAL: Always uses REAL historical data from broker API or market engine.
+        NO MOCK DATA - returns None if real data unavailable.
 
         Args:
             stock_symbol: Stock symbol
@@ -383,47 +368,185 @@ class TradePrepService:
             trading_mode: Trading mode
 
         Returns:
-            Dict with OHLC data lists
+            Dict with OHLC data lists, or None if unavailable
         """
         try:
-            # Fetch historical data (mock for now)
-            # In production, this should fetch real historical data from broker API
+            # First, try to get historical data from realtime market engine
+            from services.realtime_market_engine import get_market_engine
+            engine = get_market_engine()
 
-            # Generate mock data for testing
-            import numpy as np
-            num_candles = 100
-            base_price = 50.0
+            if option_instrument_key in engine.instruments:
+                instrument = engine.instruments[option_instrument_key]
 
-            np.random.seed(42)
-            closes = []
-            highs = []
-            lows = []
-            opens = []
+                # Check if instrument has historical spot data
+                if hasattr(instrument, 'historical_spot_data') and instrument.historical_spot_data:
+                    historical_data = instrument.historical_spot_data
+                    logger.info(f"Using historical data from market engine for {option_instrument_key}")
 
-            for i in range(num_candles):
-                open_price = base_price + np.random.randn() * 2
-                high_price = open_price + abs(np.random.randn() * 3)
-                low_price = open_price - abs(np.random.randn() * 3)
-                close_price = open_price + np.random.randn() * 2
+                    # Validate data structure
+                    if ('close' in historical_data and
+                        len(historical_data['close']) >= 20):  # Minimum 20 candles for strategy
+                        return historical_data
+                    else:
+                        logger.warning(f"Insufficient historical data in market engine: {len(historical_data.get('close', []))} candles")
 
-                opens.append(open_price)
-                highs.append(high_price)
-                lows.append(low_price)
-                closes.append(close_price)
+            # If market engine doesn't have data, fetch from broker API
+            if broker_config:
+                broker_name = broker_config.broker_name.lower()
+                logger.info(f"Fetching historical data from {broker_name} broker API")
 
-                base_price = close_price
+                if 'upstox' in broker_name:
+                    historical_data = self._fetch_upstox_historical_data(
+                        option_instrument_key, broker_config
+                    )
+                    if historical_data:
+                        return historical_data
 
-            return {
-                'open': opens,
-                'high': highs,
-                'low': lows,
-                'close': closes,
-                'volume': [100000] * num_candles
-            }
+                elif 'angel' in broker_name:
+                    historical_data = self._fetch_angel_historical_data(
+                        option_instrument_key, broker_config
+                    )
+                    if historical_data:
+                        return historical_data
+
+                elif 'dhan' in broker_name:
+                    historical_data = self._fetch_dhan_historical_data(
+                        option_instrument_key, broker_config
+                    )
+                    if historical_data:
+                        return historical_data
+
+                else:
+                    logger.error(f"Unsupported broker for historical data: {broker_name}")
+
+            # If all methods fail, return None (DO NOT USE MOCK DATA)
+            logger.error(f"Could not fetch real historical data for {option_instrument_key}")
+            return None
 
         except Exception as e:
-            logger.error(f"Error fetching historical data: {e}")
-            return {'close': [50.0] * 100}
+            logger.error(f"Error fetching historical data: {e}", exc_info=True)
+            return None
+
+    def _fetch_upstox_historical_data(
+        self,
+        instrument_key: str,
+        broker_config: Any
+    ) -> Optional[Dict[str, List[float]]]:
+        """
+        Fetch historical data from Upstox API
+
+        Args:
+            instrument_key: Instrument key
+            broker_config: Broker configuration
+
+        Returns:
+            OHLC data or None
+        """
+        try:
+            from brokers.upstox_broker import UpstoxBroker
+            from datetime import datetime, timedelta
+
+            broker = UpstoxBroker(broker_config)
+
+            # Fetch 1-minute candles for last 1 day
+            to_date = datetime.now()
+            from_date = to_date - timedelta(days=1)
+
+            historical_data = broker.get_historical_data(
+                instrument_key=instrument_key,
+                interval="1minute",
+                from_date=from_date.strftime("%Y-%m-%d"),
+                to_date=to_date.strftime("%Y-%m-%d")
+            )
+
+            if historical_data and 'candles' in historical_data:
+                candles = historical_data['candles']
+
+                if len(candles) < 20:
+                    logger.warning(f"Insufficient Upstox historical data: {len(candles)} candles")
+                    return None
+
+                # Convert to standard format
+                opens = [candle[1] for candle in candles]
+                highs = [candle[2] for candle in candles]
+                lows = [candle[3] for candle in candles]
+                closes = [candle[4] for candle in candles]
+                volumes = [candle[5] for candle in candles]
+
+                logger.info(f"Fetched {len(candles)} candles from Upstox")
+                return {
+                    'open': opens,
+                    'high': highs,
+                    'low': lows,
+                    'close': closes,
+                    'volume': volumes
+                }
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching Upstox historical data: {e}")
+            return None
+
+    def _fetch_angel_historical_data(
+        self,
+        instrument_key: str,
+        broker_config: Any
+    ) -> Optional[Dict[str, List[float]]]:
+        """
+        Fetch historical data from Angel One API
+
+        Args:
+            instrument_key: Instrument key
+            broker_config: Broker configuration
+
+        Returns:
+            OHLC data or None
+        """
+        try:
+            from brokers.angel_one_broker import AngelOneBroker
+            from datetime import datetime, timedelta
+
+            broker = AngelOneBroker(broker_config)
+
+            # Angel One requires different instrument format
+            # This is a placeholder - actual implementation depends on Angel One API
+            logger.warning("Angel One historical data fetch not fully implemented")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching Angel One historical data: {e}")
+            return None
+
+    def _fetch_dhan_historical_data(
+        self,
+        instrument_key: str,
+        broker_config: Any
+    ) -> Optional[Dict[str, List[float]]]:
+        """
+        Fetch historical data from Dhan API
+
+        Args:
+            instrument_key: Instrument key
+            broker_config: Broker configuration
+
+        Returns:
+            OHLC data or None
+        """
+        try:
+            from brokers.dhan_broker import DhanBroker
+            from datetime import datetime, timedelta
+
+            broker = DhanBroker(broker_config)
+
+            # Dhan requires different instrument format
+            # This is a placeholder - actual implementation depends on Dhan API
+            logger.warning("Dhan historical data fetch not fully implemented")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error fetching Dhan historical data: {e}")
+            return None
 
     def _create_pending_trade(
         self,
