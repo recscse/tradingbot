@@ -1231,6 +1231,53 @@ class EnhancedIntelligentOptionsService:
                         "trailing_stop_loss": selection.trailing_stop_loss,
                     }
 
+                    # Prepare option contract JSON for database
+                    import json
+                    option_contract_json = json.dumps({
+                        "option_instrument_key": contract.option_instrument_key,
+                        "underlying_instrument_key": contract.underlying_instrument_key,
+                        "option_type": contract.option_type,
+                        "strike_price": float(contract.strike_price),
+                        "expiry_date": contract.expiry_date,
+                        "premium": float(contract.premium),
+                        "lot_size": contract.lot_size,
+                        "minimum_lot": contract.minimum_lot,
+                        "freeze_quantity": contract.freeze_quantity,
+                        "volume": contract.volume,
+                        "open_interest": contract.open_interest,
+                        "bid_price": float(contract.bid_price),
+                        "ask_price": float(contract.ask_price),
+                        "delta": float(contract.delta),
+                        "gamma": float(contract.gamma),
+                        "theta": float(contract.theta),
+                        "vega": float(contract.vega),
+                        "implied_volatility": float(contract.implied_volatility),
+                        "selection_reason": contract.selection_reason,
+                        "confidence_score": float(contract.confidence_score),
+                        "risk_reward_ratio": float(contract.risk_reward_ratio),
+                        "selected_at": contract.selected_at,
+                        "valid_until": contract.valid_until,
+                    })
+
+                    # Prepare available expiry dates JSON
+                    option_expiry_dates_json = json.dumps(selection.available_expiry_dates)
+
+                    # Prepare complete option chain data (if available)
+                    option_chain_data_json = json.dumps({
+                        "atm_strike": float(selection.atm_strike),
+                        "recommended_strike": float(selection.recommended_strike),
+                        "available_expiries": selection.available_expiry_dates,
+                        "selection_metadata": {
+                            "capital_allocation": float(selection.capital_allocation),
+                            "max_loss": float(selection.max_loss),
+                            "target_profit": float(selection.target_profit),
+                            "risk_reward_ratio": float(selection.risk_reward_ratio),
+                            "entry_conditions": selection.entry_conditions,
+                            "exit_conditions": selection.exit_conditions,
+                            "trailing_stop_loss": selection.trailing_stop_loss,
+                        }
+                    })
+
                     selected_stock = SelectedStock(
                         symbol=selection.symbol,
                         instrument_key=selection.instrument_key,
@@ -1243,8 +1290,20 @@ class EnhancedIntelligentOptionsService:
                         sector=selection.sector,
                         score_breakdown=str(enhanced_metadata),
                         is_active=True,
+                        # FIXED: Store option data in dedicated fields
+                        option_type=contract.option_type,
+                        option_contract=option_contract_json,
+                        option_expiry_date=contract.expiry_date,
+                        option_expiry_dates=option_expiry_dates_json,
+                        option_chain_data=option_chain_data_json,
                     )
                     db.add(selected_stock)
+
+                    logger.debug(
+                        f"Stored option data for {selection.symbol}: "
+                        f"{contract.option_type} {contract.strike_price} "
+                        f"expiring {contract.expiry_date}"
+                    )
 
                 db.commit()
                 logger.info(
