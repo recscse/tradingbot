@@ -1,12 +1,18 @@
 """
 Auto-Trading Scheduler
-Automatically starts/stops auto-trading based on market hours and stock selection
+Automatically starts/stops auto-trading based on market hours and common stock selection
+
+Architecture:
+- SelectedStock table is GLOBAL (no user_id field) - all users see same daily stock selections
+- Each user trades independently with their own broker config
+- Auto-starts WebSocket for users when common stocks are selected
 
 Features:
-1. Auto-starts WebSocket at 9:15 AM when stocks are selected
+1. Auto-starts WebSocket at 9:15 AM when stocks are selected (market_scheduler runs selection)
 2. Auto-stops WebSocket when all positions are closed
-3. Monitors market hours
-4. Handles daily cleanup
+3. Monitors market hours (9:15 AM - 3:30 PM)
+4. Handles daily cleanup and auto-start flag reset
+5. Supports multiple users trading the same common stock selections
 """
 
 import asyncio
@@ -25,8 +31,20 @@ logger = logging.getLogger(__name__)
 
 class AutoTradeScheduler:
     """
-    Manages auto-trading lifecycle based on market hours and stock selection
-    Monitors ALL active users with broker configs automatically
+    Manages auto-trading lifecycle based on market hours and COMMON stock selection.
+
+    Important: SelectedStock table has NO user_id - stocks are selected globally
+    by market_scheduler_service and shared across ALL users.
+
+    Each user trades independently with their own:
+    - BrokerConfig (user_id, access_token, broker_name)
+    - ActivePositions (user_id, trade details)
+    - Capital allocation
+
+    This scheduler monitors all active users and auto-starts trading when:
+    1. Common stocks are selected (SelectedStock.selection_date == today)
+    2. User has active broker config with valid token
+    3. Market hours (9:15 AM - 3:30 PM)
     """
 
     def __init__(self):
@@ -93,8 +111,8 @@ class AutoTradeScheduler:
 
     async def _check_and_start_trading_all_users(self):
         """
-        Check if auto-trading should start for ANY user with stocks selected
-        Monitors ALL users automatically - no need to pass user_id
+        Check if auto-trading should start for ANY user when common stocks are selected.
+        SelectedStock table is GLOBAL (no user_id) - all users see same stock selections.
         """
         try:
             # Don't auto-start if already running
@@ -113,30 +131,39 @@ class AutoTradeScheduler:
             db = SessionLocal()
 
             try:
-                # Check ALL users with active broker configs
                 today = date.today()
 
-                # Find users with stocks selected today AND active broker configs
-                users_with_selections = (
-                    db.query(BrokerConfig)
-                    .join(SelectedStock, SelectedStock.user_id == BrokerConfig.user_id)
+                # STEP 1: Check if stocks are selected today (COMMON for all users)
+                stock_count = (
+                    db.query(SelectedStock)
                     .filter(
-                        BrokerConfig.is_active == True,
-                        BrokerConfig.access_token.isnot(None),
                         SelectedStock.selection_date == today,
                         SelectedStock.is_active == True,
                         SelectedStock.option_contract.isnot(None)
                     )
-                    .distinct()
+                    .count()
+                )
+
+                if stock_count == 0:
+                    logger.debug("No stocks selected today - waiting for market_scheduler to run selection...")
+                    return
+
+                # STEP 2: Find ALL users with active broker configs (stocks are shared)
+                active_broker_configs = (
+                    db.query(BrokerConfig)
+                    .filter(
+                        BrokerConfig.is_active == True,
+                        BrokerConfig.access_token.isnot(None)
+                    )
                     .all()
                 )
 
-                if not users_with_selections:
-                    logger.debug("No users with stock selections and active broker configs - waiting...")
+                if not active_broker_configs:
+                    logger.debug("No active broker configs found - waiting for user setup...")
                     return
 
-                # Process each user (typically there will be only one, but supports multiple)
-                for broker_config in users_with_selections:
+                # STEP 3: Process each user (stocks are common, but each user trades independently)
+                for broker_config in active_broker_configs:
                     user_id = broker_config.user_id
 
                     # Check if already auto-started for this user today
@@ -145,23 +172,12 @@ class AutoTradeScheduler:
 
                     # Validate token expiry
                     if broker_config.access_token_expiry and broker_config.access_token_expiry < datetime.now():
-                        logger.warning(f"Broker token expired for user {user_id} - cannot auto-start")
+                        logger.warning(f"⚠️ Broker token expired for user {user_id} - cannot auto-start")
                         continue
 
-                    # Count stocks for this user
-                    stock_count = (
-                        db.query(SelectedStock)
-                        .filter(
-                            SelectedStock.user_id == user_id,
-                            SelectedStock.selection_date == today,
-                            SelectedStock.is_active == True,
-                            SelectedStock.option_contract.isnot(None)
-                        )
-                        .count()
-                    )
-
                     # All conditions met - AUTO-START for this user
-                    logger.info(f"🚀 AUTO-STARTING auto-trading for user {user_id}: {stock_count} stocks selected")
+                    logger.info(f"🚀 AUTO-STARTING auto-trading for user {user_id}")
+                    logger.info(f"📊 {stock_count} common stocks selected today (available to all users)")
 
                     # Start auto-trading
                     asyncio.create_task(
@@ -186,6 +202,8 @@ class AutoTradeScheduler:
 
         except Exception as e:
             logger.error(f"Error checking auto-start for users: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
     async def _check_and_stop_trading(self):
         """
