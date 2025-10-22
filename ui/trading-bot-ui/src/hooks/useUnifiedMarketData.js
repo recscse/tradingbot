@@ -1001,7 +1001,70 @@ export const useUnifiedMarketData = () => {
             }
             break;
 
-          // NEW: Handle real-time breakout signals from backend
+          // NEW: Handle individual breakout signal from enhanced breakout engine
+          case "breakout_signal":
+            if (data) {
+              debugLog("info", "Received real-time breakout signal", data);
+              console.log("⚡ REAL-TIME BREAKOUT:", data);
+
+              // Convert single signal to match expected format
+              const signal = {
+                instrument_key: data.instrument || data.instrument_key,
+                symbol: data.instrument?.split('|')[1] || data.symbol || data.instrument,
+                breakout_type: data.type || "breakout",  // volume, momentum, resistance
+                current_price: data.price,
+                volume: data.volume,
+                timestamp: data.timestamp || new Date().toISOString(),
+                percentage_move: 0,  // Calculate if possible
+                strength: 8,  // High strength for real-time signals
+                confidence: 90,  // High confidence for live detection
+              };
+
+              // Update breakout analysis with new signal
+              setBreakoutAnalysis((prevBreakouts) => {
+                const updatedBreakouts = { ...prevBreakouts };
+
+                // Initialize arrays if needed
+                updatedBreakouts.breakouts = updatedBreakouts.breakouts || [];
+                updatedBreakouts.recent_breakouts = updatedBreakouts.recent_breakouts || [];
+
+                // Add to both arrays (prevent duplicates)
+                const isDuplicate = updatedBreakouts.breakouts.some(
+                  (b) => b.symbol === signal.symbol &&
+                         Math.abs(new Date(b.timestamp) - new Date(signal.timestamp)) < 5000
+                );
+
+                if (!isDuplicate) {
+                  updatedBreakouts.breakouts.unshift(signal);
+                  updatedBreakouts.recent_breakouts.unshift(signal);
+
+                  // Keep only latest 50
+                  if (updatedBreakouts.breakouts.length > 50) {
+                    updatedBreakouts.breakouts = updatedBreakouts.breakouts.slice(0, 50);
+                  }
+                  if (updatedBreakouts.recent_breakouts.length > 25) {
+                    updatedBreakouts.recent_breakouts = updatedBreakouts.recent_breakouts.slice(0, 25);
+                  }
+
+                  console.log(`✅ Added ${signal.symbol} ${signal.breakout_type} breakout to UI`);
+                }
+
+                // Update summary
+                updatedBreakouts.summary = {
+                  ...updatedBreakouts.summary,
+                  total_breakouts: updatedBreakouts.breakouts.length,
+                  detection_active: true,
+                  last_update: new Date().toISOString(),
+                };
+
+                updatedBreakouts.total_breakouts_today = (updatedBreakouts.total_breakouts_today || 0) + 1;
+
+                return updatedBreakouts;
+              });
+            }
+            break;
+
+          // NEW: Handle batch breakout signals from backend
           case "breakout_signals_update":
             if (data.signals && Array.isArray(data.signals)) {
               debugLog(
@@ -1176,6 +1239,9 @@ export const useUnifiedMarketData = () => {
               "market_breadth_update",
               "performance_summary_update",
               "trigger_analytics",
+              // REAL-TIME BREAKOUT DETECTION
+              "breakout_signal", // Individual breakout signals from enhanced engine
+              "breakout_signals_update", // Batch breakout signals
               // FIXED EVENT NAMES for real-time integration
               "analytics_update", // Backend sends this for vectorized analytics
               "trading_signals", // Backend sends this for auto-trading signals

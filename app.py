@@ -130,18 +130,6 @@ from router.paper_trading_routes import router as paper_trading_router
 from router.option_routes import option_router
 
 
-# try:
-#     from router.auto_trading_routes import router as auto_trading_router
-
-#     AUTO_TRADING_AVAILABLE = True
-#     logger.info("✅ Auto Trading routes imported successfully")
-# except ImportError as e:
-#     from fastapi import APIRouter
-
-#     auto_trading_router = APIRouter()  # Dummy router
-#     AUTO_TRADING_AVAILABLE = False
-#     logger.warning(f"⚠️ Auto Trading services not available: {e}")
-
 try:
     from router.trading_execution_router import router as trading_execution_router
 
@@ -154,63 +142,12 @@ except ImportError as e:
     TRADING_EXECUTION_AVAILABLE = False
     logger.warning(f"⚠️ Trading Execution services not available: {e}")
 
-# try:
-#     from router.trading_stock_selection_router_old import (
-#         router as trading_stock_selection_router,
-#     )
-
-#     TRADING_STOCK_SELECTION_AVAILABLE = True
-#     logger.info("✅ Trading Stock Selection routes imported successfully")
-# except ImportError as e:
-#     from fastapi import APIRouter
-
-#     trading_stock_selection_router = APIRouter()
-#     TRADING_STOCK_SELECTION_AVAILABLE = False
-#     logger.warning(f"⚠️ Trading Stock Selection services not available: {e}")
-
 
 # Import from market_analytics_router safely
 try:
     from router.market_analytics_router import INSTRUMENT_REGISTRY_AVAILABLE
 except ImportError:
     INSTRUMENT_REGISTRY_AVAILABLE = False
-
-# Import your existing trading engine and services
-
-# FIXED: Import trading scheduler correctly
-try:
-    from services.trading_scheduler import TradingScheduler
-
-    TRADING_SCHEDULER_AVAILABLE = True
-    logger.info("✅ Trading scheduler imported successfully")
-except ImportError as e:
-    TRADING_SCHEDULER_AVAILABLE = False
-    logger.warning(f"⚠️ Trading scheduler not available: {e}")
-
-    class TradingScheduler:
-        def __init__(self):
-            self.is_running = False
-
-        def start_scheduler(self):
-            self.is_running = True
-            logger.info("✅ Fallback TradingScheduler started")
-
-        def stop_scheduler(self):
-            self.is_running = False
-
-
-# Import pre-market service
-try:
-    from services.pre_market_data_service import (
-        PreMarketDataService,
-        get_cached_trading_stocks,
-    )
-except ImportError:
-
-    def get_cached_trading_stocks():
-        return []
-
-    logger.warning("⚠️ Pre-market data service not available")
 
 # Import gap detection service (formerly premarket candle builder)
 try:
@@ -461,7 +398,7 @@ instrument_service_instance = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Enhanced lifespan with NEW centralized WebSocket system integration"""
-    global trading_engine, trading_scheduler, market_scheduler, instrument_service_instance
+    global trading_engine, market_scheduler, instrument_service_instance
 
     logger.info(
         "🚀 Starting Enhanced Trading Application with NEW Centralized WebSocket System..."
@@ -543,11 +480,63 @@ async def lifespan(app: FastAPI):
 
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
-        # 6. Start Unified WebSocket System (🚀 ENHANCED with Real-Time Analytics Engine)
-        # logger.info(
-        #     "🔌 Starting Enhanced Unified WebSocket System with Real-Time Analytics..."
-        # )
-        # await start_unified_websocket()
+        # 4.6. 🚀 NEW: Initialize Enhanced Breakout Detection Engine
+        try:
+            logger.info("🎯 Initializing Enhanced Breakout Detection Engine...")
+            from services.enhanced_breakout_engine import (
+                initialize_breakout_engine,
+                connect_to_market_engine,
+                get_breakout_stats,
+            )
+
+            # Get WebSocket managers for broadcasting
+            unified_manager = None
+            try:
+                from services.unified_websocket_manager import (
+                    unified_manager as unified_ws,
+                )
+
+                unified_manager = unified_ws
+            except ImportError:
+                logger.debug(
+                    "Unified WebSocket manager not available for breakout broadcasting"
+                )
+
+            # Initialize breakout engine
+            breakout_engine = initialize_breakout_engine(
+                unified_manager=unified_manager,
+                centralized_manager=(
+                    centralized_manager if CENTRALIZED_WS_AVAILABLE else None
+                ),
+                min_volume=1000,  # Minimum 1000 volume
+                min_price=10,  # Minimum price Rs. 10
+                momentum_threshold=0.015,  # 1.5% momentum threshold
+                history_len=50,  # Track last 50 data points
+            )
+
+            # Connect to realtime market engine for live data feed
+            if connect_to_market_engine():
+                stats = get_breakout_stats()
+                logger.info(
+                    f"✅ Enhanced Breakout Engine initialized and connected to market data"
+                )
+                logger.info(
+                    f"📊 Breakout Detection: Min Volume={stats['min_volume']}, "
+                    f"Min Price={stats['min_price']}, Momentum Threshold={stats['momentum_threshold']*100}%"
+                )
+                logger.info("🔥 Real-time breakout/breakdown detection is now active!")
+            else:
+                logger.warning(
+                    "⚠️ Breakout engine initialized but not connected to market data"
+                )
+
+        except ImportError as e:
+            logger.warning(f"⚠️ Enhanced Breakout Engine not available: {e}")
+        except Exception as e:
+            logger.error(f"❌ Enhanced Breakout Engine initialization failed: {e}")
+            import traceback
+
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
         # Gap Detection Service analyzes market gaps at 9:08 AM daily
 
@@ -576,27 +565,6 @@ async def lifespan(app: FastAPI):
                     logger.info(
                         "✅ Centralized WebSocket background task started - continuing with other services"
                     )
-
-                    # Note: Connection happens asynchronously in background
-                    # Other services will continue to initialize while WebSocket connects
-
-                    # 🚀 NEW: Initialize optimized real-time trading system (ZERO DELAY)
-                    try:
-                        from services.startup_integration import (
-                            initialize_realtime_trading_system,
-                        )
-
-                        success = await initialize_realtime_trading_system()
-                        if success:
-                            logger.info(
-                                "✅ Real-time trading system initialized (ZERO DELAY ARCHITECTURE)"
-                            )
-                        else:
-                            logger.warning(
-                                "⚠️ Real-time trading system initialization incomplete"
-                            )
-                    except ImportError:
-                        logger.debug("Startup integration not available")
 
                     # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
                     try:
@@ -641,38 +609,37 @@ async def lifespan(app: FastAPI):
                 "⚠️ NEW: Centralized WebSocket system not available - using legacy only"
             )
 
-        # 7. FIXED: Initialize TradingScheduler correctly
-        logger.info("🕐 Starting TradingScheduler...")
-        if TRADING_SCHEDULER_AVAILABLE:
-            try:
-                trading_scheduler = TradingScheduler()
-                trading_scheduler.start_scheduler()
-                logger.info("✅ TradingScheduler started")
-            except Exception as e:
-                logger.warning(
-                    f"⚠️ TradingScheduler failed to start: {e} - continuing without scheduler"
-                )
-        else:
-            logger.warning("⚠️ TradingScheduler not available")
-
-        # 7.1. Initialize Upstox Token Automation
-        logger.info("🔄 Starting Upstox Token Automation (2GB RAM)...")
+        # 7.1. Initialize Upstox Token Automation (IN BACKGROUND - NON-BLOCKING)
+        logger.info("🔄 Starting Upstox Token Automation in background...")
         try:
-            from services.upstox_automation_service import start_upstox_automation
 
-            upstox_automation = start_upstox_automation()
-            if upstox_automation:
-                logger.info(
-                    "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
-                )
-            else:
-                logger.warning("⚠️ Upstox token automation failed to start")
+            async def start_upstox_in_background():
+                """Start Upstox automation in background to avoid blocking startup"""
+                try:
+                    from services.upstox_automation_service import (
+                        start_upstox_automation,
+                    )
+
+                    upstox_automation = start_upstox_automation()
+                    if upstox_automation:
+                        logger.info(
+                            "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
+                        )
+                    else:
+                        logger.warning("⚠️ Upstox token automation failed to start")
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️ Upstox automation error: {e} - continuing without automation"
+                    )
+
+            # Start in background - DON'T WAIT FOR IT!
+            asyncio.create_task(start_upstox_in_background())
+            logger.info(
+                "✅ Upstox automation starting in background - application remains responsive"
+            )
         except Exception as e:
             logger.warning(
-                f"⚠️ Upstox automation error: {e} - continuing without automation"
-            )
-            logger.warning(
-                "💡 Configure UPSTOX_MOBILE, UPSTOX_PIN, and UPSTOX_TOTP_KEY to enable automation"
+                f"⚠️ Upstox automation task creation failed: {e} - continuing without automation"
             )
 
         # 7.2. Initialize MarketScheduleService - CRITICAL for FNO and Instrument automation
@@ -713,14 +680,13 @@ async def lifespan(app: FastAPI):
                 "💡 This means automated token expiry alerts and daily summaries will not work"
             )
 
-        # Note: Old gap and breakout detection services removed
         # Now using enhanced services started earlier in the startup process
         logger.info(
             "🎯 Using enhanced gap and breakout detection services (numpy/pandas optimized)"
         )
 
         # 13. ✅ NEW: Start Auto Trading WebSocket Service
-        # TODO Handled this later to stsrt when it nedded
+        # TODO Handled this later to start when it needed
         if True:
             logger.info("🔴 Starting Auto Trading WebSocket Service...")
             try:
@@ -729,78 +695,32 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Auto Trading WebSocket Service failed to start: {e}")
 
-        # 14. ✅ Intelligent Stock Selection Service available via router
-        # No startup needed - service is initialized when router is accessed
-        logger.info(
-            "✅ Intelligent Stock Selection Service available via /api/v1/intelligent-stock-selection"
-        )
+        # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
+        if TRADING_EXECUTION_AVAILABLE:
+            logger.info("⏰ Starting Auto-Trade Scheduler...")
+            try:
+                from services.trading_execution.auto_trade_scheduler import (
+                    auto_trade_scheduler,
+                )
+                from services.trading_execution.capital_manager import TradingMode
 
-        # # 15. ✅ NEW: Initialize Auto Trade Execution Service
-        # if AUTO_TRADING_AVAILABLE:
-        #     logger.info("⚡ Initializing Auto Trade Execution Service...")
-        #     try:
-        #         from services.execution.auto_trade_execution_service import (
-        #             start_auto_trade_execution,
-        #         )
+                # Start scheduler - it will automatically monitor ALL users with broker configs
+                # No need to pass user_id - scheduler finds users automatically
+                asyncio.create_task(
+                    auto_trade_scheduler.start_scheduler(
+                        trading_mode=TradingMode.PAPER  # Default to paper trading for safety
+                    )
+                )
+                logger.info("✅ Auto-Trade Scheduler started (multi-user mode)")
+                logger.info(
+                    "📌 Auto-trading will start at 9:15 AM when ANY user has stocks selected"
+                )
+                logger.info(
+                    "📌 Monitoring ALL users with active broker configs automatically"
+                )
 
-        #         await start_auto_trade_execution()
-        #         logger.info("✅ Auto Trade Execution Service initialized")
-        #     except Exception as e:
-        #         logger.error(
-        #             f"❌ Auto Trade Execution Service failed to initialize: {e}"
-        #         )
-
-        # # 15.5. 🚀 NEW: Start Real-Time PnL Tracker
-        # if TRADING_EXECUTION_AVAILABLE:
-        #     logger.info("📊 Starting Real-Time PnL Tracker...")
-        #     try:
-        #         from services.trading_execution.pnl_tracker import pnl_tracker
-
-        #         await pnl_tracker.start_tracking()
-        #         logger.info("✅ Real-Time PnL Tracker started")
-        #     except Exception as e:
-        #         logger.error(f"❌ Real-Time PnL Tracker failed to start: {e}")
-
-        # # 15.6. 🚀 NEW: Start Auto-Trade Scheduler for automatic WebSocket management
-        # if TRADING_EXECUTION_AVAILABLE:
-        #     logger.info("⏰ Starting Auto-Trade Scheduler...")
-        #     try:
-        #         from services.trading_execution.auto_trade_scheduler import (
-        #             auto_trade_scheduler,
-        #         )
-
-        #         # Get first active user with broker config for scheduler
-        #         db = next(get_db())
-        #         first_user_with_broker = (
-        #             db.query(User)
-        #             .join(BrokerConfig, BrokerConfig.user_id == User.id)
-        #             .filter(
-        #                 BrokerConfig.is_active == True,
-        #                 BrokerConfig.access_token.isnot(None),
-        #             )
-        #             .first()
-        #         )
-        #         db.close()
-
-        #         if first_user_with_broker:
-        #             asyncio.create_task(
-        #                 auto_trade_scheduler.start_scheduler(
-        #                     user_id=first_user_with_broker.id,
-        #                     trading_mode="paper",  # Default to paper trading for safety
-        #                 )
-        #             )
-        #             logger.info(
-        #                 f"✅ Auto-Trade Scheduler started for user {first_user_with_broker.id}"
-        #             )
-        #             logger.info(
-        #                 "📌 Auto-trading will start at 9:15 AM when stocks are selected"
-        #             )
-        #         else:
-        #             logger.warning(
-        #                 "⚠️ No active user with broker config - scheduler not started"
-        #             )
-        #     except Exception as e:
-        #         logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
+            except Exception as e:
+                logger.error(f"❌ Auto-Trade Scheduler failed to start: {e}")
 
         # 16. 🚀 NEW: Initialize Intelligent Stock Selection Service
         logger.info("🧠 Initializing Intelligent Stock Selection Service...")
@@ -921,40 +841,6 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error stopping market scheduler: {e}")
 
-        # Stop Auto-Trade Scheduler
-        # if TRADING_EXECUTION_AVAILABLE:
-        #     try:
-        #         from services.trading_execution.auto_trade_scheduler import (
-        #             auto_trade_scheduler,
-        #         )
-
-        #         logger.info("🛑 Stopping Auto-Trade Scheduler...")
-        #         await auto_trade_scheduler.stop()
-        #         logger.info("✅ Auto-Trade Scheduler stopped")
-        #     except Exception as e:
-        #         logger.error(f"Error stopping auto-trade scheduler: {e}")
-
-        # # Stop Notification Scheduler - NEW
-        # try:
-        #     logger.info("🛑 Stopping Notification Scheduler...")
-        #     from services.notification_scheduler import notification_scheduler
-
-        #     notification_scheduler.stop_scheduler()
-        #     logger.info("✅ Notification Scheduler stopped")
-        # except Exception as e:
-        #     logger.error(f"Error stopping notification scheduler: {e}")
-
-        # # Stop Real-Time PnL Tracker - NEW
-        # if TRADING_EXECUTION_AVAILABLE:
-        #     try:
-        #         logger.info("🛑 Stopping Real-Time PnL Tracker...")
-        #         from services.trading_execution.pnl_tracker import pnl_tracker
-
-        #         await pnl_tracker.stop_tracking()
-        #         logger.info("✅ Real-Time PnL Tracker stopped")
-        #     except Exception as e:
-        #         logger.error(f"Error stopping PnL tracker: {e}")
-
         logger.info(
             "🎯 Enhanced gap and breakout detection services shutdown completed"
         )
@@ -968,8 +854,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Error stopping Upstox automation: {e}")
 
-        # logger.info("🛑 Enhanced lifespan shutdown complete.")
-        # await unified_manager.stop()
+        logger.info("🛑 Enhanced lifespan shutdown complete.")
 
 
 # FIXED: Enhanced trading engine startup function
@@ -1422,6 +1307,42 @@ async def enhanced_health_check():
     return health_status
 
 
+# Breakout Engine status endpoint
+@app.get("/api/v1/system/breakout-status")
+async def get_breakout_engine_status():
+    """Get Enhanced Breakout Detection Engine status"""
+    try:
+        from services.enhanced_breakout_engine import (
+            get_breakout_stats,
+            get_breakout_engine,
+        )
+
+        stats = get_breakout_stats()
+        engine = get_breakout_engine()
+
+        return {
+            "success": True,
+            "breakout_engine": stats,
+            "data_flow": {
+                "connected_to_market_engine": stats.get("initialized", False),
+                "realtime_detection_active": stats.get("active", False),
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Breakout engine not available",
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+
 # FIXED: Centralized WebSocket system management endpoints (always available)
 @app.get("/api/v1/system/centralized-status")
 async def get_centralized_system_status():
@@ -1691,9 +1612,6 @@ if __name__ == "__main__":
     )
     logger.info(
         f"🔧 Legacy WebSocket: {'Available' if LEGACY_MARKET_WS_AVAILABLE else 'Not Available'}"
-    )
-    logger.info(
-        f"🔧 Trading Scheduler: {'Available' if TRADING_SCHEDULER_AVAILABLE else 'Not Available'}"
     )
 
     uvicorn.run(

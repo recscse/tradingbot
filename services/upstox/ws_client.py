@@ -355,16 +355,28 @@ class UpstoxWebSocketClient:
                 # Check if it's a network connectivity issue
                 is_network_error = any(
                     keyword in error_message.lower()
-                    for keyword in ['getaddrinfo failed', 'name resolution', 'connection refused', 'timeout', 'network']
+                    for keyword in [
+                        "getaddrinfo failed",
+                        "name resolution",
+                        "connection refused",
+                        "timeout",
+                        "network",
+                    ]
                 )
 
                 if is_network_error:
-                    logger.error(f"🌐 {self.connection_type}: Network connectivity error: {error_message[:100]}")
-                    logger.warning(f"⚠️ {self.connection_type}: Network appears to be down - application will continue running without live market data")
+                    logger.error(
+                        f"🌐 {self.connection_type}: Network connectivity error: {error_message[:100]}"
+                    )
+                    logger.warning(
+                        f"⚠️ {self.connection_type}: Network appears to be down - application will continue running without live market data"
+                    )
                     # For network errors, use longer backoff to avoid spamming logs
                     self.retry_count += 1
                     if self.retry_count >= self.max_retries:
-                        logger.error(f"❌ {self.connection_type}: Max retries reached due to network issues - WebSocket will remain disconnected until network is restored")
+                        logger.error(
+                            f"❌ {self.connection_type}: Max retries reached due to network issues - WebSocket will remain disconnected until network is restored"
+                        )
                         self.should_run = False
                         break
                 else:
@@ -429,9 +441,8 @@ class UpstoxWebSocketClient:
             active_segments.append("BSE")
 
         # For trading logic - are ALL of our markets closed? (NSE/BSE only)
-        all_markets_closed = (
-            (not has_nse or nse_status == "closed")
-            and (not has_bse or bse_status == "closed")
+        all_markets_closed = (not has_nse or nse_status == "closed") and (
+            not has_bse or bse_status == "closed"
         )
 
         return active_segments, all_markets_closed
