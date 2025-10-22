@@ -433,7 +433,41 @@ const DashboardPage = () => {
     total_count: 0,
   });
   const [fnoLoading, setFnoLoading] = useState(false);
+
+  // Gap Analysis state
+  const [gapAnalysisData, setGapAnalysisData] = useState({
+    gap_up: [],
+    gap_down: [],
+    summary: null,
+  });
+  const [gapLoading, setGapLoading] = useState(false);
+
   // REMOVED: Using Material-UI useMediaQuery for responsive detection
+
+  // Fetch Gap Analysis data from API
+  const fetchGapAnalysis = useCallback(async () => {
+    if (gapLoading) return;
+    setGapLoading(true);
+    try {
+      const response = await fetch(
+        `${process.env.REACT_APP_API_URL}/api/analytics/gap-analysis`
+      );
+      const data = await response.json();
+      if (data.success && data.data) {
+        setGapAnalysisData({
+          gap_up: data.data.gap_up || [],
+          gap_down: data.data.gap_down || [],
+          summary: data.data.summary || null,
+        });
+        console.log("Gap analysis loaded:", data.data.gap_up?.length || 0, "gap up,", data.data.gap_down?.length || 0, "gap down");
+      }
+    } catch (error) {
+      console.error("Failed to fetch gap analysis:", error);
+    } finally {
+      setGapLoading(false);
+    }
+  }, [gapLoading]);
+
   // Fetch FNO stocks from API
   const fetchFnoStocks = useCallback(async () => {
     if (fnoLoading) return;
@@ -455,6 +489,13 @@ const DashboardPage = () => {
       setFnoLoading(false);
     }
   }, [fnoLoading]);
+  // Load Gap Analysis when gaps section is accessed
+  useEffect(() => {
+    if (activeSection === "gaps" && gapAnalysisData.gap_up.length === 0 && gapAnalysisData.gap_down.length === 0) {
+      fetchGapAnalysis();
+    }
+  }, [activeSection, fetchGapAnalysis, gapAnalysisData.gap_up.length, gapAnalysisData.gap_down.length]);
+
   // Load FNO stocks when component mounts or when FNO section is accessed
   useEffect(() => {
     if (activeSection === "fno" && fnoStockList.securities.length === 0) {
@@ -901,8 +942,13 @@ const DashboardPage = () => {
       }
     };
 
-    const gapUp = extractGapData(gapAnalysis, "gap_up", 25);
-    const gapDown = extractGapData(gapAnalysis, "gap_down", 25);
+    // Use API-loaded gap analysis data if available, fallback to WebSocket data
+    const gapUp = gapAnalysisData.gap_up.length > 0
+      ? gapAnalysisData.gap_up.slice(0, 25)
+      : extractGapData(gapAnalysis, "gap_up", 25);
+    const gapDown = gapAnalysisData.gap_down.length > 0
+      ? gapAnalysisData.gap_down.slice(0, 25)
+      : extractGapData(gapAnalysis, "gap_down", 25);
     const intradayBoosters = extractAnalyticsData(
       intradayStocks,
       "all_candidates",
@@ -1041,6 +1087,7 @@ const DashboardPage = () => {
     indicesData,
     topMovers,
     gapAnalysis,
+    gapAnalysisData,
     intradayStocks,
     volumeAnalysis,
     recordMovers,
@@ -2601,7 +2648,13 @@ const DashboardPage = () => {
           flexDirection: "column",
         }}
       >
-        {gapUp.length > 0 ? (
+        {gapLoading ? (
+          <Box sx={{ textAlign: "center", py: 4 }}>
+            <Typography variant="h6" sx={{ color: colors.primary, mb: 2 }}>
+              Loading Gap Analysis...
+            </Typography>
+          </Box>
+        ) : gapUp.length > 0 ? (
           <MemoizedStocksList
             title={`📈 GAP UP (${gapUp.length})`}
             data={gapUp}
@@ -2610,7 +2663,7 @@ const DashboardPage = () => {
             showSector={!isMobile} // Show sector on larger screens if table
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
-            isLoading={!isConnected}
+            isLoading={gapLoading}
             // Remove fixed containerHeight to allow natural flow
           />
         ) : (
@@ -2641,7 +2694,13 @@ const DashboardPage = () => {
           flexDirection: "column",
         }}
       >
-        {gapDown.length > 0 ? (
+        {gapLoading ? (
+          <Box sx={{ textAlign: "center", py: 4 }}>
+            <Typography variant="h6" sx={{ color: colors.primary, mb: 2 }}>
+              Loading Gap Analysis...
+            </Typography>
+          </Box>
+        ) : gapDown.length > 0 ? (
           <MemoizedStocksList
             title={`📉 GAP DOWN (${gapDown.length})`}
             data={gapDown}
@@ -2650,7 +2709,7 @@ const DashboardPage = () => {
             showSector={!isMobile} // Show sector on larger screens if table
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
-            isLoading={!isConnected}
+            isLoading={gapLoading}
             // Remove fixed containerHeight to allow natural flow
           />
         ) : (

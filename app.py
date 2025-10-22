@@ -953,7 +953,9 @@ app.include_router(notification_router, tags=["Notifications"])
 # app.include_router(instrument_router, tags=["Instruments"])
 app.include_router(websocket_router, tags=["🗑️ WebSocket Management (REDUNDANT)"])
 app.include_router(debug_router, tags=["Debug"])
-app.include_router(market_analytics_router, tags=["Market Analytics"])
+app.include_router(
+    market_analytics_router, prefix="/api/analytics", tags=["Market Analytics"]
+)
 app.include_router(heatmap_router, tags=["Heatmap & Sector Analysis"])
 # 🚀 NEW: Simple Unified WebSocket System for Real-Time Market Data
 try:
