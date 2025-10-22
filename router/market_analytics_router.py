@@ -6,6 +6,9 @@ from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, Query, HTTPException, WebSocket, WebSocketDisconnect
 from datetime import datetime
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Simple flags - no complex imports
@@ -26,7 +29,9 @@ class SimpleAnalyticsService:
         """Lazy load optimized market data service"""
         if self._enhanced_analytics is None:
             try:
-                from services.optimized_market_data_service import optimized_market_service
+                from services.optimized_market_data_service import (
+                    optimized_market_service,
+                )
 
                 self._enhanced_analytics = optimized_market_service
                 return self._enhanced_analytics
@@ -59,10 +64,20 @@ class SimpleAnalyticsService:
                     "gainers": gainers,
                     "losers": losers,
                     "analysis": {
-                        "avg_gainer_change": sum(g.get("change_percent", 0) for g in gainers) / len(gainers) if gainers else 0,
-                        "avg_loser_change": sum(l.get("change_percent", 0) for l in losers) / len(losers) if losers else 0,
-                        "total_analyzed": len(gainers) + len(losers)
-                    }
+                        "avg_gainer_change": (
+                            sum(g.get("change_percent", 0) for g in gainers)
+                            / len(gainers)
+                            if gainers
+                            else 0
+                        ),
+                        "avg_loser_change": (
+                            sum(l.get("change_percent", 0) for l in losers)
+                            / len(losers)
+                            if losers
+                            else 0
+                        ),
+                        "total_analyzed": len(gainers) + len(losers),
+                    },
                 }
             except Exception as e:
                 logger.error(f"Error getting top movers: {e}")
@@ -78,7 +93,7 @@ class SimpleAnalyticsService:
                 return {
                     "volume_leaders": volume_leaders,
                     "unusual_volume": [],  # Can be implemented later
-                    "volume_momentum": []  # Can be implemented later
+                    "volume_momentum": [],  # Can be implemented later
                 }
             except Exception as e:
                 logger.error(f"Error getting volume analysis: {e}")
@@ -96,16 +111,14 @@ class SimpleAnalyticsService:
 
         return {"sentiment": "unknown", "confidence": 0, "metrics": {}}
 
-    def get_gap_analysis(self):
+    async def get_gap_analysis(self):
         """Get gap analysis from gap detection service"""
         try:
             # Import gap detection service function
-            import asyncio
             from services.gapdetection_service import get_todays_gap_analysis
 
             # Get today's gaps (both up and down)
-            loop = asyncio.get_event_loop()
-            all_gaps = loop.run_until_complete(get_todays_gap_analysis(limit=50))
+            all_gaps = await get_todays_gap_analysis(limit=50)
 
             # Separate gap up and gap down
             gap_up = []
@@ -138,14 +151,10 @@ class SimpleAnalyticsService:
                 "gap_up_count": len(gap_up),
                 "gap_down_count": len(gap_down),
                 "data_source": "gap_detection_service",
-                "analysis_time": "9:08 AM IST"
+                "analysis_time": "9:08 AM IST",
             }
 
-            return {
-                "gap_up": gap_up,
-                "gap_down": gap_down,
-                "summary": summary
-            }
+            return {"gap_up": gap_up, "gap_down": gap_down, "summary": summary}
 
         except Exception as e:
             logger.error(f"Error getting gap analysis: {e}")
@@ -166,8 +175,16 @@ class SimpleAnalyticsService:
                     "summary": {
                         "total_breakouts": len(new_highs),
                         "total_breakdowns": len(new_lows),
-                        "market_momentum": "bullish" if len(new_highs) > len(new_lows) else "bearish" if len(new_lows) > len(new_highs) else "neutral"
-                    }
+                        "market_momentum": (
+                            "bullish"
+                            if len(new_highs) > len(new_lows)
+                            else (
+                                "bearish"
+                                if len(new_lows) > len(new_highs)
+                                else "neutral"
+                            )
+                        ),
+                    },
                 }
             except Exception as e:
                 logger.error(f"Error getting breakout analysis: {e}")
@@ -207,8 +224,8 @@ class SimpleAnalyticsService:
                         "total_analyzed": len(biggest_movers),
                         "low_risk_count": len(low_risk),
                         "medium_risk_count": len(medium_risk),
-                        "high_risk_count": len(high_risk)
-                    }
+                        "high_risk_count": len(high_risk),
+                    },
                 }
             except Exception as e:
                 logger.error(f"Error getting intraday stocks: {e}")
@@ -229,8 +246,10 @@ class SimpleAnalyticsService:
                     "summary": {
                         "new_highs_count": len(new_highs),
                         "new_lows_count": len(new_lows),
-                        "high_low_ratio": len(new_highs) / len(new_lows) if new_lows else float('inf')
-                    }
+                        "high_low_ratio": (
+                            len(new_highs) / len(new_lows) if new_lows else float("inf")
+                        ),
+                    },
                 }
             except Exception as e:
                 logger.error(f"Error getting record movers: {e}")
@@ -249,29 +268,31 @@ class SimpleAnalyticsService:
                 sectors = []
                 for sector_name, data in sector_performance.items():
                     if data["total_stocks"] > 0:
-                        sectors.append({
-                            "sector": sector_name,
-                            "avg_change_percent": data["avg_change_percent"],
-                            "advancing": data["advancing"],
-                            "declining": data["declining"],
-                            "total_stocks": data["total_stocks"],
-                            "strength_score": data["strength_score"]
-                        })
+                        sectors.append(
+                            {
+                                "sector": sector_name,
+                                "avg_change_percent": data["avg_change_percent"],
+                                "advancing": data["advancing"],
+                                "declining": data["declining"],
+                                "total_stocks": data["total_stocks"],
+                                "strength_score": data["strength_score"],
+                            }
+                        )
 
                 return {
                     "heatmap": {"sectors": sectors},
                     "metadata": {
                         "size_metric": size_metric,
                         "color_metric": color_metric,
-                        "total_sectors": len(sectors)
-                    }
+                        "total_sectors": len(sectors),
+                    },
                 }
             except Exception as e:
                 logger.error(f"Error generating sector heatmap: {e}")
 
         return {"heatmap": {"sectors": []}, "metadata": {}}
 
-    def get_complete_analytics(self):
+    async def get_complete_analytics(self):
         """Get all analytics data"""
         service = self._get_optimized_service()
         if service:
@@ -281,14 +302,14 @@ class SimpleAnalyticsService:
                     "top_movers": self.get_top_gainers_losers(),
                     "volume_analysis": self.get_volume_analysis(),
                     "market_sentiment": self.get_market_sentiment(),
-                    "gap_analysis": self.get_gap_analysis(),
+                    "gap_analysis": await self.get_gap_analysis(),
                     "breakout_analysis": self.get_breakout_analysis(),
                     "intraday_stocks": self.get_intraday_stocks(),
                     "record_movers": self.get_record_movers(),
                     "sector_heatmap": self.generate_sector_heatmap(),
                     "market_breadth": service.get_advance_decline_analysis(),
                     "generated_at": datetime.now().isoformat(),
-                    "data_source": "optimized_market_service"
+                    "data_source": "optimized_market_service",
                 }
             except Exception as e:
                 logger.error(f"Error getting complete analytics: {e}")
@@ -411,7 +432,7 @@ async def get_market_sentiment():
 async def get_gap_analysis():
     """Get gap up/down analysis"""
     try:
-        result = analytics_service.get_gap_analysis()
+        result = await analytics_service.get_gap_analysis()
         return {
             "success": True,
             "data": result,
@@ -509,7 +530,7 @@ async def get_sector_heatmap(
 async def get_complete_analytics():
     """Get all analytics data in one call"""
     try:
-        result = analytics_service.get_complete_analytics()
+        result = await analytics_service.get_complete_analytics()
         return {
             "success": True,
             "data": result,
@@ -564,7 +585,7 @@ async def websocket_market_analytics(websocket: WebSocket):
         # Send initial data
         initial_data = {
             "type": "initial_data",
-            "data": analytics_service.get_complete_analytics(),
+            "data": await analytics_service.get_complete_analytics(),
             "timestamp": datetime.now().isoformat(),
         }
         await analytics_manager.send_personal_message(initial_data, client_id)
@@ -577,7 +598,7 @@ async def websocket_market_analytics(websocket: WebSocket):
                 message_type = message.get("type", "unknown")
 
                 if message_type == "get_complete":
-                    result = analytics_service.get_complete_analytics()
+                    result = await analytics_service.get_complete_analytics()
                     await analytics_manager.send_personal_message(
                         {
                             "type": "complete_data",
