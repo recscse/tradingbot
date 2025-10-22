@@ -7,6 +7,12 @@ import numpy as np
 from numba import njit
 
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
 # -----------------------------
 # Breakout Signal Definition
 # -----------------------------
@@ -185,12 +191,12 @@ class EnhancedBreakoutEngine:
         for sig in signals:
             data = sig.to_dict()
             try:
-                await self.unified_manager.emit("breakout_signal", data)
+                print(f"📢 Broadcasting breakout signal: {data}")
             except Exception:
                 try:
                     await self.centralized_manager.emit("breakout_signal", data)
                 except Exception:
-                    logging.warning(f"Failed to broadcast signal: {data}")
+                    logger.warning(f"Failed to broadcast signal: {data}")
 
     # -----------------------------
     # Public Update Method
@@ -241,7 +247,7 @@ class EnhancedBreakoutEngine:
                 if isinstance(data, dict):
                     feed_batch[instrument_key] = {
                         "price": float(data.get("ltp", 0)),
-                        "volume": float(data.get("volume", 0))
+                        "volume": float(data.get("volume", 0)),
                     }
 
             # Process data (synchronous version)
@@ -254,6 +260,7 @@ class EnhancedBreakoutEngine:
                 # Schedule async broadcast if signals found
                 if signals:
                     import asyncio
+
                     try:
                         loop = asyncio.get_event_loop()
                         if loop.is_running():
@@ -262,12 +269,15 @@ class EnhancedBreakoutEngine:
                             asyncio.run(self._broadcast_breakouts(signals))
                     except RuntimeError:
                         # If no event loop, log warning
-                        logging.warning(f"Cannot broadcast {len(signals)} breakout signals - no event loop")
+                        logger.warning(
+                            f"Cannot broadcast {len(signals)} breakout signals - no event loop"
+                        )
 
         except Exception as e:
-            logging.error(f"Error in price update callback: {e}")
+            logger.error(f"Error in price update callback: {e}")
             import traceback
-            logging.error(traceback.format_exc())
+
+            logger.error(traceback.format_exc())
 
     # -----------------------------
     # Async Loops
@@ -304,7 +314,7 @@ def initialize_breakout_engine(
     min_volume: float = 1000,
     min_price: float = 1,
     momentum_threshold: float = 0.01,
-    history_len: int = 50
+    history_len: int = 50,
 ) -> EnhancedBreakoutEngine:
     """
     Initialize the global breakout engine instance.
@@ -323,7 +333,7 @@ def initialize_breakout_engine(
     global _breakout_engine_instance
 
     if _breakout_engine_instance is not None:
-        logging.info("Breakout engine already initialized, returning existing instance")
+        logger.info("Breakout engine already initialized, returning existing instance")
         return _breakout_engine_instance
 
     # Create storage
@@ -336,10 +346,12 @@ def initialize_breakout_engine(
         centralized_manager=centralized_manager,
         min_volume=min_volume,
         min_price=min_price,
-        momentum_threshold=momentum_threshold
+        momentum_threshold=momentum_threshold,
     )
 
-    logging.info(f"✅ Enhanced Breakout Engine initialized with {history_len} history length")
+    logger.info(
+        f"✅ Enhanced Breakout Engine initialized with {history_len} history length"
+    )
     return _breakout_engine_instance
 
 
@@ -360,24 +372,27 @@ def connect_to_market_engine():
         breakout_engine = get_breakout_engine()
 
         if not breakout_engine:
-            logging.error("Breakout engine not initialized - call initialize_breakout_engine() first")
+            logger.error(
+                "Breakout engine not initialized - call initialize_breakout_engine() first"
+            )
             return False
 
         if not market_engine:
-            logging.error("Realtime market engine not available")
+            logger.error("Realtime market engine not available")
             return False
 
         # Register callback for price updates
-        market_engine.event_emitter.on('price_update', breakout_engine.on_price_update)
+        market_engine.event_emitter.on("price_update", breakout_engine.on_price_update)
 
-        logging.info("✅ Breakout engine connected to realtime market engine")
-        logging.info("📊 Breakout detection will run on every price update")
+        logger.info("✅ Breakout engine connected to realtime market engine")
+        logger.info("📊 Breakout detection will run on every price update")
         return True
 
     except Exception as e:
-        logging.error(f"❌ Failed to connect breakout engine to market engine: {e}")
+        logger.error(f"❌ Failed to connect breakout engine to market engine: {e}")
         import traceback
-        logging.error(traceback.format_exc())
+
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -390,10 +405,7 @@ def get_breakout_stats() -> Dict[str, any]:
     """
     engine = get_breakout_engine()
     if not engine:
-        return {
-            "initialized": False,
-            "error": "Breakout engine not initialized"
-        }
+        return {"initialized": False, "error": "Breakout engine not initialized"}
 
     try:
         return {
@@ -402,10 +414,7 @@ def get_breakout_stats() -> Dict[str, any]:
             "instruments_tracked": len(engine.storage.storage),
             "min_volume": engine.min_volume,
             "min_price": engine.min_price,
-            "momentum_threshold": engine.momentum_threshold
+            "momentum_threshold": engine.momentum_threshold,
         }
     except Exception as e:
-        return {
-            "initialized": True,
-            "error": str(e)
-        }
+        return {"initialized": True, "error": str(e)}

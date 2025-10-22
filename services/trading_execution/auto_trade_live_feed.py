@@ -30,8 +30,14 @@ from enum import Enum
 
 import requests
 
-from database.connection import SessionLocal
-from database.models import SelectedStock, ActivePosition, AutoTradeExecution
+from database.connection import SessionLocal, get_db
+from database.models import (
+    BrokerConfig,
+    SelectedStock,
+    ActivePosition,
+    AutoTradeExecution,
+    User,
+)
 from services.upstox.ws_client import UpstoxWebSocketClient
 from services.trading_execution.strategy_engine import (
     strategy_engine,
@@ -137,6 +143,7 @@ class AutoTradeLiveFeed:
         self.is_running = False
         self.ws_task: Optional[asyncio.Task] = None
         self.trading_mode: TradingMode = TradingMode.PAPER  # Default to paper trading
+        self.access_token: str = ""
 
         # Instruments being monitored
         self.monitored_instruments: Dict[str, AutoTradeInstrument] = {}
@@ -171,6 +178,8 @@ class AutoTradeLiveFeed:
         try:
             self.is_running = True
             self.trading_mode = trading_mode  # Store trading mode for use in execution
+
+            self.access_token = await self.load_upstox_access_token()
 
             # Step 1: Load selected stocks from database
             await self._load_selected_instruments(user_id)
@@ -308,7 +317,10 @@ class AutoTradeLiveFeed:
 
         try:
 
-            access_token = CentralizedWebSocketManager._load_admin_token()
+            access_token = self.access_token
+            if not access_token:
+                logger.error("No access token available for WebSocket connection")
+                return
             headers = {"Authorization": f"Bearer {access_token}"}
             url = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
             response = requests.get(url=url, headers=headers)
@@ -957,6 +969,59 @@ class AutoTradeLiveFeed:
 
         except Exception as e:
             logger.error(f"Error broadcasting live price update: {e}")
+
+    async def load_upstox_access_token(self) -> str:
+        """
+        Load the admin Upstox access token from the DB.
+        Returns empty string on failure.
+        """
+        try:
+            # get_db yields a session generator in your codebase — use next() and close properly
+            try:
+                db = next(get_db())
+            except Exception:
+                # fallback to SessionLocal if get_db generator not available
+                db = SessionLocal()
+
+            try:
+                admin_broker = (
+                    db.query(BrokerConfig)
+                    .join(User, BrokerConfig.user_id == User.id)
+                    .filter(
+                        User.role == "admin",
+                        BrokerConfig.broker_name.ilike("upstox"),
+                        BrokerConfig.access_token.isnot(None),
+                    )
+                    .order_by(
+                        BrokerConfig.updated_at.desc()
+                        if hasattr(BrokerConfig, "updated_at")
+                        else BrokerConfig.id.desc()
+                    )
+                    .first()
+                )
+
+                if not admin_broker:
+                    logger.error("❌ No admin user with Upstox access token found!")
+                    return ""
+
+                token = admin_broker.access_token
+                if not token or not isinstance(token, str) or len(token.strip()) < 20:
+                    logger.error(
+                        f"❌ Invalid token format in database (length: {len(token) if token else 0})"
+                    )
+                    return ""
+
+                logger.info("✅ Loaded Upstox access token from DB")
+                return token.strip()
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"Error loading Upstox access token: {e}", exc_info=True)
+            return ""
 
     def get_live_prices(self) -> List[Dict[str, Any]]:
         """
