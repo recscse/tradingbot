@@ -191,7 +191,8 @@ class EnhancedBreakoutEngine:
         for sig in signals:
             data = sig.to_dict()
             try:
-                print(f"📢 Broadcasting breakout signal: {data}")
+                # print(f"📢 Broadcasting breakout signal: {data}")
+                """"""
             except Exception:
                 try:
                     await self.centralized_manager.emit("breakout_signal", data)

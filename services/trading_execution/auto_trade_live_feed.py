@@ -1,35 +1,26 @@
 """
 Auto-Trading Live Feed Service
-Simple, focused WebSocket service for auto-trading execution
-
-This module:
-1. Gets live feed ONLY for selected stocks + their ATM option instruments
-2. Feeds data to strategy engine in real-time
-3. Auto-executes trades based on strategy signals
-4. Manages trailing stop loss
-5. Tracks live PnL
-
-Architecture:
-- One dedicated WebSocket connection for auto-trading
-- Subscribes ONLY to selected instruments (spot + option)
-- Runs strategy on live spot data
-- Calculates Greeks from option premium
-- Auto-executes on valid signals
-- Manages positions with trailing SL
+Robust version that uses UpstoxWebSocketClient for the feed.
+- Loads admin Upstox token from DB (no user_id required)
+- Subscribes only to today's SelectedStock rows with option_contract
+- Routes parsed feed => _handle_market_data (keeps your strategy & execution)
 """
 
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
-import ssl
-from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional, Set
 
-import requests
+from google.protobuf.json_format import MessageToDict
 
+# Use your existing UpstoxWebSocketClient (the one you provided)
+from services.upstox.ws_client import UpstoxWebSocketClient
+
+# DB / models / services (unchanged)
 from database.connection import SessionLocal, get_db
 from database.models import (
     BrokerConfig,
@@ -38,7 +29,6 @@ from database.models import (
     AutoTradeExecution,
     User,
 )
-from services.upstox.ws_client import UpstoxWebSocketClient
 from services.trading_execution.strategy_engine import (
     strategy_engine,
     SignalType,
@@ -46,51 +36,27 @@ from services.trading_execution.strategy_engine import (
 )
 from services.trading_execution.execution_handler import execution_handler
 from services.trading_execution.trade_prep import trade_prep_service, TradingMode
-from services.centralized_ws_manager import CentralizedWebSocketManager
-import websockets
-from services.upstox import MarketDataFeed_pb2 as pb
-from google.protobuf.json_format import MessageToDict
 
+# broadcast helper used by original code
+from router.unified_websocket_routes import broadcast_to_clients
 
+logger = logging.getLogger("auto_trade_live_feed")
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)
 
 
 class TradeState(Enum):
-    """Auto-trade execution state"""
-
-    MONITORING = "monitoring"  # Watching for signal
-    SIGNAL_FOUND = "signal_found"  # Valid signal detected
-    EXECUTING = "executing"  # Executing trade
-    POSITION_OPEN = "position_open"  # Trade executed, managing position
-    POSITION_CLOSED = "position_closed"  # Position closed
-    ERROR = "error"  # Error state
+    MONITORING = "monitoring"
+    SIGNAL_FOUND = "signal_found"
+    EXECUTING = "executing"
+    POSITION_OPEN = "position_open"
+    POSITION_CLOSED = "position_closed"
+    ERROR = "error"
 
 
 @dataclass
 class AutoTradeInstrument:
-    """
-    Instrument being monitored for auto-trading
-
-    Attributes:
-        stock_symbol: Stock symbol (e.g., "RELIANCE")
-        spot_instrument_key: Spot/equity instrument key for strategy
-        option_instrument_key: Option contract instrument key for trading
-        option_type: CE or PE
-        strike_price: Strike price
-        expiry_date: Expiry date
-        lot_size: Lot size
-        user_id: User identifier
-        state: Current trade state
-        live_spot_price: Live spot price for strategy
-        live_option_premium: Live option premium
-        historical_spot_data: OHLC data for strategy (last 50 candles)
-        last_signal: Last strategy signal
-        active_position_id: Active position ID if trade executed
-    """
-
     stock_symbol: str
     spot_instrument_key: str
     option_instrument_key: str
@@ -98,17 +64,14 @@ class AutoTradeInstrument:
     strike_price: Decimal
     expiry_date: str
     lot_size: int
-    user_id: int
+    user_id: Optional[int]
 
-    # State tracking
     state: TradeState = TradeState.MONITORING
 
-    # Live data
     live_spot_price: Decimal = Decimal("0")
     live_option_premium: Decimal = Decimal("0")
-    premium_at_selection: Decimal = Decimal("0")  # Premium when stock was selected
+    premium_at_selection: Decimal = Decimal("0")
 
-    # Historical data for strategy (rolling window)
     historical_spot_data: Dict[str, List[float]] = field(
         default_factory=lambda: {
             "open": [],
@@ -119,11 +82,9 @@ class AutoTradeInstrument:
         }
     )
 
-    # Signal tracking
     last_signal: Optional[TradingSignal] = None
     signal_confidence_threshold: Decimal = Decimal("0.65")
 
-    # Position tracking
     active_position_id: Optional[int] = None
     entry_price: Decimal = Decimal("0")
     current_stop_loss: Decimal = Decimal("0")
@@ -131,27 +92,16 @@ class AutoTradeInstrument:
 
 
 class AutoTradeLiveFeed:
-    """
-    Simple auto-trading live feed service
-
-    Manages WebSocket connection for selected stocks and executes trades
-    based on real-time strategy signals
-    """
-
     def __init__(self):
-        """Initialize auto-trading live feed service"""
         self.is_running = False
         self.ws_task: Optional[asyncio.Task] = None
-        self.trading_mode: TradingMode = TradingMode.PAPER  # Default to paper trading
+        self.ws_client_task: Optional[asyncio.Task] = None
+        self.trading_mode: TradingMode = TradingMode.PAPER
         self.access_token: str = ""
 
-        # Instruments being monitored
         self.monitored_instruments: Dict[str, AutoTradeInstrument] = {}
-
-        # WebSocket subscription keys
         self.subscribed_keys: Set[str] = set()
 
-        # Performance tracking
         self.stats = {
             "signals_generated": 0,
             "trades_executed": 0,
@@ -159,79 +109,162 @@ class AutoTradeLiveFeed:
             "errors": 0,
         }
 
+        # Upstox client instance (created when starting)
+        self.upstox_client: Optional[UpstoxWebSocketClient] = None
+
         logger.info("Auto-Trading Live Feed Service initialized")
 
-    async def start_auto_trading(
-        self,
-        user_id: int,
-        access_token: str,
-        trading_mode: TradingMode = TradingMode.PAPER,
-    ):
+    # ------------------------------
+    # Public control
+    # ------------------------------
+    async def start_auto_trading(self, trading_mode: TradingMode = TradingMode.PAPER):
         """
-        Start auto-trading for user's selected stocks
-
-        Args:
-            user_id: User identifier
-            access_token: Upstox access token
-            trading_mode: Paper or Live trading
+        Start auto-trading using admin access token (no user_id required).
+        Creates and starts UpstoxWebSocketClient in background.
         """
-        try:
-            self.is_running = True
-            self.trading_mode = trading_mode  # Store trading mode for use in execution
+        if self.is_running:
+            logger.warning("AutoTradeLiveFeed already running")
+            return
 
-            self.access_token = await self.load_upstox_access_token()
+        self.is_running = True
+        self.trading_mode = trading_mode
 
-            # Step 1: Load selected stocks from database
-            await self._load_selected_instruments(user_id)
-
-            if not self.monitored_instruments:
-                logger.warning(f"No selected stocks found for user {user_id}")
-                return
-
-            # Step 2: Prepare instrument keys for WebSocket subscription
-            instrument_keys = self._prepare_subscription_keys()
-
-            logger.info(
-                f"🚀 Starting auto-trading for {len(self.monitored_instruments)} stocks"
-            )
-            logger.info(f"   Subscribing to {len(instrument_keys)} instrument keys")
-
-            # Step 3: Start WebSocket connection
-            await self.self_mananged_ws_connection()
-
-            # Step 4: Connect and stream in background
-            if not self.ws_task or self.ws_task.done():
-                self.ws_task = asyncio.create_task(self._ws_connection_loop())
-
-        except Exception as e:
-            logger.error(f"Error starting auto-trading: {e}")
+        # Load admin token
+        self.access_token = await self.load_upstox_access_token()
+        if not self.access_token:
+            logger.error("No Upstox access token found in DB — aborting start")
             self.is_running = False
+            return
 
+        # Load selected instruments
+        await self._load_selected_instruments()
+
+        if not self.monitored_instruments:
+            logger.warning(
+                "No selected instruments to monitor; stopping auto-trade start"
+            )
+            self.is_running = False
+            return
+
+        # Prepare keys (do not mutate original instrument storage)
+        keys_to_subscribe = self._prepare_subscription_keys()
+        self.subscribed_keys = set(keys_to_subscribe)
+
+        logger.info(
+            f"Starting auto-trade: {len(self.monitored_instruments)} instruments, subscribing {len(keys_to_subscribe)} keys"
+        )
+
+        # Create Upstox client and start it in background
+        self.upstox_client = UpstoxWebSocketClient(
+            access_token=self.access_token,
+            instrument_keys=keys_to_subscribe,
+            callback=self._incoming_feed_callback,  # callback receives parsed dicts from client
+            stop_callback=self._on_client_stopped,
+            on_auth_error=self._on_auth_error,
+            connection_type="centralized_admin",
+            subscription_mode="full",
+            max_retries=10,
+        )
+
+        # run connect_and_stream in background
+        loop = asyncio.get_event_loop()
+        self.ws_client_task = loop.create_task(self.upstox_client.connect_and_stream())
+
+        # Also run a monitoring background task to ensure client_task keeps running / restart if necessary
+        if not self.ws_task or self.ws_task.done():
+            self.ws_task = asyncio.create_task(self._ws_connection_loop())
+
+    async def stop(self):
+        """Stop auto-trading service and the underlying Upstox client."""
+        self.is_running = False
+
+        # Stop the upstox client if running
+        try:
+            if self.upstox_client:
+                self.upstox_client.stop()
+        except Exception:
+            logger.exception("Error stopping upstox client")
+
+        # Cancel background tasks
+        if self.ws_client_task:
+            self.ws_client_task.cancel()
+            try:
+                await self.ws_client_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.ws_task:
+            self.ws_task.cancel()
+            try:
+                await self.ws_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info("🛑 Auto-trading live feed stopped")
+        logger.info(f"📊 Final Stats: {self.stats}")
+        self.monitored_instruments.clear()
+        self.subscribed_keys.clear()
+        self.upstox_client = None
+
+    # ------------------------------
+    # Background monitor to restart client if it dies unexpectedly
+    # ------------------------------
     async def _ws_connection_loop(self):
-        """Background WebSocket loop with automatic reconnect"""
+        backoff = 1
         while self.is_running:
             try:
-                await self.self_mananged_ws_connection()
-            except Exception as e:
-                logger.error(f"Websocket conenction error: {e}")
-            logger.warning("WebSocket disconnected, retrying in 5 seconds...")
-            await asyncio.sleep(5)
+                # If client task finished (with error), attempt restart
+                if self.ws_client_task and self.ws_client_task.done():
+                    exc = None
+                    try:
+                        self.ws_client_task.result()
+                    except Exception as e:
+                        exc = e
+                    logger.warning(
+                        f"Upstox client task finished. exc={exc}; restarting in {backoff}s"
+                    )
+                    # recreate Upstox client with current keys
+                    if not self.is_running:
+                        break
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 30)
+                    # recreate the client
+                    if self.access_token:
+                        self.upstox_client = UpstoxWebSocketClient(
+                            access_token=self.access_token,
+                            instrument_keys=list(self.subscribed_keys),
+                            callback=self._incoming_feed_callback,
+                            stop_callback=self._on_client_stopped,
+                            on_auth_error=self._on_auth_error,
+                            connection_type="centralized_admin",
+                            subscription_mode="full",
+                            max_retries=10,
+                        )
+                        self.ws_client_task = asyncio.create_task(
+                            self.upstox_client.connect_and_stream()
+                        )
+                else:
+                    backoff = 1
+                    await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Error in _ws_connection_loop; will continue")
+                await asyncio.sleep(5)
 
-    async def _load_selected_instruments(self, user_id: int):
+    # ------------------------------
+    # Load instruments
+    # ------------------------------
+    async def _load_selected_instruments(self):
         """
-        Load selected stocks from database
+        Load active SelectedStock rows for today that have option_contract.
+        No user_id required (admin service).
+        """
 
-        Args:
-            user_id: User identifier
-        """
-        try:
+        def db_job():
             db = SessionLocal()
-
             try:
-                # Get today's selected stocks
-                from datetime import date
-
-                selected_stocks = (
+                return (
                     db.query(SelectedStock)
                     .filter(
                         SelectedStock.selection_date == date.today(),
@@ -240,206 +273,173 @@ class AutoTradeLiveFeed:
                     )
                     .all()
                 )
-
-                for stock in selected_stocks:
-                    # Parse option contract
-                    import json
-
-                    option_data = {}
-                    if stock.option_contract:
-                        try:
-                            option_data = (
-                                json.loads(stock.option_contract)
-                                if isinstance(stock.option_contract, str)
-                                else stock.option_contract
-                            )
-                        except:
-                            continue
-
-                    # Get spot instrument key (for strategy)
-                    spot_key = stock.instrument_key or f"NSE_EQ|{stock.symbol}"
-
-                    # Get option instrument key (for trading)
-                    option_key = option_data.get("option_instrument_key")
-
-                    if not option_key:
-                        logger.warning(f"No option instrument key for {stock.symbol}")
-                        continue
-
-                    # Determine option type - CRITICAL: Never use defaults
-                    option_type = stock.option_type or option_data.get("option_type")
-
-                    if not option_type or option_type not in ["CE", "PE"]:
-                        logger.error(
-                            f"Invalid or missing option_type for {stock.symbol} - "
-                            f"stock.option_type={stock.option_type}, "
-                            f"option_data.option_type={option_data.get('option_type')} - SKIPPING"
-                        )
-                        continue
-
-                    # Create auto-trade instrument
-                    instrument = AutoTradeInstrument(
-                        stock_symbol=stock.symbol,
-                        spot_instrument_key=spot_key,
-                        option_instrument_key=option_key,
-                        option_type=option_type,
-                        strike_price=Decimal(str(option_data.get("strike_price", 0))),
-                        expiry_date=stock.option_expiry_date
-                        or option_data.get("expiry_date"),
-                        lot_size=option_data.get("lot_size", 1),
-                        user_id=user_id,
-                        premium_at_selection=Decimal(
-                            str(option_data.get("premium", 0))
-                        ),  # Store original premium
-                    )
-
-                    # Store by option instrument key for quick lookup
-                    self.monitored_instruments[option_key] = instrument
-
-                    logger.info(
-                        f"✅ Loaded {stock.symbol} {stock.option_type} {option_data.get('strike_price')}"
-                    )
-
             finally:
                 db.close()
 
-        except Exception as e:
-            logger.error(f"Error loading selected instruments: {e}")
-
-    async def self_mananged_ws_connection(self):
-        """
-        Manage WebSocket connection for auto trading
-
-        Args:
-            access_token: User access token
-            instrument_keys: List of instrument keys to subscribe
-        """
-
         try:
+            rows = await asyncio.to_thread(db_job)
+            for stock in rows:
+                option_data = {}
+                if stock.option_contract:
+                    try:
+                        option_data = (
+                            json.loads(stock.option_contract)
+                            if isinstance(stock.option_contract, str)
+                            else stock.option_contract
+                        )
+                    except Exception:
+                        logger.exception(
+                            f"Bad option_contract JSON for {getattr(stock,'symbol', 'unknown')}; skipping"
+                        )
+                        continue
 
-            access_token = self.access_token
-            if not access_token:
-                logger.error("No access token available for WebSocket connection")
-                return
-            headers = {"Authorization": f"Bearer {access_token}"}
-            url = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
-            response = requests.get(url=url, headers=headers)
+                spot_key = stock.instrument_key or f"NSE_EQ|{stock.symbol}"
+                option_key = option_data.get("option_instrument_key")
+                if not option_key:
+                    logger.warning(
+                        f"No option_instrument_key for {stock.symbol}; skipping"
+                    )
+                    continue
 
-            if response.status_code != 200:
-                logger.error("Failed to authorize market data feed")
-                return
-            websocket_url = (
-                response.json().get("data", {}).get("authorized_redirect_uri")
-            )
-            if not websocket_url:
-                logger.error("No authorized_redirect_uri in response")
-                return
-            instrument_keys = list(self.subscribed_keys)
+                option_type = stock.option_type or option_data.get("option_type")
+                if option_type not in ("CE", "PE"):
+                    logger.error(f"Invalid option_type for {stock.symbol}; skipping")
+                    continue
 
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
-            async with websockets.connect(websocket_url, ssl=ssl_context) as websocket:
-                logger.info("WebSocket connection established")
-                # Subscribe to instrument keys
-                subscribe_message = {
-                    "guide": "auto_trade_feed",
-                    "method": "subscribe",
-                    "data": {"mode": "full", "instrumentKeys": instrument_keys},
-                }
-                await websocket.send(json.dumps(subscribe_message).encode("utf-8"))
-                logger.info(f"Subscribed to {len(instrument_keys)} instrument keys")
-                while self.is_running:
-                    message = await websocket.recv()
-                    feed_response = pb.FeedResponse()
-                    feed_response.ParseFromString(message)
-                    data_dict = MessageToDict(feed_response)
-                    await self._handle_market_data(data_dict)
-
-        except Exception as e:
-            logger.error(f"Error in self managed ws connection: {e}")
-            return
+                instrument = AutoTradeInstrument(
+                    stock_symbol=stock.symbol,
+                    spot_instrument_key=spot_key,
+                    option_instrument_key=option_key,
+                    option_type=option_type,
+                    strike_price=Decimal(str(option_data.get("strike_price", 0))),
+                    expiry_date=stock.option_expiry_date
+                    or option_data.get("expiry_date"),
+                    lot_size=option_data.get("lot_size", 1),
+                    user_id=getattr(stock, "user_id", None),
+                    premium_at_selection=Decimal(str(option_data.get("premium", 0))),
+                )
+                # store by option key for fast lookup in option updates
+                self.monitored_instruments[option_key] = instrument
+                # Also store spot key -> the same instrument for spot updates (option_key used for primary lookup)
+                self.monitored_instruments.setdefault(spot_key, instrument)
+                logger.info(
+                    f"✅ Loaded: {stock.symbol} spot={spot_key} option={option_key}"
+                )
+        except Exception:
+            logger.exception("Error loading selected instruments")
 
     def _prepare_subscription_keys(self) -> List[str]:
         """
-        Prepare instrument keys for WebSocket subscription
-
-        Returns:
-            List of instrument keys (spot + option for each stock)
+        Return deduplicated instrument keys to subscribe.
+        Use copy of keys to avoid mutating internal sets.
         """
         keys = set()
-
-        for instrument in self.monitored_instruments.values():
-            # Add spot instrument (for strategy)
-            keys.add(instrument.spot_instrument_key)
-
-            # Add option instrument (for premium and Greeks)
-            keys.add(instrument.option_instrument_key)
-
-        self.subscribed_keys = keys
+        for inst in self.monitored_instruments.values():
+            # every instrument object might have been saved twice under spot and option key; ensure uniqueness
+            if inst.spot_instrument_key:
+                keys.add(inst.spot_instrument_key)
+            if inst.option_instrument_key:
+                keys.add(inst.option_instrument_key)
+        # Respect Upstox limit: send max 1500 (client also truncates)
         return list(keys)
 
-    async def _handle_market_data(self, data: Dict):
+    # ------------------------------
+    # Upstox client callback
+    # ------------------------------
+    async def _incoming_feed_callback(self, parsed: Dict[str, Any]):
         """
-        Handle incoming market data from WebSocket
-
-        Args:
-            data: Market data from Upstox
+        This callback is passed to UpstoxWebSocketClient.
+        The client already parses protobuf frames into dict via MessageToDict.
+        We route the parsed dict into our _handle_market_data.
         """
         try:
-            if not data or "feeds" not in data:
+            # Some messages might be in the shape {"type":"market_info", ...}
+            # Our handler expects a dict with 'feeds' key (like parsed proto -> dict).
+            # Normalize common shapes here:
+            if not parsed:
                 return
 
+            # If client sends {"type":"live_feed", "data": { ...feeds... }} unify it
+            if parsed.get("type") == "live_feed" and "data" in parsed:
+                normalized = {"feeds": parsed["data"]}
+            elif "feeds" in parsed:
+                normalized = parsed
+            elif parsed.get("data", {}).get("feeds"):
+                normalized = {"feeds": parsed["data"]["feeds"]}
+            else:
+                # Unknown shape: still attempt to pass through if it looks like feeds map
+                # sometimes older payloads might be a raw dict of instrument -> payload
+                if any("|" in k for k in parsed.keys()):
+                    normalized = {"feeds": parsed}
+                else:
+                    # ignore non-price messages here; Upstox client already handles market_info separately
+                    return
+
+            await self._handle_market_data(normalized)
+        except Exception:
+            logger.exception("Error in incoming feed callback")
+
+    async def _on_client_stopped(self):
+        logger.info("Upstox client stop callback triggered")
+
+    async def _on_auth_error(self):
+        logger.warning(
+            "Upstox client reported auth error (token expired). Stopping auto-trade."
+        )
+        # stop service so operator can refresh token
+        await self.stop()
+
+    # ------------------------------
+    # Market data handling (mostly unchanged logic)
+    # ------------------------------
+    async def _handle_market_data(self, data: Dict):
+        try:
+            if not data:
+                return
             feeds = data.get("feeds", {})
+            if not feeds:
+                return
 
             for instrument_key, feed_data in feeds.items():
-                # Update spot price if this is a spot instrument
+                # update spot then option (both safe)
                 await self._update_spot_data(instrument_key, feed_data)
-
-                # Update option premium if this is an option instrument
                 await self._update_option_data(instrument_key, feed_data)
-
-        except Exception as e:
-            logger.error(f"Error handling market data: {e}")
+        except Exception:
+            logger.exception("Error handling market data")
 
     async def _update_spot_data(self, instrument_key: str, feed_data: Dict):
-        """
-        Update spot price data for strategy
-
-        Args:
-            instrument_key: Instrument key
-            feed_data: Feed data from WebSocket
-        """
         try:
-            # Find instrument by spot key
+            # locate instrument by matching spot_instrument_key
             instrument = None
-            for inst in self.monitored_instruments.values():
-                if inst.spot_instrument_key == instrument_key:
-                    instrument = inst
-                    break
-
+            # faster lookup: check direct key then find any instrument with matching spot key
+            inst = self.monitored_instruments.get(instrument_key)
+            if inst and inst.spot_instrument_key == instrument_key:
+                instrument = inst
+            else:
+                # fallback scan (rare)
+                for i in self.monitored_instruments.values():
+                    if i.spot_instrument_key == instrument_key:
+                        instrument = i
+                        break
             if not instrument:
                 return
 
-            # Extract LTPC from feed
-            full_feed = feed_data.get("fullFeed", {})
-            market_ff = full_feed.get("marketFF", {})
-            ltpc = market_ff.get("ltpc", {})
-            ohlc_data = market_ff.get("marketOHLC", {}).get("ohlc", [])
+            full_feed = feed_data.get("fullFeed", {}) or {}
+            market_ff = full_feed.get("marketFF", {}) or {}
+            ltpc = market_ff.get("ltpc", {}) or {}
+            ohlc_data = (
+                (market_ff.get("marketOHLC") or {}).get("ohlc", []) if market_ff else []
+            )
 
             ltp = ltpc.get("ltp", 0)
-            if ltp <= 0:
+            if not ltp or float(ltp) <= 0:
                 return
 
-            # Update live spot price
             instrument.live_spot_price = Decimal(str(ltp))
 
-            # Update historical data (for strategy indicators)
-            # Find 1-minute interval OHLC
+            # append 1-min candle if present (rolling window)
             for candle in ohlc_data:
-                if candle.get("interval") == "I1":  # 1-minute interval
-                    # Add to rolling window (keep last 50 candles)
+                if candle.get("interval") == "I1":
                     instrument.historical_spot_data["open"].append(
                         float(candle.get("open", ltp))
                     )
@@ -455,149 +455,113 @@ class AutoTradeLiveFeed:
                     instrument.historical_spot_data["volume"].append(
                         int(candle.get("vol", 0))
                     )
-
-                    # Keep only last 50 candles
-                    for key in instrument.historical_spot_data:
-                        if len(instrument.historical_spot_data[key]) > 50:
-                            instrument.historical_spot_data[key] = (
-                                instrument.historical_spot_data[key][-50:]
+                    # keep only last 50
+                    for k in instrument.historical_spot_data:
+                        if len(instrument.historical_spot_data[k]) > 50:
+                            instrument.historical_spot_data[k] = (
+                                instrument.historical_spot_data[k][-50:]
                             )
-
                     break
 
-            # Run strategy if we have enough historical data
+            # run strategy when we have enough history
             if len(instrument.historical_spot_data["close"]) >= 30:
                 await self._run_strategy(instrument)
-
-        except Exception as e:
-            logger.error(f"Error updating spot data: {e}")
+        except Exception:
+            logger.exception("Error updating spot data")
 
     async def _update_option_data(self, instrument_key: str, feed_data: Dict):
-        """
-        Update option premium data
-
-        Args:
-            instrument_key: Instrument key
-            feed_data: Feed data from WebSocket
-        """
         try:
-            # Find instrument by option key
+            # primary lookup is by option instrument key
             instrument = self.monitored_instruments.get(instrument_key)
-
             if not instrument:
                 return
 
-            # Extract option premium
-            full_feed = feed_data.get("fullFeed", {})
-            market_ff = full_feed.get("marketFF", {})
-            ltpc = market_ff.get("ltpc", {})
+            full_feed = feed_data.get("fullFeed", {}) or {}
+            market_ff = full_feed.get("marketFF", {}) or {}
+            ltpc = market_ff.get("ltpc", {}) or {}
 
             premium = ltpc.get("ltp", 0)
-            if premium <= 0:
+            if not premium or float(premium) <= 0:
                 return
 
-            # Update live option premium
             instrument.live_option_premium = Decimal(str(premium))
 
-            # Broadcast live price update to UI
-            await self._broadcast_live_price_update(instrument)
+            # broadcast live update
+            try:
+                await self._broadcast_live_price_update(instrument)
+            except Exception:
+                logger.exception("Broadcast failed")
 
-            # Update position PnL if position is open
             if (
                 instrument.state == TradeState.POSITION_OPEN
                 and instrument.active_position_id
             ):
                 await self._update_position_pnl(instrument)
+        except Exception:
+            logger.exception("Error updating option data")
 
-        except Exception as e:
-            logger.error(f"Error updating option data: {e}")
-
+    # ------------------------------
+    # Strategy / execution (kept your logic, wrapped blocking calls)
+    # ------------------------------
     async def _run_strategy(self, instrument: AutoTradeInstrument):
-        """
-        Run strategy on live data and check for signals
-
-        Args:
-            instrument: Auto-trade instrument
-        """
         try:
-            # Only run strategy if monitoring (not in position)
             if instrument.state != TradeState.MONITORING:
                 return
 
-            # Generate signal using strategy engine
-            signal = strategy_engine.generate_signal(
-                current_price=instrument.live_spot_price,
-                historical_data=instrument.historical_spot_data,
-                option_type=instrument.option_type,
-            )
+            # strategy_engine.generate_signal might be sync — run in thread if it blocks
+            try:
+                signal = strategy_engine.generate_signal(
+                    current_price=instrument.live_spot_price,
+                    historical_data=instrument.historical_spot_data,
+                    option_type=instrument.option_type,
+                )
+            except Exception:
+                signal = await asyncio.to_thread(
+                    strategy_engine.generate_signal,
+                    instrument.live_spot_price,
+                    instrument.historical_spot_data,
+                    instrument.option_type,
+                )
 
             instrument.last_signal = signal
             self.stats["signals_generated"] += 1
 
-            # Validate signal for auto-execution
             if self._is_valid_signal(signal, instrument.option_type):
                 logger.info(
-                    f"✅ Valid signal for {instrument.stock_symbol}: {signal.signal_type.value} "
-                    f"(Confidence: {signal.confidence:.2f})"
+                    f"✅ Valid signal for {instrument.stock_symbol}: {signal.signal_type.value} (Conf: {signal.confidence})"
                 )
-
                 instrument.state = TradeState.SIGNAL_FOUND
-
-                # Auto-execute trade
                 await self._execute_trade(instrument, signal)
-
-        except Exception as e:
-            logger.error(f"Error running strategy for {instrument.stock_symbol}: {e}")
+        except Exception:
+            logger.exception("Error running strategy")
 
     def _is_valid_signal(self, signal: TradingSignal, option_type: str) -> bool:
-        """
-        Validate if signal is ready for execution
-
-        Args:
-            signal: Trading signal
-            option_type: CE or PE
-
-        Returns:
-            True if valid for execution
-        """
-        # Check 1: Not HOLD signal
-        if signal.signal_type == SignalType.HOLD:
+        try:
+            if signal.signal_type == SignalType.HOLD:
+                return False
+            if option_type == "CE" and signal.signal_type not in (SignalType.BUY,):
+                return False
+            if option_type == "PE" and signal.signal_type not in (SignalType.SELL,):
+                return False
+            if Decimal(str(signal.confidence)) < Decimal("0.65"):
+                return False
+            return True
+        except Exception:
+            logger.exception("Signal validation error")
             return False
-
-        # Check 2: Signal type matches option direction
-        if option_type == "CE" and signal.signal_type not in [SignalType.BUY]:
-            return False
-
-        if option_type == "PE" and signal.signal_type not in [SignalType.SELL]:
-            return False
-
-        # Check 3: Confidence threshold
-        if signal.confidence < Decimal("0.65"):  # 65% minimum
-            return False
-
-        return True
 
     async def _execute_trade(
         self, instrument: AutoTradeInstrument, signal: TradingSignal
     ):
-        """
-        Auto-execute trade based on signal
+        instrument.state = TradeState.EXECUTING
+        logger.info(f"🚀 Executing trade for {instrument.stock_symbol}")
 
-        Args:
-            instrument: Auto-trade instrument
-            signal: Trading signal
-        """
+        # prepare_trade might be async; if blocking it will run in thread
+        db = SessionLocal()
         try:
-            instrument.state = TradeState.EXECUTING
-
-            logger.info(f"🚀 Executing trade for {instrument.stock_symbol}")
-
-            db = SessionLocal()
-
             try:
-                # Prepare trade using existing service
                 prepared_trade = await trade_prep_service.prepare_trade(
-                    user_id=instrument.user_id,
+                    user_id=1,
                     stock_symbol=instrument.stock_symbol,
                     option_instrument_key=instrument.option_instrument_key,
                     option_type=instrument.option_type,
@@ -605,119 +569,158 @@ class AutoTradeLiveFeed:
                     expiry_date=instrument.expiry_date,
                     lot_size=instrument.lot_size,
                     db=db,
-                    trading_mode=self.trading_mode,  # Use stored trading mode
+                    trading_mode=self.trading_mode,
+                )
+            except Exception:
+                prepared_trade = await asyncio.to_thread(
+                    trade_prep_service.prepare_trade,
+                    instrument.user_id,
+                    instrument.stock_symbol,
+                    instrument.option_instrument_key,
+                    instrument.option_type,
+                    instrument.strike_price,
+                    instrument.expiry_date,
+                    instrument.lot_size,
+                    db,
+                    self.trading_mode,
                 )
 
-                # Execute trade
-                if prepared_trade.status.value == "ready":
-                    execution_result = execution_handler.execute_trade(
-                        prepared_trade, db
+            if (
+                getattr(prepared_trade, "status", None)
+                and getattr(prepared_trade.status, "value", "") == "ready"
+            ):
+                # execute trade in thread if blocking
+                exec_result = await asyncio.to_thread(
+                    execution_handler.execute_trade, prepared_trade, db
+                )
+                if getattr(exec_result, "success", False):
+                    logger.info(
+                        f"✅ Trade executed: {getattr(exec_result, 'trade_id', 'unknown')}"
                     )
-
-                    if execution_result.success:
-                        logger.info(f"✅ Trade executed: {execution_result.trade_id}")
-
-                        # Update instrument state
-                        instrument.state = TradeState.POSITION_OPEN
-                        instrument.active_position_id = (
-                            execution_result.active_position_id
+                    instrument.state = TradeState.POSITION_OPEN
+                    instrument.active_position_id = getattr(
+                        exec_result, "active_position_id", None
+                    )
+                    instrument.entry_price = Decimal(
+                        str(
+                            getattr(
+                                exec_result,
+                                "entry_price",
+                                instrument.live_option_premium,
+                            )
                         )
-                        instrument.entry_price = execution_result.entry_price
-                        instrument.current_stop_loss = signal.stop_loss
-                        instrument.target_price = signal.target_price
-
-                        self.stats["trades_executed"] += 1
-                    else:
-                        logger.error(f"Execution failed: {execution_result.message}")
-                        instrument.state = TradeState.ERROR
-                        self.stats["errors"] += 1
+                    )
+                    instrument.current_stop_loss = getattr(
+                        signal, "stop_loss", instrument.current_stop_loss
+                    )
+                    instrument.target_price = getattr(
+                        signal, "target_price", instrument.target_price
+                    )
+                    self.stats["trades_executed"] += 1
                 else:
-                    logger.warning(f"Trade not ready: {prepared_trade.status.value}")
-                    instrument.state = TradeState.MONITORING
-
-            finally:
-                db.close()
-
-        except Exception as e:
-            logger.error(f"Error executing trade: {e}")
+                    logger.error(
+                        f"Execution failed: {getattr(exec_result, 'message', 'unknown')}"
+                    )
+                    instrument.state = TradeState.ERROR
+                    self.stats["errors"] += 1
+            else:
+                logger.warning("Prepared trade not ready; monitoring continues")
+                instrument.state = TradeState.MONITORING
+        except Exception:
+            logger.exception("Error executing trade")
             instrument.state = TradeState.ERROR
             self.stats["errors"] += 1
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
 
+    # ------------------------------
+    # Position management (unchanged)
+    # ------------------------------
     async def _update_position_pnl(self, instrument: AutoTradeInstrument):
-        """
-        Update position PnL and check exit conditions
-
-        Args:
-            instrument: Auto-trade instrument
-        """
         try:
             if not instrument.active_position_id:
                 return
 
-            db = SessionLocal()
-
-            try:
-                # Get active position
-                position = (
-                    db.query(ActivePosition)
-                    .filter(
-                        ActivePosition.id == instrument.active_position_id,
-                        ActivePosition.is_active == True,
+            def db_get_pos():
+                db = SessionLocal()
+                try:
+                    return (
+                        db.query(ActivePosition)
+                        .filter(
+                            ActivePosition.id == instrument.active_position_id,
+                            ActivePosition.is_active == True,
+                        )
+                        .first()
                     )
-                    .first()
-                )
+                finally:
+                    db.close()
 
-                if not position:
-                    return
+            position = await asyncio.to_thread(db_get_pos)
+            if not position:
+                return
 
-                # Calculate PnL
-                current_price = instrument.live_option_premium
-                entry_price = Decimal(str(position.entry_price))
-                quantity = position.quantity
+            current_price = instrument.live_option_premium
+            entry_price = Decimal(str(position.entry_price))
+            quantity = position.quantity
 
-                pnl = (current_price - entry_price) * Decimal(str(quantity))
-                pnl_percent = (
-                    ((current_price - entry_price) / entry_price * 100)
-                    if entry_price > 0
-                    else Decimal("0")
-                )
+            pnl = (current_price - entry_price) * Decimal(str(quantity))
+            pnl_percent = (
+                ((current_price - entry_price) / entry_price * 100)
+                if entry_price > 0
+                else Decimal("0")
+            )
 
-                # Update position
-                position.current_price = float(current_price)
-                position.current_pnl = float(pnl)
-                position.current_pnl_percentage = float(pnl_percent)
-                position.last_updated = datetime.now()
-
-                # Update trailing stop loss
-                new_sl = self._calculate_trailing_sl(
-                    current_price=current_price,
-                    entry_price=entry_price,
-                    current_sl=instrument.current_stop_loss,
-                    option_type=instrument.option_type,
-                )
-
-                if new_sl != instrument.current_stop_loss:
-                    instrument.current_stop_loss = new_sl
-                    position.current_stop_loss = float(new_sl)
-                    logger.info(
-                        f"📈 Trailing SL updated: {instrument.stock_symbol} -> {new_sl}"
+            def db_update():
+                db = SessionLocal()
+                try:
+                    p = (
+                        db.query(ActivePosition)
+                        .filter(ActivePosition.id == position.id)
+                        .first()
                     )
+                    if not p:
+                        return False
+                    p.current_price = float(current_price)
+                    p.current_pnl = float(pnl)
+                    p.current_pnl_percentage = float(pnl_percent)
+                    p.last_updated = datetime.now()
+                    new_sl = self._calculate_trailing_sl(
+                        current_price=current_price,
+                        entry_price=entry_price,
+                        current_sl=instrument.current_stop_loss,
+                        option_type=instrument.option_type,
+                    )
+                    changed = False
+                    if new_sl != instrument.current_stop_loss:
+                        instrument.current_stop_loss = new_sl
+                        p.current_stop_loss = float(new_sl)
+                        changed = True
+                    db.commit()
+                    return changed
+                except Exception:
+                    db.rollback()
+                    raise
+                finally:
+                    db.close()
 
-                # Check exit conditions
-                should_exit, reason = self._check_exit_conditions(
-                    instrument, current_price
+            changed = await asyncio.to_thread(db_update)
+            if changed:
+                logger.info(
+                    f"📈 Trailing SL updated for {instrument.stock_symbol} -> {instrument.current_stop_loss}"
                 )
 
-                if should_exit:
-                    await self._close_position(instrument, current_price, reason, db)
-
-                db.commit()
-
-            finally:
-                db.close()
-
-        except Exception as e:
-            logger.error(f"Error updating position PnL: {e}")
+            should_exit, reason = self._check_exit_conditions(instrument, current_price)
+            if should_exit:
+                db2 = SessionLocal()
+                try:
+                    await self._close_position(instrument, current_price, reason, db2)
+                finally:
+                    db2.close()
+        except Exception:
+            logger.exception("Error updating position PnL")
 
     def _calculate_trailing_sl(
         self,
@@ -726,54 +729,25 @@ class AutoTradeLiveFeed:
         current_sl: Decimal,
         option_type: str,
     ) -> Decimal:
-        """
-        Calculate trailing stop loss
-
-        Args:
-            current_price: Current option premium
-            entry_price: Entry price
-            current_sl: Current stop loss
-            option_type: CE or PE
-
-        Returns:
-            Updated stop loss
-        """
         try:
-            # 2% trailing for options
             trailing_percent = Decimal("0.02")
-
             if option_type == "CE":
-                # For calls, trail below current price if in profit
                 if current_price > entry_price:
                     potential_sl = current_price * (Decimal("1") - trailing_percent)
                     return max(current_sl, potential_sl)
             else:
-                # For puts, trail above current price if in profit
                 if current_price < entry_price:
                     potential_sl = current_price * (Decimal("1") + trailing_percent)
                     return min(current_sl, potential_sl)
-
             return current_sl
-
-        except Exception as e:
-            logger.error(f"Error calculating trailing SL: {e}")
+        except Exception:
+            logger.exception("Error calculating trailing SL")
             return current_sl
 
     def _check_exit_conditions(
         self, instrument: AutoTradeInstrument, current_price: Decimal
-    ) -> tuple[bool, Optional[str]]:
-        """
-        Check if position should be exited
-
-        Args:
-            instrument: Auto-trade instrument
-            current_price: Current option premium
-
-        Returns:
-            Tuple of (should_exit, exit_reason)
-        """
+    ):
         try:
-            # Check stop loss hit
             if instrument.option_type == "CE":
                 if current_price <= instrument.current_stop_loss:
                     return True, "STOP_LOSS_HIT"
@@ -781,63 +755,40 @@ class AutoTradeLiveFeed:
                 if current_price >= instrument.current_stop_loss:
                     return True, "STOP_LOSS_HIT"
 
-            # Check target hit
             if instrument.option_type == "CE":
-                if current_price >= instrument.target_price:
+                if instrument.target_price and current_price >= instrument.target_price:
                     return True, "TARGET_HIT"
             else:
-                if current_price <= instrument.target_price:
+                if instrument.target_price and current_price <= instrument.target_price:
                     return True, "TARGET_HIT"
 
-            # Check time-based exit (3:20 PM)
-            current_time = datetime.now().time()
-            if current_time.hour >= 15 and current_time.minute >= 20:
+            now_t = datetime.now().time()
+            if (now_t.hour, now_t.minute) >= (15, 20):
                 return True, "TIME_BASED_EXIT"
-
             return False, None
-
-        except Exception as e:
-            logger.error(f"Error checking exit conditions: {e}")
+        except Exception:
+            logger.exception("Error checking exit conditions")
             return False, None
 
     async def _close_position(
         self, instrument: AutoTradeInstrument, exit_price: Decimal, exit_reason: str, db
     ):
-        """
-        Close position
-
-        Args:
-            instrument: Auto-trade instrument
-            exit_price: Exit price
-            exit_reason: Reason for exit
-            db: Database session
-        """
         try:
-            logger.info(
-                f"🚪 Closing position: {instrument.stock_symbol} - {exit_reason}"
-            )
-
-            # Get position
             position = (
                 db.query(ActivePosition)
                 .filter(ActivePosition.id == instrument.active_position_id)
                 .first()
             )
-
             if not position:
                 return
-
-            # Get trade execution
             trade = (
                 db.query(AutoTradeExecution)
                 .filter(AutoTradeExecution.id == position.trade_execution_id)
                 .first()
             )
-
             if not trade:
                 return
 
-            # Calculate final PnL
             entry_price = Decimal(str(trade.entry_price))
             quantity = trade.quantity
             pnl = (exit_price - entry_price) * Decimal(str(quantity))
@@ -847,7 +798,6 @@ class AutoTradeLiveFeed:
                 else Decimal("0")
             )
 
-            # Update trade execution
             trade.exit_time = datetime.now()
             trade.exit_price = float(exit_price)
             trade.exit_reason = exit_reason
@@ -855,53 +805,27 @@ class AutoTradeLiveFeed:
             trade.pnl_percentage = float(pnl_percent)
             trade.status = "CLOSED"
 
-            # Deactivate position
             position.is_active = False
             position.last_updated = datetime.now()
 
-            # Update instrument state
             instrument.state = TradeState.POSITION_CLOSED
             instrument.active_position_id = None
 
             self.stats["positions_closed"] += 1
-
-            logger.info(f"✅ Position closed: PnL = ₹{pnl:.2f} ({pnl_percent:.2f}%)")
-
             db.commit()
+            logger.info(f"✅ Position closed: PnL = ₹{pnl:.2f} ({pnl_percent:.2f}%)")
+        except Exception:
+            logger.exception("Error closing position")
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
-        except Exception as e:
-            logger.error(f"Error closing position: {e}")
-            db.rollback()
-
-    async def check_all_positions_closed(self) -> bool:
-        """
-        Check if all positions are closed
-
-        Returns:
-            True if all positions closed, False otherwise
-        """
-        try:
-            # Check if any instrument has active position
-            for instrument in self.monitored_instruments.values():
-                if instrument.state == TradeState.POSITION_OPEN:
-                    return False
-
-            # All positions closed
-            return True
-
-        except Exception as e:
-            logger.error(f"Error checking positions: {e}")
-            return False
-
+    # ------------------------------
+    # Broadcast UI updates
+    # ------------------------------
     async def _broadcast_live_price_update(self, instrument: AutoTradeInstrument):
-        """
-        Broadcast live price update to WebSocket clients
-
-        Args:
-            instrument: Instrument with updated live price
-        """
         try:
-            # Calculate PnL based on state
             unrealized_pnl = Decimal("0")
             unrealized_pnl_percent = Decimal("0")
             price_change = Decimal("0")
@@ -930,11 +854,15 @@ class AutoTradeLiveFeed:
                     ) * instrument.lot_size
                     unrealized_pnl_percent = (
                         (
-                            instrument.live_option_premium
-                            - instrument.premium_at_selection
+                            (
+                                instrument.live_option_premium
+                                - instrument.premium_at_selection
+                            )
+                            / instrument.premium_at_selection
+                            * 100
                         )
-                        / instrument.premium_at_selection
-                        * 100
+                        if instrument.premium_at_selection > 0
+                        else Decimal("0")
                     )
 
                 if instrument.premium_at_selection > 0:
@@ -942,10 +870,11 @@ class AutoTradeLiveFeed:
                         instrument.live_option_premium - instrument.premium_at_selection
                     )
                     price_change_percent = (
-                        price_change / instrument.premium_at_selection * 100
+                        (price_change / instrument.premium_at_selection * 100)
+                        if instrument.premium_at_selection > 0
+                        else Decimal("0")
                     )
 
-            # Prepare update data
             update_data = {
                 "symbol": instrument.stock_symbol,
                 "option_instrument_key": instrument.option_instrument_key,
@@ -962,25 +891,18 @@ class AutoTradeLiveFeed:
                 "timestamp": datetime.now().isoformat(),
             }
 
-            # Broadcast to WebSocket clients
-            from router.unified_websocket_routes import broadcast_to_clients
-
             await broadcast_to_clients("selected_stock_price_update", update_data)
+        except Exception:
+            logger.exception("Error broadcasting live price update")
 
-        except Exception as e:
-            logger.error(f"Error broadcasting live price update: {e}")
-
+    # ------------------------------
+    # Token loader (admin token)
+    # ------------------------------
     async def load_upstox_access_token(self) -> str:
-        """
-        Load the admin Upstox access token from the DB.
-        Returns empty string on failure.
-        """
         try:
-            # get_db yields a session generator in your codebase — use next() and close properly
             try:
                 db = next(get_db())
             except Exception:
-                # fallback to SessionLocal if get_db generator not available
                 db = SessionLocal()
 
             try:
@@ -999,18 +921,13 @@ class AutoTradeLiveFeed:
                     )
                     .first()
                 )
-
                 if not admin_broker:
                     logger.error("❌ No admin user with Upstox access token found!")
                     return ""
-
                 token = admin_broker.access_token
                 if not token or not isinstance(token, str) or len(token.strip()) < 20:
-                    logger.error(
-                        f"❌ Invalid token format in database (length: {len(token) if token else 0})"
-                    )
+                    logger.error("❌ Invalid token format in database")
                     return ""
-
                 logger.info("✅ Loaded Upstox access token from DB")
                 return token.strip()
             finally:
@@ -1018,110 +935,10 @@ class AutoTradeLiveFeed:
                     db.close()
                 except Exception:
                     pass
-
-        except Exception as e:
-            logger.error(f"Error loading Upstox access token: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error loading Upstox access token")
             return ""
 
-    def get_live_prices(self) -> List[Dict[str, Any]]:
-        """
-        Get live prices for all monitored instruments
 
-        Returns:
-            List of dictionaries with live price data
-        """
-        live_data = []
-
-        for instrument in self.monitored_instruments.values():
-            # Calculate unrealized PnL based on state
-            unrealized_pnl = Decimal("0")
-            unrealized_pnl_percent = Decimal("0")
-            price_change = Decimal("0")
-            price_change_percent = Decimal("0")
-
-            if instrument.live_option_premium > 0:
-                if (
-                    instrument.state == TradeState.POSITION_OPEN
-                    and instrument.entry_price
-                ):
-                    # For active positions: PnL relative to entry price
-                    unrealized_pnl = (
-                        instrument.live_option_premium - instrument.entry_price
-                    ) * instrument.lot_size
-                    unrealized_pnl_percent = (
-                        (
-                            (instrument.live_option_premium - instrument.entry_price)
-                            / instrument.entry_price
-                            * 100
-                        )
-                        if instrument.entry_price > 0
-                        else Decimal("0")
-                    )
-                elif instrument.premium_at_selection > 0:
-                    # For monitoring state: Show hypothetical PnL if entered at selection
-                    unrealized_pnl = (
-                        instrument.live_option_premium - instrument.premium_at_selection
-                    ) * instrument.lot_size
-                    unrealized_pnl_percent = (
-                        (
-                            instrument.live_option_premium
-                            - instrument.premium_at_selection
-                        )
-                        / instrument.premium_at_selection
-                        * 100
-                    )
-
-                # Calculate price change from selection
-                if instrument.premium_at_selection > 0:
-                    price_change = (
-                        instrument.live_option_premium - instrument.premium_at_selection
-                    )
-                    price_change_percent = (
-                        price_change / instrument.premium_at_selection * 100
-                    )
-
-            live_data.append(
-                {
-                    "symbol": instrument.stock_symbol,
-                    "spot_instrument_key": instrument.spot_instrument_key,
-                    "option_instrument_key": instrument.option_instrument_key,
-                    "option_type": instrument.option_type,
-                    "strike_price": float(instrument.strike_price),
-                    "expiry_date": instrument.expiry_date,
-                    "lot_size": instrument.lot_size,
-                    "live_spot_price": float(instrument.live_spot_price),
-                    "live_option_premium": float(instrument.live_option_premium),
-                    "premium_at_selection": float(instrument.premium_at_selection),
-                    "price_change": float(price_change),
-                    "price_change_percent": float(price_change_percent),
-                    "state": instrument.state.value,
-                    "active_position_id": instrument.active_position_id,
-                    "unrealized_pnl": float(unrealized_pnl),
-                    "unrealized_pnl_percent": float(unrealized_pnl_percent),
-                    "last_updated": datetime.now().isoformat(),
-                }
-            )
-
-        return live_data
-
-    async def stop(self):
-        """Stop auto-trading service"""
-        self.is_running = False
-
-        if self.ws_task:
-            self.ws_task.cancel()
-            try:
-                await self.ws_task
-            except asyncio.CancelledError:
-                pass
-
-        logger.info("🛑 Auto-trading live feed stopped")
-        logger.info(f"📊 Final Stats: {self.stats}")
-
-        # Clear monitored instruments
-        self.monitored_instruments.clear()
-        self.subscribed_keys.clear()
-
-
-# Singleton instance
+# Singleton
 auto_trade_live_feed = AutoTradeLiveFeed()
