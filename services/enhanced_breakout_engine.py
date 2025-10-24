@@ -188,15 +188,39 @@ class EnhancedBreakoutEngine:
     # Broadcast
     # -----------------------------
     async def _broadcast_breakouts(self, signals: List[BreakoutSignal]):
+        """
+        Broadcast breakout signals to connected clients.
+
+        Uses the realtime market engine's event emitter to broadcast breakout signals.
+        This ensures signals are sent through the unified WebSocket system to all
+        subscribed clients.
+
+        Args:
+            signals: List of BreakoutSignal objects to broadcast
+        """
         for sig in signals:
             data = sig.to_dict()
             try:
-                print(f"📢 Broadcasting breakout signal: {data}")
-            except Exception:
-                try:
-                    await self.centralized_manager.emit("breakout_signal", data)
-                except Exception:
-                    logger.warning(f"Failed to broadcast signal: {data}")
+                # Get market engine and emit through its event system
+                from services.realtime_market_engine import get_market_engine
+
+                engine = get_market_engine()
+                if engine and hasattr(engine, "event_emitter"):
+                    # Emit through market engine's event emitter
+                    # This will trigger the on_breakout_signal listener in unified_websocket_routes
+                    engine.event_emitter.emit("breakout_signal", data)
+                    logger.debug(
+                        f"Emitted breakout signal via market engine: {data['instrument']} "
+                        f"(type: {data['type']}, price: {data['price']})"
+                    )
+                else:
+                    logger.warning(
+                        "Market engine not available or missing event_emitter - breakout signal not sent"
+                    )
+            except Exception as e:
+                logger.error(f"Failed to broadcast breakout signal for {data.get('instrument', 'unknown')}: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
 
     # -----------------------------
     # Public Update Method

@@ -79,9 +79,16 @@ def register_engine_listeners():
             )
             asyncio.create_task(broadcast_to_clients("analytics_update", data))
 
+    # Breakout signals from enhanced breakout engine
+    def on_breakout_signal(data):
+        if active_connections:
+            logger.info(f"Broadcasting breakout signal to {len(active_connections)} clients: {data.get('instrument', 'unknown')}")
+            asyncio.create_task(broadcast_to_clients("breakout_signal", data))
+
     # Register engine events
     engine.event_emitter.on("price_update", on_price_update)
     engine.event_emitter.on("analytics_update", on_analytics_update)
+    engine.event_emitter.on("breakout_signal", on_breakout_signal)
 
     # Also register with centralized manager for real-time price updates
     def on_centralized_price_update(updates: dict):
@@ -160,6 +167,7 @@ async def unified_websocket_endpoint(websocket: WebSocket):
                     client_subscriptions[client_id] = {
                         "price_update",
                         "analytics_update",
+                        "breakout_signal",
                     }
                 else:
                     client_subscriptions[client_id].update(events)
