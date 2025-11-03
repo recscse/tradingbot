@@ -594,15 +594,15 @@ class RealtimeMarketEngine:
         self.analytics.calculation_latency_ms = (time.time() - calc_start) * 1000
         self.analytics.last_calculation = time.time()
 
-        logger.info(
-            f"Analytics calculated: {len(top_gainers_dedup)} gainers, {len(top_losers_dedup)} losers"
-        )
+        # logger.info(
+        #     f"Analytics calculated: {len(top_gainers_dedup)} gainers, {len(top_losers_dedup)} losers"
+        # )
 
         gainer_symbols = [g.get("symbol") for g in top_gainers_dedup]
         loser_symbols = [l.get("symbol") for l in top_losers_dedup]
 
-        logger.info(f"Top gainers: {gainer_symbols}")
-        logger.info(f"Top losers: {loser_symbols}")
+        # logger.info(f"Top gainers: {gainer_symbols}")
+        # logger.info(f"Top losers: {loser_symbols}")
 
         # Check for duplicates
         if len(gainer_symbols) != len(set(gainer_symbols)):
