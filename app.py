@@ -561,51 +561,42 @@ async def lifespan(app: FastAPI):
         if CENTRALIZED_WS_AVAILABLE:
             logger.info("🔌 Initializing NEW Centralized WebSocket System...")
             try:
-                if await centralized_manager.initialize():
-                    # Start connection in background - non-blocking
-                    logger.info(
-                        "🔌 Starting Centralized WebSocket connection in background..."
-                    )
-                    await centralized_manager.start_connection()
-                    logger.info(
-                        "✅ Centralized WebSocket background task started - continuing with other services"
-                    )
+                # CRITICAL FIX: DON'T await - just create background task
+                # start_connection() will handle initialization internally
+                logger.info(
+                    "🔌 Starting Centralized WebSocket connection in background..."
+                )
+                asyncio.create_task(centralized_manager.start_connection())
+                logger.info(
+                    "✅ Centralized WebSocket background task started - continuing with other services"
+                )
 
-                    # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
-                    try:
-                        from services.realtime_data_streamer import realtime_streamer
+                # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
+                try:
+                    from services.realtime_data_streamer import realtime_streamer
 
-                        realtime_streamer.start_streaming()
-                        logger.info("🚀 ZERO-DELAY real-time streaming ACTIVATED")
-                    except ImportError as e:
-                        logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
-
-                    except Exception as e:
-                        logger.error(
-                            f"❌ Error initializing real-time trading system: {e}"
-                        )
-
-                    # Check health status (non-blocking)
-                    status = await centralized_manager.health_check()
-                    logger.info(
-                        f"📊 Centralized WebSocket Status: Health Score {status.get('health_score', 0)}/100"
-                    )
-                    logger.info(
-                        f"📊 WebSocket Connected: {status.get('ws_connected', False)} | Instruments: {status.get('total_instruments', 0)}"
-                    )
-
-                    # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
-                    logger.info(
-                        "🔗 Connecting centralized WebSocket manager to enhanced unified system..."
-                    )
-
-                else:
+                    realtime_streamer.start_streaming()
+                    logger.info("🚀 ZERO-DELAY real-time streaming ACTIVATED")
+                except ImportError as e:
+                    logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
+                except Exception as e:
                     logger.error(
-                        "❌ NEW: Failed to initialize centralized WebSocket system"
+                        f"❌ Error initializing real-time trading system: {e}"
                     )
-                    logger.warning(
-                        "⚠️ Application will continue without live market data"
-                    )
+
+                # Log initial status (don't await health check to avoid blocking)
+                logger.info(
+                    "📊 Centralized WebSocket Status: Starting in background..."
+                )
+                logger.info(
+                    "📊 WebSocket will connect automatically when ready"
+                )
+
+                # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
+                logger.info(
+                    "🔗 Connecting centralized WebSocket manager to enhanced unified system..."
+                )
+
             except Exception as e:
                 logger.error(f"❌ NEW: Centralized WebSocket system error: {e}")
                 logger.warning("⚠️ Application will continue without live market data")
@@ -734,9 +725,10 @@ async def lifespan(app: FastAPI):
                 intelligent_stock_selector,
             )
 
-            await intelligent_stock_selector.initialize_services()
+            # CRITICAL FIX: Don't await - run in background to prevent blocking
+            asyncio.create_task(intelligent_stock_selector.initialize_services())
             logger.info(
-                "✅ Intelligent Stock Selection Service initialized successfully"
+                "✅ Intelligent Stock Selection Service initialization started in background"
             )
         except ImportError as e:
             logger.warning(f"⚠️ Intelligent Stock Selection Service not available: {e}")
@@ -750,11 +742,9 @@ async def lifespan(app: FastAPI):
         try:
             from services.websocket.mcx.integration import initialize_mcx_service
 
-            mcx_success = await initialize_mcx_service()
-            if mcx_success:
-                logger.info("✅ MCX WebSocket Service initialized successfully")
-            else:
-                logger.warning("⚠️ MCX WebSocket Service initialization failed")
+            # CRITICAL FIX: Don't await - run in background to prevent blocking
+            asyncio.create_task(initialize_mcx_service())
+            logger.info("✅ MCX WebSocket Service initialization started in background")
         except ImportError as e:
             logger.warning(f"⚠️ MCX WebSocket Service not available: {e}")
         except Exception as e:
