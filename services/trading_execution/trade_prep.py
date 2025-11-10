@@ -187,16 +187,22 @@ class TradePrepService:
 
             broker_name = broker_config.broker_name if broker_config else "Paper Trading"
 
-            # Step 2: Get available capital
-            available_capital = capital_manager.get_available_capital(user_id, db, trading_mode)
+            # Step 2: Get available capital for new position
+            # Use new method that checks position limits instead of deducting from pool
+            available_capital = capital_manager.get_available_capital_for_new_position(
+                user_id, db, trading_mode
+            )
 
             if available_capital <= 0:
-                logger.warning(f"No available capital for user {user_id}")
+                logger.warning(
+                    f"No available capital for user {user_id} - "
+                    f"either max positions reached or insufficient funds"
+                )
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id, stock_symbol, option_instrument_key,
                     option_type, strike_price, expiry_date, lot_size,
-                    trading_mode, "Insufficient capital available"
+                    trading_mode, "Insufficient capital or max positions reached"
                 )
 
             # Step 3: Calculate position size based on capital
@@ -392,16 +398,22 @@ class TradePrepService:
 
             broker_name = broker_config.broker_name if broker_config else "Paper Trading"
 
-            # Step 2: Get available capital
-            available_capital = capital_manager.get_available_capital(user_id, db, trading_mode)
+            # Step 2: Get available capital for new position
+            # Use new method that checks position limits instead of deducting from pool
+            available_capital = capital_manager.get_available_capital_for_new_position(
+                user_id, db, trading_mode
+            )
 
             if available_capital <= 0:
-                logger.warning(f"No available capital for user {user_id}")
+                logger.warning(
+                    f"No available capital for user {user_id} - "
+                    f"either max positions reached or insufficient funds"
+                )
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id, stock_symbol, option_instrument_key,
                     option_type, strike_price, expiry_date, lot_size,
-                    trading_mode, "Insufficient capital available"
+                    trading_mode, "Insufficient capital or max positions reached"
                 )
 
             # Step 3: Fetch current option premium (live market data)

@@ -464,6 +464,7 @@ class AutoTradeLiveFeed:
             )
 
             # Run strategy for instruments with sufficient historical data
+            # Strategy requires: max(EMA period, SuperTrend period) + 10 = max(20, 10) + 10 = 30 candles
             for instrument in shared_registry.instruments.values():
                 if instrument.spot_instrument_key == instrument_key:
                     if len(instrument.historical_spot_data["close"]) >= 30:
@@ -573,6 +574,21 @@ class AutoTradeLiveFeed:
 
             instrument.last_signal = signal
             self.stats["signals_generated"] += 1
+        except ValueError as e:
+            # Handle insufficient data error gracefully (e.g., "Need at least 30 candles")
+            if "candles" in str(e).lower():
+                logger.debug(
+                    f"Skipping strategy for {instrument.stock_symbol}: {e} "
+                    f"(have {len(instrument.historical_spot_data.get('close', []))} candles)"
+                )
+                return
+            else:
+                raise
+        except Exception:
+            logger.exception(f"Error generating signal for {instrument.stock_symbol}")
+            return
+
+        try:
 
             # Broadcast signal to UI (even if not acted upon)
             await broadcast_to_clients("trading_signal", {
@@ -606,15 +622,75 @@ class AutoTradeLiveFeed:
             )
 
             if not subscribed_users:
-                logger.warning(f"No users subscribed to {instrument.stock_symbol}")
+                logger.info(f"No users currently subscribed to {instrument.stock_symbol}")
                 return
 
-            # Execute trade for EACH subscribed user
+            # CRITICAL FIX: Filter users based on signal type and position state
+            # EXIT signals should only go to users WITH positions
+            # ENTRY signals should only go to users WITHOUT positions
+            eligible_users = []
+
+            # Quick check using in-memory positions first (fast path)
+            for user_id in subscribed_users:
+                has_position_in_memory = (
+                    user_id in self.active_user_positions
+                    and instrument.option_instrument_key in self.active_user_positions[user_id]
+                )
+
+                # For critical decisions, also check database (slower but accurate)
+                # This ensures correctness after service restarts
+                has_position = has_position_in_memory
+
+                # If memory says no position but this is an EXIT signal, double-check DB
+                # to avoid missing positions after service restart
+                if not has_position and signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
+                    db = SessionLocal()
+                    try:
+                        db_position = (
+                            db.query(ActivePosition)
+                            .join(AutoTradeExecution, ActivePosition.trade_execution_id == AutoTradeExecution.id)
+                            .filter(
+                                AutoTradeExecution.user_id == user_id,
+                                AutoTradeExecution.instrument_key == instrument.option_instrument_key,
+                                ActivePosition.is_active == True
+                            )
+                            .first()
+                        )
+                        has_position = db_position is not None
+                    finally:
+                        db.close()
+
+                # Check signal type vs position state
+                if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
+                    # EXIT signal: only for users WITH positions
+                    if has_position:
+                        eligible_users.append(user_id)
+                    else:
+                        logger.debug(
+                            f"Skipping EXIT signal for user {user_id} on {instrument.stock_symbol} - no position"
+                        )
+                else:
+                    # ENTRY signal (BUY/SELL): only for users WITHOUT positions
+                    if not has_position:
+                        eligible_users.append(user_id)
+                    else:
+                        logger.debug(
+                            f"Skipping ENTRY signal for user {user_id} on {instrument.stock_symbol} - already has position"
+                        )
+
+            if not eligible_users:
+                logger.info(
+                    f"No eligible users for {signal.signal_type.value} signal on {instrument.stock_symbol} "
+                    f"(total subscribed: {len(subscribed_users)})"
+                )
+                return
+
+            # Execute trade for EACH eligible user
             logger.info(
-                f"Broadcasting signal to {len(subscribed_users)} users for {instrument.stock_symbol}"
+                f"Broadcasting {signal.signal_type.value} signal to {len(eligible_users)}/{len(subscribed_users)} users for {instrument.stock_symbol}"
             )
 
-            for user_id in subscribed_users:
+            for user_id in eligible_users:
                 # Execute in background to avoid blocking other users
                 asyncio.create_task(
                     self._execute_trade_for_user(instrument, signal, user_id)
@@ -635,25 +711,59 @@ class AutoTradeLiveFeed:
             True if signal is valid
         """
         try:
+            logger.info(
+                f"Validating signal: type={signal.signal_type.value}, "
+                f"confidence={signal.confidence:.2f}, option_type={option_type}"
+            )
+
             if signal.signal_type == SignalType.HOLD:
+                logger.info(f"Signal rejected: HOLD signal for {option_type}")
+                return False
+
+            # Check confidence threshold (reduced from 65% to 55%)
+            if Decimal(str(signal.confidence)) < Decimal("0.55"):
+                logger.info(
+                    f"Signal rejected: confidence {signal.confidence:.2f} < 0.55 threshold"
+                )
                 return False
 
             # CRITICAL FIX: Allow EXIT signals for closing positions
-            # Entry signals: CE->BUY, PE->SELL
             # Exit signals: EXIT_LONG, EXIT_SHORT (valid for both CE/PE)
             if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
-                # Exit signals are always valid (closing positions)
-                pass
-            elif option_type == "CE" and signal.signal_type not in (SignalType.BUY,):
-                return False
-            elif option_type == "PE" and signal.signal_type not in (SignalType.SELL,):
+                logger.info(f"Valid EXIT signal for {option_type}")
+                return True
+
+            # ENTRY signals: Both CE and PE use BUY signals
+            # Reasoning: We're BUYING options (long position), not shorting
+            # - BUY CE = Long Call = Bullish bet
+            # - BUY PE = Long Put = Bearish bet
+            # The option_type (CE/PE) determines direction, not signal type
+            if signal.signal_type == SignalType.BUY:
+                logger.info(f"Valid BUY signal for {option_type} option")
+                return True
+
+            # LEGACY SUPPORT: PE with SELL signal (backward compatibility)
+            # Note: This should ideally be BUY for both CE and PE
+            if option_type == "PE" and signal.signal_type == SignalType.SELL:
+                logger.warning(
+                    f"PE with SELL signal (legacy mapping) - ideally should be BUY"
+                )
+                return True
+
+            # CE with SELL signal (invalid for buying calls)
+            if option_type == "CE" and signal.signal_type == SignalType.SELL:
+                logger.info(
+                    f"Signal rejected: SELL signal not valid for CE (buying calls)"
+                )
                 return False
 
-            if Decimal(str(signal.confidence)) < Decimal("0.65"):
-                return False
-            return True
-        except Exception:
-            logger.exception("Signal validation error")
+            logger.info(
+                f"Signal rejected: {signal.signal_type.value} not valid for {option_type}"
+            )
+            return False
+
+        except Exception as e:
+            logger.exception(f"Signal validation error: {e}")
             return False
 
     # ============================================================================
@@ -688,91 +798,152 @@ class AutoTradeLiveFeed:
             self.stats["errors"] += 1
             return
 
-        # Check if user has active position
-        has_position = (
-            user_id in self.active_user_positions
-            and instrument.option_instrument_key in self.active_user_positions[user_id]
-        )
-
-        # CRITICAL: Handle ENTRY vs EXIT signals differently
-        if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
-            # EXIT signal: Only process if position exists
-            if not has_position:
-                logger.info(
-                    f"⏭️ EXIT signal for {instrument.stock_symbol} but no active position for user {user_id} - skipping"
-                )
-                # Broadcast to UI that exit signal was generated but no position exists
-                await broadcast_to_clients("signal_skipped", {
-                    "symbol": instrument.stock_symbol,
-                    "signal_type": signal.signal_type.value,
-                    "reason": "No active position to exit",
-                    "user_id": user_id,
-                    "timestamp": datetime.now().isoformat()
-                })
-                return
-            else:
-                logger.info(
-                    f"🔄 Processing EXIT signal for {instrument.stock_symbol} - closing position for user {user_id}"
-                )
-                # TODO: Implement position closing logic here
-                # For now, just skip - need to integrate with execution_handler.close_position()
-                await broadcast_to_clients("position_closing", {
-                    "symbol": instrument.stock_symbol,
-                    "signal_type": signal.signal_type.value,
-                    "user_id": user_id,
-                    "timestamp": datetime.now().isoformat()
-                })
-                return
-        else:
-            # ENTRY signal (BUY/SELL): Only process if no position exists
-            if has_position:
-                logger.info(
-                    f"⏭️ User {user_id} already has position in {instrument.stock_symbol} - skipping entry signal"
-                )
-                await broadcast_to_clients("signal_skipped", {
-                    "symbol": instrument.stock_symbol,
-                    "signal_type": signal.signal_type.value,
-                    "reason": "Position already exists",
-                    "user_id": user_id,
-                    "timestamp": datetime.now().isoformat()
-                })
-                return
-
-            logger.info(
-                f"🎯 Processing ENTRY signal for {instrument.stock_symbol} - opening position for user {user_id}"
-            )
-
         db = SessionLocal()
         try:
+            # Check if user has active position in both memory AND database for accuracy
+            has_position_in_memory = (
+                user_id in self.active_user_positions
+                and instrument.option_instrument_key in self.active_user_positions[user_id]
+            )
+
+            # Check database for active position (critical for service restarts)
+            db_position = (
+                db.query(ActivePosition)
+                .join(AutoTradeExecution, ActivePosition.trade_execution_id == AutoTradeExecution.id)
+                .filter(
+                    AutoTradeExecution.user_id == user_id,
+                    AutoTradeExecution.instrument_key == instrument.option_instrument_key,
+                    ActivePosition.is_active == True
+                )
+                .first()
+            )
+
+            has_position = has_position_in_memory or (db_position is not None)
+
+            # Sync memory with database if needed
+            if db_position and not has_position_in_memory:
+                logger.info(
+                    f"Syncing memory: Found active DB position for user {user_id}, {instrument.stock_symbol}"
+                )
+                if user_id not in self.active_user_positions:
+                    self.active_user_positions[user_id] = {}
+
+                # Get trade execution details
+                trade = (
+                    db.query(AutoTradeExecution)
+                    .filter(AutoTradeExecution.id == db_position.trade_execution_id)
+                    .first()
+                )
+
+                if trade:
+                    self.active_user_positions[user_id][instrument.option_instrument_key] = {
+                        "position_id": db_position.id,
+                        "entry_price": Decimal(str(trade.entry_price)),
+                        "stop_loss": Decimal(str(trade.stop_loss)) if trade.stop_loss else Decimal("0"),
+                        "target": Decimal(str(trade.target_price)) if trade.target_price else Decimal("0"),
+                    }
+                    logger.info(f"Memory sync complete for user {user_id}")
+
+            # CRITICAL: Handle ENTRY vs EXIT signals differently
+            if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
+                # EXIT signal: Only process if position exists
+                if not has_position:
+                    logger.info(
+                        f"⏭️ EXIT signal for {instrument.stock_symbol} but no active position for user {user_id} - skipping"
+                    )
+                    # Broadcast to UI that exit signal was generated but no position exists
+                    await broadcast_to_clients("signal_skipped", {
+                        "symbol": instrument.stock_symbol,
+                        "signal_type": signal.signal_type.value,
+                        "reason": "No active position to exit",
+                        "user_id": user_id,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    return
+                else:
+                    logger.info(
+                        f"🔄 Processing EXIT signal for {instrument.stock_symbol} - closing position for user {user_id}"
+                    )
+
+                    # FIXED: Actually close the position instead of just broadcasting
+                    exit_price = instrument.live_option_premium
+                    exit_reason = f"SIGNAL_{signal.signal_type.value}"
+
+                    await self._close_position_for_user(
+                        user_id=user_id,
+                        instrument=instrument,
+                        exit_price=exit_price,
+                        exit_reason=exit_reason,
+                        db=db
+                    )
+
+                    logger.info(
+                        f"✅ Position closed for user {user_id}: {instrument.stock_symbol} @ {exit_price}"
+                    )
+                    return
+            else:
+                # ENTRY signal (BUY/SELL): Only process if no position exists
+                if has_position:
+                    logger.info(
+                        f"⏭️ User {user_id} already has position in {instrument.stock_symbol} - skipping entry signal"
+                    )
+                    await broadcast_to_clients("signal_skipped", {
+                        "symbol": instrument.stock_symbol,
+                        "signal_type": signal.signal_type.value,
+                        "reason": "Position already exists",
+                        "user_id": user_id,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    return
+
+                logger.info(
+                    f"🎯 Processing ENTRY signal for {instrument.stock_symbol} - opening position for user {user_id}"
+                )
+
             # Validate data availability
+            current_candles = len(instrument.historical_spot_data.get("close", []))
+
             if instrument.live_option_premium <= 0:
-                logger.error(f"❌ No premium data for {instrument.stock_symbol} (premium: {instrument.live_option_premium})")
+                logger.error(
+                    f"No premium data for {instrument.stock_symbol} "
+                    f"(premium: {instrument.live_option_premium})"
+                )
                 self.stats["errors"] += 1
                 await broadcast_to_clients("trade_error", {
                     "symbol": instrument.stock_symbol,
                     "error": "No premium data available",
                     "user_id": user_id,
+                    "premium": float(instrument.live_option_premium),
                     "timestamp": datetime.now().isoformat()
                 })
                 return
 
-            if len(instrument.historical_spot_data.get("close", [])) < 20:
-                logger.error(
-                    f"❌ Insufficient historical data for {instrument.stock_symbol} "
-                    f"(have {len(instrument.historical_spot_data.get('close', []))} candles, need 20)"
+            # Strategy requires minimum 30 candles: max(EMA 20, SuperTrend 10) + 10 = 30
+            if current_candles < 30:
+                logger.warning(
+                    f"Insufficient historical data for {instrument.stock_symbol} "
+                    f"(have {current_candles} candles, need 30 minimum for SuperTrend+EMA strategy)"
                 )
                 self.stats["errors"] += 1
                 await broadcast_to_clients("trade_error", {
                     "symbol": instrument.stock_symbol,
-                    "error": "Insufficient historical data",
+                    "error": f"Insufficient historical data ({current_candles}/30 candles)",
                     "user_id": user_id,
+                    "candles_available": current_candles,
                     "timestamp": datetime.now().isoformat()
                 })
                 return
 
             logger.info(
-                f"📊 Preparing trade for {instrument.stock_symbol}: "
-                f"Premium={instrument.live_option_premium}, HistData={len(instrument.historical_spot_data.get('close', []))} candles"
+                f"Data validation passed for {instrument.stock_symbol}: "
+                f"Premium={instrument.live_option_premium:.2f}, "
+                f"HistData={current_candles} candles, "
+                f"SpotPrice={instrument.live_spot_price:.2f}"
+            )
+
+            logger.info(
+                f"Preparing trade for user {user_id}: {instrument.stock_symbol} "
+                f"{instrument.option_type} {instrument.strike_price}"
             )
 
             # Prepare trade with user-specific capital
@@ -797,10 +968,22 @@ class AutoTradeLiveFeed:
                 ask_price=instrument.ask_price
             )
 
-            if (
-                getattr(prepared_trade, "status", None)
-                and getattr(prepared_trade.status, "value", "") == "ready"
-            ):
+            prepared_status = getattr(prepared_trade, "status", None)
+            prepared_status_value = getattr(prepared_status, "value", "") if prepared_status else "unknown"
+
+            logger.info(
+                f"Trade preparation result: status={prepared_status_value}, "
+                f"symbol={instrument.stock_symbol}"
+            )
+
+            if prepared_status_value == "ready":
+                investment = float(prepared_trade.total_investment) if hasattr(prepared_trade, 'total_investment') else 0
+                logger.info(
+                    f"Executing trade for user {user_id}: "
+                    f"{instrument.stock_symbol} {instrument.option_type} @ {instrument.strike_price}, "
+                    f"investment=Rs.{investment:,.2f}"
+                )
+
                 # Execute trade
                 exec_result = await asyncio.to_thread(
                     execution_handler.execute_trade,
@@ -809,18 +992,17 @@ class AutoTradeLiveFeed:
                     None,  # parent_trade_id
                     broker_name,
                     broker_config_id,
-                    float(prepared_trade.total_investment) if hasattr(prepared_trade, 'total_investment') else None
+                    investment
                 )
 
                 if getattr(exec_result, "success", False):
+                    trade_id = getattr(exec_result, 'trade_id', 'unknown')
                     logger.info(
-                        f"✅ Trade executed successfully for user {user_id}: {getattr(exec_result, 'trade_id', 'unknown')}"
-                    )
-                    logger.info(
-                        f"   Symbol: {instrument.stock_symbol} {instrument.option_type} {instrument.strike_price}"
-                    )
-                    logger.info(
-                        f"   Entry: {instrument.live_option_premium}, Lots: {instrument.lot_size}"
+                        f"Trade executed successfully for user {user_id}: "
+                        f"trade_id={trade_id}, "
+                        f"symbol={instrument.stock_symbol} {instrument.option_type} {instrument.strike_price}, "
+                        f"entry={instrument.live_option_premium:.2f}, "
+                        f"lots={instrument.lot_size}"
                     )
 
                     # Track active position
@@ -864,13 +1046,19 @@ class AutoTradeLiveFeed:
                         "timestamp": datetime.now().isoformat()
                     })
             else:
-                status_value = getattr(getattr(prepared_trade, "status", None), "value", "unknown")
+                # Trade preparation failed or not ready
+                metadata = getattr(prepared_trade, "metadata", {})
+                error_reason = metadata.get("error", "Unknown reason")
                 logger.warning(
-                    f"⚠️ Trade not ready for user {user_id} - status: {status_value}"
+                    f"Trade not ready for user {user_id}: "
+                    f"status={prepared_status_value}, "
+                    f"symbol={instrument.stock_symbol}, "
+                    f"reason={error_reason}"
                 )
                 await broadcast_to_clients("trade_preparation_failed", {
                     "symbol": instrument.stock_symbol,
-                    "status": status_value,
+                    "status": prepared_status_value,
+                    "reason": error_reason,
                     "user_id": user_id,
                     "timestamp": datetime.now().isoformat()
                 })

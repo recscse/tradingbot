@@ -292,6 +292,9 @@ class TradeExecutionHandler:
             logger.info(f"  Entry: Rs.{actual_entry_price}, Qty: {actual_quantity}")
 
             # Create trade execution record
+            signal_conf = prepared_trade.metadata.get('signal_confidence', 0.7)
+            signal_strength = float(signal_conf * 100) if signal_conf else 70.0
+
             trade_execution = AutoTradeExecution(
                 user_id=prepared_trade.user_id,
                 trade_id=trade_id,
@@ -299,7 +302,7 @@ class TradeExecutionHandler:
                 instrument_key=prepared_trade.option_instrument_key,
                 strategy_name="supertrend_ema",
                 signal_type=f"BUY_{prepared_trade.option_type}",
-                signal_strength=float(prepared_trade.metadata.get('signal_confidence', 0) * 100),
+                signal_strength=signal_strength,
                 entry_time=datetime.now(),
                 entry_price=float(actual_entry_price),
                 entry_order_id=broker_order_id,
@@ -309,10 +312,10 @@ class TradeExecutionHandler:
                 target_1=float(prepared_trade.target_price),
                 target_2=float(prepared_trade.target_price * Decimal('1.1')),
                 status="ACTIVE",
-                # Multi-demat support
-                broker_name=broker_name or prepared_trade.broker_name,
-                broker_config_id=broker_id,
-                allocated_capital=allocated_capital or float(prepared_trade.total_investment),
+                # Multi-demat support - use actual broker details from config
+                broker_name=prepared_trade.broker_name,
+                broker_config_id=broker_config.id,
+                allocated_capital=float(prepared_trade.total_investment),
                 parent_trade_id=parent_trade_id,
                 trading_mode=prepared_trade.trading_mode
             )

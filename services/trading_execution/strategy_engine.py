@@ -305,6 +305,7 @@ class StrategyEngine:
                 trend_bullish = current_trend_1x == 1
                 trend_reversal_up = prev_trend_1x == -1 and current_trend_1x == 1
 
+                # ENTRY CONDITIONS (open new position)
                 if trend_reversal_up and price_above_ema:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.85')
@@ -313,10 +314,17 @@ class StrategyEngine:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
                     reason = "Strong uptrend: Price above SuperTrend and EMA"
-                elif not price_above_supertrend or not price_above_ema:
+                # EXIT CONDITIONS (only when conditions clearly deteriorate)
+                elif not trend_bullish and (not price_above_supertrend or not price_above_ema):
+                    # Both trend turned bearish AND price broke support levels
                     signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
-                    reason = "Exit: Price below SuperTrend or EMA"
+                    reason = "Exit: Bearish trend with price below key levels"
+                else:
+                    # Neutral zone or minor pullback - HOLD
+                    signal_type = SignalType.HOLD
+                    confidence = Decimal('0.50')
+                    reason = "Waiting for clear signal - no strong trend"
 
             # SHORT ENTRY LOGIC (for PE options)
             else:
@@ -326,6 +334,7 @@ class StrategyEngine:
                 trend_bearish = current_trend_1x == -1
                 trend_reversal_down = prev_trend_1x == 1 and current_trend_1x == -1
 
+                # ENTRY CONDITIONS (open new position)
                 if trend_reversal_down and price_below_ema:
                     signal_type = SignalType.SELL
                     confidence = Decimal('0.85')
@@ -334,10 +343,17 @@ class StrategyEngine:
                     signal_type = SignalType.SELL
                     confidence = Decimal('0.75')
                     reason = "Strong downtrend: Price below SuperTrend and EMA"
-                elif not price_below_supertrend or not price_below_ema:
+                # EXIT CONDITIONS (only when conditions clearly improve)
+                elif not trend_bearish and (not price_below_supertrend or not price_below_ema):
+                    # Both trend turned bullish AND price broke resistance levels
                     signal_type = SignalType.EXIT_SHORT
                     confidence = Decimal('0.80')
-                    reason = "Exit: Price above SuperTrend or EMA"
+                    reason = "Exit: Bullish trend with price above key levels"
+                else:
+                    # Neutral zone or minor bounce - HOLD
+                    signal_type = SignalType.HOLD
+                    confidence = Decimal('0.50')
+                    reason = "Waiting for clear signal - no strong trend"
 
             # Calculate entry, stop loss, and target
             entry_price = current_price

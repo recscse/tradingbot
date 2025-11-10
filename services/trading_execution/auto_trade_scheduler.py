@@ -74,6 +74,11 @@ class AutoTradeScheduler:
             )
             logger.info(f"📊 Default trading mode: {trading_mode.value}")
 
+            # IMMEDIATE START: Check and start trading immediately on application startup
+            # This allows auto-trading to work even outside market hours for testing/monitoring
+            logger.info("🚀 Checking for immediate auto-start on application startup...")
+            await self._check_and_start_trading_all_users()
+
             while self.is_running:
                 try:
                     # Check current time
@@ -99,10 +104,11 @@ class AutoTradeScheduler:
                         if auto_trade_live_feed.is_running:
                             await self._check_and_stop_trading()
                     else:
-                        # After market hours - ensure stopped
-                        if auto_trade_live_feed.is_running:
-                            logger.info("📉 Market closed - stopping auto-trading")
-                            await auto_trade_live_feed.stop()
+                        # Outside market hours - still allow auto-trading to run if already started
+                        # Don't auto-stop outside market hours to allow 24/7 monitoring
+                        if not auto_trade_live_feed.is_running:
+                            # Try to start if conditions are met (for pre-market/post-market monitoring)
+                            await self._check_and_start_trading_all_users()
 
                     await asyncio.sleep(self.check_interval)
 

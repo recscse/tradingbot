@@ -181,6 +181,81 @@ class TradingCapitalManager:
             logger.error(f"Error getting available capital: {e}")
             return Decimal('0')
 
+    def get_available_capital_for_new_position(
+        self,
+        user_id: int,
+        db: Session,
+        trading_mode: TradingMode = TradingMode.PAPER
+    ) -> Decimal:
+        """
+        Get capital available for opening a NEW position based on position limits
+
+        IMPROVED LOGIC: Instead of deducting from total capital pool, this method:
+        1. Checks if max concurrent positions limit is reached
+        2. Returns per-trade max allocation if limit not reached
+        3. Returns 0 if max positions already open
+
+        This prevents capital exhaustion issues where multiple positions block new trades.
+
+        Args:
+            user_id: User identifier
+            db: Database session
+            trading_mode: Paper or Live trading mode
+
+        Returns:
+            Per-trade capital allocation if positions available, else 0
+
+        Raises:
+            ValueError: If user_id is invalid
+        """
+        if not user_id or user_id <= 0:
+            raise ValueError("Invalid user_id provided")
+
+        try:
+            # Get total capital
+            if trading_mode == TradingMode.PAPER:
+                total_capital = self.paper_trading_capital
+            else:
+                broker_config = self.get_active_broker_config(user_id, db)
+                if not broker_config:
+                    logger.error(f"No active broker for user {user_id}")
+                    return Decimal('0')
+                total_capital = self._fetch_funds_from_broker(broker_config)
+                if total_capital <= 0:
+                    return Decimal('0')
+
+            # Calculate per-trade max allocation (20% of total capital)
+            max_per_trade = total_capital * self.max_capital_per_trade_percent
+
+            # Check concurrent position limit
+            from database.models import ActivePosition
+
+            active_positions_count = db.query(ActivePosition).filter(
+                ActivePosition.user_id == user_id,
+                ActivePosition.is_active == True
+            ).count()
+
+            MAX_CONCURRENT_POSITIONS = 5
+
+            if active_positions_count >= MAX_CONCURRENT_POSITIONS:
+                logger.warning(
+                    f"User {user_id} reached max concurrent positions "
+                    f"({active_positions_count}/{MAX_CONCURRENT_POSITIONS})"
+                )
+                return Decimal('0')
+
+            logger.info(
+                f"User {user_id} - Capital available for new position: "
+                f"Rs.{max_per_trade:,.2f} "
+                f"({active_positions_count}/{MAX_CONCURRENT_POSITIONS} positions active)"
+            )
+
+            return max_per_trade
+
+        except Exception as e:
+            logger.error(f"Error getting capital for new position: {e}")
+            return Decimal('0')
+
     def _get_allocated_capital_for_active_positions(
         self,
         user_id: int,
