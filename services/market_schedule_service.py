@@ -61,8 +61,8 @@ class MarketScheduleService:
                     port=int(os.getenv("REDIS_PORT", 6379)),
                     db=int(os.getenv("REDIS_DB", 0)),
                     decode_responses=True,
-                    socket_connect_timeout=5,
-                    socket_timeout=5,
+                    socket_connect_timeout=1,  # Reduced from 5 to 1 second
+                    socket_timeout=1,  # Reduced from 5 to 1 second
                 )
                 # Test connection
                 self.redis_client.ping()

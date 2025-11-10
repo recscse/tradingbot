@@ -89,14 +89,36 @@ class NotificationScheduler:
                 time.sleep(60)
     
     def _run_async_task(self, coro_func):
-        """Helper to run async functions in scheduler."""
+        """
+        Helper to run async functions in scheduler (non-blocking).
+
+        CRITICAL FIX: Uses asyncio.create_task() to avoid blocking the main thread.
+        """
+        try:
+            # Get the existing event loop instead of creating new one
+            try:
+                loop = asyncio.get_running_loop()
+                # Schedule as background task - DON'T WAIT
+                asyncio.create_task(coro_func())
+                logger.debug(f"✅ Scheduled {coro_func.__name__} as background task")
+            except RuntimeError:
+                # No event loop running - fall back to thread pool execution
+                import concurrent.futures
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                executor.submit(self._run_in_new_loop, coro_func)
+                logger.debug(f"✅ Scheduled {coro_func.__name__} in thread pool")
+        except Exception as e:
+            logger.error(f"❌ Async task scheduling error: {e}")
+
+    def _run_in_new_loop(self, coro_func):
+        """Run coroutine in new event loop (for thread pool execution)"""
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(coro_func())
             loop.close()
         except Exception as e:
-            logger.error(f"❌ Async task error: {e}")
+            logger.error(f"❌ Async task error in new loop: {e}")
     
     async def monitor_token_expiry(self):
         """Monitor broker tokens for expiry and send notifications."""
@@ -269,12 +291,22 @@ class NotificationScheduler:
             except Exception as e:
                 health_issues.append(f"Redis connectivity: {str(e)}")
             
-            # Check disk space
-            import shutil
-            disk_usage = shutil.disk_usage("/")
-            free_gb = disk_usage.free / (1024**3)
-            if free_gb < 1:  # Less than 1GB free
-                health_issues.append(f"Low disk space: {free_gb:.1f}GB remaining")
+            # Check disk space (NON-BLOCKING with timeout)
+            try:
+                import shutil
+                import concurrent.futures
+
+                # Run disk_usage in thread pool with timeout to avoid blocking
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(shutil.disk_usage, ".")
+                    disk_usage = future.result(timeout=5)  # 5 second timeout
+                    free_gb = disk_usage.free / (1024**3)
+                    if free_gb < 1:  # Less than 1GB free
+                        health_issues.append(f"Low disk space: {free_gb:.1f}GB remaining")
+            except concurrent.futures.TimeoutError:
+                logger.warning("⚠️ Disk space check timed out after 5 seconds - skipping")
+            except Exception as disk_error:
+                logger.warning(f"⚠️ Disk space check failed: {disk_error} - skipping")
             
             # If there are health issues, send alert to admins
             if health_issues:

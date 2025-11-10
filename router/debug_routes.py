@@ -46,30 +46,41 @@ async def debug_realtime_analytics():
 
 
 @router.get("/debug-run-stock-selection")
-async def debug_run_stock_selection():
-    """Debug endpoint for the stocks selection service"""
+async def debug_run_stock_selection(force: bool = False):
+    """
+    Debug endpoint for the stocks selection service
+
+    Args:
+        force: If True, force new selection even if already done today
+    """
 
     try:
         from services.intelligent_stock_selection_service import (
             intelligent_stock_selector,
         )
 
-        result = await intelligent_stock_selector.run_premarket_selection()
+        result = await intelligent_stock_selector.run_premarket_selection(force=force)
 
         if result and not result.get("error"):
             selected_stocks_data = result.get("selected_stocks", [])
             sentiment_analysis = result.get("sentiment_analysis", {})
+            already_selected = result.get("already_selected", False)
 
-            logger.info(
-                f"✅ Intelligent stock selection complete: {len(selected_stocks_data)} stocks"
-            )
-            logger.info(
-                f"📊 Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})"
-            )
+            if already_selected:
+                logger.info(
+                    f"✅ Returning existing stock selection: {result.get('selection_count', 0)} stocks"
+                )
+            else:
+                logger.info(
+                    f"✅ Intelligent stock selection complete: {len(selected_stocks_data)} stocks"
+                )
+                logger.info(
+                    f"📊 Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})"
+                )
 
             return {"success": True, "result": result}
     except Exception as e:
-        logger.error(f"Error running stocks selectionservice")
+        logger.error(f"Error running stocks selection service: {e}")
         return {
             "success": False,
             "error": str(e),
