@@ -565,15 +565,35 @@ class AutoTradeLiveFeed:
             instrument: Shared instrument
         """
         try:
-            # Generate signal (common for all users)
-            signal = strategy_engine.generate_signal(
+            # STEP 1: Generate SPOT-BASED signal (trend detection on underlying)
+            spot_signal = strategy_engine.generate_signal(
                 current_price=instrument.live_spot_price,
                 historical_data=instrument.historical_spot_data,
                 option_type=instrument.option_type,
             )
 
-            instrument.last_signal = signal
+            # STEP 2: Convert SPOT signal to PREMIUM signal (for actual trading)
+            # This is CRITICAL: Strategy runs on spot for trend, but we trade options
+            option_delta = None
+            if hasattr(instrument, 'option_greeks') and instrument.option_greeks:
+                option_delta = instrument.option_greeks.get('delta')
+
+            premium_signal = strategy_engine.convert_spot_signal_to_premium(
+                signal=spot_signal,
+                spot_price=instrument.live_spot_price,
+                option_premium=instrument.live_option_premium,
+                option_delta=option_delta
+            )
+
+            # Store PREMIUM signal (this is what we'll use for trading)
+            instrument.last_signal = premium_signal
             self.stats["signals_generated"] += 1
+
+            logger.info(
+                f"Signal for {instrument.stock_symbol}: "
+                f"Spot({spot_signal.signal_type.value}) → "
+                f"Premium({premium_signal.signal_type.value}, SL={premium_signal.stop_loss:.2f})"
+            )
         except ValueError as e:
             # Handle insufficient data error gracefully (e.g., "Need at least 30 candles")
             if "candles" in str(e).lower():
@@ -593,27 +613,27 @@ class AutoTradeLiveFeed:
             # Broadcast signal to UI (even if not acted upon)
             await broadcast_to_clients("trading_signal", {
                 "symbol": instrument.stock_symbol,
-                "signal_type": signal.signal_type.value,
-                "confidence": float(signal.confidence),
-                "price": float(signal.price),
-                "entry_price": float(signal.entry_price),
-                "stop_loss": float(signal.stop_loss),
-                "target_price": float(signal.target_price),
-                "reason": signal.reason,
-                "timestamp": signal.timestamp
+                "signal_type": premium_signal.signal_type.value,
+                "confidence": float(premium_signal.confidence),
+                "price": float(premium_signal.price),
+                "entry_price": float(premium_signal.entry_price),
+                "stop_loss": float(premium_signal.stop_loss),
+                "target_price": float(premium_signal.target_price),
+                "reason": premium_signal.reason,
+                "timestamp": premium_signal.timestamp
             })
 
             # Check if signal is valid
-            if not self._is_valid_signal(signal, instrument.option_type):
+            if not self._is_valid_signal(premium_signal, instrument.option_type):
                 logger.debug(
-                    f"Signal {signal.signal_type.value} for {instrument.stock_symbol} did not pass validation "
-                    f"(confidence: {signal.confidence}, option_type: {instrument.option_type})"
+                    f"Signal {premium_signal.signal_type.value} for {instrument.stock_symbol} did not pass validation "
+                    f"(confidence: {premium_signal.confidence}, option_type: {instrument.option_type})"
                 )
                 return
 
             logger.info(
                 f"✅ Valid signal for {instrument.stock_symbol}: "
-                f"{signal.signal_type.value} (Conf: {signal.confidence})"
+                f"{premium_signal.signal_type.value} (Conf: {premium_signal.confidence})"
             )
 
             # Get all users subscribed to this instrument
@@ -643,7 +663,7 @@ class AutoTradeLiveFeed:
 
                 # If memory says no position but this is an EXIT signal, double-check DB
                 # to avoid missing positions after service restart
-                if not has_position and signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
+                if not has_position and premium_signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
                     db = SessionLocal()
                     try:
                         db_position = (
@@ -661,7 +681,7 @@ class AutoTradeLiveFeed:
                         db.close()
 
                 # Check signal type vs position state
-                if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
+                if premium_signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
                     # EXIT signal: only for users WITH positions
                     if has_position:
                         eligible_users.append(user_id)
@@ -680,20 +700,20 @@ class AutoTradeLiveFeed:
 
             if not eligible_users:
                 logger.info(
-                    f"No eligible users for {signal.signal_type.value} signal on {instrument.stock_symbol} "
+                    f"No eligible users for {premium_signal.signal_type.value} signal on {instrument.stock_symbol} "
                     f"(total subscribed: {len(subscribed_users)})"
                 )
                 return
 
             # Execute trade for EACH eligible user
             logger.info(
-                f"Broadcasting {signal.signal_type.value} signal to {len(eligible_users)}/{len(subscribed_users)} users for {instrument.stock_symbol}"
+                f"Broadcasting {premium_signal.signal_type.value} signal to {len(eligible_users)}/{len(subscribed_users)} users for {instrument.stock_symbol}"
             )
 
             for user_id in eligible_users:
                 # Execute in background to avoid blocking other users
                 asyncio.create_task(
-                    self._execute_trade_for_user(instrument, signal, user_id)
+                    self._execute_trade_for_user(instrument, premium_signal, user_id)
                 )
 
         except Exception:
@@ -727,33 +747,25 @@ class AutoTradeLiveFeed:
                 )
                 return False
 
-            # CRITICAL FIX: Allow EXIT signals for closing positions
-            # Exit signals: EXIT_LONG, EXIT_SHORT (valid for both CE/PE)
+            # EXIT signals: Valid for both CE and PE (closing long positions)
             if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
                 logger.info(f"Valid EXIT signal for {option_type}")
                 return True
 
-            # ENTRY signals: Both CE and PE use BUY signals
-            # Reasoning: We're BUYING options (long position), not shorting
+            # ENTRY signals: Both CE and PE use BUY signals ONLY
+            # STANDARDIZED: We're BUYING options (long positions), never selling
             # - BUY CE = Long Call = Bullish bet
             # - BUY PE = Long Put = Bearish bet
-            # The option_type (CE/PE) determines direction, not signal type
+            # The option_type (CE/PE) determines direction, signal type is always BUY for entry
             if signal.signal_type == SignalType.BUY:
                 logger.info(f"Valid BUY signal for {option_type} option")
                 return True
 
-            # LEGACY SUPPORT: PE with SELL signal (backward compatibility)
-            # Note: This should ideally be BUY for both CE and PE
-            if option_type == "PE" and signal.signal_type == SignalType.SELL:
-                logger.warning(
-                    f"PE with SELL signal (legacy mapping) - ideally should be BUY"
-                )
-                return True
-
-            # CE with SELL signal (invalid for buying calls)
-            if option_type == "CE" and signal.signal_type == SignalType.SELL:
+            # REJECT SELL signals (no longer supported for either CE or PE)
+            # Removed legacy PE+SELL support for consistency
+            if signal.signal_type == SignalType.SELL:
                 logger.info(
-                    f"Signal rejected: SELL signal not valid for CE (buying calls)"
+                    f"Signal rejected: SELL signal not valid (we only BUY options for long positions)"
                 )
                 return False
 
@@ -865,11 +877,11 @@ class AutoTradeLiveFeed:
                         f"🔄 Processing EXIT signal for {instrument.stock_symbol} - closing position for user {user_id}"
                     )
 
-                    # FIXED: Actually close the position instead of just broadcasting
+                    # FIXED: Actually close the position with confirmation
                     exit_price = instrument.live_option_premium
                     exit_reason = f"SIGNAL_{signal.signal_type.value}"
 
-                    await self._close_position_for_user(
+                    closure_result = await self._close_position_for_user(
                         user_id=user_id,
                         instrument=instrument,
                         exit_price=exit_price,
@@ -877,8 +889,23 @@ class AutoTradeLiveFeed:
                         db=db
                     )
 
+                    if not closure_result.get('success'):
+                        logger.error(
+                            f"❌ Failed to close position for user {user_id}: {closure_result.get('error')}"
+                        )
+                        # Broadcast failure to UI
+                        await broadcast_to_clients("position_close_failed", {
+                            "symbol": instrument.stock_symbol,
+                            "signal_type": signal.signal_type.value,
+                            "user_id": user_id,
+                            "error": closure_result.get('error'),
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        return
+
                     logger.info(
-                        f"✅ Position closed for user {user_id}: {instrument.stock_symbol} @ {exit_price}"
+                        f"✅ Position closed for user {user_id}: {instrument.stock_symbol} @ {exit_price}, "
+                        f"PnL: ₹{closure_result.get('pnl', 0):.2f}"
                     )
                     return
             else:
@@ -1202,10 +1229,47 @@ class AutoTradeLiveFeed:
                 if target and current_price <= target:
                     return True, "TARGET_HIT"
 
-            # Time-based exit
+            # SMART TIME-BASED EXIT with expiry day handling
             now_t = datetime.now().time()
+            now_date = datetime.now().date()
+            entry_price_decimal = position_data.get("entry_price", Decimal("0"))
+
+            # Parse expiry date
+            try:
+                if hasattr(instrument, 'expiry_date') and instrument.expiry_date:
+                    if isinstance(instrument.expiry_date, str):
+                        from datetime import datetime as dt
+                        expiry_date = dt.strptime(instrument.expiry_date, "%Y-%m-%d").date()
+                    else:
+                        expiry_date = instrument.expiry_date
+                    is_expiry_day = (expiry_date == now_date)
+                else:
+                    is_expiry_day = False
+            except Exception as e:
+                logger.warning(f"Could not parse expiry date: {e}")
+                is_expiry_day = False
+
+            # EXPIRY DAY EXIT: Close earlier (3:00 PM)
+            if is_expiry_day:
+                if (now_t.hour, now_t.minute) >= (15, 0):
+                    logger.info(f"Expiry day exit triggered for {instrument.stock_symbol} at {now_t}")
+                    return True, "EXPIRY_DAY_EXIT_3PM"
+
+            # NORMAL DAY EXIT: Standard 3:20 PM exit
             if (now_t.hour, now_t.minute) >= (15, 20):
-                return True, "TIME_BASED_EXIT"
+                logger.info(f"Standard market close exit for {instrument.stock_symbol} at {now_t}")
+                return True, "TIME_BASED_EXIT_3_20PM"
+
+            # EMERGENCY LOSS EXIT: After 3:10 PM, exit if down more than 10%
+            if (now_t.hour, now_t.minute) >= (15, 10):
+                if entry_price_decimal > 0 and current_price > 0:
+                    pnl_percent = ((current_price - entry_price_decimal) / entry_price_decimal * 100)
+                    if pnl_percent < -10:
+                        logger.warning(
+                            f"Emergency loss exit for {instrument.stock_symbol}: "
+                            f"PnL {pnl_percent:.2f}% at {now_t}"
+                        )
+                        return True, "EMERGENCY_LOSS_EXIT_3_10PM"
 
             return False, None
 
@@ -1220,7 +1284,7 @@ class AutoTradeLiveFeed:
         exit_price: Decimal,
         exit_reason: str,
         db
-    ):
+    ) -> Dict[str, Any]:
         """
         Close position for specific user
 
@@ -1230,6 +1294,9 @@ class AutoTradeLiveFeed:
             exit_price: Exit price
             exit_reason: Exit reason
             db: Database session
+
+        Returns:
+            Dict with success status, pnl, and other details
         """
         try:
             position_data = self.active_user_positions[user_id][instrument.option_instrument_key]
@@ -1295,9 +1362,22 @@ class AutoTradeLiveFeed:
                 "timestamp": datetime.now().isoformat()
             })
 
-        except Exception:
+            return {
+                'success': True,
+                'pnl': float(pnl),
+                'pnl_percent': float(pnl_percent),
+                'exit_price': float(exit_price),
+                'position_id': position_id
+            }
+
+        except Exception as e:
             logger.exception(f"Error closing position for user {user_id}")
             db.rollback()
+            return {
+                'success': False,
+                'error': str(e),
+                'pnl': 0
+            }
 
     # ============================================================================
     # UI BROADCASTING
