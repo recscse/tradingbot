@@ -624,15 +624,15 @@
     "name": "AVENUE SUPERMARTS LIMITED",
     "trading_symbol": "DMART"
   },
-  "NSE_EQ|INE059A01026": {
-    "symbol": "CIPLA",
-    "name": "CIPLA LTD",
-    "trading_symbol": "CIPLA"
-  },
   "NSE_EQ|INE732I01013": {
     "symbol": "ANGELONE",
     "name": "ANGEL ONE LIMITED",
     "trading_symbol": "ANGELONE"
+  },
+  "NSE_EQ|INE059A01026": {
+    "symbol": "CIPLA",
+    "name": "CIPLA LTD",
+    "trading_symbol": "CIPLA"
   },
   "NSE_EQ|INE138Y01010": {
     "symbol": "KFINTECH",
@@ -680,9 +680,9 @@
     "trading_symbol": "CUMMINSIND"
   },
   "NSE_EQ|INE155A01022": {
-    "symbol": "TATAMOTORS",
-    "name": "TATA MOTORS LIMITED",
-    "trading_symbol": "TATAMOTORS"
+    "symbol": "TMPV",
+    "name": "TATA MOTORS PASS VEH LTD",
+    "trading_symbol": "TMPV"
   },
   "NSE_EQ|INE274J01014": {
     "symbol": "OIL",
@@ -969,6 +969,11 @@
     "name": "COLGATE PALMOLIVE LTD.",
     "trading_symbol": "COLPAL"
   },
+  "NSE_EQ|INE07Y701011": {
+    "symbol": "POWERINDIA",
+    "name": "HITACHI ENERGY INDIA LTD",
+    "trading_symbol": "POWERINDIA"
+  },
   "NSE_EQ|INE765G01017": {
     "symbol": "ICICIGI",
     "name": "ICICI LOMBARD GIC LIMITED",
@@ -1013,11 +1018,6 @@
     "symbol": "TATAELXSI",
     "name": "TATA ELXSI LIMITED",
     "trading_symbol": "TATAELXSI"
-  },
-  "NSE_EQ|INE092A01019": {
-    "symbol": "TATACHEM",
-    "name": "TATA CHEMICALS LTD",
-    "trading_symbol": "TATACHEM"
   },
   "NSE_EQ|INE200M01039": {
     "symbol": "VBL",
