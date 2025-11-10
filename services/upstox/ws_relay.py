@@ -16,7 +16,7 @@ logger = logging.getLogger("ws_relay")
 
 def get_market_data_feed_authorize_v3():
     """Get authorization for market data feed."""
-    access_token = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiIzREM5RTIiLCJqdGkiOiI2ODhkMTZhNDA2NTA1MjZlMGQ4NTFlZWUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzU0MDc2ODM2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NTQwODU2MDB9.m4_pfkAg3Q05oGWQzaQDfXzGIQYG51JdY7Ym7YMkpjs"
+    access_token = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiIzREM5RTIiLCJqdGkiOiI2OGY5YTM4Y2I0MTBmNzBmODlmMjg2OGMiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzYxMTkwNzk2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NjEyNTY4MDB9.uo8teqTFR_Hn3G_CVprKiZXCvQyZ44U0zuDGZCofKng"
     headers = {"Accept": "application/json", "Authorization": f"Bearer {access_token}"}
     url = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
     api_response = requests.get(url=url, headers=headers)
@@ -68,7 +68,7 @@ async def fetch_market_data():
             "method": "sub",
             "data": {
                 "mode": "full",
-                "instrumentKeys": ["NSE_INDEX|Nifty 50"],
+                "instrumentKeys": ["NSE_EQ|INE009A01021"],
             },
         }
 

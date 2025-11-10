@@ -154,10 +154,14 @@ class UpstoxAutomationService:
             finally:
                 new_loop.close()
 
-        # Run in thread pool to avoid blocking
+        # CRITICAL FIX: Run in thread pool with reduced timeout to prevent blocking
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(run_in_new_loop)
-            return future.result(timeout=120)  # 2 minute timeout
+            try:
+                return future.result(timeout=30)  # REDUCED to 30 seconds to prevent app freeze
+            except concurrent.futures.TimeoutError:
+                logger.error("⏰ Playwright automation timed out after 30 seconds")
+                return False
 
     async def _playwright_login_impl(self, api_key: str, admin_user_id: int) -> bool:
         """
@@ -239,12 +243,12 @@ class UpstoxAutomationService:
                 logger.info("Waiting for redirect with authorization code...")
 
                 try:
-                    max_attempts = 60
+                    max_attempts = 10  # REDUCED: 10 attempts × 500ms = 5 seconds max wait (was 30 seconds)
                     attempt = 0
                     auth_code_found = False
                     last_url = ""
 
-                    logger.info("⏳ Waiting for authorization redirect...")
+                    logger.info("⏳ Waiting for authorization redirect (max 5 seconds)...")
 
                     while attempt < max_attempts and not auth_code_found:
                         await page.wait_for_timeout(500)
@@ -279,7 +283,7 @@ class UpstoxAutomationService:
                         attempt += 1
 
                     if not auth_code_found:
-                        logger.warning("No valid authorization code found after 30 seconds")
+                        logger.warning("No valid authorization code found after 5 seconds - callback will handle token exchange")
                     return True
 
                 except Exception as redirect_error:
@@ -384,7 +388,7 @@ class UpstoxAutomationService:
             return False
 
     async def wait_for_token_refresh(
-        self, broker: BrokerConfig, db: Session, timeout_seconds: int = 30
+        self, broker: BrokerConfig, db: Session, timeout_seconds: int = 15
     ) -> Dict:
         """
         Wait for the callback endpoint to complete token refresh
@@ -681,16 +685,17 @@ class UpstoxAutomationService:
                         "error": f"Direct token exchange failed: {str(exchange_error)}",
                     }
             else:
-                # Step 2 (Fallback): Wait for callback to handle token exchange
+                # Step 2 (Fallback): Don't wait - let callback handle it asynchronously
                 logger.info(
-                    "⏳ No auth code captured, waiting for callback endpoint..."
+                    "⏳ No auth code captured - callback endpoint will handle token exchange when redirect occurs"
                 )
-                # ✅ FIX: Increased timeout for callback method reliability
-                result = await self.wait_for_token_refresh(
-                    admin_broker,
-                    db,
-                    timeout_seconds=45,  # Longer timeout for callback reliability
-                )
+                # CRITICAL FIX: Don't block waiting for callback - return immediately
+                # The callback endpoint will update the token when browser redirects
+                result = {
+                    "success": False,
+                    "error": "Auth code not captured - manual login required or callback will complete later",
+                    "note": "Token refresh initiated but not waited for - check callback endpoint logs"
+                }
 
             if result["success"]:
                 # Update config with automation timestamp
