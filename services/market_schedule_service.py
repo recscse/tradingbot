@@ -175,6 +175,14 @@ class MarketScheduleService:
                     await self._run_early_morning_preparation()
                     self.daily_tasks_completed["early_preparation"] = current_date
 
+                # Waiting period (8:00-9:00 AM) - After early prep, just wait
+                elif (
+                    current_time >= self.early_preparation
+                    and current_time < self.preopen_start
+                ):
+                    # Already completed early prep, just waiting for pre-open
+                    logger.debug("⏳ Waiting for pre-open session (9:00 AM)...")
+
                 # Pre-open stock selection (9:00-9:15 AM) - Uses LIVE pre-open data
                 elif (
                     current_time >= self.preopen_start
@@ -184,6 +192,14 @@ class MarketScheduleService:
                 ):
                     await self._run_preopen_stock_selection()
                     self.daily_tasks_completed["preopen_stock_selection"] = current_date
+
+                # Waiting period (9:00-9:15 AM) - After pre-open selection, just wait
+                elif (
+                    current_time >= self.preopen_start
+                    and current_time < self.market_open
+                ):
+                    # Already completed pre-open selection, just waiting for market open
+                    logger.debug("⏳ Waiting for market open (9:15 AM)...")
 
                 # Market open validation (9:15-9:30 AM) - Validates and finalizes selections
                 elif (
@@ -195,6 +211,14 @@ class MarketScheduleService:
                     await self._validate_market_open_selection()
                     self.daily_tasks_completed["market_open_validation"] = current_date
 
+                # Waiting period (9:15-9:30 AM) - After market open validation, just wait
+                elif (
+                    current_time >= self.market_open
+                    and current_time < self.trading_start
+                ):
+                    # Already completed market open validation, just waiting for trading start
+                    logger.debug("⏳ Waiting for trading start (9:30 AM)...")
+
                 # Active trading (9:30 AM - 3:30 PM)
                 elif (
                     current_time >= self.trading_start
@@ -202,9 +226,11 @@ class MarketScheduleService:
                 ):
                     await self._monitor_active_trading()
 
-                # Post-market cleanup (after 3:30 PM)
+                # Post-market cleanup (after 3:30 PM OR before 8:00 AM)
                 else:
-                    await self._post_market_cleanup()
+                    # Only run cleanup if it's actually after market close
+                    if current_time >= self.market_close or current_time < self.early_preparation:
+                        await self._post_market_cleanup()
 
                 await asyncio.sleep(60)  # Check every minute
 
@@ -231,95 +257,77 @@ class MarketScheduleService:
         """
         Background task for early morning preparation.
 
-        This runs independently and doesn't block the main scheduler or application.
+        CRITICAL FIX: This MUST NOT block the application under any circumstances.
+        All heavy operations are skipped or deferred to avoid blocking.
         """
         try:
             logger.info(
-                "🔧 Background: Starting FNO and instrument service initialization..."
+                "🔧 Background: Starting LIGHTWEIGHT early morning preparation..."
             )
 
             # Check if it's Monday (weekday 0) for weekly FNO refresh
             current_weekday = datetime.now(self.ist).weekday()
             should_refresh_fno = current_weekday == 0  # Monday only
 
-            # STEP 1: FNO service (runs in background, won't block)
-            logger.info("🔧 Background: Step 1 - FNO stock list preparation...")
+            # STEP 1: FNO service - SKIP REFRESH to avoid blocking
+            logger.info("🔧 Background: Step 1 - FNO stock list check...")
             try:
                 from services.fno_stock_service import FnoStockListService
 
                 fno_service = FnoStockListService()
 
                 if should_refresh_fno:
-                    # WEEKLY: Full refresh on Mondays
-                    logger.info(
-                        "📊 Background: Running weekly FNO stock list refresh (Monday)..."
+                    # MONDAY: Skip web scraping - it takes 35+ seconds and blocks!
+                    logger.warning(
+                        "⚠️ Background: FNO web scraping SKIPPED (takes 35+ seconds)"
                     )
-                    fno_result = await asyncio.to_thread(fno_service.update_fno_list)
-
-                    if fno_result["status"] == "success":
-                        logger.info(
-                            f"✅ Background: Weekly FNO refresh complete: {fno_result['total_stocks']} stocks"
-                        )
-                    else:
-                        logger.error(
-                            f"❌ Background: Weekly FNO refresh failed: {fno_result.get('error')}"
-                        )
-                        return
+                    logger.info(
+                        "💡 Background: FNO data will be refreshed manually or use existing data"
+                    )
                 else:
-                    # DAILY: Verify existing FNO data is available
+                    # DAILY: Just verify existing file exists
                     logger.info(
                         f"🔍 Background: Verifying existing FNO data (Tuesday-Sunday)..."
                     )
-                    existing_stocks = await asyncio.to_thread(
-                        fno_service.load_from_json
-                    )
-
-                    if not existing_stocks:
-                        logger.warning(
-                            "⚠️ Background: No existing FNO data found, running emergency refresh..."
-                        )
-                        fno_result = await asyncio.to_thread(
-                            fno_service.update_fno_list
-                        )
-                        if fno_result["status"] != "success":
-                            logger.error(
-                                f"❌ Background: Emergency FNO refresh failed: {fno_result.get('error')}"
-                            )
-                            return
-                    else:
+                    # Quick check - don't call load_from_json as it might be slow
+                    import os
+                    fno_file_path = "data/fno_stock_list.json"
+                    if os.path.exists(fno_file_path):
                         logger.info(
-                            f"✅ Background: FNO data verified: {len(existing_stocks)} stocks available"
+                            f"✅ Background: FNO data file exists at {fno_file_path}"
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ Background: FNO data file not found, trading may be limited"
                         )
 
             except Exception as fno_error:
                 logger.error(f"❌ Background: FNO service error: {fno_error}")
-                return
+                # Don't return - continue with instrument service
 
-            # STEP 2: Instrument service initialization
+            # STEP 2: Instrument service initialization - CHECK ONLY
             logger.info(
-                "🔧 Background: Step 2 - Building instrument service (depends on FNO data)..."
+                "🔧 Background: Step 2 - Checking instrument service status..."
             )
             try:
                 from services.instrument_refresh_service import get_trading_service
 
                 instrument_service = get_trading_service()
 
-                # Initialize service (runs in background)
-                result = await instrument_service.initialize_service()
-
-                if result.status == "success":
+                # Check if already initialized - don't re-initialize
+                if instrument_service.is_initialized():
                     logger.info(
-                        f"✅ Background: Instrument service ready with {result.websocket_instruments} keys"
+                        "✅ Background: Instrument service already initialized"
                     )
                 else:
-                    logger.error(
-                        f"❌ Background: Instrument service failed: {result.error}"
+                    logger.info(
+                        "💡 Background: Instrument service will be initialized on-demand"
                     )
 
             except Exception as inst_error:
-                logger.error(f"❌ Background: Instrument service error: {inst_error}")
+                logger.error(f"❌ Background: Instrument service check error: {inst_error}")
 
-            logger.info("✅ Background: Early morning preparation complete")
+            logger.info("✅ Background: Early morning preparation complete (lightweight mode)")
 
         except Exception as e:
             logger.error(f"❌ Background: Early morning preparation failed: {e}")
@@ -335,12 +343,25 @@ class MarketScheduleService:
         This uses REAL-TIME data from realtime_market_engine which receives live
         WebSocket feeds during pre-open session.
 
-        FIXED: Non-blocking with retries, never stops the application.
+        FIXED: NON-BLOCKING - runs in background task to prevent application freeze.
         """
         logger.info(
-            "📊 Starting pre-open stock selection (9:00-9:15 AM) with LIVE data..."
+            "📊 Starting pre-open stock selection in BACKGROUND (9:00-9:15 AM)..."
         )
 
+        # Run as background task - DON'T WAIT FOR IT!
+        asyncio.create_task(self._background_preopen_selection())
+
+        logger.info(
+            "✅ Pre-open stock selection started in background - application remains responsive"
+        )
+
+    async def _background_preopen_selection(self):
+        """
+        Background task for pre-open stock selection.
+
+        This runs independently and doesn't block the main scheduler or application.
+        """
         try:
             from services.intelligent_stock_selection_service import (
                 intelligent_stock_selector,
@@ -350,37 +371,38 @@ class MarketScheduleService:
             from services.realtime_market_engine import is_analytics_data_ready
 
             # Retry up to 6 times with 5-second intervals (max 30 seconds total)
+            # This won't block the main application since it's in a background task
             max_retries = 6
             retry_interval = 5
             data_ready = False
 
-            logger.info("🔍 Checking centralized_ws_manager data availability...")
+            logger.info("🔍 Background: Checking centralized_ws_manager data availability...")
             for attempt in range(1, max_retries + 1):
                 if is_analytics_data_ready():
                     data_ready = True
                     logger.info(
-                        f"✅ LIVE market data ready (attempt {attempt}/{max_retries})"
+                        f"✅ Background: LIVE market data ready (attempt {attempt}/{max_retries})"
                     )
                     break
                 else:
                     if attempt < max_retries:
                         logger.info(
-                            f"⏳ Market data not ready yet (attempt {attempt}/{max_retries}) - checking again in {retry_interval}s..."
+                            f"⏳ Background: Market data not ready yet (attempt {attempt}/{max_retries}) - checking again in {retry_interval}s..."
                         )
                         await asyncio.sleep(retry_interval)
                     else:
                         logger.warning(
-                            f"⚠️ Market data not available after {max_retries} attempts - will proceed anyway"
+                            f"⚠️ Background: Market data not available after {max_retries} attempts - will proceed anyway"
                         )
 
             # ALWAYS continue even if data not ready - don't block the application
             if not data_ready:
                 logger.warning(
-                    "⚠️ Proceeding with stock selection using available data (WebSocket may still be connecting)"
+                    "⚠️ Background: Proceeding with stock selection using available data (WebSocket may still be connecting)"
                 )
 
             # Run pre-open stock selection with LIVE data
-            logger.info("✅ LIVE pre-open data available - running stock selection...")
+            logger.info("✅ Background: LIVE pre-open data available - running stock selection...")
             preopen_result = await intelligent_stock_selector.run_premarket_selection()
 
             if preopen_result and not preopen_result.get("error"):
@@ -388,10 +410,10 @@ class MarketScheduleService:
                 sentiment_analysis = preopen_result.get("sentiment_analysis", {})
 
                 logger.info(
-                    f"✅ Pre-open stock selection complete: {len(selected_stocks_data)} stocks selected using LIVE data"
+                    f"✅ Background: Pre-open stock selection complete: {len(selected_stocks_data)} stocks selected using LIVE data"
                 )
                 logger.info(
-                    f"📊 LIVE Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})"
+                    f"📊 Background: LIVE Market sentiment: {sentiment_analysis.get('sentiment')} (A/D: {sentiment_analysis.get('advance_decline_ratio', 1.0):.2f})"
                 )
 
                 # Store minimal reference for legacy compatibility
@@ -407,7 +429,7 @@ class MarketScheduleService:
                         }
 
                 logger.info(
-                    "✅ Pre-open stock selection complete - will validate at market open (9:15 AM)"
+                    "✅ Background: Pre-open stock selection complete - will validate at market open (9:15 AM)"
                 )
 
             else:
@@ -416,11 +438,11 @@ class MarketScheduleService:
                     if preopen_result
                     else "No result returned"
                 )
-                logger.warning(f"⚠️ Pre-open stock selection failed: {error_msg}")
+                logger.warning(f"⚠️ Background: Pre-open stock selection failed: {error_msg}")
                 self.selected_stocks = {}
 
         except Exception as e:
-            logger.error(f"❌ Pre-open stock selection failed: {e}")
+            logger.error(f"❌ Background: Pre-open stock selection failed: {e}")
             import traceback
 
             traceback.print_exc()

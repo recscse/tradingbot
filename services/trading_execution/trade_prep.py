@@ -33,6 +33,7 @@ class TradeStatus(Enum):
     INSUFFICIENT_CAPITAL = "insufficient_capital"
     NO_ACTIVE_BROKER = "no_active_broker"
     INVALID_PARAMS = "invalid_params"
+    INVALID_OPTION = "invalid_option"
     ERROR = "error"
 
 
@@ -109,6 +110,230 @@ class TradePrepService:
         """Initialize trade preparation service"""
         self.signal_validity_minutes = 15  # Signals valid for 15 minutes
         logger.info("Trade Preparation Service initialized")
+
+    async def prepare_trade_with_live_data(
+        self,
+        user_id: int,
+        stock_symbol: str,
+        option_instrument_key: str,
+        option_type: str,
+        strike_price: Decimal,
+        expiry_date: str,
+        lot_size: int,
+        current_premium: Decimal,
+        historical_data: Dict[str, List[float]],
+        db: Session,
+        trading_mode: TradingMode = TradingMode.PAPER,
+        broker_name: Optional[str] = None,
+        option_greeks: Optional[Dict[str, float]] = None,
+        implied_volatility: Optional[float] = None,
+        open_interest: Optional[float] = None,
+        volume: Optional[float] = None,
+        bid_price: Optional[float] = None,
+        ask_price: Optional[float] = None
+    ) -> PreparedTrade:
+        """
+        Prepare trade with live market data already provided (optimized for auto-trading)
+
+        This method is optimized for auto_trade_live_feed which already has:
+        - Current option premium from live WebSocket feed
+        - Historical spot data for strategy calculation
+
+        Args:
+            user_id: User identifier
+            stock_symbol: Underlying stock symbol
+            option_instrument_key: Option contract instrument key
+            option_type: "CE" for calls, "PE" for puts
+            strike_price: Option strike price
+            expiry_date: Option expiry date
+            lot_size: Lot size for the option
+            current_premium: Current option premium (from live feed)
+            historical_data: Historical spot OHLC data
+            db: Database session
+            trading_mode: Paper or Live trading mode
+            broker_name: Broker name (optional)
+
+        Returns:
+            PreparedTrade with complete execution details
+
+        Raises:
+            ValueError: If parameters are invalid
+        """
+        if not user_id or user_id <= 0:
+            raise ValueError("Invalid user_id provided")
+        if not option_instrument_key:
+            raise ValueError("Option instrument key is required")
+        if option_type not in ["CE", "PE"]:
+            raise ValueError("Option type must be 'CE' or 'PE'")
+        if current_premium <= 0:
+            raise ValueError("Current premium must be positive")
+        if not historical_data or len(historical_data.get("close", [])) < 20:
+            raise ValueError("Insufficient historical data provided")
+
+        try:
+            logger.info(f"Preparing trade for user {user_id}: {stock_symbol} {option_type} {strike_price} (with live data)")
+
+            # Step 1: Validate broker configuration
+            broker_config = capital_manager.get_active_broker_config(user_id, db)
+
+            if not broker_config and trading_mode == TradingMode.LIVE:
+                logger.warning(f"No active broker for user {user_id}")
+                return self._create_error_trade(
+                    TradeStatus.NO_ACTIVE_BROKER,
+                    user_id, stock_symbol, option_instrument_key,
+                    option_type, strike_price, expiry_date, lot_size,
+                    trading_mode, "No active broker configuration found"
+                )
+
+            broker_name = broker_config.broker_name if broker_config else "Paper Trading"
+
+            # Step 2: Get available capital
+            available_capital = capital_manager.get_available_capital(user_id, db, trading_mode)
+
+            if available_capital <= 0:
+                logger.warning(f"No available capital for user {user_id}")
+                return self._create_error_trade(
+                    TradeStatus.INSUFFICIENT_CAPITAL,
+                    user_id, stock_symbol, option_instrument_key,
+                    option_type, strike_price, expiry_date, lot_size,
+                    trading_mode, "Insufficient capital available"
+                )
+
+            # Step 3: Calculate position size based on capital
+            capital_allocation = capital_manager.calculate_position_size(
+                available_capital,
+                current_premium,
+                lot_size
+            )
+
+            # Step 4: Validate sufficient capital
+            capital_validation = capital_manager.validate_capital_availability(
+                user_id,
+                capital_allocation.allocated_capital,
+                db,
+                trading_mode
+            )
+
+            if not capital_validation.get("valid"):
+                logger.warning(f"Insufficient capital: need {capital_allocation.allocated_capital}")
+                return self._create_error_trade(
+                    TradeStatus.INSUFFICIENT_CAPITAL,
+                    user_id, stock_symbol, option_instrument_key,
+                    option_type, strike_price, expiry_date, lot_size,
+                    trading_mode,
+                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}"
+                )
+
+            # Step 5: Validate option quality using Greeks and market data (NEW)
+            if option_greeks and implied_volatility and open_interest:
+                logger.info(f"Validating option quality with Greeks and market data")
+
+                from services.trading_execution.option_analytics import option_analytics
+
+                # Calculate spot ATR for Greeks analysis
+                spot_atr = self._calculate_atr_from_historical(historical_data) if historical_data else None
+
+                option_validation = option_analytics.validate_option_for_entry(
+                    greeks=option_greeks,
+                    iv=implied_volatility,
+                    oi=open_interest,
+                    volume=volume or 0,
+                    bid_price=bid_price or float(current_premium * Decimal('0.995')),
+                    ask_price=ask_price or float(current_premium * Decimal('1.005')),
+                    premium=float(current_premium),
+                    quantity=capital_allocation.position_size_lots * lot_size,
+                    spot_atr=spot_atr
+                )
+
+                if not option_validation.valid:
+                    logger.warning(f"Option validation failed: {option_validation.reason}")
+                    return self._create_error_trade(
+                        TradeStatus.INVALID_OPTION,
+                        user_id, stock_symbol, option_instrument_key,
+                        option_type, strike_price, expiry_date, lot_size,
+                        trading_mode, option_validation.reason
+                    )
+
+                # Log warnings
+                for warning in option_validation.warnings:
+                    logger.warning(f"Option warning: {warning}")
+
+                logger.info(f"Option validated - Quality Score: {option_validation.metrics.get('quality_score')}/100")
+            else:
+                logger.warning("Option Greeks/IV/OI not provided - skipping advanced validation")
+
+            # Step 6: Generate trading signal using provided historical data
+            logger.info(f"Generating signal for {stock_symbol} using provided historical data")
+
+            # Generate signal from option premium
+            signal = strategy_engine.generate_signal(
+                current_premium,
+                historical_data,
+                option_type
+            )
+
+            # Check signal validity
+            if signal.signal_type == SignalType.HOLD:
+                logger.info(f"No clear trading signal for {stock_symbol}")
+                return self._create_pending_trade(
+                    user_id, stock_symbol, option_instrument_key,
+                    option_type, strike_price, expiry_date, lot_size,
+                    current_premium, capital_allocation, signal, trading_mode, broker_name
+                )
+
+            # Step 6: Calculate risk-reward ratio
+            risk = abs(signal.entry_price - signal.stop_loss)
+            reward = abs(signal.target_price - signal.entry_price)
+            risk_reward_ratio = reward / risk if risk > 0 else Decimal('0')
+
+            # Step 7: Create prepared trade
+            prepared_trade = PreparedTrade(
+                status=TradeStatus.READY,
+                stock_symbol=stock_symbol,
+                option_instrument_key=option_instrument_key,
+                option_type=option_type,
+                strike_price=strike_price,
+                expiry_date=expiry_date,
+                current_premium=current_premium,
+                lot_size=lot_size,
+                signal=asdict(signal) if signal else None,
+                capital_allocation=asdict(capital_allocation),
+                risk_reward_ratio=risk_reward_ratio,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                target_price=signal.target_price,
+                trailing_stop_config=signal.trailing_stop_config,
+                position_size_lots=capital_allocation.position_size_lots,
+                total_investment=capital_allocation.allocated_capital,
+                max_loss_amount=capital_allocation.max_loss,
+                trading_mode=trading_mode.value,
+                broker_name=broker_name,
+                user_id=user_id,
+                prepared_at=datetime.now().isoformat(),
+                valid_until=(datetime.now() + timedelta(minutes=self.signal_validity_minutes)).isoformat(),
+                metadata={
+                    "signal_confidence": float(signal.confidence),
+                    "signal_reason": signal.reason,
+                    "capital_utilization_percent": float(capital_allocation.capital_utilization_percent),
+                    "risk_per_trade_percent": float(capital_allocation.risk_per_trade_percent),
+                    "data_source": "live_websocket_feed"
+                }
+            )
+
+            logger.info(f"Trade prepared successfully: {stock_symbol} {option_type}")
+            logger.info(f"  Entry: {signal.entry_price}, SL: {signal.stop_loss}, Target: {signal.target_price}")
+            logger.info(f"  Position: {capital_allocation.position_size_lots} lots, Investment: Rs.{capital_allocation.allocated_capital:,.2f}")
+
+            return prepared_trade
+
+        except Exception as e:
+            logger.error(f"Error preparing trade with live data: {e}")
+            return self._create_error_trade(
+                TradeStatus.ERROR,
+                user_id, stock_symbol, option_instrument_key,
+                option_type, strike_price, expiry_date, lot_size,
+                trading_mode, str(e)
+            )
 
     async def prepare_trade(
         self,
@@ -631,6 +856,51 @@ class TradePrepService:
             valid_until=datetime.now().isoformat(),
             metadata={"error": error_message}
         )
+
+    def _calculate_atr_from_historical(
+        self,
+        historical_data: Dict[str, List[float]],
+        period: int = 14
+    ) -> Optional[float]:
+        """
+        Calculate Average True Range from historical data
+
+        Args:
+            historical_data: Dict with high, low, close lists
+            period: ATR period (default 14)
+
+        Returns:
+            ATR value or None if insufficient data
+        """
+        try:
+            high_prices = historical_data.get('high', [])
+            low_prices = historical_data.get('low', [])
+            close_prices = historical_data.get('close', [])
+
+            if len(close_prices) < period + 1:
+                return None
+
+            import numpy as np
+
+            high_arr = np.array(high_prices[-period-1:])
+            low_arr = np.array(low_prices[-period-1:])
+            close_arr = np.array(close_prices[-period-1:])
+
+            # Calculate True Range
+            tr1 = high_arr[1:] - low_arr[1:]
+            tr2 = np.abs(high_arr[1:] - close_arr[:-1])
+            tr3 = np.abs(low_arr[1:] - close_arr[:-1])
+
+            tr = np.maximum(tr1, np.maximum(tr2, tr3))
+
+            # Calculate ATR (simple moving average)
+            atr = np.mean(tr)
+
+            return float(atr)
+
+        except Exception as e:
+            logger.error(f"Error calculating ATR: {e}")
+            return None
 
 
 # Create singleton instance

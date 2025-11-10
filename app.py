@@ -107,7 +107,12 @@ from router.dhan_router import dhan_router
 # from router.trading_config_router import router as trading_config_router
 from router.config_router import router as config_router
 from router.upstox_router import upstox_router
-from router.fyers_router import fyers_router
+try:
+    from router.fyers_router import fyers_router
+    FYERS_AVAILABLE = True
+except ImportError:
+    logger.warning("Fyers router not available - fyers_apiv3 module not installed")
+    FYERS_AVAILABLE = False
 from router.broker_profile_router import broker_profile_router
 from router.margin_aware_trading_router import margin_trading_router
 
@@ -935,7 +940,8 @@ app.include_router(broker_router, prefix="/api/broker", tags=["Broker API"])
 app.include_router(config_router, tags=["Configuration"])
 app.include_router(stock_list_router, prefix="/api/stocks", tags=["Stock Data"])
 app.include_router(upstox_router, prefix="/api/broker/upstox", tags=["Upstox API"])
-app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
+if FYERS_AVAILABLE:
+    app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
 app.include_router(broker_profile_router, tags=["Broker Profile & Funds"])
 app.include_router(margin_trading_router, tags=["Margin-Aware Trading"])
 app.include_router(dhan_router, prefix="/api/dhan", tags=["Dhan API"])

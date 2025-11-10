@@ -321,107 +321,43 @@ async def trading_websocket(
         logger.info(f"Trading WebSocket disconnected: {client_id}")
 
 
-# Legacy WebSocket for backward compatibility
+# Legacy WebSocket for backward compatibility - DEPRECATED
 @router.websocket("/ws/market")
 async def legacy_market_websocket(websocket: WebSocket):
     """
     Legacy WebSocket endpoint for backward compatibility
 
-    This endpoint is compatible with the original WebSocket implementation
-    but uses the centralized WebSocket manager for data.
+    DEPRECATED: This endpoint is maintained for backward compatibility only.
+    New clients should use /ws/unified instead.
+
+    Note: This endpoint does NOT use centralized_manager to avoid method conflicts.
+    It simply redirects clients to use the unified endpoint.
     """
     token = websocket.query_params.get("token")
-    if not token:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "reason": "missing_token"})
-        await websocket.close()
-        return
-
-    client_id = None
-    user = None
 
     try:
-        # Accept the connection first
         await websocket.accept()
 
-        # Authenticate user
-        db = next(get_db())
-        try:
-            user = get_current_user(token=token, db=db)
-        except (ExpiredSignatureError, DecodeError):
-            await websocket.send_json({"type": "error", "reason": "token_expired"})
-            await websocket.close()
-            return
+        # Send deprecation warning and redirect message
+        await websocket.send_json({
+            "type": "deprecated_endpoint",
+            "message": "This endpoint is deprecated. Please use /ws/unified for real-time data.",
+            "redirect_to": "/ws/unified",
+            "timestamp": datetime.now().isoformat()
+        })
 
-        # Generate client ID
-        client_id = generate_client_id(user.id, "legacy")
+        logger.warning("⚠️ Legacy WebSocket endpoint /ws/market accessed - client should migrate to /ws/unified")
 
-        # Get default instrument keys
-        instrument_keys = await get_default_instrument_keys()
-
-        # Log connection
-        logger.info(f"🔄 Legacy WebSocket connected: {client_id}")
-
-        # Store connection info
-        active_connections[client_id] = {
-            "user_id": user.id,
-            "connection_type": "legacy",
-            "instrument_count": len(instrument_keys),
-            "connected_at": datetime.now().isoformat(),
-        }
-
-        # Add client to centralized manager
-        await centralized_manager.add_client(
-            client_id=client_id,
-            websocket=websocket,
-            client_type="dashboard",  # Use dashboard format for legacy
-        )
-
-        # Wait for WebSocket to disconnect
-        try:
-            while websocket.client_state == WebSocketState.CONNECTED:
-                # Handle client messages
-                try:
-                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
-                    if data:
-                        try:
-                            message = json.loads(data)
-                            # For legacy clients, just acknowledge ping
-                            if message.get("type") == "ping":
-                                await websocket.send_json(
-                                    {
-                                        "type": "pong",
-                                        "timestamp": datetime.now().isoformat(),
-                                    }
-                                )
-                        except json.JSONDecodeError:
-                            pass
-                except asyncio.TimeoutError:
-                    # Send ping to keep connection alive
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.send_json(
-                            {"type": "ping", "timestamp": datetime.now().isoformat()}
-                        )
-        except WebSocketDisconnect:
-            pass
+        # Close connection gracefully
+        await websocket.close(code=1000, reason="Endpoint deprecated, use /ws/unified")
 
     except Exception as e:
         logger.error(f"❌ Error in legacy WebSocket: {e}")
         if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.send_json(
-                {"type": "error", "message": "Internal server error"}
-            )
-
-    finally:
-        # Clean up
-        if client_id and client_id in active_connections:
-            del active_connections[client_id]
-
-        # Remove from centralized manager
-        if client_id:
-            await centralized_manager.remove_client(client_id)
-
-        logger.info(f"Legacy WebSocket disconnected: {client_id}")
+            try:
+                await websocket.close(code=1011, reason="Internal server error")
+            except:
+                pass
 
 
 # Message handlers

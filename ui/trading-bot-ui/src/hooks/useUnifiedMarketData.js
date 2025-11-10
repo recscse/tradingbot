@@ -1007,17 +1007,26 @@ export const useUnifiedMarketData = () => {
               debugLog("info", "Received real-time breakout signal", data);
               console.log("⚡ REAL-TIME BREAKOUT:", data);
 
+              // Map backend breakout types to UI expected types
+              const typeMapping = {
+                'volume': 'volume_breakout',
+                'momentum': 'momentum_breakout',
+                'resistance': 'resistance_breakout',
+                'support': 'support_breakdown',
+              };
+
               // Convert single signal to match expected format
               const signal = {
                 instrument_key: data.instrument || data.instrument_key,
-                symbol: data.instrument?.split('|')[1] || data.symbol || data.instrument,
-                breakout_type: data.type || "breakout",  // volume, momentum, resistance
+                symbol: data.symbol || data.instrument?.split('|')[1] || data.instrument,
+                breakout_type: typeMapping[data.type] || data.type || "volume_breakout",
                 current_price: data.price,
                 volume: data.volume,
                 timestamp: data.timestamp || new Date().toISOString(),
-                percentage_move: 0,  // Calculate if possible
-                strength: 8,  // High strength for real-time signals
-                confidence: 90,  // High confidence for live detection
+                percentage_move: data.change_percent || 0,
+                resistance: data.resistance,
+                strength: data.strength || 0,
+                confidence: data.confidence || 0,
               };
 
               // Update breakout analysis with new signal

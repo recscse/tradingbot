@@ -18,8 +18,6 @@ Features:
 import asyncio
 import logging
 from datetime import datetime, time as dt_time, date
-from typing import Optional
-from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
 from database.models import SelectedStock, ActivePosition, BrokerConfig
@@ -80,7 +78,6 @@ class AutoTradeScheduler:
                 try:
                     # Check current time
                     current_time = datetime.now().time()
-                    current_date = date.today()
 
                     # Reset daily flag at midnight
                     if current_time.hour == 0 and current_time.minute == 0:
@@ -237,6 +234,8 @@ class AutoTradeScheduler:
         Check if auto-trading should stop based on positions for ANY active user
         """
         try:
+            from services.trading_execution.shared_instrument_registry import shared_registry
+
             db = SessionLocal()
 
             try:
@@ -248,12 +247,12 @@ class AutoTradeScheduler:
                 )
 
                 # Check if any stocks are still being monitored
-                monitored_count = len(auto_trade_live_feed.monitored_instruments)
+                monitored_count = len(shared_registry.instruments)
 
                 # Check if any stocks are in monitoring state (waiting for signal)
                 monitoring_state_count = 0
-                for instrument in auto_trade_live_feed.monitored_instruments.values():
-                    if instrument.state.value in ["monitoring", "signal_found"]:
+                for instrument in shared_registry.instruments.values():
+                    if instrument.state.value in ["monitoring", "signal_detected"]:
                         monitoring_state_count += 1
 
                 # Auto-stop conditions:
@@ -265,11 +264,11 @@ class AutoTradeScheduler:
                     and monitored_count > 0
                 ):
                     logger.info(
-                        f"🛑 AUTO-STOPPING: All positions closed, no stocks monitoring"
+                        "AUTO-STOPPING: All positions closed, no stocks monitoring"
                     )
                     await auto_trade_live_feed.stop()
                     logger.info(
-                        f"✅ Auto-trading stopped at {datetime.now().strftime('%H:%M:%S')}"
+                        f"Auto-trading stopped at {datetime.now().strftime('%H:%M:%S')}"
                     )
 
             finally:

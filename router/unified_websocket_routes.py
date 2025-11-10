@@ -82,7 +82,7 @@ def register_engine_listeners():
     # Breakout signals from enhanced breakout engine
     def on_breakout_signal(data):
         if active_connections:
-            logger.info(f"Broadcasting breakout signal to {len(active_connections)} clients: {data.get('instrument', 'unknown')}")
+            logger.debug(f"Broadcasting breakout signal to {len(active_connections)} clients: {data.get('instrument', 'unknown')}")
             asyncio.create_task(broadcast_to_clients("breakout_signal", data))
 
     # Register engine events
@@ -168,6 +168,13 @@ async def unified_websocket_endpoint(websocket: WebSocket):
                         "price_update",
                         "analytics_update",
                         "breakout_signal",
+                        "trading_signal",
+                        "pnl_update",
+                        "position_update",
+                        "trade_executed",
+                        "signal_skipped",
+                        "position_closing",
+                        "trade_error",
                     }
                 else:
                     client_subscriptions[client_id].update(events)

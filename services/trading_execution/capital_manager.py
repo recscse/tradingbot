@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from datetime import datetime
 from sqlalchemy.orm import Session
 from database.models import User, BrokerConfig
 
@@ -125,7 +126,10 @@ class TradingCapitalManager:
         trading_mode: TradingMode = TradingMode.PAPER
     ) -> Decimal:
         """
-        Get available capital for trading
+        Get available capital for trading (total capital minus already allocated capital)
+
+        CRITICAL: This method now accounts for capital already allocated to active positions
+        to prevent over-allocation when multiple positions are open concurrently.
 
         Args:
             user_id: User identifier
@@ -133,7 +137,7 @@ class TradingCapitalManager:
             trading_mode: Paper or Live trading mode
 
         Returns:
-            Available capital amount
+            Available capital amount (after deducting allocated capital)
 
         Raises:
             ValueError: If user_id is invalid
@@ -142,11 +146,9 @@ class TradingCapitalManager:
             raise ValueError("Invalid user_id provided")
 
         try:
+            # Get total capital (from broker or paper trading)
             if trading_mode == TradingMode.PAPER:
-                # Paper trading uses virtual capital
-                logger.info(f"Paper trading capital: Rs.{self.paper_trading_capital:,.2f}")
-                return self.paper_trading_capital
-
+                total_capital = self.paper_trading_capital
             else:
                 # Live trading - fetch from broker
                 broker_config = self.get_active_broker_config(user_id, db)
@@ -156,17 +158,69 @@ class TradingCapitalManager:
                     return Decimal('0')
 
                 # Get funds from broker API
-                available_funds = self._fetch_funds_from_broker(broker_config)
+                total_capital = self._fetch_funds_from_broker(broker_config)
 
-                if available_funds <= 0:
+                if total_capital <= 0:
                     logger.warning(f"No available funds for user {user_id}")
                     return Decimal('0')
 
-                logger.info(f"Live trading capital: Rs.{available_funds:,.2f}")
-                return available_funds
+            # Calculate capital already allocated to active positions
+            allocated_capital = self._get_allocated_capital_for_active_positions(user_id, db)
+
+            # Available capital = Total capital - Allocated capital
+            available_capital = total_capital - allocated_capital
+
+            logger.info(
+                f"User {user_id} capital: Total={total_capital:,.2f}, "
+                f"Allocated={allocated_capital:,.2f}, Available={available_capital:,.2f}"
+            )
+
+            return max(Decimal('0'), available_capital)
 
         except Exception as e:
             logger.error(f"Error getting available capital: {e}")
+            return Decimal('0')
+
+    def _get_allocated_capital_for_active_positions(
+        self,
+        user_id: int,
+        db: Session
+    ) -> Decimal:
+        """
+        Calculate total capital allocated to user's active positions
+
+        Args:
+            user_id: User identifier
+            db: Database session
+
+        Returns:
+            Total allocated capital amount
+        """
+        try:
+            from database.models import AutoTradeExecution
+
+            # Get all active trades for this user
+            active_trades = db.query(AutoTradeExecution).filter(
+                AutoTradeExecution.user_id == user_id,
+                AutoTradeExecution.status == "ACTIVE"
+            ).all()
+
+            total_allocated = Decimal('0')
+
+            for trade in active_trades:
+                if trade.allocated_capital:
+                    total_allocated += Decimal(str(trade.allocated_capital))
+                else:
+                    # Fallback: calculate from entry_price * quantity
+                    entry_value = Decimal(str(trade.entry_price)) * Decimal(str(trade.quantity))
+                    total_allocated += entry_value
+
+            logger.debug(f"User {user_id} has {len(active_trades)} active positions with total allocated capital: Rs.{total_allocated:,.2f}")
+
+            return total_allocated
+
+        except Exception as e:
+            logger.error(f"Error calculating allocated capital: {e}")
             return Decimal('0')
 
     def _fetch_funds_from_broker(self, broker_config: BrokerConfig) -> Decimal:
@@ -348,6 +402,95 @@ class TradingCapitalManager:
             logger.error(f"Error validating capital: {e}")
             return {
                 "valid": False,
+                "error": str(e)
+            }
+
+    def get_capital_utilization_summary(
+        self,
+        user_id: int,
+        db: Session,
+        trading_mode: TradingMode = TradingMode.PAPER
+    ) -> Dict[str, Any]:
+        """
+        Get comprehensive capital utilization summary for a user
+
+        Args:
+            user_id: User identifier
+            db: Database session
+            trading_mode: Paper or Live trading mode
+
+        Returns:
+            Dict with capital utilization details
+
+        Raises:
+            ValueError: If user_id is invalid
+        """
+        if not user_id or user_id <= 0:
+            raise ValueError("Invalid user_id provided")
+
+        try:
+            from database.models import AutoTradeExecution, ActivePosition
+
+            # Get total capital
+            if trading_mode == TradingMode.PAPER:
+                total_capital = self.paper_trading_capital
+            else:
+                broker_config = self.get_active_broker_config(user_id, db)
+                if broker_config:
+                    total_capital = self._fetch_funds_from_broker(broker_config)
+                else:
+                    total_capital = Decimal('0')
+
+            # Get allocated capital
+            allocated_capital = self._get_allocated_capital_for_active_positions(user_id, db)
+
+            # Get available capital
+            available_capital = total_capital - allocated_capital
+
+            # Get active positions count
+            active_positions_count = db.query(ActivePosition).filter(
+                ActivePosition.user_id == user_id,
+                ActivePosition.is_active == True
+            ).count()
+
+            # Get active trades count
+            active_trades_count = db.query(AutoTradeExecution).filter(
+                AutoTradeExecution.user_id == user_id,
+                AutoTradeExecution.status == "ACTIVE"
+            ).count()
+
+            # Calculate utilization percentage
+            utilization_percent = (allocated_capital / total_capital * Decimal('100')) if total_capital > 0 else Decimal('0')
+
+            # Get current PnL from active positions
+            active_positions = db.query(ActivePosition).filter(
+                ActivePosition.user_id == user_id,
+                ActivePosition.is_active == True
+            ).all()
+
+            total_unrealized_pnl = sum(
+                Decimal(str(pos.current_pnl)) for pos in active_positions
+            )
+
+            return {
+                "user_id": user_id,
+                "trading_mode": trading_mode.value,
+                "total_capital": float(total_capital),
+                "allocated_capital": float(allocated_capital),
+                "available_capital": float(available_capital),
+                "utilization_percent": float(utilization_percent),
+                "active_positions_count": active_positions_count,
+                "active_trades_count": active_trades_count,
+                "total_unrealized_pnl": float(total_unrealized_pnl),
+                "max_capital_per_trade": float(total_capital * self.max_capital_per_trade_percent),
+                "max_risk_per_trade": float(total_capital * self.max_risk_per_trade_percent),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting capital utilization summary: {e}")
+            return {
+                "user_id": user_id,
                 "error": str(e)
             }
 

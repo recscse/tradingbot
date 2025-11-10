@@ -192,40 +192,26 @@ class FnoStockListService:
         else:
             logger.info("⚠️ No extracted data found, falling back to scraping methods")
 
-        # Method 1: Main futures stocks list (fallback)
-        if len(all_stocks) < 200:  # Only if extracted data is insufficient
-            main_futures_stocks = self._get_main_futures_list()
-            if main_futures_stocks:
-                all_stocks.extend(main_futures_stocks)
-                methods_used.append(f"MainFutures({len(main_futures_stocks)})")
-                
-        # Method 1.5: Try alternative URLs for complete lists
-        if len(all_stocks) < 200:  # Only if we need more data
-            alt_stocks = self._get_alternative_sources() 
-            if alt_stocks:
-                all_stocks.extend(alt_stocks)
-                methods_used.append(f"AltSources({len(alt_stocks)})")
+        # Method 1: Futures pagination - ALWAYS scrape to ensure completeness
+        futures_stocks = self._get_futures_pagination()
+        if futures_stocks:
+            all_stocks.extend(futures_stocks)
+            methods_used.append(f"Futures({len(futures_stocks)})")
+            logger.info(f"✅ Futures pagination: {len(futures_stocks)} stocks")
 
-        # Method 2: Futures pagination (backup)
-        if len(all_stocks) < 200:  # Only if we need more data
-            futures_stocks = self._get_futures_pagination()
-            if futures_stocks:
-                all_stocks.extend(futures_stocks)
-                methods_used.append(f"Futures({len(futures_stocks)})")
+        # Method 2: F&O lot size - ALWAYS scrape for comprehensive data
+        lot_size_stocks = self._get_fno_lot_size()
+        if lot_size_stocks:
+            all_stocks.extend(lot_size_stocks)
+            methods_used.append(f"LotSize({len(lot_size_stocks)})")
+            logger.info(f"✅ F&O lot size: {len(lot_size_stocks)} stocks")
 
-        # Method 3: F&O lot size (backup)
-        if len(all_stocks) < 200:  # Only if we need more data
-            lot_size_stocks = self._get_fno_lot_size()
-            if lot_size_stocks:
-                all_stocks.extend(lot_size_stocks)
-                methods_used.append(f"LotSize({len(lot_size_stocks)})")
-
-        # Method 4: Options pagination (backup)
-        if len(all_stocks) < 200:  # Only if we need more data
-            options_stocks = self._get_options_pagination()
-            if options_stocks:
-                all_stocks.extend(options_stocks)
-                methods_used.append(f"Options({len(options_stocks)})")
+        # Method 3: Options pagination - ALWAYS scrape for complete coverage
+        options_stocks = self._get_options_pagination()
+        if options_stocks:
+            all_stocks.extend(options_stocks)
+            methods_used.append(f"Options({len(options_stocks)})")
+            logger.info(f"✅ Options pagination: {len(options_stocks)} stocks")
 
         # Deduplicate using the working logic
         unique_stocks = self._deduplicate_stocks(all_stocks)
@@ -316,9 +302,15 @@ class FnoStockListService:
         logger.info(f"✅ F&O collection complete: {total_count} total ({indices_count} indices, {stocks_count} stocks) from {', '.join(methods_used)}, fixed {fixed_symbols} symbols")
         
         # Additional quality checks
-        expected_total = 221  # 216 stocks + 5 indices
-        if total_count != expected_total:
-            logger.warning(f"⚠️ Count mismatch: Got {total_count}, expected {expected_total} (difference: {expected_total - total_count})")
+        expected_total = 214  # Total FNO stocks including indices (as of November 2025)
+        expected_min = 210  # Allow for slight variations
+        expected_max = 218
+        if total_count < expected_min:
+            logger.warning(f"⚠️ Count lower than expected: Got {total_count}, expected {expected_min}-{expected_max} (difference: {expected_total - total_count})")
+        elif total_count > expected_max:
+            logger.warning(f"⚠️ Count higher than expected: Got {total_count}, expected {expected_min}-{expected_max} (difference: {total_count - expected_total})")
+        else:
+            logger.info(f"✅ Stock count within expected range: {total_count} (expected {expected_min}-{expected_max})")
         
         # Log sample of collected data for verification
         logger.info("📋 Sample of collected stocks:")
@@ -345,7 +337,7 @@ class FnoStockListService:
             
             if symbol:
                 # Get sector from mapping
-                sector = get_symbol_sector(symbol)
+                sector = get_sector_for_stock(symbol)
                 if sector:
                     enhanced_item['sector'] = sector
                 else:
@@ -419,11 +411,11 @@ class FnoStockListService:
             issues.append(f"{name_issues} name format issues")
             score -= name_issues * 2
         
-        # UPDATED: Check expected count (should be around 221: 216 stocks + 5 indices)
-        expected_min = 215  # Allow slight variance
-        expected_max = 225
+        # UPDATED: Check expected count (should be around 214 total including indices as of Nov 2025)
+        expected_min = 210  # Allow slight variance
+        expected_max = 218
         actual_count = len(data)
-        
+
         if actual_count < expected_min:
             issues.append(f"Count too low: {actual_count} (expected {expected_min}-{expected_max})")
             score -= 10
@@ -451,7 +443,7 @@ class FnoStockListService:
                 "total_count": actual_count,
                 "indices_found": len(present_indices),
                 "stocks_found": actual_count - len(present_indices),
-                "expected_total": 221
+                "expected_total": 214
             }
         }
 

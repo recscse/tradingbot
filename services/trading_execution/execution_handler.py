@@ -180,11 +180,11 @@ class TradeExecutionHandler:
                 target_2=float(prepared_trade.target_price * Decimal('1.1')),  # 10% beyond first target
                 status="ACTIVE",
                 # Multi-demat support
-                broker_name=broker_name,
+                broker_name=broker_name or prepared_trade.broker_name or "Paper Trading",
                 broker_config_id=broker_id,
-                allocated_capital=allocated_capital,
+                allocated_capital=allocated_capital or float(prepared_trade.total_investment),
                 parent_trade_id=parent_trade_id,
-                trading_mode=prepared_trade.trading_mode.value
+                trading_mode=prepared_trade.trading_mode
             )
 
             db.add(trade_execution)
@@ -310,11 +310,11 @@ class TradeExecutionHandler:
                 target_2=float(prepared_trade.target_price * Decimal('1.1')),
                 status="ACTIVE",
                 # Multi-demat support
-                broker_name=broker_name,
+                broker_name=broker_name or prepared_trade.broker_name,
                 broker_config_id=broker_id,
-                allocated_capital=allocated_capital,
+                allocated_capital=allocated_capital or float(prepared_trade.total_investment),
                 parent_trade_id=parent_trade_id,
-                trading_mode=prepared_trade.trading_mode.value
+                trading_mode=prepared_trade.trading_mode
             )
 
             db.add(trade_execution)

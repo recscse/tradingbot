@@ -70,33 +70,82 @@ async def get_selected_trading_stocks(
             .all()
         )
 
-        # Prepare stock data
+        # Helper function to safely parse JSON
+        def safe_parse_json(maybe_json):
+            if not maybe_json:
+                return {}
+            if isinstance(maybe_json, dict):
+                return maybe_json
+            if isinstance(maybe_json, str):
+                import json
+                import ast
+                s = maybe_json.strip()
+                if not s:
+                    return {}
+                try:
+                    return json.loads(s)
+                except json.JSONDecodeError:
+                    try:
+                        return ast.literal_eval(s)
+                    except Exception:
+                        return {}
+                except Exception:
+                    return {}
+            return {}
+
+        # Prepare stock data with deduplication and validation
         stocks_data = []
+        seen_symbols = set()
+
         for stock in selected_stocks:
+            # Skip duplicates
+            if stock.symbol in seen_symbols:
+                continue
+
+            # Parse option contract
+            option_contract = safe_parse_json(stock.option_contract)
+
+            # Skip if no valid option contract or missing essential data
+            if not option_contract or not option_contract.get("option_instrument_key"):
+                continue
+            if not option_contract.get("strike_price") or not option_contract.get("lot_size"):
+                continue
+
+            seen_symbols.add(stock.symbol)
+
+            # Extract option contract details
+            strike_price = float(option_contract.get("strike_price", 0) or 0)
+            lot_size = int(option_contract.get("lot_size", 0) or 0)
+            premium = float(option_contract.get("premium", 0) or 0)
+            option_instrument_key = option_contract.get("option_instrument_key", "")
+
             stock_data = {
                 "symbol": stock.symbol,
                 "instrument_key": stock.instrument_key,
-                "selection_score": stock.selection_score,
+                "selection_score": float(stock.selection_score or 0),
                 "selection_reason": stock.selection_reason,
-                "price_at_selection": stock.price_at_selection,
-                "volume_at_selection": stock.volume_at_selection,
-                "change_percent_at_selection": stock.change_percent_at_selection,
+                "price_at_selection": float(stock.price_at_selection or 0),
+                "volume_at_selection": int(stock.volume_at_selection or 0),
+                "change_percent_at_selection": float(stock.change_percent_at_selection or 0),
                 "sector": stock.sector,
                 "created_at": (
                     stock.created_at.isoformat() if stock.created_at else None
                 ),
             }
 
-            # Add option data if requested
+            # Add option data if requested (PARSED and validated)
             if include_options:
                 stock_data.update(
                     {
-                        "option_type": stock.option_type,
-                        "option_contract": stock.option_contract,
-                        "option_contracts_available": stock.option_contracts_available,
-                        "option_chain_data": stock.option_chain_data,
-                        "option_expiry_date": stock.option_expiry_date,
-                        "option_expiry_dates": stock.option_expiry_dates,
+                        "option_type": stock.option_type or "NEUTRAL",
+                        "strike_price": strike_price,
+                        "lot_size": lot_size,
+                        "premium": premium,
+                        "option_instrument_key": option_instrument_key,
+                        "option_expiry_date": stock.option_expiry_date or "",
+                        "option_contracts_available": int(stock.option_contracts_available or 0),
+                        # Also include raw for backward compatibility
+                        "option_contract": option_contract,
                     }
                 )
 
