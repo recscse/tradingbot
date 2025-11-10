@@ -181,11 +181,11 @@ const AutoTradingPage = () => {
         selection_score: stock.selection_score || 0,
         price_at_selection: stock.price_at_selection || 0,
         // Ensure strings with safe defaults
-        symbol: stock.symbol || '',
-        option_type: stock.option_type || 'N/A',
-        expiry_date: stock.expiry_date || '',
-        option_instrument_key: stock.option_instrument_key || '',
-        sector: stock.sector || 'OTHER'
+        symbol: stock.symbol || "",
+        option_type: stock.option_type || "N/A",
+        expiry_date: stock.expiry_date || "",
+        option_instrument_key: stock.option_instrument_key || "",
+        sector: stock.sector || "OTHER",
       }));
 
       setSelectedStocks(cleanedStocks);
@@ -308,6 +308,8 @@ const AutoTradingPage = () => {
 
       ws.onopen = () => {
         console.log("Connected to unified WebSocket for trading updates");
+
+        // Send client info
         ws.send(
           JSON.stringify({
             type: "client_info",
@@ -315,6 +317,16 @@ const AutoTradingPage = () => {
             timestamp: new Date().toISOString(),
           })
         );
+
+        // Subscribe to all trading events
+        ws.send(
+          JSON.stringify({
+            type: "subscribe",
+            events: ["all"], // Subscribe to all events including trading_signal
+          })
+        );
+
+        console.log("Subscribed to all trading events");
       };
 
       ws.onmessage = (event) => {
@@ -348,7 +360,9 @@ const AutoTradingPage = () => {
           // Handle trading signals
           if (message.type === "trading_signal") {
             const signalData = message.data;
-            console.log(`Signal: ${signalData.signal_type} for ${signalData.symbol} (Conf: ${signalData.confidence})`);
+            console.log(
+              `Signal: ${signalData.signal_type} for ${signalData.symbol} (Conf: ${signalData.confidence})`
+            );
 
             // Add to live signals
             setLiveSignals((prev) => [
@@ -359,39 +373,45 @@ const AutoTradingPage = () => {
                 confidence: signalData.confidence,
                 price: signalData.price,
                 reason: signalData.reason,
-                timestamp: signalData.timestamp || new Date().toISOString()
+                timestamp: signalData.timestamp || new Date().toISOString(),
               },
-              ...prev.slice(0, 9) // Keep last 10 signals
+              ...prev.slice(0, 9), // Keep last 10 signals
             ]);
 
             // Add to activity feed
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'signal',
-                message: `${signalData.signal_type.toUpperCase()} signal for ${signalData.symbol}`,
-                details: `Confidence: ${(signalData.confidence * 100).toFixed(0)}% | Price: ₹${signalData.price}`,
+                type: "signal",
+                message: `${signalData.signal_type.toUpperCase()} signal for ${
+                  signalData.symbol
+                }`,
+                details: `Confidence: ${(signalData.confidence * 100).toFixed(
+                  0
+                )}% | Price: ₹${signalData.price}`,
                 timestamp: new Date().toISOString(),
-                severity: 'info'
+                severity: "info",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
           // Handle signal skipped
           if (message.type === "signal_skipped") {
-            console.log(`Signal skipped for ${message.data.symbol}: ${message.data.reason}`);
+            console.log(
+              `Signal skipped for ${message.data.symbol}: ${message.data.reason}`
+            );
 
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'signal_skipped',
+                type: "signal_skipped",
                 message: `Signal skipped for ${message.data.symbol}`,
                 details: message.data.reason,
                 timestamp: new Date().toISOString(),
-                severity: 'warning'
+                severity: "warning",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
@@ -399,7 +419,9 @@ const AutoTradingPage = () => {
           if (message.type === "trade_executed") {
             const tradeData = message.data;
             setSuccess(
-              `Trade executed: ${tradeData.symbol} ${tradeData.option_type} @ ₹${tradeData.entry_price.toFixed(2)}`
+              `Trade executed: ${tradeData.symbol} ${
+                tradeData.option_type
+              } @ ₹${tradeData.entry_price.toFixed(2)}`
             );
             fetchActivePositions();
             fetchPnLSummary();
@@ -409,47 +431,53 @@ const AutoTradingPage = () => {
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'trade_executed',
+                type: "trade_executed",
                 message: `Trade Executed: ${tradeData.symbol} ${tradeData.option_type}`,
-                details: `Entry: ₹${tradeData.entry_price.toFixed(2)} | Lots: ${tradeData.lot_size} | Mode: ${tradeData.trading_mode}`,
+                details: `Entry: ₹${tradeData.entry_price.toFixed(2)} | Lots: ${
+                  tradeData.lot_size
+                } | Mode: ${tradeData.trading_mode}`,
                 timestamp: tradeData.timestamp || new Date().toISOString(),
-                severity: 'success'
+                severity: "success",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
           // Handle trade errors
           if (message.type === "trade_error") {
-            setError(`Trade error for ${message.data.symbol}: ${message.data.error}`);
+            setError(
+              `Trade error for ${message.data.symbol}: ${message.data.error}`
+            );
 
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'trade_error',
+                type: "trade_error",
                 message: `Trade Error: ${message.data.symbol}`,
                 details: message.data.error,
                 timestamp: message.data.timestamp || new Date().toISOString(),
-                severity: 'error'
+                severity: "error",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
           // Handle trade preparation failures
           if (message.type === "trade_preparation_failed") {
-            console.warn(`Trade prep failed for ${message.data.symbol}: ${message.data.status}`);
+            console.warn(
+              `Trade prep failed for ${message.data.symbol}: ${message.data.status}`
+            );
 
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'trade_prep_failed',
+                type: "trade_prep_failed",
                 message: `Trade Preparation Failed: ${message.data.symbol}`,
                 details: `Status: ${message.data.status}`,
                 timestamp: message.data.timestamp || new Date().toISOString(),
-                severity: 'warning'
+                severity: "warning",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
@@ -457,7 +485,9 @@ const AutoTradingPage = () => {
           if (message.type === "position_closed") {
             const posData = message.data;
             setSuccess(
-              `Position closed: ${posData.symbol} - PnL: ₹${posData.pnl.toFixed(2)}`
+              `Position closed: ${posData.symbol} - PnL: ₹${posData.pnl.toFixed(
+                2
+              )}`
             );
             fetchActivePositions();
             fetchPnLSummary();
@@ -466,13 +496,15 @@ const AutoTradingPage = () => {
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'position_closed',
+                type: "position_closed",
                 message: `Position Closed: ${posData.symbol}`,
-                details: `PnL: ₹${posData.pnl.toFixed(2)} | Exit: ₹${posData.exit_price}`,
+                details: `PnL: ₹${posData.pnl.toFixed(2)} | Exit: ₹${
+                  posData.exit_price
+                }`,
                 timestamp: posData.timestamp || new Date().toISOString(),
-                severity: posData.pnl >= 0 ? 'success' : 'error'
+                severity: posData.pnl >= 0 ? "success" : "error",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
@@ -483,13 +515,13 @@ const AutoTradingPage = () => {
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
-                type: 'position_closing',
+                type: "position_closing",
                 message: `Closing Position: ${message.data.symbol}`,
-                details: 'Exit signal triggered',
+                details: "Exit signal triggered",
                 timestamp: message.data.timestamp || new Date().toISOString(),
-                severity: 'info'
+                severity: "info",
               },
-              ...prev.slice(0, maxActivityItems - 1)
+              ...prev.slice(0, maxActivityItems - 1),
             ]);
           }
 
@@ -538,7 +570,12 @@ const AutoTradingPage = () => {
     } catch (err) {
       console.error("WebSocket connection error:", err);
     }
-  }, [fetchActivePositions, fetchPnLSummary, fetchTradeHistory]);
+  }, [
+    fetchActivePositions,
+    fetchPnLSummary,
+    fetchSelectedStocks,
+    fetchTradeHistory,
+  ]);
 
   // ---------- Effects ----------
   // OPTIMIZED: Load ALL data in parallel for INSTANT page load
@@ -549,16 +586,16 @@ const AutoTradingPage = () => {
         // This makes the page load 3-5x faster
         await Promise.allSettled([
           fetchTradingPreferences(),
-          fetchSelectedStocks(),     // Load immediately - don't wait!
+          fetchSelectedStocks(), // Load immediately - don't wait!
           fetchCapitalOverview(),
           fetchActivePositions(),
           fetchPnLSummary(),
-          fetchTradeHistory()
+          fetchTradeHistory(),
         ]);
 
-        console.log('All initial data loaded successfully');
+        console.log("All initial data loaded successfully");
       } catch (err) {
-        console.error('Error loading initial data:', err);
+        console.error("Error loading initial data:", err);
       } finally {
         // Mark page as loaded - this happens FAST now!
         setIsLoading(false);
@@ -578,14 +615,22 @@ const AutoTradingPage = () => {
     };
     // CRITICAL FIX: Empty dependency array - only run once on mount!
     // This prevents infinite re-renders
-  }, []);
+  }, [
+    fetchActivePositions,
+    fetchCapitalOverview,
+    fetchPnLSummary,
+    fetchSelectedStocks,
+    fetchTradeHistory,
+    fetchTradingPreferences,
+    initializeWebSocket,
+  ]);
 
   // OPTIMIZED: Auto-refresh every 5 seconds (less server load)
   // WebSocket provides real-time updates, so polling can be slower
   useEffect(() => {
     const interval = setInterval(() => {
       // Only refresh if page is visible (performance optimization)
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         fetchCapitalOverview();
         fetchActivePositions();
         fetchPnLSummary();
@@ -593,13 +638,13 @@ const AutoTradingPage = () => {
     }, 5000); // Changed from 2s to 5s - WebSocket handles real-time updates
 
     return () => clearInterval(interval);
-  }, []); // Empty deps - functions are stable from useCallback
+  }, [fetchActivePositions, fetchCapitalOverview, fetchPnLSummary]); // Empty deps - functions are stable from useCallback
 
   // OPTIMIZED: Poll auto-trading status every 10 seconds
   useEffect(() => {
     const checkAutoTradingStatus = async () => {
       // Skip if page not visible (save resources)
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== "visible") return;
 
       try {
         const response = await api.get(
@@ -868,15 +913,23 @@ const AutoTradingPage = () => {
                         bgcolor: "background.default",
                         borderRadius: 1,
                         height: 300,
-                        overflowY: "auto"
+                        overflowY: "auto",
                       }}
                     >
-                      <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5 }}>
+                      <Typography
+                        variant="subtitle2"
+                        fontWeight={600}
+                        sx={{ mb: 1.5 }}
+                      >
                         Recent Signals (Last 10)
                       </Typography>
 
                       {liveSignals.length === 0 ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ textAlign: "center", mt: 4 }}
+                        >
                           Waiting for trading signals...
                         </Typography>
                       ) : (
@@ -890,27 +943,47 @@ const AutoTradingPage = () => {
                                 borderRadius: 1,
                                 borderLeft: 4,
                                 borderColor:
-                                  signal.signal_type === 'buy' ? 'success.main' :
-                                  signal.signal_type === 'sell' ? 'error.main' :
-                                  'warning.main'
+                                  signal.signal_type === "buy"
+                                    ? "success.main"
+                                    : signal.signal_type === "sell"
+                                    ? "error.main"
+                                    : "warning.main",
                               }}
                             >
-                              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                              <Stack
+                                direction="row"
+                                justifyContent="space-between"
+                                alignItems="center"
+                              >
                                 <Box>
                                   <Typography variant="body2" fontWeight={600}>
-                                    {signal.symbol} - {signal.signal_type.toUpperCase()}
+                                    {signal.symbol} -{" "}
+                                    {signal.signal_type.toUpperCase()}
                                   </Typography>
-                                  <Typography variant="caption" color="text.secondary">
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                  >
                                     {signal.reason}
                                   </Typography>
                                 </Box>
-                                <Box sx={{ textAlign: 'right' }}>
+                                <Box sx={{ textAlign: "right" }}>
                                   <Chip
-                                    label={`${(signal.confidence * 100).toFixed(0)}%`}
+                                    label={`${(signal.confidence * 100).toFixed(
+                                      0
+                                    )}%`}
                                     size="small"
-                                    color={signal.confidence >= 0.75 ? 'success' : 'warning'}
+                                    color={
+                                      signal.confidence >= 0.75
+                                        ? "success"
+                                        : "warning"
+                                    }
                                   />
-                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    sx={{ display: "block", mt: 0.5 }}
+                                  >
                                     ₹{signal.price}
                                   </Typography>
                                 </Box>
@@ -930,15 +1003,23 @@ const AutoTradingPage = () => {
                         bgcolor: "background.default",
                         borderRadius: 1,
                         height: 300,
-                        overflowY: "auto"
+                        overflowY: "auto",
                       }}
                     >
-                      <Typography variant="subtitle2" fontWeight={600} sx={{ mb: 1.5 }}>
+                      <Typography
+                        variant="subtitle2"
+                        fontWeight={600}
+                        sx={{ mb: 1.5 }}
+                      >
                         Activity Feed
                       </Typography>
 
                       {activityFeed.length === 0 ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ textAlign: "center", mt: 4 }}
+                        >
                           No activity yet...
                         </Typography>
                       ) : (
@@ -952,20 +1033,32 @@ const AutoTradingPage = () => {
                                 borderRadius: 1,
                                 borderLeft: 4,
                                 borderColor:
-                                  activity.severity === 'success' ? 'success.main' :
-                                  activity.severity === 'error' ? 'error.main' :
-                                  activity.severity === 'warning' ? 'warning.main' :
-                                  'info.main'
+                                  activity.severity === "success"
+                                    ? "success.main"
+                                    : activity.severity === "error"
+                                    ? "error.main"
+                                    : activity.severity === "warning"
+                                    ? "warning.main"
+                                    : "info.main",
                               }}
                             >
                               <Typography variant="body2" fontWeight={600}>
                                 {activity.message}
                               </Typography>
-                              <Typography variant="caption" color="text.secondary">
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
                                 {activity.details}
                               </Typography>
-                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                                {new Date(activity.timestamp).toLocaleTimeString()}
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ display: "block", mt: 0.5 }}
+                              >
+                                {new Date(
+                                  activity.timestamp
+                                ).toLocaleTimeString()}
                               </Typography>
                             </Box>
                           ))}
@@ -1837,7 +1930,7 @@ const AutoTradingPage = () => {
 
                 {/* Loading indicator for stocks */}
                 {stocksLoading && (
-                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                  <Box sx={{ textAlign: "center", py: 4 }}>
                     <LinearProgress sx={{ mb: 2 }} />
                     <Typography variant="body2" color="text.secondary">
                       Loading selected stocks...
