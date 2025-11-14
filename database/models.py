@@ -672,7 +672,9 @@ class PaperTradingPosition(Base):
     entry_price = Column(Float, nullable=False)
     current_price = Column(Float, nullable=False)
     quantity = Column(Integer, nullable=False)
-    lot_size = Column(Integer, nullable=False)
+    lot_size = Column(Integer, nullable=False)  # Lot size per contract
+    lots_traded = Column(Integer, nullable=True)  # Number of lots traded
+    total_investment = Column(Numeric(15, 2), nullable=True)  # Total capital invested (entry_price × quantity)
     invested_amount = Column(Float, nullable=False)
     current_value = Column(Float, nullable=False)
     pnl = Column(Float, nullable=False, default=0.0)
@@ -1235,7 +1237,9 @@ class AutoTradeExecution(Base):
     entry_price = Column(Numeric(10, 2), nullable=False)
     entry_order_id = Column(String(50))
     quantity = Column(Integer, nullable=False)
-    lot_size = Column(Integer, nullable=False)
+    lot_size = Column(Integer, nullable=False)  # Lot size per contract
+    lots_traded = Column(Integer, nullable=True)  # Number of lots traded
+    total_investment = Column(Numeric(15, 2), nullable=True)  # Total capital invested (entry_price × quantity)
 
     # Exit Details
     exit_time = Column(DateTime)
@@ -1697,7 +1701,9 @@ class FNOStockMetadata(Base):
     primary_index = Column(String(20), index=True)  # Primary index for classification
 
     # F&O Contract Details
-    lot_size = Column(Integer, nullable=False)
+    lot_size = Column(Integer, nullable=False)  # Lot size per contract
+    lots_traded = Column(Integer, nullable=True)  # Number of lots traded
+    total_investment = Column(Numeric(15, 2), nullable=True)  # Total capital invested (entry_price × quantity)
     tick_size = Column(Numeric(6, 4), default=0.05)  # Minimum price movement
     instrument_type = Column(String(20), default="EQ")  # EQ, FUTIDX, FUTSTK, etc.
 

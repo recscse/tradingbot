@@ -37,8 +37,14 @@ import {
   Close as CloseIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  Info as InfoIcon,
+  SignalCellularAlt as SignalIcon,
 } from "@mui/icons-material";
 import api from "../services/api";
+import StockActivityChart from "../components/trading/StockActivityChart";
 
 const AutoTradingPage = () => {
   // State management - Will be loaded from database
@@ -64,10 +70,11 @@ const AutoTradingPage = () => {
   const [emergencyStopLoading, setEmergencyStopLoading] = useState(false);
   const [autoTradingRunning, setAutoTradingRunning] = useState(false);
 
-  // Live activity tracking
-  const [liveSignals, setLiveSignals] = useState([]);
+  // Live activity tracking - PER STOCK CHART
   const [activityFeed, setActivityFeed] = useState([]);
-  const maxActivityItems = 50; // Keep last 50 activities
+  const [stockActivityStats, setStockActivityStats] = useState({}); // Per-stock activity count
+  const maxActivityItems = 10;
+  const [showLiveActivity, setShowLiveActivity] = useState(false);
 
   // WebSocket ref
   const socketRef = useRef(null);
@@ -97,7 +104,7 @@ const AutoTradingPage = () => {
     }
   }, []);
 
-  const fetchPnLSummary = useCallback(async () => {
+  const fetchPortfolioSummary = useCallback(async () => {
     try {
       const response = await api.get("/v1/trading/execution/pnl-summary");
       if (response.data.success) {
@@ -211,7 +218,7 @@ const AutoTradingPage = () => {
       if (response.data.success) {
         setSuccess(`Position closed. PnL: ₹${response.data.pnl.toFixed(2)}`);
         await fetchActivePositions();
-        await fetchPnLSummary();
+        await fetchPortfolioSummary();
         await fetchTradeHistory();
       }
     } catch (err) {
@@ -252,7 +259,7 @@ const AutoTradingPage = () => {
       );
 
       await fetchActivePositions();
-      await fetchPnLSummary();
+      await fetchPortfolioSummary();
       await fetchTradeHistory();
     } catch (err) {
       setError(
@@ -287,7 +294,7 @@ const AutoTradingPage = () => {
       if (response.data.success) {
         setTradingMode(newMode);
         // Refresh capital data for new mode
-        await fetchCapitalOverview();
+        await fetchPortfolioSummary();
       }
     } catch (err) {
       console.error("Error updating trading mode:", err);
@@ -354,38 +361,38 @@ const AutoTradingPage = () => {
             );
 
             // Refresh summary
-            fetchPnLSummary();
+            fetchPortfolioSummary();
           }
 
-          // Handle trading signals
+          // Handle trading signals - Track per-stock activity
           if (message.type === "trading_signal") {
             const signalData = message.data;
+            const symbol = signalData.symbol;
+
             console.log(
-              `Signal: ${signalData.signal_type} for ${signalData.symbol} (Conf: ${signalData.confidence})`
+              `Signal: ${signalData.signal_type} for ${symbol} (Conf: ${signalData.confidence})`
             );
 
-            // Add to live signals
-            setLiveSignals((prev) => [
-              {
-                id: Date.now(),
-                symbol: signalData.symbol,
-                signal_type: signalData.signal_type,
-                confidence: signalData.confidence,
-                price: signalData.price,
-                reason: signalData.reason,
-                timestamp: signalData.timestamp || new Date().toISOString(),
+            // Update per-stock stats
+            setStockActivityStats((prev) => ({
+              ...prev,
+              [symbol]: {
+                symbol: symbol,
+                signals: (prev[symbol]?.signals || 0) + 1,
+                trades: prev[symbol]?.trades || 0,
+                pnl: prev[symbol]?.pnl || 0,
+                lastActivity: new Date().toISOString(),
+                status: signalData.signal_type,
               },
-              ...prev.slice(0, 9), // Keep last 10 signals
-            ]);
+            }));
 
             // Add to activity feed
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
                 type: "signal",
-                message: `${signalData.signal_type.toUpperCase()} signal for ${
-                  signalData.symbol
-                }`,
+                symbol: symbol,
+                message: `${signalData.signal_type.toUpperCase()} signal`,
                 details: `Confidence: ${(signalData.confidence * 100).toFixed(
                   0
                 )}% | Price: ₹${signalData.price}`,
@@ -415,28 +422,116 @@ const AutoTradingPage = () => {
             ]);
           }
 
-          // Handle trade execution
+          // Handle trade execution - Track per-stock
           if (message.type === "trade_executed") {
             const tradeData = message.data;
+            const symbol = tradeData.symbol;
+
             setSuccess(
-              `Trade executed: ${tradeData.symbol} ${
+              `Trade executed: ${symbol} ${
                 tradeData.option_type
               } @ ₹${tradeData.entry_price.toFixed(2)}`
             );
+
+            // Update per-stock stats
+            setStockActivityStats((prev) => ({
+              ...prev,
+              [symbol]: {
+                ...(prev[symbol] || { signals: 0, trades: 0, pnl: 0 }),
+                symbol: symbol,
+                trades: (prev[symbol]?.trades || 0) + 1,
+                lastActivity: new Date().toISOString(),
+                status: "traded",
+              },
+            }));
+
             fetchActivePositions();
-            fetchPnLSummary();
-            fetchSelectedStocks(); // Refresh stocks to show updated state
+            fetchPortfolioSummary();
+            fetchSelectedStocks();
 
             // Add to activity feed
             setActivityFeed((prev) => [
               {
                 id: Date.now(),
                 type: "trade_executed",
-                message: `Trade Executed: ${tradeData.symbol} ${tradeData.option_type}`,
+                symbol: symbol,
+                message: `Trade Executed: ${tradeData.option_type}`,
                 details: `Entry: ₹${tradeData.entry_price.toFixed(2)} | Lots: ${
                   tradeData.lot_size
                 } | Mode: ${tradeData.trading_mode}`,
                 timestamp: tradeData.timestamp || new Date().toISOString(),
+                severity: "success",
+              },
+              ...prev.slice(0, maxActivityItems - 1),
+            ]);
+          }
+
+          // CRITICAL FIX: Handle active position created event
+          // This is broadcasted when a position is opened and MUST be handled
+          // to display positions in real-time
+          if (message.type === "active_position_created") {
+            const posData = message.data;
+            console.log(
+              `Active position created: ${posData.symbol} @ ₹${posData.entry_price}`
+            );
+
+            // Add position to state immediately - don't wait for API refresh
+            setActivePositions((prev) => {
+              // Check if position already exists (prevent duplicates)
+              const existingIndex = prev.findIndex(
+                (p) => p.position_id === posData.position_id
+              );
+
+              if (existingIndex >= 0) {
+                // Update existing position
+                const updated = [...prev];
+                updated[existingIndex] = {
+                  ...updated[existingIndex],
+                  ...posData,
+                };
+                return updated;
+              } else {
+                // Add new position at the top
+                return [
+                  {
+                    position_id: posData.position_id,
+                    trade_id: posData.trade_id,
+                    symbol: posData.symbol,
+                    instrument_key: posData.instrument_key,
+                    option_type: posData.option_type,
+                    strike_price: posData.strike_price,
+                    entry_price: posData.entry_price,
+                    current_price: posData.current_price || posData.entry_price,
+                    stop_loss: posData.stop_loss,
+                    target: posData.target,
+                    quantity: posData.quantity,
+                    current_pnl: posData.current_pnl || 0,
+                    current_pnl_percentage: posData.current_pnl_percentage || 0,
+                    broker_name: posData.broker_name,
+                    trading_mode: posData.trading_mode,
+                    entry_time: posData.timestamp,
+                    last_updated: posData.timestamp,
+                    trailing_stop_active: false,
+                  },
+                  ...prev,
+                ];
+              }
+            });
+
+            // Refresh summary data
+            fetchPortfolioSummary();
+            fetchSelectedStocks();
+
+            // Add to activity feed
+            setActivityFeed((prev) => [
+              {
+                id: Date.now(),
+                type: "position_created",
+                message: `Position Opened: ${posData.symbol}`,
+                details: `Entry: ₹${posData.entry_price.toFixed(2)} | SL: ₹${
+                  posData.stop_loss
+                } | Target: ₹${posData.target}`,
+                timestamp: posData.timestamp || new Date().toISOString(),
                 severity: "success",
               },
               ...prev.slice(0, maxActivityItems - 1),
@@ -490,7 +585,7 @@ const AutoTradingPage = () => {
               )}`
             );
             fetchActivePositions();
-            fetchPnLSummary();
+            fetchPortfolioSummary();
             fetchTradeHistory();
 
             setActivityFeed((prev) => [
@@ -572,7 +667,7 @@ const AutoTradingPage = () => {
     }
   }, [
     fetchActivePositions,
-    fetchPnLSummary,
+    fetchPortfolioSummary,
     fetchSelectedStocks,
     fetchTradeHistory,
   ]);
@@ -586,10 +681,10 @@ const AutoTradingPage = () => {
         // This makes the page load 3-5x faster
         await Promise.allSettled([
           fetchTradingPreferences(),
-          fetchSelectedStocks(), // Load immediately - don't wait!
-          fetchCapitalOverview(),
+          fetchSelectedStocks(),
+          fetchPortfolioSummary(),
           fetchActivePositions(),
-          fetchPnLSummary(),
+          fetchCapitalOverview(),
           fetchTradeHistory(),
         ]);
 
@@ -613,17 +708,8 @@ const AutoTradingPage = () => {
         socketRef.current = null;
       }
     };
-    // CRITICAL FIX: Empty dependency array - only run once on mount!
-    // This prevents infinite re-renders
-  }, [
-    fetchActivePositions,
-    fetchCapitalOverview,
-    fetchPnLSummary,
-    fetchSelectedStocks,
-    fetchTradeHistory,
-    fetchTradingPreferences,
-    initializeWebSocket,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // OPTIMIZED: Auto-refresh every 5 seconds (less server load)
   // WebSocket provides real-time updates, so polling can be slower
@@ -631,14 +717,14 @@ const AutoTradingPage = () => {
     const interval = setInterval(() => {
       // Only refresh if page is visible (performance optimization)
       if (document.visibilityState === "visible") {
-        fetchCapitalOverview();
+        fetchPortfolioSummary();
         fetchActivePositions();
-        fetchPnLSummary();
       }
     }, 5000); // Changed from 2s to 5s - WebSocket handles real-time updates
 
     return () => clearInterval(interval);
-  }, [fetchActivePositions, fetchCapitalOverview, fetchPnLSummary]); // Empty deps - functions are stable from useCallback
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // OPTIMIZED: Poll auto-trading status every 10 seconds
   useEffect(() => {
@@ -895,178 +981,179 @@ const AutoTradingPage = () => {
           </Card>
         </Grid>
 
-        {/* Live Trading Activity - Shows strategy status, signals, and execution events */}
-        {autoTradingRunning && (
+        {/* Live Stock Activity Chart - Per Stock Visualization */}
+        <StockActivityChart
+          stockActivityStats={stockActivityStats}
+          showLiveActivity={showLiveActivity}
+          setShowLiveActivity={setShowLiveActivity}
+        />
+
+        {/* Keep collapsed OLD timeline for reference - will remove later */}
+        {false && activityFeed.length > 0 && (
           <Grid item xs={12}>
             <Card elevation={2}>
               <CardContent>
-                <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
-                  Live Trading Activity
-                </Typography>
+                <Collapse in={false}>
+                  <Box sx={{ mt: 2, position: "relative" }}>
+                    {activityFeed.length === 0 ? (
+                      <Alert severity="info" sx={{ borderRadius: 2 }}>
+                        No recent activity. The timeline will show trades, signals, and system events in real-time.
+                      </Alert>
+                    ) : (
+                      <Box sx={{ position: "relative", pl: 2 }}>
+                        {/* Vertical Timeline Line */}
+                        <Box
+                          sx={{
+                            position: "absolute",
+                            left: "29px",
+                            top: "20px",
+                            bottom: "20px",
+                            width: "2px",
+                            bgcolor: "divider",
+                          }}
+                        />
 
-                <Grid container spacing={2}>
-                  {/* Live Signals Panel */}
-                  <Grid item xs={12} md={6}>
-                    <Box
-                      sx={{
-                        p: 2,
-                        bgcolor: "background.default",
-                        borderRadius: 1,
-                        height: 300,
-                        overflowY: "auto",
-                      }}
-                    >
-                      <Typography
-                        variant="subtitle2"
-                        fontWeight={600}
-                        sx={{ mb: 1.5 }}
-                      >
-                        Recent Signals (Last 10)
-                      </Typography>
+                        {/* Timeline Items */}
+                        <Stack spacing={2.5}>
+                          {activityFeed.map((activity, index) => {
+                            const getIcon = () => {
+                              if (activity.type === "trade_executed" || activity.type === "position_created") {
+                                return <CheckCircleIcon />;
+                              } else if (activity.type === "position_closed") {
+                                return activity.severity === "success" ? <TrendingUpIcon /> : <TrendingDownIcon />;
+                              } else if (activity.type === "signal") {
+                                return <SignalIcon />;
+                              } else if (activity.severity === "error") {
+                                return <ErrorIcon />;
+                              } else if (activity.severity === "warning") {
+                                return <WarningIcon />;
+                              } else {
+                                return <InfoIcon />;
+                              }
+                            };
 
-                      {liveSignals.length === 0 ? (
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          sx={{ textAlign: "center", mt: 4 }}
-                        >
-                          Waiting for trading signals...
-                        </Typography>
-                      ) : (
-                        <Stack spacing={1}>
-                          {liveSignals.map((signal) => (
-                            <Box
-                              key={signal.id}
-                              sx={{
-                                p: 1.5,
-                                bgcolor: "background.paper",
-                                borderRadius: 1,
-                                borderLeft: 4,
-                                borderColor:
-                                  signal.signal_type === "buy"
-                                    ? "success.main"
-                                    : signal.signal_type === "sell"
-                                    ? "error.main"
-                                    : "warning.main",
-                              }}
-                            >
-                              <Stack
-                                direction="row"
-                                justifyContent="space-between"
-                                alignItems="center"
+                            const getColor = () => {
+                              if (activity.severity === "success") return "success.main";
+                              if (activity.severity === "error") return "error.main";
+                              if (activity.severity === "warning") return "warning.main";
+                              return "info.main";
+                            };
+
+                            return (
+                              <Box
+                                key={activity.id}
+                                sx={{
+                                  display: "flex",
+                                  gap: 2,
+                                  position: "relative",
+                                  animation: index === 0 ? "fadeSlideIn 0.5s ease-out" : "none",
+                                  "@keyframes fadeSlideIn": {
+                                    from: {
+                                      opacity: 0,
+                                      transform: "translateY(-10px)",
+                                    },
+                                    to: {
+                                      opacity: 1,
+                                      transform: "translateY(0)",
+                                    },
+                                  },
+                                }}
                               >
-                                <Box>
-                                  <Typography variant="body2" fontWeight={600}>
-                                    {signal.symbol} -{" "}
-                                    {signal.signal_type.toUpperCase()}
-                                  </Typography>
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                  >
-                                    {signal.reason}
-                                  </Typography>
+                                {/* Timeline Icon */}
+                                <Box
+                                  sx={{
+                                    width: 40,
+                                    height: 40,
+                                    borderRadius: "50%",
+                                    bgcolor: "background.paper",
+                                    border: 2,
+                                    borderColor: getColor(),
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    flexShrink: 0,
+                                    zIndex: 1,
+                                    color: getColor(),
+                                  }}
+                                >
+                                  {getIcon()}
                                 </Box>
-                                <Box sx={{ textAlign: "right" }}>
-                                  <Chip
-                                    label={`${(signal.confidence * 100).toFixed(
-                                      0
-                                    )}%`}
-                                    size="small"
-                                    color={
-                                      signal.confidence >= 0.75
-                                        ? "success"
-                                        : "warning"
-                                    }
-                                  />
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                    sx={{ display: "block", mt: 0.5 }}
-                                  >
-                                    ₹{signal.price}
+
+                                {/* Activity Card */}
+                                <Box
+                                  sx={{
+                                    flex: 1,
+                                    bgcolor: "background.default",
+                                    borderRadius: 2,
+                                    p: 2,
+                                    border: 1,
+                                    borderColor: "divider",
+                                    transition: "all 0.2s",
+                                    "&:hover": {
+                                      borderColor: getColor(),
+                                      boxShadow: `0 2px 8px ${getColor()}20`,
+                                      transform: "translateX(4px)",
+                                    },
+                                  }}
+                                >
+                                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 0.5 }}>
+                                    <Typography variant="body1" fontWeight={600}>
+                                      {activity.message}
+                                    </Typography>
+                                    <Typography
+                                      variant="caption"
+                                      sx={{
+                                        fontFamily: "monospace",
+                                        bgcolor: "background.paper",
+                                        px: 1,
+                                        py: 0.5,
+                                        borderRadius: 1,
+                                        border: 1,
+                                        borderColor: "divider",
+                                      }}
+                                    >
+                                      {new Date(activity.timestamp).toLocaleTimeString("en-IN", {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                        second: "2-digit",
+                                      })}
+                                    </Typography>
+                                  </Stack>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {activity.details}
                                   </Typography>
+                                  <Box sx={{ mt: 1 }}>
+                                    <Chip
+                                      label={
+                                        activity.severity === "success"
+                                          ? "Success"
+                                          : activity.severity === "error"
+                                          ? "Error"
+                                          : activity.severity === "warning"
+                                          ? "Warning"
+                                          : "Info"
+                                      }
+                                      size="small"
+                                      color={
+                                        activity.severity === "success"
+                                          ? "success"
+                                          : activity.severity === "error"
+                                          ? "error"
+                                          : activity.severity === "warning"
+                                          ? "warning"
+                                          : "info"
+                                      }
+                                    />
+                                  </Box>
                                 </Box>
-                              </Stack>
-                            </Box>
-                          ))}
+                              </Box>
+                            );
+                          })}
                         </Stack>
-                      )}
-                    </Box>
-                  </Grid>
-
-                  {/* Activity Feed Panel */}
-                  <Grid item xs={12} md={6}>
-                    <Box
-                      sx={{
-                        p: 2,
-                        bgcolor: "background.default",
-                        borderRadius: 1,
-                        height: 300,
-                        overflowY: "auto",
-                      }}
-                    >
-                      <Typography
-                        variant="subtitle2"
-                        fontWeight={600}
-                        sx={{ mb: 1.5 }}
-                      >
-                        Activity Feed
-                      </Typography>
-
-                      {activityFeed.length === 0 ? (
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          sx={{ textAlign: "center", mt: 4 }}
-                        >
-                          No activity yet...
-                        </Typography>
-                      ) : (
-                        <Stack spacing={1}>
-                          {activityFeed.map((activity) => (
-                            <Box
-                              key={activity.id}
-                              sx={{
-                                p: 1.5,
-                                bgcolor: "background.paper",
-                                borderRadius: 1,
-                                borderLeft: 4,
-                                borderColor:
-                                  activity.severity === "success"
-                                    ? "success.main"
-                                    : activity.severity === "error"
-                                    ? "error.main"
-                                    : activity.severity === "warning"
-                                    ? "warning.main"
-                                    : "info.main",
-                              }}
-                            >
-                              <Typography variant="body2" fontWeight={600}>
-                                {activity.message}
-                              </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {activity.details}
-                              </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                                sx={{ display: "block", mt: 0.5 }}
-                              >
-                                {new Date(
-                                  activity.timestamp
-                                ).toLocaleTimeString()}
-                              </Typography>
-                            </Box>
-                          ))}
-                        </Stack>
-                      )}
-                    </Box>
-                  </Grid>
-                </Grid>
+                      </Box>
+                    )}
+                  </Box>
+                </Collapse>
               </CardContent>
             </Card>
           </Grid>
@@ -1749,7 +1836,10 @@ const AutoTradingPage = () => {
                     <Table size="small">
                       <TableHead>
                         <TableRow>
+                          <TableCell sx={{ fontWeight: 600 }}>Broker</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Symbol</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Mode</TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             Entry
                           </TableCell>
@@ -1758,6 +1848,12 @@ const AutoTradingPage = () => {
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             Qty
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Lots
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Investment
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             P&L
@@ -1794,6 +1890,14 @@ const AutoTradingPage = () => {
                           return (
                             <TableRow key={position.position_id} hover>
                               <TableCell>
+                                <Chip
+                                  label={(position.broker_name || "N/A").toUpperCase()}
+                                  size="small"
+                                  color={position.broker_name ? "primary" : "default"}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                              <TableCell>
                                 <Typography variant="body2" fontWeight={600}>
                                   {position.symbol}
                                 </Typography>
@@ -1803,6 +1907,24 @@ const AutoTradingPage = () => {
                                 >
                                   {position.trade_id}
                                 </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={position.signal_type}
+                                  size="small"
+                                  color={
+                                    position.signal_type?.includes("CE")
+                                      ? "success"
+                                      : "error"
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={(position.trading_mode || "paper").toUpperCase()}
+                                  size="small"
+                                  color={position.trading_mode === "live" ? "error" : "info"}
+                                />
                               </TableCell>
                               <TableCell align="right">
                                 <Typography variant="body2">
@@ -1836,6 +1958,16 @@ const AutoTradingPage = () => {
                               <TableCell align="right">
                                 <Typography variant="body2">
                                   {position.quantity}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Typography variant="body2">
+                                  {position.lots_traded || 0}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Typography variant="body2" fontWeight={600}>
+                                  {formatCurrency(position.total_investment || 0)}
                                 </Typography>
                               </TableCell>
                               <TableCell align="right">
@@ -1944,6 +2076,7 @@ const AutoTradingPage = () => {
                       <TableHead>
                         <TableRow>
                           <TableCell sx={{ fontWeight: 600 }}>Symbol</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>Instrument</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             Strike
@@ -1952,61 +2085,79 @@ const AutoTradingPage = () => {
                             Expiry
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Live Price
+                            LTP
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Change
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Unrealized PnL
+                            Change %
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             Lot Size
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Capital
+                            Lots to Trade
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Total Qty
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Capital Required
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             Score
                           </TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            Status
+                          </TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {selectedStocks.map((stock, idx) => (
-                          <TableRow key={idx} hover>
-                            <TableCell>
-                              <Typography variant="body2" fontWeight={600}>
-                                {stock.symbol}
-                              </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {stock.sector || "N/A"}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={stock.option_type || "N/A"}
-                                color={
-                                  stock.option_type === "CE"
-                                    ? "success"
-                                    : "error"
-                                }
-                                size="small"
-                                sx={{ minWidth: 40 }}
-                              />
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatCurrency(stock.strike_price || 0)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {stock.expiry_date || "N/A"}
-                              </Typography>
-                            </TableCell>
+                        {selectedStocks.map((stock, idx) => {
+                          const lotsToTrade = stock.position_size_lots || 1;
+                          const lotSize = stock.lot_size || 0;
+                          const totalQty = lotsToTrade * lotSize;
+                          const ltp = stock.live_price || stock.entry_price || 0;
+                          const capitalRequired = ltp * totalQty;
+
+                          return (
+                            <TableRow key={idx} hover>
+                              <TableCell>
+                                <Typography variant="body2" fontWeight={600}>
+                                  {stock.symbol}
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                >
+                                  {stock.sector || "N/A"}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
+                                  {stock.instrument_key ? stock.instrument_key.split("|")[1] : "N/A"}
+                                </Typography>
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={stock.option_type || "N/A"}
+                                  color={
+                                    stock.option_type === "CE"
+                                      ? "success"
+                                      : "error"
+                                  }
+                                  size="small"
+                                  sx={{ minWidth: 40 }}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <Typography variant="body2" fontWeight={600}>
+                                  {formatCurrency(stock.strike_price || 0)}
+                                </Typography>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Typography variant="body2">
+                                  {stock.expiry_date || "N/A"}
+                                </Typography>
+                              </TableCell>
                             <TableCell align="right">
                               <Typography
                                 variant="body2"
@@ -2039,13 +2190,6 @@ const AutoTradingPage = () => {
                                       : "error"
                                   }
                                   size="small"
-                                  icon={
-                                    stock.price_change_percent >= 0 ? (
-                                      <TrendingUpIcon />
-                                    ) : (
-                                      <TrendingDownIcon />
-                                    )
-                                  }
                                 />
                               ) : (
                                 <Typography
@@ -2057,59 +2201,26 @@ const AutoTradingPage = () => {
                               )}
                             </TableCell>
                             <TableCell align="right">
-                              {stock.unrealized_pnl !== undefined &&
-                              stock.unrealized_pnl !== null ? (
-                                <>
-                                  <Typography
-                                    variant="body2"
-                                    fontWeight={600}
-                                    color={
-                                      stock.unrealized_pnl >= 0
-                                        ? "success.main"
-                                        : "error.main"
-                                    }
-                                  >
-                                    {formatCurrency(stock.unrealized_pnl)}
-                                  </Typography>
-                                  <Typography
-                                    variant="caption"
-                                    color={
-                                      stock.unrealized_pnl >= 0
-                                        ? "success.main"
-                                        : "error.main"
-                                    }
-                                  >
-                                    {stock.unrealized_pnl_percent >= 0
-                                      ? "+"
-                                      : ""}
-                                    {stock.unrealized_pnl_percent?.toFixed(2) ||
-                                      0}
-                                    %
-                                  </Typography>
-                                </>
-                              ) : (
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                >
-                                  -
-                                </Typography>
-                              )}
+                              <Typography variant="body2" fontWeight={600}>
+                                {lotSize}
+                              </Typography>
                             </TableCell>
                             <TableCell align="right">
-                              <Typography variant="body2">
-                                {stock.lot_size || "N/A"}
+                              <Typography variant="body2" fontWeight={700} color="primary">
+                                {lotsToTrade}
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2" fontWeight={600}>
-                                {formatCurrency(stock.capital_allocation || 0)}
+                                {totalQty}
                               </Typography>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {stock.position_size_lots} lot(s)
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2" fontWeight={700} color="error.main">
+                                {formatCurrency(capitalRequired)}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                @ {formatCurrency(ltp)}/unit
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
@@ -2125,8 +2236,20 @@ const AutoTradingPage = () => {
                                 size="small"
                               />
                             </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={stock.trade_status || "SELECTED"}
+                                size="small"
+                                color={
+                                  stock.trade_status === "TRADED" ? "success" :
+                                  stock.trade_status === "IN_POSITION" ? "warning" :
+                                  "info"
+                                }
+                              />
+                            </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </TableContainer>
@@ -2151,19 +2274,44 @@ const AutoTradingPage = () => {
                     <Table size="small">
                       <TableHead>
                         <TableRow>
+                          <TableCell sx={{ fontWeight: 600 }}>Broker</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Symbol</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Entry
+                            Entry Date
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Exit
+                            Entry Time
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Entry Price
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Exit Date
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Exit Time
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Exit Price
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Quantity
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Lots
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            Investment
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             P&L
                           </TableCell>
                           <TableCell align="right" sx={{ fontWeight: 600 }}>
                             P&L %
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            Mode
                           </TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>
                             Exit Reason
@@ -2176,6 +2324,14 @@ const AutoTradingPage = () => {
                       <TableBody>
                         {tradeHistory.map((trade, idx) => (
                           <TableRow key={idx} hover>
+                            <TableCell>
+                              <Chip
+                                label={(trade.broker_name || "N/A").toUpperCase()}
+                                size="small"
+                                color={trade.broker_name ? "primary" : "default"}
+                                variant="outlined"
+                              />
+                            </TableCell>
                             <TableCell>
                               <Typography variant="body2" fontWeight={600}>
                                 {trade.symbol}
@@ -2194,12 +2350,47 @@ const AutoTradingPage = () => {
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2">
+                                {trade.entry_date || "N/A"}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2">
+                                {trade.entry_time_str || "N/A"}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2">
                                 {formatCurrency(trade.entry_price)}
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
                               <Typography variant="body2">
+                                {trade.exit_date || "N/A"}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2">
+                                {trade.exit_time_str || "N/A"}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2">
                                 {formatCurrency(trade.exit_price)}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2">
+                                {trade.quantity || 0}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2">
+                                {trade.lots_traded || 0}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2" fontWeight={600}>
+                                {formatCurrency(trade.total_investment)}
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
@@ -2227,18 +2418,21 @@ const AutoTradingPage = () => {
                               />
                             </TableCell>
                             <TableCell>
+                              <Chip
+                                label={(trade.trading_mode || "paper").toUpperCase()}
+                                size="small"
+                                color={trade.trading_mode === "live" ? "error" : "info"}
+                              />
+                            </TableCell>
+                            <TableCell>
                               <Typography variant="body2">
                                 {trade.exit_reason}
                               </Typography>
                             </TableCell>
                             <TableCell align="center">
                               <Typography variant="body2">
-                                {trade.entry_time && trade.exit_time
-                                  ? Math.round(
-                                      (new Date(trade.exit_time) -
-                                        new Date(trade.entry_time)) /
-                                        (1000 * 60)
-                                    ) + "m"
+                                {trade.duration_minutes
+                                  ? trade.duration_minutes + "m"
                                   : "N/A"}
                               </Typography>
                             </TableCell>

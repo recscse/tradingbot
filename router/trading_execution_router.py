@@ -423,11 +423,22 @@ async def get_active_positions(
         active_positions = []
 
         for position, trade in results:
+            # Calculate total investment
+            total_investment = float(trade.total_investment) if trade.total_investment else (float(trade.entry_price) * trade.quantity)
+            lots_traded = trade.lots_traded if trade.lots_traded else (trade.quantity // trade.lot_size if trade.lot_size > 0 else 1)
+
+            # Calculate holding duration
+            duration_minutes = 0
+            if trade.entry_time:
+                from datetime import datetime
+                duration_minutes = int((datetime.now() - trade.entry_time).total_seconds() / 60)
+
             active_positions.append(
                 {
                     "position_id": position.id,
                     "trade_id": trade.trade_id,
                     "symbol": position.symbol,
+                    "signal_type": trade.signal_type,
                     "instrument_key": position.instrument_key,
                     "entry_price": float(trade.entry_price),
                     "current_price": (
@@ -436,6 +447,9 @@ async def get_active_positions(
                         else 0
                     ),
                     "quantity": trade.quantity,
+                    "lot_size": trade.lot_size,
+                    "lots_traded": lots_traded,
+                    "total_investment": total_investment,
                     "current_pnl": (
                         float(position.current_pnl) if position.current_pnl else 0
                     ),
@@ -459,11 +473,16 @@ async def get_active_positions(
                     "entry_time": (
                         trade.entry_time.isoformat() if trade.entry_time else None
                     ),
+                    "duration_minutes": duration_minutes,
                     "last_updated": (
                         position.last_updated.isoformat()
                         if position.last_updated
                         else None
                     ),
+                    "broker_name": trade.broker_name or "N/A",
+                    "trading_mode": trade.trading_mode or "paper",
+                    "strategy_name": trade.strategy_name or "fibonacci_ema",
+                    "entry_order_id": trade.entry_order_id,
                 }
             )
 
@@ -950,6 +969,35 @@ async def get_trade_history(
         trade_history = []
 
         for trade in trades:
+            # Calculate duration in minutes
+            duration_minutes = 0
+            if trade.entry_time and trade.exit_time:
+                duration_minutes = int((trade.exit_time - trade.entry_time).total_seconds() / 60)
+
+            # Format dates and times in IST
+            from datetime import timezone, timedelta
+            ist = timezone(timedelta(hours=5, minutes=30))
+
+            if trade.entry_time:
+                entry_time_ist = trade.entry_time.replace(tzinfo=timezone.utc).astimezone(ist)
+                entry_date = entry_time_ist.strftime("%d-%b-%Y")  # e.g., 14-Nov-2025
+                entry_time_str = entry_time_ist.strftime("%I:%M:%S %p")  # e.g., 02:30:45 PM
+            else:
+                entry_date = None
+                entry_time_str = None
+
+            if trade.exit_time:
+                exit_time_ist = trade.exit_time.replace(tzinfo=timezone.utc).astimezone(ist)
+                exit_date = exit_time_ist.strftime("%d-%b-%Y")
+                exit_time_str = exit_time_ist.strftime("%I:%M:%S %p")
+            else:
+                exit_date = None
+                exit_time_str = None
+
+            # Calculate total investment
+            total_investment = float(trade.total_investment) if trade.total_investment else (float(trade.entry_price) * trade.quantity)
+            lots_traded = trade.lots_traded if trade.lots_traded else (trade.quantity // trade.lot_size if trade.lot_size > 0 else 1)
+
             trade_history.append(
                 {
                     "trade_id": trade.trade_id,
@@ -961,9 +1009,16 @@ async def get_trade_history(
                     "exit_time": (
                         trade.exit_time.isoformat() if trade.exit_time else None
                     ),
+                    "entry_date": entry_date,
+                    "entry_time_str": entry_time_str,
+                    "exit_date": exit_date,
+                    "exit_time_str": exit_time_str,
                     "entry_price": float(trade.entry_price),
                     "exit_price": float(trade.exit_price) if trade.exit_price else 0,
                     "quantity": trade.quantity,
+                    "lot_size": trade.lot_size,
+                    "lots_traded": lots_traded,
+                    "total_investment": total_investment,
                     "gross_pnl": float(trade.gross_pnl) if trade.gross_pnl else 0,
                     "net_pnl": float(trade.net_pnl) if trade.net_pnl else 0,
                     "pnl_percentage": (
@@ -971,6 +1026,12 @@ async def get_trade_history(
                     ),
                     "exit_reason": trade.exit_reason,
                     "strategy_name": trade.strategy_name,
+                    "duration_minutes": duration_minutes,
+                    "broker_name": trade.broker_name or "N/A",
+                    "trading_mode": trade.trading_mode or "paper",
+                    "instrument_key": trade.instrument_key,
+                    "entry_order_id": trade.entry_order_id,
+                    "exit_order_id": trade.exit_order_id,
                 }
             )
 
@@ -1234,4 +1295,133 @@ async def get_capital_allocation_plan(
 
     except Exception as e:
         logger.error(f"Error getting allocation plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/portfolio-summary")
+async def get_portfolio_summary(
+    trading_mode: str = Query("paper", description="Trading mode: paper or live"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get comprehensive portfolio summary with real-time P&L and investments
+    
+    **Returns:**
+    - Total P&L (realized + unrealized)
+    - Active positions count
+    - Total investment in active positions
+    - Available capital
+    - Today's P&L
+    - Overall portfolio performance
+    
+    **Use Case:** Display portfolio dashboard with complete financial overview
+    """
+    try:
+        from sqlalchemy import and_, func
+        from datetime import datetime, date
+        
+        # Get active positions with real-time PnL
+        active_positions = db.query(ActivePosition).filter(
+            and_(
+                ActivePosition.user_id == current_user.id,
+                ActivePosition.is_active == True
+            )
+        ).all()
+        
+        # Calculate total investment and unrealized P&L from active positions
+        total_investment = Decimal('0')
+        total_unrealized_pnl = Decimal('0')
+        active_positions_data = []
+        
+        for pos in active_positions:
+            trade = db.query(AutoTradeExecution).filter(
+                AutoTradeExecution.id == pos.trade_execution_id
+            ).first()
+            
+            if trade:
+                investment = Decimal(str(trade.total_investment)) if trade.total_investment else (Decimal(str(trade.entry_price)) * Decimal(str(trade.quantity)))
+                total_investment += investment
+                total_unrealized_pnl += Decimal(str(pos.current_pnl))
+                
+                active_positions_data.append({
+                    "symbol": pos.symbol,
+                    "investment": float(investment),
+                    "current_pnl": float(pos.current_pnl),
+                    "pnl_percent": float(pos.current_pnl_percentage)
+                })
+        
+        # Get realized P&L from closed trades
+        today = date.today()
+        
+        # Today's closed trades
+        todays_closed_trades = db.query(AutoTradeExecution).filter(
+            and_(
+                AutoTradeExecution.user_id == current_user.id,
+                AutoTradeExecution.status == "CLOSED",
+                func.date(AutoTradeExecution.exit_time) == today
+            )
+        ).all()
+        
+        todays_realized_pnl = sum(
+            Decimal(str(trade.net_pnl)) for trade in todays_closed_trades if trade.net_pnl
+        )
+        
+        # All time closed trades
+        all_closed_trades = db.query(AutoTradeExecution).filter(
+            and_(
+                AutoTradeExecution.user_id == current_user.id,
+                AutoTradeExecution.status == "CLOSED"
+            )
+        ).all()
+        
+        total_realized_pnl = sum(
+            Decimal(str(trade.net_pnl)) for trade in all_closed_trades if trade.net_pnl
+        )
+        
+        # Total P&L = Realized + Unrealized
+        total_pnl = total_realized_pnl + total_unrealized_pnl
+        
+        # Get capital information
+        from services.trading_execution.capital_manager import capital_manager
+        
+        if trading_mode == "paper":
+            total_capital = capital_manager.paper_trading_capital
+        else:
+            broker_config = capital_manager.get_active_broker_config(current_user.id, db)
+            if broker_config:
+                total_capital = capital_manager._fetch_funds_from_broker(broker_config)
+            else:
+                total_capital = Decimal('0')
+        
+        # Calculate available capital
+        available_capital = total_capital - total_investment + total_realized_pnl
+        
+        # Calculate portfolio metrics
+        total_pnl_percent = (total_pnl / total_capital * Decimal('100')) if total_capital > 0 else Decimal('0')
+        todays_pnl_percent = ((todays_realized_pnl + total_unrealized_pnl) / total_capital * Decimal('100')) if total_capital > 0 else Decimal('0')
+        
+        portfolio_summary = {
+            "total_capital": float(total_capital),
+            "available_capital": float(available_capital),
+            "total_investment": float(total_investment),
+            "active_positions_count": len(active_positions),
+            "total_pnl": float(total_pnl),
+            "total_pnl_percent": float(total_pnl_percent),
+            "unrealized_pnl": float(total_unrealized_pnl),
+            "realized_pnl": float(total_realized_pnl),
+            "todays_pnl": float(todays_realized_pnl + total_unrealized_pnl),
+            "todays_pnl_percent": float(todays_pnl_percent),
+            "used_margin": float(total_investment),
+            "free_margin": float(available_capital),
+            "margin_utilization_percent": float((total_investment / total_capital * Decimal('100')) if total_capital > 0 else Decimal('0')),
+            "active_positions": active_positions_data,
+            "total_trades_today": len(todays_closed_trades),
+            "total_trades_all_time": len(all_closed_trades),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return {"success": True, "portfolio_summary": portfolio_summary}
+        
+    except Exception as e:
+        logger.error(f"Error getting portfolio summary: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
