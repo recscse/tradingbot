@@ -734,21 +734,39 @@ class IntelligentStockSelectionService:
 
     # Public API Methods
 
-    async def run_premarket_selection(self) -> Dict[str, Any]:
-        """Run premarket stock selection (before 9:15 AM) - ONLY ONCE"""
+    async def run_premarket_selection(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Run premarket stock selection (before 9:15 AM)
+
+        Args:
+            force: If True, force new selection even if already done today
+
+        Returns:
+            Dict containing selection results with success status
+        """
         self.selection_in_progress = True
         try:
-            # Check if premarket selection already done
-            if self.premarket_selections:
-                logger.warning("⚠️ Premarket selection already completed today")
+            # Check if premarket selection already done today
+            if self.premarket_selections and not force:
+                logger.info("✅ Premarket selection already completed today - returning existing selections")
                 return {
-                    "success": False,
-                    "message": "Premarket selection already done today",
+                    "success": True,
+                    "message": "Premarket selection already done today - no need to select again",
+                    "already_selected": True,
                     "existing_selections": [
                         asdict(stock) for stock in self.premarket_selections
                     ],
+                    "selection_count": len(self.premarket_selections),
                     "phase": "premarket",
+                    "timestamp": datetime.now().isoformat(),
                 }
+
+            # If force=True, clear existing selections
+            if force and self.premarket_selections:
+                logger.info("🔄 Force flag enabled - clearing existing selections and running fresh selection")
+                self.premarket_selections = []
+                self.final_selections = []
+                self.final_selection_done = False
 
             logger.info("🌅 Starting premarket stock selection...")
 
@@ -828,8 +846,52 @@ class IntelligentStockSelectionService:
             except Exception as db_error:
                 logger.error(f"❌ Database save error: {db_error}")
                 result["database_saved"] = False
+
+            # CRITICAL: Enhance with options contracts for complete trading data
+            logger.info("🎯 Enhancing premarket selections with option contracts...")
+            try:
+                from services.enhanced_intelligent_options_selection import (
+                    enhanced_options_service,
+                )
+
+                options_result = (
+                    await enhanced_options_service.enhance_selected_stocks_with_options(
+                        selected_stocks, selection_type="premarket"
+                    )
+                )
+
+                if options_result.get("success"):
+                    result["options_enhancement"] = {
+                        "enhanced_count": options_result.get(
+                            "options_contracts_found", 0
+                        ),
+                        "total_capital_required": options_result.get(
+                            "total_capital_required", 0
+                        ),
+                        "options_ready": options_result.get("options_ready", False),
+                    }
+                    logger.info(
+                        f"✅ Options enhancement complete: {options_result.get('options_contracts_found', 0)} stocks enhanced with option contracts"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ Options enhancement failed: {options_result.get('error')}"
+                    )
+                    result["options_enhancement"] = {
+                        "error": options_result.get("error"),
+                        "enhanced_count": 0,
+                        "options_ready": False,
+                    }
+            except Exception as opt_error:
+                logger.error(f"❌ Error enhancing with options: {opt_error}")
+                result["options_enhancement"] = {
+                    "error": str(opt_error),
+                    "enhanced_count": 0,
+                    "options_ready": False,
+                }
+
             logger.info(
-                f"✅ Premarket selection complete: {len(selected_stocks)} stocks selected"
+                f"✅ Premarket selection complete: {len(selected_stocks)} stocks selected with options data"
             )
             return result
 
@@ -849,23 +911,85 @@ class IntelligentStockSelectionService:
 
             # Check if final selection already done
             if self.final_selection_done:
-                logger.warning(
-                    "⚠️ Final selection already completed - no more changes today"
+                logger.info(
+                    "✅ Final selection already completed - returning existing final selections"
                 )
                 return {
-                    "success": False,
-                    "message": "Final selections already done today - no more changes allowed",
+                    "success": True,
+                    "message": "Final selections already done today - no more changes needed",
+                    "already_finalized": True,
                     "final_selections": [
                         asdict(stock) for stock in self.final_selections
                     ],
+                    "final_count": len(self.final_selections),
                     "phase": "final_selection_done",
+                    "ready_for_trading": len(self.final_selections) > 0,
+                    "timestamp": datetime.now().isoformat(),
                 }
 
+            # CRITICAL FIX: Load from database if not in memory
             if not self.premarket_selections:
-                return {
-                    "error": "No premarket selections found. Run premarket selection first.",
-                    "phase": "market_open_validation",
-                }
+                logger.warning("⚠️ No premarket selections in memory - loading from database...")
+                from datetime import date
+                from database.connection import SessionLocal
+                from database.models import SelectedStock
+
+                db = SessionLocal()
+                try:
+                    db_stocks = db.query(SelectedStock).filter(
+                        SelectedStock.selection_date == date.today(),
+                        SelectedStock.is_active == True,
+                        SelectedStock.selection_phase.in_(['premarket', 'final_selection'])
+                    ).all()
+
+                    if not db_stocks:
+                        return {
+                            "error": "No premarket selections found in database either. Run premarket selection first.",
+                            "phase": "market_open_validation",
+                        }
+
+                    logger.info(f"✅ Loaded {len(db_stocks)} stocks from database")
+
+                    # Convert DB stocks to StockSelection objects
+                    # Use them as premarket selections
+                    self.premarket_selections = []
+                    for stock in db_stocks:
+                        # Use basic StockSelection - we'll enhance with options later
+                        selection = StockSelection(
+                            symbol=stock.symbol,
+                            name=stock.symbol,
+                            instrument_key=stock.instrument_key,
+                            sector=stock.sector or 'OTHER',
+                            lot_size=0,
+                            ltp=float(stock.price_at_selection or 100.0),
+                            change_percent=float(stock.change_percent_at_selection or 0.0),
+                            change=0.0,
+                            volume=int(stock.volume_at_selection or 0),
+                            value_crores=0.0,
+                            high=float(stock.price_at_selection or 100.0),
+                            low=float(stock.price_at_selection or 100.0),
+                            previous_close=float(stock.price_at_selection or 100.0),
+                            sentiment_score=0.5,
+                            sector_score=0.5,
+                            technical_score=0.5,
+                            volume_score=0.5,
+                            value_score=0.5,
+                            final_score=float(stock.selection_score or 50.0),
+                            selection_reason=stock.selection_reason or 'Selected',
+                            confidence_level=0.7,
+                            risk_level='MEDIUM',
+                            recommended_quantity=0,
+                            target_value=0.0,
+                            stop_loss=0.0,
+                            options_direction=stock.option_type or 'CE',
+                            selected_at=stock.created_at.isoformat() if stock.created_at else '',
+                            valid_until=''
+                        )
+                        self.premarket_selections.append(selection)
+
+                    logger.info(f"✅ Converted {len(self.premarket_selections)} DB stocks to StockSelection format")
+                finally:
+                    db.close()
 
             # Check current market sentiment at market open
             market_sentiment, sentiment_analysis = await self.analyze_market_sentiment()
@@ -1189,6 +1313,50 @@ class IntelligentStockSelectionService:
             TradingPhase.POST_MARKET: "💤 Wait for next trading day",
         }
         return recommendations.get(phase, "Monitor market conditions")
+
+    def reset_for_new_trading_day(self) -> Dict[str, Any]:
+        """
+        Reset service state for a new trading day
+
+        This should be called at the start of each trading day to clear
+        previous day's selections and allow fresh selection.
+
+        Returns:
+            Dict with reset status and timestamp
+        """
+        try:
+            logger.info("🔄 Resetting stock selection service for new trading day")
+
+            # Clear all selections
+            self.premarket_selections = []
+            self.final_selections = []
+
+            # Reset market state
+            self.premarket_sentiment = MarketSentiment.NEUTRAL
+            self.market_open_sentiment = MarketSentiment.NEUTRAL
+            self.current_sentiment = MarketSentiment.NEUTRAL
+            self.current_phase = TradingPhase.PREMARKET
+            self.last_selection_time = None
+            self.sentiment_changed = False
+            self.final_selection_done = False
+            self.selection_in_progress = False
+
+            logger.info("✅ Stock selection service reset complete - ready for new day")
+
+            return {
+                "success": True,
+                "message": "Stock selection service reset for new trading day",
+                "reset_at": datetime.now().isoformat(),
+                "ready_for_selection": True,
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error resetting stock selection service: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat(),
+            }
 
 
 # Create singleton instance

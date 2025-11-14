@@ -305,6 +305,7 @@ class StrategyEngine:
                 trend_bullish = current_trend_1x == 1
                 trend_reversal_up = prev_trend_1x == -1 and current_trend_1x == 1
 
+                # ENTRY CONDITIONS (open new position)
                 if trend_reversal_up and price_above_ema:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.85')
@@ -313,12 +314,19 @@ class StrategyEngine:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
                     reason = "Strong uptrend: Price above SuperTrend and EMA"
-                elif not price_above_supertrend or not price_above_ema:
+                # EXIT CONDITIONS (only when conditions clearly deteriorate)
+                elif not trend_bullish and (not price_above_supertrend or not price_above_ema):
+                    # Both trend turned bearish AND price broke support levels
                     signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
-                    reason = "Exit: Price below SuperTrend or EMA"
+                    reason = "Exit: Bearish trend with price below key levels"
+                else:
+                    # Neutral zone or minor pullback - HOLD
+                    signal_type = SignalType.HOLD
+                    confidence = Decimal('0.50')
+                    reason = "Waiting for clear signal - no strong trend"
 
-            # SHORT ENTRY LOGIC (for PE options)
+            # PE OPTIONS LOGIC (Buying Put Options)
             else:
                 # Downtrend conditions
                 price_below_ema = current_price < current_ema
@@ -326,32 +334,42 @@ class StrategyEngine:
                 trend_bearish = current_trend_1x == -1
                 trend_reversal_down = prev_trend_1x == 1 and current_trend_1x == -1
 
+                # ENTRY CONDITIONS (BUY put option when bearish - not SELL!)
+                # We are BUYING put options, not selling them
                 if trend_reversal_down and price_below_ema:
-                    signal_type = SignalType.SELL
+                    signal_type = SignalType.BUY
                     confidence = Decimal('0.85')
-                    reason = "SuperTrend reversal to downtrend + Price below EMA"
+                    reason = "SuperTrend reversal to downtrend + Price below EMA (Buy Put)"
                 elif price_below_supertrend and price_below_ema and trend_bearish:
-                    signal_type = SignalType.SELL
+                    signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
-                    reason = "Strong downtrend: Price below SuperTrend and EMA"
-                elif not price_below_supertrend or not price_below_ema:
-                    signal_type = SignalType.EXIT_SHORT
+                    reason = "Strong downtrend: Price below SuperTrend and EMA (Buy Put)"
+                # EXIT CONDITIONS (only when conditions clearly improve)
+                elif not trend_bearish and (not price_below_supertrend or not price_below_ema):
+                    # Both trend turned bullish AND price broke resistance levels
+                    signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
-                    reason = "Exit: Price above SuperTrend or EMA"
+                    reason = "Exit: Bullish trend with price above key levels (Exit Put)"
+                else:
+                    # Neutral zone or minor bounce - HOLD
+                    signal_type = SignalType.HOLD
+                    confidence = Decimal('0.50')
+                    reason = "Waiting for clear signal - no strong trend"
 
-            # Calculate entry, stop loss, and target
+            # Calculate entry, stop loss, and target IN SPOT TERMS
+            # These will be converted to premium terms later using convert_spot_signal_to_premium()
             entry_price = current_price
 
-            if option_type == "CE":
-                # For calls: SL at SuperTrend 1x, Target based on R:R
-                stop_loss = current_supertrend_1x
-                risk = abs(entry_price - stop_loss)
-                target_price = entry_price + (risk * self.default_risk_reward_ratio)
-            else:
-                # For puts: SL at SuperTrend 1x, Target based on R:R
-                stop_loss = current_supertrend_1x
-                risk = abs(entry_price - stop_loss)
-                target_price = entry_price - (risk * self.default_risk_reward_ratio)
+            # For both CE and PE: Use SuperTrend as stop loss (spot-based)
+            # The conversion to premium will happen in auto_trade_live_feed
+            stop_loss = current_supertrend_1x
+            risk = abs(entry_price - stop_loss)
+            target_price = entry_price + (risk * self.default_risk_reward_ratio) if option_type == "CE" else entry_price - (risk * self.default_risk_reward_ratio)
+
+            logger.debug(
+                f"{option_type} Signal (SPOT-BASED): Entry={entry_price:.2f}, "
+                f"SL={stop_loss:.2f}, Target={target_price:.2f}, Risk={risk:.2f}"
+            )
 
             # Trailing stop configuration
             trailing_stop_config = {
@@ -395,6 +413,114 @@ class StrategyEngine:
         except Exception as e:
             logger.error(f"Error generating signal: {e}")
             raise
+
+    def convert_spot_signal_to_premium(
+        self,
+        signal: TradingSignal,
+        spot_price: Decimal,
+        option_premium: Decimal,
+        option_delta: Optional[float] = None
+    ) -> TradingSignal:
+        """
+        Convert spot-based trading signal to premium-based values
+
+        This is CRITICAL: Strategy generates signals on SPOT prices (trend detection),
+        but we execute trades on OPTION PREMIUMS. This method converts spot-based
+        SL/Target to equivalent premium values.
+
+        Args:
+            signal: Original signal with spot-based SL/Target
+            spot_price: Current spot price
+            option_premium: Current option premium
+            option_delta: Option delta (if available), defaults to 0.5
+
+        Returns:
+            New TradingSignal with premium-based SL/Target
+
+        Example:
+            Spot Signal: BUY at 3100, SL=3090 (10 points risk)
+            Delta: 0.4
+            Premium: 45
+
+            Spot risk = 10 points = 0.32% of spot
+            Premium risk = 45 * 0.32% * 0.4 (delta adjustment) = 0.58
+            Premium SL = 45 - 0.58 = 44.42
+        """
+        try:
+            # Use provided delta or estimate based on option type and moneyness
+            if option_delta is None:
+                # Rough estimation: ATM options have ~0.5 delta
+                option_delta = 0.5
+
+            # Calculate spot-based risk percentage
+            spot_risk_points = abs(signal.entry_price - signal.stop_loss)
+            spot_risk_percent = spot_risk_points / signal.entry_price if signal.entry_price > 0 else Decimal('0.05')
+
+            # Convert to premium terms using delta
+            # Delta represents how much option price moves per 1 point spot move
+            # So premium_risk = spot_risk * delta
+            premium_risk_percent = spot_risk_percent * Decimal(str(abs(option_delta)))
+
+            # Apply min/max bounds (3% to 8% risk)
+            premium_risk_percent = max(Decimal('0.03'), min(premium_risk_percent, Decimal('0.08')))
+
+            # Calculate premium-based SL and Target
+            premium_sl = option_premium * (Decimal('1') - premium_risk_percent)
+            premium_risk_amount = option_premium - premium_sl
+            risk_reward_ratio = Decimal(str(signal.trailing_stop_config.get('risk_reward_ratio', 2.0)))
+            premium_target = option_premium + (premium_risk_amount * risk_reward_ratio)
+
+            logger.info(
+                f"Converted spot signal to premium: "
+                f"Spot Risk={spot_risk_percent:.2%}, Delta={option_delta:.2f}, "
+                f"Premium Risk={premium_risk_percent:.2%}, "
+                f"Premium SL={premium_sl:.2f}, Target={premium_target:.2f}"
+            )
+
+            # Create new signal with premium-based values
+            return TradingSignal(
+                signal_type=signal.signal_type,
+                price=option_premium,  # Use premium as current price
+                confidence=signal.confidence,
+                reason=signal.reason + " (converted to premium)",
+                indicators=signal.indicators,  # Keep spot indicators for reference
+                entry_price=option_premium,
+                stop_loss=premium_sl,
+                target_price=premium_target,
+                trailing_stop_config=signal.trailing_stop_config,
+                timestamp=datetime.now().isoformat()
+            )
+
+        except Exception as e:
+            logger.error(f"Error converting spot signal to premium: {e}")
+            # Fallback: use percentage-based approach
+            return self._fallback_premium_signal(signal, option_premium)
+
+    def _fallback_premium_signal(
+        self,
+        signal: TradingSignal,
+        option_premium: Decimal
+    ) -> TradingSignal:
+        """
+        Fallback method for premium signal conversion when delta not available
+        Uses fixed 5% risk
+        """
+        premium_risk = option_premium * Decimal('0.05')  # 5% risk
+        premium_sl = option_premium - premium_risk
+        premium_target = option_premium + (premium_risk * Decimal('2.0'))  # 1:2 R:R
+
+        return TradingSignal(
+            signal_type=signal.signal_type,
+            price=option_premium,
+            confidence=signal.confidence,
+            reason=signal.reason + " (fallback premium conversion)",
+            indicators=signal.indicators,
+            entry_price=option_premium,
+            stop_loss=premium_sl,
+            target_price=premium_target,
+            trailing_stop_config=signal.trailing_stop_config,
+            timestamp=datetime.now().isoformat()
+        )
 
     def update_trailing_stop(
         self,

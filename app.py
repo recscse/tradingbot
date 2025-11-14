@@ -107,7 +107,12 @@ from router.dhan_router import dhan_router
 # from router.trading_config_router import router as trading_config_router
 from router.config_router import router as config_router
 from router.upstox_router import upstox_router
-from router.fyers_router import fyers_router
+try:
+    from router.fyers_router import fyers_router
+    FYERS_AVAILABLE = True
+except ImportError:
+    logger.warning("Fyers router not available - fyers_apiv3 module not installed")
+    FYERS_AVAILABLE = False
 from router.broker_profile_router import broker_profile_router
 from router.margin_aware_trading_router import margin_trading_router
 
@@ -556,51 +561,42 @@ async def lifespan(app: FastAPI):
         if CENTRALIZED_WS_AVAILABLE:
             logger.info("🔌 Initializing NEW Centralized WebSocket System...")
             try:
-                if await centralized_manager.initialize():
-                    # Start connection in background - non-blocking
-                    logger.info(
-                        "🔌 Starting Centralized WebSocket connection in background..."
-                    )
-                    await centralized_manager.start_connection()
-                    logger.info(
-                        "✅ Centralized WebSocket background task started - continuing with other services"
-                    )
+                # CRITICAL FIX: DON'T await - just create background task
+                # start_connection() will handle initialization internally
+                logger.info(
+                    "🔌 Starting Centralized WebSocket connection in background..."
+                )
+                asyncio.create_task(centralized_manager.start_connection())
+                logger.info(
+                    "✅ Centralized WebSocket background task started - continuing with other services"
+                )
 
-                    # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
-                    try:
-                        from services.realtime_data_streamer import realtime_streamer
+                # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
+                try:
+                    from services.realtime_data_streamer import realtime_streamer
 
-                        realtime_streamer.start_streaming()
-                        logger.info("🚀 ZERO-DELAY real-time streaming ACTIVATED")
-                    except ImportError as e:
-                        logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
-
-                    except Exception as e:
-                        logger.error(
-                            f"❌ Error initializing real-time trading system: {e}"
-                        )
-
-                    # Check health status (non-blocking)
-                    status = await centralized_manager.health_check()
-                    logger.info(
-                        f"📊 Centralized WebSocket Status: Health Score {status.get('health_score', 0)}/100"
-                    )
-                    logger.info(
-                        f"📊 WebSocket Connected: {status.get('ws_connected', False)} | Instruments: {status.get('total_instruments', 0)}"
-                    )
-
-                    # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
-                    logger.info(
-                        "🔗 Connecting centralized WebSocket manager to enhanced unified system..."
-                    )
-
-                else:
+                    realtime_streamer.start_streaming()
+                    logger.info("🚀 ZERO-DELAY real-time streaming ACTIVATED")
+                except ImportError as e:
+                    logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
+                except Exception as e:
                     logger.error(
-                        "❌ NEW: Failed to initialize centralized WebSocket system"
+                        f"❌ Error initializing real-time trading system: {e}"
                     )
-                    logger.warning(
-                        "⚠️ Application will continue without live market data"
-                    )
+
+                # Log initial status (don't await health check to avoid blocking)
+                logger.info(
+                    "📊 Centralized WebSocket Status: Starting in background..."
+                )
+                logger.info(
+                    "📊 WebSocket will connect automatically when ready"
+                )
+
+                # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
+                logger.info(
+                    "🔗 Connecting centralized WebSocket manager to enhanced unified system..."
+                )
+
             except Exception as e:
                 logger.error(f"❌ NEW: Centralized WebSocket system error: {e}")
                 logger.warning("⚠️ Application will continue without live market data")
@@ -729,9 +725,10 @@ async def lifespan(app: FastAPI):
                 intelligent_stock_selector,
             )
 
-            await intelligent_stock_selector.initialize_services()
+            # CRITICAL FIX: Don't await - run in background to prevent blocking
+            asyncio.create_task(intelligent_stock_selector.initialize_services())
             logger.info(
-                "✅ Intelligent Stock Selection Service initialized successfully"
+                "✅ Intelligent Stock Selection Service initialization started in background"
             )
         except ImportError as e:
             logger.warning(f"⚠️ Intelligent Stock Selection Service not available: {e}")
@@ -745,11 +742,9 @@ async def lifespan(app: FastAPI):
         try:
             from services.websocket.mcx.integration import initialize_mcx_service
 
-            mcx_success = await initialize_mcx_service()
-            if mcx_success:
-                logger.info("✅ MCX WebSocket Service initialized successfully")
-            else:
-                logger.warning("⚠️ MCX WebSocket Service initialization failed")
+            # CRITICAL FIX: Don't await - run in background to prevent blocking
+            asyncio.create_task(initialize_mcx_service())
+            logger.info("✅ MCX WebSocket Service initialization started in background")
         except ImportError as e:
             logger.warning(f"⚠️ MCX WebSocket Service not available: {e}")
         except Exception as e:
@@ -935,7 +930,8 @@ app.include_router(broker_router, prefix="/api/broker", tags=["Broker API"])
 app.include_router(config_router, tags=["Configuration"])
 app.include_router(stock_list_router, prefix="/api/stocks", tags=["Stock Data"])
 app.include_router(upstox_router, prefix="/api/broker/upstox", tags=["Upstox API"])
-app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
+if FYERS_AVAILABLE:
+    app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
 app.include_router(broker_profile_router, tags=["Broker Profile & Funds"])
 app.include_router(margin_trading_router, tags=["Margin-Aware Trading"])
 app.include_router(dhan_router, prefix="/api/dhan", tags=["Dhan API"])

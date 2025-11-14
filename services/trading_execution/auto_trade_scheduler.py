@@ -18,8 +18,6 @@ Features:
 import asyncio
 import logging
 from datetime import datetime, time as dt_time, date
-from typing import Optional
-from sqlalchemy.orm import Session
 
 from database.connection import SessionLocal
 from database.models import SelectedStock, ActivePosition, BrokerConfig
@@ -76,11 +74,15 @@ class AutoTradeScheduler:
             )
             logger.info(f"📊 Default trading mode: {trading_mode.value}")
 
+            # IMMEDIATE START: Check and start trading immediately on application startup
+            # This allows auto-trading to work even outside market hours for testing/monitoring
+            logger.info("🚀 Checking for immediate auto-start on application startup...")
+            await self._check_and_start_trading_all_users()
+
             while self.is_running:
                 try:
                     # Check current time
                     current_time = datetime.now().time()
-                    current_date = date.today()
 
                     # Reset daily flag at midnight
                     if current_time.hour == 0 and current_time.minute == 0:
@@ -102,10 +104,11 @@ class AutoTradeScheduler:
                         if auto_trade_live_feed.is_running:
                             await self._check_and_stop_trading()
                     else:
-                        # After market hours - ensure stopped
-                        if auto_trade_live_feed.is_running:
-                            logger.info("📉 Market closed - stopping auto-trading")
-                            await auto_trade_live_feed.stop()
+                        # Outside market hours - still allow auto-trading to run if already started
+                        # Don't auto-stop outside market hours to allow 24/7 monitoring
+                        if not auto_trade_live_feed.is_running:
+                            # Try to start if conditions are met (for pre-market/post-market monitoring)
+                            await self._check_and_start_trading_all_users()
 
                     await asyncio.sleep(self.check_interval)
 
@@ -237,6 +240,8 @@ class AutoTradeScheduler:
         Check if auto-trading should stop based on positions for ANY active user
         """
         try:
+            from services.trading_execution.shared_instrument_registry import shared_registry
+
             db = SessionLocal()
 
             try:
@@ -248,12 +253,12 @@ class AutoTradeScheduler:
                 )
 
                 # Check if any stocks are still being monitored
-                monitored_count = len(auto_trade_live_feed.monitored_instruments)
+                monitored_count = len(shared_registry.instruments)
 
                 # Check if any stocks are in monitoring state (waiting for signal)
                 monitoring_state_count = 0
-                for instrument in auto_trade_live_feed.monitored_instruments.values():
-                    if instrument.state.value in ["monitoring", "signal_found"]:
+                for instrument in shared_registry.instruments.values():
+                    if instrument.state.value in ["monitoring", "signal_detected"]:
                         monitoring_state_count += 1
 
                 # Auto-stop conditions:
@@ -265,11 +270,11 @@ class AutoTradeScheduler:
                     and monitored_count > 0
                 ):
                     logger.info(
-                        f"🛑 AUTO-STOPPING: All positions closed, no stocks monitoring"
+                        "AUTO-STOPPING: All positions closed, no stocks monitoring"
                     )
                     await auto_trade_live_feed.stop()
                     logger.info(
-                        f"✅ Auto-trading stopped at {datetime.now().strftime('%H:%M:%S')}"
+                        f"Auto-trading stopped at {datetime.now().strftime('%H:%M:%S')}"
                     )
 
             finally:

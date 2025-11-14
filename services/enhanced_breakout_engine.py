@@ -24,19 +24,34 @@ class BreakoutSignal:
         price: float,
         volume: float,
         timestamp: datetime = None,
+        symbol: str = None,
+        change_percent: float = 0.0,
+        resistance: float = None,
+        strength: float = 0.0,
+        confidence: float = 0.0,
     ):
         self.instrument = instrument
         self.type = type_
         self.price = price
         self.volume = volume
         self.timestamp = timestamp or datetime.now()
+        self.symbol = symbol or instrument
+        self.change_percent = change_percent
+        self.resistance = resistance
+        self.strength = strength
+        self.confidence = confidence
 
     def to_dict(self):
         return {
             "instrument": self.instrument,
+            "symbol": self.symbol,
             "type": self.type,
             "price": self.price,
             "volume": self.volume,
+            "change_percent": self.change_percent,
+            "resistance": self.resistance if self.resistance is not None else 0.0,
+            "strength": self.strength,
+            "confidence": self.confidence,
             "timestamp": self.timestamp.isoformat(),
         }
 
@@ -120,6 +135,7 @@ class EnhancedBreakoutEngine:
         min_volume: float = 1000,
         min_price: float = 1,
         momentum_threshold: float = 0.01,
+        detection_interval_seconds: float = 30.0,  # Throttle detection to every 30 seconds
     ):
         self.storage = storage
         self.unified_manager = unified_manager
@@ -127,9 +143,57 @@ class EnhancedBreakoutEngine:
         self.min_volume = min_volume
         self.min_price = min_price
         self.momentum_threshold = momentum_threshold
+        self.detection_interval_seconds = detection_interval_seconds
+        self.last_detection_time = datetime.now()
 
         self.data_lock = RLock()
         self.active = True
+
+        # Cache for symbol lookups to avoid repeated lookups
+        self.symbol_cache = {}
+
+        # Import market engine once
+        try:
+            from services.realtime_market_engine import get_market_engine
+            self.market_engine = get_market_engine()
+        except Exception as e:
+            logger.warning(f"Could not import market engine: {e}")
+            self.market_engine = None
+
+    def _get_symbol_for_instrument(self, instrument_key: str) -> str:
+        """
+        Get symbol for instrument from market engine or cache
+
+        Args:
+            instrument_key: Instrument key (e.g., "NSE_EQ|INE318A01026")
+
+        Returns:
+            Symbol (e.g., "RELIANCE") or fallback to ISIN
+        """
+        # Check cache first
+        if instrument_key in self.symbol_cache:
+            return self.symbol_cache[instrument_key]
+
+        # Try to fetch from market engine
+        symbol = instrument_key  # Default fallback
+        try:
+            if self.market_engine:
+                inst_metadata = self.market_engine.get_instrument(instrument_key)
+                if inst_metadata and hasattr(inst_metadata, 'symbol'):
+                    symbol = inst_metadata.symbol
+                else:
+                    # Fallback: extract ISIN from key
+                    symbol = instrument_key.split("|")[-1] if "|" in instrument_key else instrument_key
+            else:
+                # No market engine, use fallback
+                symbol = instrument_key.split("|")[-1] if "|" in instrument_key else instrument_key
+        except Exception as e:
+            logger.debug(f"Could not fetch symbol for {instrument_key}: {e}")
+            symbol = instrument_key.split("|")[-1] if "|" in instrument_key else instrument_key
+
+        # Cache the result
+        self.symbol_cache[instrument_key] = symbol
+        return symbol
 
     # -----------------------------
     # Feed Processing
@@ -148,6 +212,14 @@ class EnhancedBreakoutEngine:
     # Breakout Detection
     # -----------------------------
     def _detect_breakouts_vectorized(self) -> List[BreakoutSignal]:
+        # Throttle detection to prevent excessive signals
+        now = datetime.now()
+        time_since_last_detection = (now - self.last_detection_time).total_seconds()
+        if time_since_last_detection < self.detection_interval_seconds:
+            return []  # Skip detection, too soon since last run
+
+        self.last_detection_time = now
+
         signals = []
         with self.data_lock:
             for instrument in self.storage.storage.keys():
@@ -155,30 +227,78 @@ class EnhancedBreakoutEngine:
                 if price_arr is None or len(price_arr) < 2:
                     continue
 
+                # Calculate common metrics
+                current_price = price_arr[-1]
+                prev_price = price_arr[-2] if len(price_arr) >= 2 else current_price
+                change_percent = ((current_price - prev_price) / prev_price * 100) if prev_price > 0 else 0.0
+                resistance_level = np.max(price_arr[:-1]) if len(price_arr) >= 2 else current_price
+
+                # Fetch symbol from market engine (e.g., "NSE_EQ|INE318A01026" -> "RELIANCE")
+                symbol = self._get_symbol_for_instrument(instrument)
+
                 # Volume breakout check
                 if fast_volume_breakout_check(price_arr, volume_arr, self.min_volume):
+                    # Calculate strength based on volume surge
+                    avg_volume = np.mean(volume_arr[:-1]) if len(volume_arr) > 1 else volume_arr[-1]
+                    volume_surge = (volume_arr[-1] / avg_volume) if avg_volume > 0 else 1.0
+                    strength = min(10.0, volume_surge * 2)
+                    confidence = min(100.0, volume_surge * 20)
+
                     signals.append(
                         BreakoutSignal(
-                            instrument, "volume", price_arr[-1], volume_arr[-1]
+                            instrument=instrument,
+                            type_="volume",
+                            price=current_price,
+                            volume=volume_arr[-1],
+                            symbol=symbol,
+                            change_percent=change_percent,
+                            resistance=resistance_level,
+                            strength=strength,
+                            confidence=confidence
                         )
                     )
 
                 # Momentum breakout check (needs at least 2 data points)
                 if len(price_arr) >= 2:
                     if fast_momentum_breakout_check(price_arr, self.momentum_threshold):
+                        # Calculate strength based on momentum
+                        momentum = (current_price / prev_price - 1.0) * 100 if prev_price > 0 else 0.0
+                        strength = min(10.0, abs(momentum) * 5)
+                        confidence = min(100.0, abs(momentum) * 50)
+
                         signals.append(
                             BreakoutSignal(
-                                instrument, "momentum", price_arr[-1], volume_arr[-1]
+                                instrument=instrument,
+                                type_="momentum",
+                                price=current_price,
+                                volume=volume_arr[-1],
+                                symbol=symbol,
+                                change_percent=change_percent,
+                                resistance=resistance_level,
+                                strength=strength,
+                                confidence=confidence
                             )
                         )
 
                 # Resistance breakout check (needs at least 2 data points)
                 if len(price_arr) >= 2:
-                    resistance_level = np.max(price_arr[:-1])
                     if fast_resistance_breakout_check(price_arr, resistance_level):
+                        # Calculate strength based on how much above resistance
+                        above_resistance = ((current_price - resistance_level) / resistance_level * 100) if resistance_level > 0 else 0.0
+                        strength = min(10.0, above_resistance * 10)
+                        confidence = min(100.0, above_resistance * 100)
+
                         signals.append(
                             BreakoutSignal(
-                                instrument, "resistance", price_arr[-1], volume_arr[-1]
+                                instrument=instrument,
+                                type_="resistance",
+                                price=current_price,
+                                volume=volume_arr[-1],
+                                symbol=symbol,
+                                change_percent=change_percent,
+                                resistance=resistance_level,
+                                strength=strength,
+                                confidence=confidence
                             )
                         )
 

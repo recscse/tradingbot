@@ -488,6 +488,36 @@ class RealTimePnLTracker:
 
             logger.info(f"✅ Position closed: PnL = Rs.{net_pnl:.2f} ({pnl_percent:.2f}%)")
 
+            # Broadcast position close event to UI
+            try:
+                from router.unified_websocket_routes import broadcast_to_clients
+
+                close_data = {
+                    "position_id": position.id,
+                    "trade_id": trade_execution.trade_id,
+                    "user_id": position.user_id,
+                    "symbol": position.symbol,
+                    "instrument_key": position.instrument_key,
+                    "entry_price": float(entry_price),
+                    "exit_price": float(exit_price),
+                    "quantity": quantity,
+                    "gross_pnl": float(gross_pnl),
+                    "net_pnl": float(net_pnl),
+                    "pnl_percent": float(pnl_percent),
+                    "pnl_points": float(pnl_points),
+                    "exit_reason": exit_reason,
+                    "entry_time": trade_execution.entry_time.isoformat(),
+                    "exit_time": datetime.now().isoformat(),
+                    "holding_duration_minutes": int((datetime.now() - trade_execution.entry_time).total_seconds() / 60),
+                    "timestamp": datetime.now().isoformat()
+                }
+
+                await broadcast_to_clients("position_closed", close_data)
+                logger.info(f"Broadcasted position close event for trade {trade_execution.trade_id}")
+
+            except Exception as broadcast_error:
+                logger.error(f"Error broadcasting position close: {broadcast_error}")
+
         except Exception as e:
             logger.error(f"Error closing position: {e}")
             db.rollback()
@@ -500,14 +530,28 @@ class RealTimePnLTracker:
             pnl_updates: List of position PnL updates
         """
         try:
-            from services.unified_websocket_manager import emit_trading_pnl_update
+            from router.unified_websocket_routes import broadcast_to_clients
 
             for pnl_update in pnl_updates:
-                emit_trading_pnl_update({
-                    "type": "pnl_update",
-                    "data": asdict(pnl_update),
+                # Format data to match frontend expectations
+                update_data = {
+                    "position_id": pnl_update.position_id,
+                    "trade_id": pnl_update.trade_id,
+                    "user_id": pnl_update.user_id,
+                    "symbol": pnl_update.symbol,
+                    "current_price": float(pnl_update.current_price),
+                    "pnl": float(pnl_update.pnl),
+                    "pnl_percent": float(pnl_update.pnl_percent),
+                    "stop_loss": float(pnl_update.stop_loss),
+                    "target": float(pnl_update.target),
+                    "trailing_sl_active": pnl_update.trailing_sl_active,
+                    "highest_price": float(pnl_update.highest_price),
+                    "last_updated": pnl_update.last_updated,
                     "timestamp": datetime.now().isoformat()
-                })
+                }
+
+                await broadcast_to_clients("pnl_update", update_data)
+                logger.debug(f"Broadcasted PnL update for position {pnl_update.position_id}")
 
         except Exception as e:
             logger.error(f"Error broadcasting PnL updates: {e}")

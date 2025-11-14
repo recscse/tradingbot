@@ -442,50 +442,47 @@ class CentralizedWebSocketManager:
                 # Validate token expiry BEFORE storing
                 validation_result = await self._validate_token_expiry(admin_broker)
 
-                # If token is expired or expiring soon, defer refresh during startup
+                # If token is expired or expiring soon, schedule background refresh
+                # CRITICAL FIX: NEVER block on token refresh during token loading
                 if not validation_result["valid"] and validation_result["reason"] in [
                     "expired",
                     "expiring_soon",
                 ]:
                     reason = validation_result["reason"]
+                    message = validation_result["message"]
 
-                    # Skip automatic refresh during startup to avoid callback issues
+                    if reason == "expired":
+                        logger.warning(f"⚠️ Admin token expired: {message}")
+                    elif reason == "expiring_soon":
+                        logger.warning(f"⚠️ Admin token expiring soon: {message}")
+
+                    # CRITICAL FIX: SKIP token refresh during startup phase to prevent blocking
                     if self._is_startup_phase:
                         logger.info(
-                            f"🔄 Token {reason} - deferring refresh until after server startup"
+                            f"🔧 STARTUP MODE: Token refresh skipped during startup - {reason} token will be refreshed after startup completes"
                         )
                         self._needs_token_refresh = True
-                        # Continue with expired token for now
                     else:
-                        message = validation_result["message"]
-
-                        if reason == "expired":
-                            logger.error(f"❌ Admin token expired: {message}")
-                        elif reason == "expiring_soon":
-                            logger.warning(f"⚠️ Admin token expiring soon: {message}")
-
                         logger.info(
-                            f"🤖 Attempting automated token refresh for {reason} token BEFORE storing..."
+                            f"🤖 Scheduling background token refresh for {reason} token..."
                         )
+                        self._needs_token_refresh = True
 
+                        # Schedule refresh in background WITHOUT blocking
                         try:
-                            refresh_success = await self._try_automated_refresh()
-                            if refresh_success:
-                                logger.info(
-                                    "✅ Automated token refresh completed - reloading fresh token"
-                                )
-                                # Recursively reload to get the fresh token
-                                return await self._load_admin_token()
-                            else:
-                                logger.warning(
-                                    "⚠️ Automated token refresh failed - will store expired token and retry on connection failure"
-                                )
-                                # Fall through to store the expired token as fallback
+                            # This will return immediately without blocking
+                            await self._try_automated_refresh()
+                            logger.info(
+                                "✅ Token refresh scheduled in background - continuing with current token"
+                            )
                         except Exception as refresh_error:
                             logger.error(
-                                f"❌ Error during automated token refresh: {refresh_error}"
+                                f"❌ Error scheduling background token refresh: {refresh_error}"
                             )
-                            # Fall through to store the expired token as fallback
+
+                    # ALWAYS continue with the current token (even if expired)
+                    # The background refresh will reload it when ready
+                    # This ensures we NEVER block the application startup or connection attempts
 
                 # Store token and user ID (only reached if valid OR refresh failed)
                 self.admin_token = token.strip()
@@ -564,41 +561,49 @@ class CentralizedWebSocketManager:
     async def _try_automated_refresh(self) -> bool:
         """
         Attempt automated token refresh using the automation service
+        CRITICAL FIX: This now runs in background WITHOUT blocking
         """
         try:
-            logger.info("🤖 Attempting automated token refresh...")
+            logger.info("🤖 Scheduling automated token refresh in background...")
 
             # Import automation service dynamically to avoid circular imports
             from services.upstox_automation_service import UpstoxAutomationService
 
+            # CRITICAL FIX: Run token refresh in background task
+            # Do NOT await it - let it run asynchronously
             automation_service = UpstoxAutomationService()
-            # ✅ FIX: Add emergency bypass for expired tokens
-            result = await automation_service.refresh_admin_upstox_token(
-                emergency_bypass=True
-            )
 
-            if result.get("success", False):
-                logger.info("✅ Automated token refresh completed successfully")
+            async def background_refresh():
+                """Background task for token refresh"""
+                try:
+                    logger.info("🔄 Background token refresh starting...")
+                    result = await automation_service.refresh_admin_upstox_token(
+                        emergency_bypass=True
+                    )
 
-                # ✅ FIX: Add delay before reloading to ensure database is updated
-                logger.info("⏳ Waiting for database update to complete...")
-                await asyncio.sleep(2)
+                    if result.get("success", False):
+                        logger.info("✅ Background token refresh completed successfully")
+                        # Wait for database update
+                        await asyncio.sleep(2)
+                        # Reload token
+                        await self._load_admin_token()
+                        logger.info("✅ Token reloaded after background refresh")
+                    else:
+                        error_msg = result.get("error", "Unknown error")
+                        logger.warning(f"⚠️ Background token refresh failed: {error_msg}")
+                except Exception as e:
+                    logger.error(f"❌ Background token refresh error: {e}")
 
-                # Reload the admin token after successful refresh
-                token_reloaded = await self._load_admin_token()
-                if token_reloaded:
-                    logger.info("✅ Admin token reloaded after automated refresh")
-                    return True
-                else:
-                    logger.error("❌ Failed to reload token after automated refresh")
-                    return False
-            else:
-                error_msg = result.get("error", "Unknown error")
-                logger.error(f"❌ Automated token refresh failed: {error_msg}")
-                return False
+            # CRITICAL FIX: Create background task WITHOUT awaiting
+            asyncio.create_task(background_refresh())
+            logger.info("✅ Token refresh scheduled in background - NOT blocking connection")
+
+            # Return False immediately to indicate we didn't wait for refresh
+            # This allows WebSocket connection to proceed with existing token
+            return False
 
         except Exception as e:
-            logger.error(f"❌ Error during automated token refresh: {e}")
+            logger.error(f"❌ Error scheduling token refresh: {e}")
             return False
 
     async def _validate_and_refresh_token(self) -> bool:
@@ -635,17 +640,16 @@ class CentralizedWebSocketManager:
 
                 if admin_user.access_token_expiry <= (now + buffer_time):
                     logger.info(
-                        f"🔄 Token expires soon ({admin_user.access_token_expiry}), refreshing..."
+                        f"🔄 Token expires soon ({admin_user.access_token_expiry}), scheduling background refresh..."
                     )
 
-                    # Try automatic refresh
-                    refresh_success = await self._try_automated_refresh()
-                    if refresh_success:
-                        # Reload the new token
-                        return await self._load_admin_token()
-                    else:
-                        logger.error("❌ Proactive token refresh failed")
-                        return False
+                    # CRITICAL FIX: Schedule refresh in background WITHOUT blocking
+                    await self._try_automated_refresh()
+                    logger.info("✅ Background token refresh scheduled - continuing with current token")
+
+                    # CRITICAL FIX: Return True to allow connection to proceed
+                    # The background task will handle the refresh
+                    return True
 
                 logger.debug(f"✅ Token valid until {admin_user.access_token_expiry}")
                 return True
@@ -854,21 +858,40 @@ class CentralizedWebSocketManager:
 
     async def start_connection(self):
         """Start the centralized WebSocket connection"""
+        # CRITICAL FIX: Run initialization in background to prevent blocking
         if not self.is_running:
-            if not await self.initialize():
-                logger.error("❌ Failed to initialize manager, cannot start connection")
-                return False
+            # Create background task for initialization
+            async def initialize_and_connect():
+                try:
+                    if not await self.initialize():
+                        logger.error("❌ Failed to initialize manager, cannot start connection")
+                        return
 
-        # Reset for fresh start
-        self.reconnect_attempts = 0
-        self.last_connection_attempt = datetime.now()
+                    # Reset for fresh start
+                    self.reconnect_attempts = 0
+                    self.last_connection_attempt = datetime.now()
 
-        # Start connection in background task
-        task = asyncio.create_task(self._maintain_connection())
-        self.background_tasks.add(task)
-        task.add_done_callback(self.background_tasks.discard)
+                    # Start connection loop
+                    await self._maintain_connection()
+                except Exception as e:
+                    logger.error(f"❌ Error in initialization and connection: {e}")
 
-        logger.info("🚀 Centralized WebSocket connection starting...")
+            # Start in background - don't block
+            task = asyncio.create_task(initialize_and_connect())
+            self.background_tasks.add(task)
+            task.add_done_callback(self.background_tasks.discard)
+        else:
+            # Already running, just start maintain connection
+            # Reset for fresh start
+            self.reconnect_attempts = 0
+            self.last_connection_attempt = datetime.now()
+
+            # Start connection in background task
+            task = asyncio.create_task(self._maintain_connection())
+            self.background_tasks.add(task)
+            task.add_done_callback(self.background_tasks.discard)
+
+        logger.info("🚀 Centralized WebSocket connection starting in background...")
         return True
 
     async def _check_network_connectivity(self) -> bool:
@@ -1113,20 +1136,16 @@ class CentralizedWebSocketManager:
                         f"Token validation required: {validation_status.get('reason', 'unknown')}"
                     )
 
-            # Step 2: Attempt token refresh if needed
+            # Step 2: Schedule token refresh in background if needed
+            # CRITICAL FIX: Never block on token refresh during reconnection
             if token_validation_needed or self.reconnect_attempts > 3:
-                logger.info("Attempting proactive token refresh before reconnection")
+                logger.info("Scheduling background token refresh before reconnection")
                 try:
-                    refresh_success = await self._try_automated_refresh()
-                    if refresh_success:
-                        logger.info("Token refresh successful - reloading token")
-                        await self._load_admin_token()
-                    else:
-                        logger.warning(
-                            "Token refresh failed - proceeding with existing token"
-                        )
+                    # This returns immediately without blocking
+                    await self._try_automated_refresh()
+                    logger.info("✅ Background token refresh scheduled - proceeding with reconnection")
                 except Exception as refresh_error:
-                    logger.error(f"Error during token refresh: {refresh_error}")
+                    logger.error(f"Error scheduling token refresh: {refresh_error}")
 
             # Step 3: Reload admin token from database
             try:
@@ -2722,22 +2741,12 @@ class CentralizedWebSocketManager:
         logger.error("🔐 Admin token authentication failed")
         self.connection_ready.clear()
 
-        # First try to trigger automated token refresh
-        logger.info("🔄 Attempting automated token refresh...")
-        refresh_success = await self._try_automated_refresh()
+        # CRITICAL FIX: Schedule token refresh in background WITHOUT blocking
+        logger.info("🔄 Scheduling automated token refresh in background...")
+        await self._try_automated_refresh()
+        logger.info("✅ Token refresh scheduled in background - will reload automatically when ready")
 
-        if refresh_success:
-            logger.info("✅ Automated token refresh successful, reloading token...")
-            token_refreshed = await self._load_admin_token()
-            if token_refreshed:
-                logger.info("✅ New token loaded, triggering reconnection...")
-                # Reset reconnect attempts to allow retry with new token
-                self.reconnect_attempts = 0
-                # Clear any connection ready flag to force reconnect
-                self.connection_ready.clear()
-                return
-
-        # Fallback: Try to reload token from database (in case it was manually refreshed)
+        # Try to reload token from database (in case it was recently refreshed)
         token_refreshed = await self._load_admin_token()
 
         if not token_refreshed:

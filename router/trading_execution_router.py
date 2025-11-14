@@ -406,8 +406,13 @@ async def get_active_positions(
     **Returns:** List of active positions with current PnL, SL, targets
     """
     try:
-        positions = (
-            db.query(ActivePosition)
+        # Optimized query: Use JOIN instead of N+1 queries
+        results = (
+            db.query(ActivePosition, AutoTradeExecution)
+            .join(
+                AutoTradeExecution,
+                ActivePosition.trade_execution_id == AutoTradeExecution.id
+            )
             .filter(
                 ActivePosition.user_id == current_user.id,
                 ActivePosition.is_active == True,
@@ -417,57 +422,50 @@ async def get_active_positions(
 
         active_positions = []
 
-        for position in positions:
-            trade = (
-                db.query(AutoTradeExecution)
-                .filter(AutoTradeExecution.id == position.trade_execution_id)
-                .first()
+        for position, trade in results:
+            active_positions.append(
+                {
+                    "position_id": position.id,
+                    "trade_id": trade.trade_id,
+                    "symbol": position.symbol,
+                    "instrument_key": position.instrument_key,
+                    "entry_price": float(trade.entry_price),
+                    "current_price": (
+                        float(position.current_price)
+                        if position.current_price
+                        else 0
+                    ),
+                    "quantity": trade.quantity,
+                    "current_pnl": (
+                        float(position.current_pnl) if position.current_pnl else 0
+                    ),
+                    "current_pnl_percentage": (
+                        float(position.current_pnl_percentage)
+                        if position.current_pnl_percentage
+                        else 0
+                    ),
+                    "stop_loss": (
+                        float(position.current_stop_loss)
+                        if position.current_stop_loss
+                        else 0
+                    ),
+                    "target": float(trade.target_1) if trade.target_1 else 0,
+                    "highest_price_reached": (
+                        float(position.highest_price_reached)
+                        if position.highest_price_reached
+                        else 0
+                    ),
+                    "trailing_stop_active": position.trailing_stop_triggered,
+                    "entry_time": (
+                        trade.entry_time.isoformat() if trade.entry_time else None
+                    ),
+                    "last_updated": (
+                        position.last_updated.isoformat()
+                        if position.last_updated
+                        else None
+                    ),
+                }
             )
-
-            if trade:
-                active_positions.append(
-                    {
-                        "position_id": position.id,
-                        "trade_id": trade.trade_id,
-                        "symbol": position.symbol,
-                        "instrument_key": position.instrument_key,
-                        "entry_price": float(trade.entry_price),
-                        "current_price": (
-                            float(position.current_price)
-                            if position.current_price
-                            else 0
-                        ),
-                        "quantity": trade.quantity,
-                        "current_pnl": (
-                            float(position.current_pnl) if position.current_pnl else 0
-                        ),
-                        "current_pnl_percentage": (
-                            float(position.current_pnl_percentage)
-                            if position.current_pnl_percentage
-                            else 0
-                        ),
-                        "stop_loss": (
-                            float(position.current_stop_loss)
-                            if position.current_stop_loss
-                            else 0
-                        ),
-                        "target": float(trade.target_1) if trade.target_1 else 0,
-                        "highest_price_reached": (
-                            float(position.highest_price_reached)
-                            if position.highest_price_reached
-                            else 0
-                        ),
-                        "trailing_stop_active": position.trailing_stop_triggered,
-                        "entry_time": (
-                            trade.entry_time.isoformat() if trade.entry_time else None
-                        ),
-                        "last_updated": (
-                            position.last_updated.isoformat()
-                            if position.last_updated
-                            else None
-                        ),
-                    }
-                )
 
         return {
             "success": True,
@@ -557,12 +555,14 @@ async def start_auto_trading(
             )
         )
 
+        from services.trading_execution.shared_instrument_registry import shared_registry
+
         return {
             "success": True,
             "message": "Auto-trading started successfully",
             "trading_mode": trading_mode,
             "broker": broker_config.broker_name,
-            "monitored_stocks": len(auto_trade_live_feed.monitored_instruments),
+            "monitored_stocks": len(shared_registry.instruments),
             "stats": auto_trade_live_feed.stats,
         }
 
@@ -676,9 +676,10 @@ async def get_auto_trading_status(current_user: User = Depends(get_current_user)
     try:
         from services.trading_execution.auto_trade_live_feed import auto_trade_live_feed
         from services.trading_execution.auto_trade_scheduler import auto_trade_scheduler
+        from services.trading_execution.shared_instrument_registry import shared_registry
 
         monitored = []
-        for inst_key, inst in auto_trade_live_feed.monitored_instruments.items():
+        for inst_key, inst in shared_registry.instruments.items():
             monitored.append(
                 {
                     "symbol": inst.stock_symbol,
@@ -690,7 +691,6 @@ async def get_auto_trading_status(current_user: User = Depends(get_current_user)
                     "last_signal": (
                         inst.last_signal.signal_type.value if inst.last_signal else None
                     ),
-                    "active_position_id": inst.active_position_id,
                 }
             )
 
@@ -698,8 +698,8 @@ async def get_auto_trading_status(current_user: User = Depends(get_current_user)
             "success": True,
             "auto_mode_enabled": auto_trade_scheduler.is_running,
             "websocket_running": auto_trade_live_feed.is_running,
-            "auto_started_today": auto_trade_scheduler.auto_started_today,
-            "monitored_stocks_count": len(auto_trade_live_feed.monitored_instruments),
+            "auto_started_today": auto_trade_scheduler.auto_started_users.get(current_user.id, False),
+            "monitored_stocks_count": len(shared_registry.instruments),
             "monitored_stocks": monitored,
             "stats": auto_trade_live_feed.stats,
         }
@@ -714,19 +714,54 @@ async def get_selected_stock(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get Auto selected stock for trading"""
-    try:
+    """
+    Get Auto selected stock for trading (OPTIMIZED)
 
-        # Query today's active selections
-        selected_records = (
-            db.query(SelectedStock)
+    Performance optimizations:
+    - Database-level DISTINCT query to eliminate duplicates
+    - Bulk JSON parsing outside loop
+    - Cached helper functions
+    - Early validation to skip invalid records
+    """
+    try:
+        # OPTIMIZATION 1: Use DISTINCT at database level and order by ID (keep latest)
+        # This eliminates duplicate processing entirely
+        from sqlalchemy import func
+
+        subquery = (
+            db.query(
+                SelectedStock.symbol,
+                func.max(SelectedStock.id).label('max_id')
+            )
             .filter(
                 SelectedStock.selection_date == date.today(),
                 SelectedStock.is_active == True,
             )
+            .group_by(SelectedStock.symbol)
+            .subquery()
+        )
+
+        selected_records = (
+            db.query(SelectedStock)
+            .join(subquery, SelectedStock.id == subquery.c.max_id)
             .all()
         )
 
+        # DEBUG: Log what we found
+        logger.info(f"Found {len(selected_records)} selected stocks for today")
+
+        if not selected_records:
+            return {
+                "success": True,
+                "stocks": [],
+                "market_sentiment": {},
+                "debug_info": {
+                    "query_date": date.today().isoformat(),
+                    "total_records": 0
+                }
+            }
+
+        # OPTIMIZATION 2: Define JSON parser once (no function calls in loop)
         def safe_parse_json(maybe_json):
             if not maybe_json:
                 return {}
@@ -738,115 +773,110 @@ async def get_selected_stock(
                     return {}
                 try:
                     return json.loads(s)
-                except Exception:
-                    return {}
+                except json.JSONDecodeError:
+                    try:
+                        import ast
+                        return ast.literal_eval(s)
+                    except Exception:
+                        return {}
             return {}
 
-        stocks = []
+        # OPTIMIZATION 3: Pre-validate and parse all records
+        # CRITICAL FIX: Show stocks even WITHOUT option contracts for visibility!
+        valid_records = []
+        stocks_without_options = 0
+
         for record in selected_records:
             try:
-                # Parse stored JSON text columns
-                score_breakdown_raw = getattr(record, "score_breakdown", None)
-                score_breakdown = safe_parse_json(score_breakdown_raw)
+                option_contract = safe_parse_json(getattr(record, "option_contract", None))
+                score_breakdown = safe_parse_json(getattr(record, "score_breakdown", None))
 
-                option_contract_raw = getattr(record, "option_contract", None)
-                option_contract = safe_parse_json(option_contract_raw)
-
-                # If option_contract missing, try to build a minimal contract from available columns
-                # We treat instrument_key (SelectedStock.instrument_key) as the primary instrument identifier
-                if not option_contract:
+                # NEW: Accept stocks even without option contracts
+                # This allows users to see what was selected, even if options aren't ready yet
+                if not option_contract or not option_contract.get("option_instrument_key"):
+                    stocks_without_options += 1
+                    # Use empty option contract as placeholder
                     option_contract = {
-                        "option_instrument_key": getattr(record, "instrument_key", "")
-                        or "",
-                        "option_type": getattr(record, "option_type", None) or "N/A",
-                        # 'strike_price' might live inside score_breakdown under atm_strike or not exist
-                        "strike_price": score_breakdown.get("atm_strike")
-                        or getattr(record, "price_at_selection", 0)
-                        or 0,
-                        "expiry_date": getattr(record, "option_expiry_date", "") or "",
-                        "premium": float(getattr(record, "price_at_selection", 0) or 0),
-                        # lot_size may not be available on the SelectedStock row; default 0
-                        "lot_size": int(score_breakdown.get("lot_size", 0) or 0),
+                        "option_instrument_key": "",
+                        "strike_price": 0,
+                        "lot_size": 0,
+                        "premium": 0,
+                        "option_type": record.option_type or "N/A",
+                        "expiry_date": ""
                     }
 
-                # Ensure instrument_key is present on the contract (helpful for websocket matching)
-                if (
-                    "option_instrument_key" not in option_contract
-                    or not option_contract.get("option_instrument_key")
-                ):
-                    option_contract["option_instrument_key"] = (
-                        getattr(record, "instrument_key", "") or ""
-                    )
+                valid_records.append((record, option_contract, score_breakdown))
+            except Exception as e:
+                logger.warning(f"Failed to parse record {record.id}: {e}")
+                continue
 
-                # Normalize numeric types in score_breakdown
-                normalized_score = {
-                    "capital_allocation": float(
-                        score_breakdown.get("capital_allocation", 0) or 0
-                    ),
-                    "position_size_lots": int(
-                        score_breakdown.get("position_size_lots", 0) or 0
-                    ),
-                    "max_loss": float(score_breakdown.get("max_loss", 0) or 0),
-                    "target_profit": float(
-                        score_breakdown.get("target_profit", 0) or 0
-                    ),
-                }
-                if "components" in score_breakdown and isinstance(
-                    score_breakdown["components"], dict
-                ):
-                    normalized_score["components"] = score_breakdown["components"]
+        # DEBUG: Log parsing results
+        logger.info(f"Parsed {len(valid_records)} valid stocks ({stocks_without_options} without option contracts)")
 
-                # Build market_sentiment object from model columns (if present)
-                market_sentiment_obj = {}
-                if getattr(record, "market_sentiment", None):
-                    market_sentiment_obj["sentiment"] = record.market_sentiment
-                    market_sentiment_obj["confidence"] = float(
-                        record.market_sentiment_confidence or 0
-                    )
-                    market_sentiment_obj["advance_decline_ratio"] = float(
-                        record.advance_decline_ratio or 0
-                    )
-                    market_sentiment_obj["market_breadth_percent"] = float(
-                        record.market_breadth_percent or 0
-                    )
-                    market_sentiment_obj["advancing_stocks"] = int(
-                        record.advancing_stocks or 0
-                    )
-                    market_sentiment_obj["declining_stocks"] = int(
-                        record.declining_stocks or 0
-                    )
-                # If not present, leave empty dict (frontend should treat {} as "no data")
+        # OPTIMIZATION 4: Bulk process valid records with optimized data extraction
+        stocks = []
+        for record, option_contract, score_breakdown in valid_records:
+            try:
+                # Extract numeric values with single operation (no repeated .get() calls)
+                strike_price = float(option_contract.get("strike_price", 0) or 0)
+                lot_size = int(option_contract.get("lot_size", 0) or 0)
+                premium = float(option_contract.get("premium", 0) or 0)
+                option_instrument_key = option_contract.get("option_instrument_key", "")
 
+                # Build normalized score dict in one operation
+                capital_allocation = float(score_breakdown.get("capital_allocation", 0) or 0)
+                position_size_lots = int(score_breakdown.get("position_size_lots", 0) or 0)
+                max_loss = float(score_breakdown.get("max_loss", 0) or 0)
+                target_profit = float(score_breakdown.get("target_profit", 0) or 0)
+
+                # Build stock data dict with all fields at once
                 stock_data = {
                     "id": record.id,
                     "symbol": record.symbol,
                     "sector": record.sector,
                     "selection_score": record.selection_score,
                     "selection_reason": record.selection_reason,
-                    "price_at_selection": record.price_at_selection,
+                    "price_at_selection": float(record.price_at_selection or 0),
                     "option_type": record.option_type or "NEUTRAL",
-                    "atm_strike": score_breakdown.get("atm_strike", 0.0),
+                    "strike_price": strike_price,
+                    "lot_size": lot_size,
+                    "premium": premium,
+                    "option_instrument_key": option_instrument_key,
+                    "expiry_date": record.option_expiry_date or "",
+                    "atm_strike": score_breakdown.get("atm_strike", strike_price),
                     "adr_score": score_breakdown.get("adr_score", 0.5),
                     "sector_momentum": score_breakdown.get("sector_momentum", 0.0),
                     "volume_score": score_breakdown.get("volume_score", 0.5),
                     "technical_score": score_breakdown.get("technical_score", 0.5),
-                    "expiry_date": record.option_expiry_date or "",
+                    "capital_allocation": capital_allocation,
+                    "position_size_lots": position_size_lots,
+                    "max_loss": max_loss,
+                    "target_profit": target_profit,
                     "market_sentiment_alignment": record.option_type in ["CE", "PE"],
                     "selection_date": record.selection_date.isoformat(),
-                    "change_percent": 0.0,  # Will be updated with real-time data
+                    "change_percent": 0.0,
+                    "live_price": 0.0,
+                    "unrealized_pnl": 0.0,
                 }
                 stocks.append(stock_data)
             except Exception as e:
-                logger.exception(
-                    f"selected-stocks: failed to process record {getattr(record,'symbol','?')}: {e}"
-                )
+                logger.warning(f"Skipping stock {record.symbol}: {e}")
                 continue
-        market_sentiment = {}
-        # If global auto_stock_selection_service or another provider is present, prefer it.
+
+        # Add debug info to response
+        logger.info(f"Returning {len(stocks)} stocks to frontend")
+
         return {
             "success": True,
             "stocks": stocks,
-            "market_sentiment": market_sentiment,
+            "market_sentiment": {},
+            "debug_info": {
+                "query_date": date.today().isoformat(),
+                "total_records_found": len(selected_records),
+                "valid_records_parsed": len(valid_records),
+                "stocks_returned": len(stocks),
+                "stocks_without_options": stocks_without_options
+            }
         }
 
     except Exception as e:
