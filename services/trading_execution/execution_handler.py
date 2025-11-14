@@ -36,6 +36,7 @@ class ExecutionResult:
         timestamp: Execution timestamp
         metadata: Additional execution metadata
     """
+
     success: bool
     trade_id: str
     order_id: Optional[str]
@@ -73,7 +74,7 @@ class TradeExecutionHandler:
         parent_trade_id: Optional[str] = None,
         broker_name: Optional[str] = None,
         broker_id: Optional[int] = None,
-        allocated_capital: Optional[float] = None
+        allocated_capital: Optional[float] = None,
     ) -> ExecutionResult:
         """
         Execute trade (paper or live based on trading_mode)
@@ -96,21 +97,27 @@ class TradeExecutionHandler:
                 success=False,
                 trade_id="",
                 order_id=None,
-                entry_price=Decimal('0'),
+                entry_price=Decimal("0"),
                 quantity=0,
                 status="FAILED",
                 message=f"Trade not ready for execution: {prepared_trade.status.value}",
                 trade_execution_id=None,
                 active_position_id=None,
                 timestamp=datetime.now().isoformat(),
-                metadata={"error": "Trade not ready"}
+                metadata={"error": "Trade not ready"},
             )
 
         try:
             trading_mode = TradingMode(prepared_trade.trading_mode)
 
             if trading_mode == TradingMode.PAPER:
-                return self._execute_paper_trade(prepared_trade, db)
+                return self._execute_paper_trade(
+                    prepared_trade,
+                    db,
+                    broker_name=broker_name,
+                    broker_id=broker_id,
+                    allocated_capital=allocated_capital,
+                )
             else:
                 return self._execute_live_trade(prepared_trade, db)
 
@@ -120,20 +127,23 @@ class TradeExecutionHandler:
                 success=False,
                 trade_id="",
                 order_id=None,
-                entry_price=Decimal('0'),
+                entry_price=Decimal("0"),
                 quantity=0,
                 status="ERROR",
                 message=str(e),
                 trade_execution_id=None,
                 active_position_id=None,
                 timestamp=datetime.now().isoformat(),
-                metadata={"error": str(e)}
+                metadata={"error": str(e)},
             )
 
     def _execute_paper_trade(
         self,
         prepared_trade: PreparedTrade,
-        db: Session
+        db: Session,
+        broker_name: Optional[str] = None,
+        broker_id: Optional[int] = None,
+        allocated_capital: Optional[float] = None,
     ) -> ExecutionResult:
         """
         Execute paper trade (virtual/mock execution)
@@ -155,11 +165,16 @@ class TradeExecutionHandler:
             # Simulate execution at prepared entry price
             entry_price = prepared_trade.entry_price
             quantity = prepared_trade.position_size_lots * prepared_trade.lot_size
+            lots_traded = prepared_trade.position_size_lots
+            total_investment = entry_price * Decimal(str(quantity))
 
             logger.info(f"Executing PAPER trade: {trade_id}")
             logger.info(f"  Symbol: {prepared_trade.stock_symbol}")
-            logger.info(f"  Option: {prepared_trade.option_type} {prepared_trade.strike_price}")
-            logger.info(f"  Entry: Rs.{entry_price}, Qty: {quantity}")
+            logger.info(
+                f"  Option: {prepared_trade.option_type} {prepared_trade.strike_price}"
+            )
+            logger.info(f"  Entry: Rs.{entry_price}, Qty: {quantity}, Lots: {lots_traded}")
+            logger.info(f"  Total Investment: Rs.{total_investment:,.2f}")
 
             # Create trade execution record
             trade_execution = AutoTradeExecution(
@@ -169,22 +184,28 @@ class TradeExecutionHandler:
                 instrument_key=prepared_trade.option_instrument_key,
                 strategy_name="supertrend_ema",
                 signal_type=f"BUY_{prepared_trade.option_type}",
-                signal_strength=float(prepared_trade.metadata.get('signal_confidence', 0) * 100),
+                signal_strength=float(
+                    prepared_trade.metadata.get("signal_confidence", 0) * 100
+                ),
                 entry_time=datetime.now(),
                 entry_price=float(entry_price),
                 entry_order_id=order_id,
                 quantity=quantity,
                 lot_size=prepared_trade.lot_size,
+                lots_traded=lots_traded,
+                total_investment=float(total_investment),
                 initial_stop_loss=float(prepared_trade.stop_loss),
                 target_1=float(prepared_trade.target_price),
-                target_2=float(prepared_trade.target_price * Decimal('1.1')),  # 10% beyond first target
+                target_2=float(
+                    prepared_trade.target_price * Decimal("1.1")
+                ),  # 10% beyond first target
                 status="ACTIVE",
                 # Multi-demat support
-                broker_name=broker_name or prepared_trade.broker_name or "Paper Trading",
+                broker_name=broker_name or "Paper Trading",
                 broker_config_id=broker_id,
-                allocated_capital=allocated_capital or float(prepared_trade.total_investment),
-                parent_trade_id=parent_trade_id,
-                trading_mode=prepared_trade.trading_mode
+                allocated_capital=allocated_capital,
+                parent_trade_id=None,
+                trading_mode=prepared_trade.trading_mode,
             )
 
             db.add(trade_execution)
@@ -205,7 +226,7 @@ class TradeExecutionHandler:
                 unrealized_risk=float(prepared_trade.max_loss_amount),
                 mark_to_market_time=datetime.now(),
                 is_active=True,
-                last_updated=datetime.now()
+                last_updated=datetime.now(),
             )
 
             db.add(active_position)
@@ -235,8 +256,8 @@ class TradeExecutionHandler:
                     "stop_loss": float(prepared_trade.stop_loss),
                     "target": float(prepared_trade.target_price),
                     "investment": float(prepared_trade.total_investment),
-                    "max_loss": float(prepared_trade.max_loss_amount)
-                }
+                    "max_loss": float(prepared_trade.max_loss_amount),
+                },
             )
 
         except Exception as e:
@@ -245,9 +266,7 @@ class TradeExecutionHandler:
             raise
 
     def _execute_live_trade(
-        self,
-        prepared_trade: PreparedTrade,
-        db: Session
+        self, prepared_trade: PreparedTrade, db: Session
     ) -> ExecutionResult:
         """
         Execute live trade via broker API
@@ -261,38 +280,51 @@ class TradeExecutionHandler:
         """
         try:
             # Get broker configuration
-            broker_config = db.query(BrokerConfig).join(User).filter(
-                User.id == prepared_trade.user_id,
-                BrokerConfig.broker_name.ilike(f"%{prepared_trade.broker_name}%"),
-                BrokerConfig.is_active == True
-            ).first()
+            broker_config = (
+                db.query(BrokerConfig)
+                .join(User)
+                .filter(
+                    User.id == prepared_trade.user_id,
+                    BrokerConfig.broker_name.ilike(f"%{prepared_trade.broker_name}%"),
+                    BrokerConfig.is_active == True,
+                )
+                .first()
+            )
 
             if not broker_config:
-                raise ValueError(f"No active broker configuration found: {prepared_trade.broker_name}")
+                raise ValueError(
+                    f"No active broker configuration found: {prepared_trade.broker_name}"
+                )
 
             # Generate unique trade ID
             trade_id = f"LIVE_{uuid.uuid4().hex[:12].upper()}"
 
             # Place order via broker
-            order_result = self._place_broker_order(
-                broker_config,
-                prepared_trade
+            order_result = self._place_broker_order(broker_config, prepared_trade)
+
+            if not order_result.get("success"):
+                raise ValueError(
+                    f"Order placement failed: {order_result.get('message')}"
+                )
+
+            broker_order_id = order_result.get("order_id")
+            actual_entry_price = Decimal(
+                str(order_result.get("price", prepared_trade.entry_price))
             )
-
-            if not order_result.get('success'):
-                raise ValueError(f"Order placement failed: {order_result.get('message')}")
-
-            broker_order_id = order_result.get('order_id')
-            actual_entry_price = Decimal(str(order_result.get('price', prepared_trade.entry_price)))
-            actual_quantity = order_result.get('quantity', prepared_trade.position_size_lots * prepared_trade.lot_size)
+            actual_quantity = order_result.get(
+                "quantity", prepared_trade.position_size_lots * prepared_trade.lot_size
+            )
+            lots_traded = prepared_trade.position_size_lots
+            total_investment = actual_entry_price * Decimal(str(actual_quantity))
 
             logger.info(f"Executing LIVE trade: {trade_id}")
             logger.info(f"  Symbol: {prepared_trade.stock_symbol}")
             logger.info(f"  Broker Order ID: {broker_order_id}")
-            logger.info(f"  Entry: Rs.{actual_entry_price}, Qty: {actual_quantity}")
+            logger.info(f"  Entry: Rs.{actual_entry_price}, Qty: {actual_quantity}, Lots: {lots_traded}")
+            logger.info(f"  Total Investment: Rs.{total_investment:,.2f}")
 
             # Create trade execution record
-            signal_conf = prepared_trade.metadata.get('signal_confidence', 0.7)
+            signal_conf = prepared_trade.metadata.get("signal_confidence", 0.7)
             signal_strength = float(signal_conf * 100) if signal_conf else 70.0
 
             trade_execution = AutoTradeExecution(
@@ -308,16 +340,18 @@ class TradeExecutionHandler:
                 entry_order_id=broker_order_id,
                 quantity=actual_quantity,
                 lot_size=prepared_trade.lot_size,
+                lots_traded=lots_traded,
+                total_investment=float(total_investment),
                 initial_stop_loss=float(prepared_trade.stop_loss),
                 target_1=float(prepared_trade.target_price),
-                target_2=float(prepared_trade.target_price * Decimal('1.1')),
+                target_2=float(prepared_trade.target_price * Decimal("1.1")),
                 status="ACTIVE",
                 # Multi-demat support - use actual broker details from config
                 broker_name=prepared_trade.broker_name,
                 broker_config_id=broker_config.id,
                 allocated_capital=float(prepared_trade.total_investment),
-                parent_trade_id=parent_trade_id,
-                trading_mode=prepared_trade.trading_mode
+                parent_trade_id=prepared_trade.parent_trade_id or None,
+                trading_mode=prepared_trade.trading_mode,
             )
 
             db.add(trade_execution)
@@ -338,7 +372,7 @@ class TradeExecutionHandler:
                 unrealized_risk=float(prepared_trade.max_loss_amount),
                 mark_to_market_time=datetime.now(),
                 is_active=True,
-                last_updated=datetime.now()
+                last_updated=datetime.now(),
             )
 
             db.add(active_position)
@@ -364,8 +398,8 @@ class TradeExecutionHandler:
                     "symbol": prepared_trade.stock_symbol,
                     "option_type": prepared_trade.option_type,
                     "strike": float(prepared_trade.strike_price),
-                    "expiry": prepared_trade.expiry_date
-                }
+                    "expiry": prepared_trade.expiry_date,
+                },
             )
 
         except Exception as e:
@@ -374,9 +408,7 @@ class TradeExecutionHandler:
             raise
 
     def _place_broker_order(
-        self,
-        broker_config: BrokerConfig,
-        prepared_trade: PreparedTrade
+        self, broker_config: BrokerConfig, prepared_trade: PreparedTrade
     ) -> Dict[str, Any]:
         """
         Place order via broker API
@@ -395,8 +427,9 @@ class TradeExecutionHandler:
             # Determine transaction type (BUY for both CE and PE initial entry)
             transaction_type = "BUY"
 
-            if 'upstox' in broker_name:
+            if "upstox" in broker_name:
                 from brokers.upstox_broker import UpstoxBroker
+
                 broker = UpstoxBroker(broker_config)
 
                 order_result = broker.place_order(
@@ -404,53 +437,55 @@ class TradeExecutionHandler:
                     quantity=quantity,
                     order_type="MARKET",
                     transaction_type=transaction_type,
-                    product_type="INTRADAY"
+                    product_type="INTRADAY",
                 )
 
                 return {
-                    'success': True,
-                    'order_id': order_result.get('order_id'),
-                    'price': prepared_trade.entry_price,
-                    'quantity': quantity,
-                    'broker': 'Upstox'
+                    "success": True,
+                    "order_id": order_result.get("order_id"),
+                    "price": prepared_trade.entry_price,
+                    "quantity": quantity,
+                    "broker": "Upstox",
                 }
 
-            elif 'angel' in broker_name:
-                from brokers.angel_one_broker import AngelOneBroker
+            elif "angel" in broker_name:
+                from brokers.angel_broker import AngelOneBroker
+
                 broker = AngelOneBroker(broker_config)
 
                 order_result = broker.place_order(
                     symbol=prepared_trade.stock_symbol,
                     quantity=quantity,
                     order_type="MARKET",
-                    transaction_type=transaction_type
+                    transaction_type=transaction_type,
                 )
 
                 return {
-                    'success': True,
-                    'order_id': order_result.get('orderid'),
-                    'price': prepared_trade.entry_price,
-                    'quantity': quantity,
-                    'broker': 'AngelOne'
+                    "success": True,
+                    "order_id": order_result.get("orderid"),
+                    "price": prepared_trade.entry_price,
+                    "quantity": quantity,
+                    "broker": "AngelOne",
                 }
 
-            elif 'dhan' in broker_name:
+            elif "dhan" in broker_name:
                 from brokers.dhan_broker import DhanBroker
+
                 broker = DhanBroker(broker_config)
 
                 order_result = broker.place_order(
                     instrument_key=prepared_trade.option_instrument_key,
                     quantity=quantity,
                     order_type="MARKET",
-                    transaction_type=transaction_type
+                    transaction_type=transaction_type,
                 )
 
                 return {
-                    'success': True,
-                    'order_id': order_result.get('orderId'),
-                    'price': prepared_trade.entry_price,
-                    'quantity': quantity,
-                    'broker': 'Dhan'
+                    "success": True,
+                    "order_id": order_result.get("orderId"),
+                    "price": prepared_trade.entry_price,
+                    "quantity": quantity,
+                    "broker": "Dhan",
                 }
 
             else:
@@ -458,10 +493,7 @@ class TradeExecutionHandler:
 
         except Exception as e:
             logger.error(f"Error placing broker order: {e}")
-            return {
-                'success': False,
-                'message': str(e)
-            }
+            return {"success": False, "message": str(e)}
 
 
 # Create singleton instance

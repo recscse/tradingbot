@@ -290,10 +290,15 @@ class RealTimePnLTracker:
             entry_price = Decimal(str(trade_execution.entry_price))
             quantity = trade_execution.quantity
 
+            # Get total investment (use from trade record if available, else calculate)
+            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+
             # Calculate PnL
             pnl_points = current_price - entry_price
             pnl_amount = pnl_points * Decimal(str(quantity))
-            pnl_percent = (pnl_points / entry_price) * Decimal('100') if entry_price > 0 else Decimal('0')
+
+            # CRITICAL FIX: Calculate percentage based on total_investment, not per-unit price
+            pnl_percent = (pnl_amount / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
 
             # Track highest price
             highest_price = max(
@@ -310,7 +315,8 @@ class RealTimePnLTracker:
                 'pnl_percent': pnl_percent,
                 'pnl_points': pnl_points,
                 'highest_price': highest_price,
-                'holding_duration_minutes': int(holding_duration)
+                'holding_duration_minutes': int(holding_duration),
+                'total_investment': total_investment
             }
 
         except Exception as e:
@@ -330,7 +336,8 @@ class RealTimePnLTracker:
         current_price: Decimal
     ) -> Decimal:
         """
-        Update trailing stop loss
+        Update trailing stop loss using SuperTrend-based approach with fallback
+        ENHANCED: Multi-tier trailing with SuperTrend, ATR-based, and percentage fallback
 
         Args:
             position: Active position
@@ -344,42 +351,83 @@ class RealTimePnLTracker:
             entry_price = Decimal(str(trade_execution.entry_price))
             current_sl = Decimal(str(position.current_stop_loss))
 
-            # Determine position type based on signal
-            position_type = "LONG" if "CE" in trade_execution.signal_type else "SHORT"
+            # Determine position type (both CE and PE are long positions when buying options)
+            position_type = "LONG"
 
-            # Use SuperTrend 1x as trailing stop
-            # In production, fetch actual SuperTrend value from strategy engine
-            # For now, use simple percentage trailing
+            # Attempt to get SuperTrend-based trailing from shared registry
+            try:
+                from services.trading_execution.shared_instrument_registry import shared_registry
 
-            if position_type == "LONG":
-                # For long positions, trail below current price
-                if current_price > entry_price:
-                    # In profit - activate trailing
-                    trailing_percent = Decimal('0.02')  # 2% trailing
-                    potential_sl = current_price * (Decimal('1') - trailing_percent)
-                    new_sl = max(current_sl, potential_sl)
+                instrument = shared_registry.get_instrument(position.instrument_key)
 
-                    if new_sl > current_sl:
-                        position.trailing_stop_triggered = True
+                if instrument and hasattr(instrument, 'last_signal') and instrument.last_signal:
+                    # TIER 1: SuperTrend-based trailing (preferred method)
+                    supertrend_value = instrument.last_signal.indicators.get('supertrend_1x')
 
-                    return new_sl
-                else:
-                    # Still at initial SL
-                    return current_sl
+                    if supertrend_value and supertrend_value > 0:
+                        supertrend_decimal = Decimal(str(supertrend_value))
+
+                        if position_type == "LONG":
+                            # Trail using SuperTrend (moves up only, never down)
+                            new_sl = max(current_sl, supertrend_decimal)
+
+                            if new_sl > current_sl:
+                                position.trailing_stop_triggered = True
+                                logger.info(
+                                    f"SuperTrend trailing SL updated: "
+                                    f"{current_sl:.2f} -> {new_sl:.2f} for position {position.id}"
+                                )
+
+                            return new_sl
+
+                # TIER 2: ATR-based trailing (if SuperTrend not available but Greeks available)
+                if instrument and hasattr(instrument, 'option_greeks') and instrument.option_greeks:
+                    option_greeks = instrument.option_greeks
+                    delta = option_greeks.get('delta', 0.5) if option_greeks else 0.5
+
+                    # Get spot ATR from historical data
+                    if hasattr(instrument, 'historical_spot_data') and instrument.historical_spot_data:
+                        spot_atr = instrument.historical_spot_data.get('atr', 0)
+
+                        if spot_atr > 0:
+                            # Convert spot ATR to premium terms using Delta
+                            premium_atr = Decimal(str(spot_atr)) * Decimal(str(abs(delta)))
+
+                            if current_price > entry_price:
+                                # In profit - use 2x ATR as trailing distance
+                                new_sl = current_price - (premium_atr * Decimal('2'))
+                                new_sl = max(current_sl, new_sl)
+
+                                if new_sl > current_sl:
+                                    position.trailing_stop_triggered = True
+                                    logger.info(
+                                        f"ATR-based trailing SL updated: "
+                                        f"{current_sl:.2f} -> {new_sl:.2f} (ATR={premium_atr:.2f})"
+                                    )
+
+                                return new_sl
+
+            except Exception as e:
+                logger.debug(f"Could not fetch SuperTrend/ATR for trailing SL: {e}")
+
+            # TIER 3: Percentage-based trailing (fallback method)
+            if current_price > entry_price:
+                # In profit - activate trailing at 2%
+                trailing_percent = Decimal('0.02')
+                potential_sl = current_price * (Decimal('1') - trailing_percent)
+                new_sl = max(current_sl, potential_sl)
+
+                if new_sl > current_sl:
+                    position.trailing_stop_triggered = True
+                    logger.info(
+                        f"Percentage trailing SL updated: "
+                        f"{current_sl:.2f} -> {new_sl:.2f} (2% below {current_price:.2f})"
+                    )
+
+                return new_sl
             else:
-                # For short positions, trail above current price
-                if current_price < entry_price:
-                    # In profit - activate trailing
-                    trailing_percent = Decimal('0.02')
-                    potential_sl = current_price * (Decimal('1') + trailing_percent)
-                    new_sl = min(current_sl, potential_sl)
-
-                    if new_sl < current_sl:
-                        position.trailing_stop_triggered = True
-
-                    return new_sl
-                else:
-                    return current_sl
+                # Not in profit - keep initial SL
+                return current_sl
 
         except Exception as e:
             logger.error(f"Error updating trailing SL: {e}")
@@ -462,6 +510,8 @@ class RealTimePnLTracker:
             # Calculate final PnL
             entry_price = Decimal(str(trade_execution.entry_price))
             quantity = trade_execution.quantity
+            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+
             pnl_points = exit_price - entry_price
             gross_pnl = pnl_points * Decimal(str(quantity))
 
@@ -469,7 +519,8 @@ class RealTimePnLTracker:
             brokerage = gross_pnl * Decimal('0.005')
             net_pnl = gross_pnl - brokerage
 
-            pnl_percent = (pnl_points / entry_price) * Decimal('100') if entry_price > 0 else Decimal('0')
+            # CRITICAL FIX: Calculate percentage based on total_investment
+            pnl_percent = (net_pnl / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
 
             # Update trade execution
             trade_execution.exit_time = datetime.now()
