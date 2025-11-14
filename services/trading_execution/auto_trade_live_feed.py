@@ -37,6 +37,7 @@ from services.trading_execution.shared_instrument_registry import (
     SharedInstrument
 )
 from router.unified_websocket_routes import broadcast_to_clients
+from utils.market_hours import is_market_open
 
 logger = logging.getLogger("auto_trade_live_feed")
 logging.basicConfig(
@@ -158,6 +159,10 @@ class AutoTradeLiveFeed:
             from services.trading_execution.pnl_tracker import pnl_tracker
             self.pnl_task = asyncio.create_task(pnl_tracker.start_tracking())
             logger.info("Started real-time PnL tracking (using singleton tracker)")
+
+        # Load active positions from database into memory for exit signal eligibility
+        await self._sync_active_positions_from_db()
+        logger.info(f"Synced active positions from database into memory")
 
         logger.info(f"Auto-trading started in {trading_mode.value} mode")
 
@@ -318,8 +323,40 @@ class AutoTradeLiveFeed:
     async def _ws_connection_loop(self):
         """Monitor and restart WebSocket client if needed"""
         backoff = 1
+        market_close_notified = False
+
         while self.is_running:
             try:
+                # CRITICAL: Check if market is open
+                if not is_market_open():
+                    if not market_close_notified:
+                        logger.info(
+                            "Market is closed - auto-trading WebSocket will pause until market opens"
+                        )
+                        market_close_notified = True
+
+                        # Broadcast market closed status
+                        await broadcast_to_clients("market_status_update", {
+                            "status": "closed",
+                            "message": "Market is closed - auto-trading paused",
+                            "timestamp": datetime.now().isoformat()
+                        })
+
+                    # Sleep for 60 seconds and check again
+                    await asyncio.sleep(60)
+                    continue
+                else:
+                    # Market is open
+                    if market_close_notified:
+                        logger.info("Market is open - resuming auto-trading WebSocket")
+                        market_close_notified = False
+
+                        await broadcast_to_clients("market_status_update", {
+                            "status": "open",
+                            "message": "Market is open - auto-trading active",
+                            "timestamp": datetime.now().isoformat()
+                        })
+
                 if self.ws_client_task and self.ws_client_task.done():
                     exc = None
                     try:
@@ -565,6 +602,13 @@ class AutoTradeLiveFeed:
             instrument: Shared instrument
         """
         try:
+            # CRITICAL: Check if market is open before generating signals
+            if not is_market_open():
+                logger.debug(
+                    f"Market is closed - skipping signal generation for {instrument.stock_symbol}"
+                )
+                return
+
             # STEP 1: Generate SPOT-BASED signal (trend detection on underlying)
             spot_signal = strategy_engine.generate_signal(
                 current_price=instrument.live_spot_price,
@@ -699,10 +743,24 @@ class AutoTradeLiveFeed:
                         )
 
             if not eligible_users:
+                # ENHANCED LOGGING: Show why no users are eligible for better debugging
                 logger.info(
                     f"No eligible users for {premium_signal.signal_type.value} signal on {instrument.stock_symbol} "
                     f"(total subscribed: {len(subscribed_users)})"
                 )
+
+                # Debug: Show position state for each subscribed user
+                for user_id in subscribed_users:
+                    has_position_in_memory = (
+                        user_id in self.active_user_positions
+                        and instrument.option_instrument_key in self.active_user_positions[user_id]
+                    )
+                    logger.debug(
+                        f"  User {user_id}: has_position_in_memory={has_position_in_memory}, "
+                        f"signal_type={premium_signal.signal_type.value}, "
+                        f"instrument_key={instrument.option_instrument_key}"
+                    )
+
                 return
 
             # Execute trade for EACH eligible user
@@ -800,6 +858,19 @@ class AutoTradeLiveFeed:
             f"Executing trade for user {user_id}: {instrument.stock_symbol}"
         )
 
+        # CRITICAL: Check if market is open before executing trades
+        if not is_market_open():
+            logger.warning(
+                f"Market is closed - cannot execute trade for user {user_id}, {instrument.stock_symbol}"
+            )
+            await broadcast_to_clients("trade_error", {
+                "symbol": instrument.stock_symbol,
+                "error": "Market is closed - trading not allowed",
+                "user_id": user_id,
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+
         # Get user metadata
         user_metadata = shared_registry.get_user_metadata(user_id)
         broker_name = user_metadata.get("broker_name")
@@ -873,6 +944,39 @@ class AutoTradeLiveFeed:
                     })
                     return
                 else:
+                    # CRITICAL FIX: Check minimum hold time to prevent immediate exits
+                    MIN_HOLD_TIME_MINUTES = 5  # Don't exit positions within 5 minutes of entry
+
+                    if db_position:
+                        trade_entry = db.query(AutoTradeExecution).filter(
+                            AutoTradeExecution.id == db_position.trade_execution_id
+                        ).first()
+
+                        if trade_entry and trade_entry.entry_time:
+                            from datetime import datetime, timedelta
+                            hold_duration = datetime.now() - trade_entry.entry_time
+                            min_duration = timedelta(minutes=MIN_HOLD_TIME_MINUTES)
+
+                            if hold_duration < min_duration:
+                                remaining_time = (min_duration - hold_duration).total_seconds() / 60
+                                logger.info(
+                                    f"⏳ EXIT signal for {instrument.stock_symbol} but position too new "
+                                    f"(held {hold_duration.total_seconds()/60:.1f}m, need {MIN_HOLD_TIME_MINUTES}m). "
+                                    f"Waiting {remaining_time:.1f}m more."
+                                )
+                                # Broadcast cooldown message to UI
+                                await broadcast_to_clients("signal_cooldown", {
+                                    "symbol": instrument.stock_symbol,
+                                    "signal_type": signal.signal_type.value,
+                                    "reason": f"Position must be held for at least {MIN_HOLD_TIME_MINUTES} minutes",
+                                    "user_id": user_id,
+                                    "hold_duration_minutes": hold_duration.total_seconds() / 60,
+                                    "min_hold_minutes": MIN_HOLD_TIME_MINUTES,
+                                    "remaining_minutes": remaining_time,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                                return
+
                     logger.info(
                         f"🔄 Processing EXIT signal for {instrument.stock_symbol} - closing position for user {user_id}"
                     )
@@ -1024,6 +1128,24 @@ class AutoTradeLiveFeed:
 
                 if getattr(exec_result, "success", False):
                     trade_id = getattr(exec_result, 'trade_id', 'unknown')
+
+                    # CRITICAL: Ensure database commit succeeded before broadcasting
+                    try:
+                        db.commit()
+                        logger.info(f"Database commit successful for trade {trade_id}")
+                    except Exception as commit_error:
+                        logger.error(f"Database commit failed for trade {trade_id}: {commit_error}")
+                        db.rollback()
+                        # Don't broadcast if commit failed - data inconsistency
+                        self.stats["errors"] += 1
+                        await broadcast_to_clients("trade_error", {
+                            "symbol": instrument.stock_symbol,
+                            "error": f"Database commit failed: {str(commit_error)}",
+                            "user_id": user_id,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        return
+
                     logger.info(
                         f"Trade executed successfully for user {user_id}: "
                         f"trade_id={trade_id}, "
@@ -1045,7 +1167,7 @@ class AutoTradeLiveFeed:
 
                     self.stats["trades_executed"] += 1
 
-                    # Broadcast to UI
+                    # Broadcast to UI - Trade Executed Event
                     await broadcast_to_clients("trade_executed", {
                         "trade_id": getattr(exec_result, 'trade_id', 'unknown'),
                         "symbol": instrument.stock_symbol,
@@ -1060,6 +1182,32 @@ class AutoTradeLiveFeed:
                         "trading_mode": self.default_trading_mode.value,
                         "timestamp": datetime.now().isoformat()
                     })
+
+                    # Broadcast Active Position Created Event (for UI position list)
+                    await broadcast_to_clients("active_position_created", {
+                        "position_id": getattr(exec_result, "active_position_id", None),
+                        "trade_id": getattr(exec_result, 'trade_id', 'unknown'),
+                        "symbol": instrument.stock_symbol,
+                        "instrument_key": instrument.option_instrument_key,
+                        "option_type": instrument.option_type,
+                        "strike_price": float(instrument.strike_price),
+                        "entry_price": float(self.active_user_positions[user_id][instrument.option_instrument_key]["entry_price"]),
+                        "current_price": float(self.active_user_positions[user_id][instrument.option_instrument_key]["entry_price"]),
+                        "stop_loss": float(signal.stop_loss),
+                        "target": float(signal.target_price),
+                        "quantity": instrument.lot_size * getattr(exec_result, "quantity", 0) // instrument.lot_size,
+                        "user_id": user_id,
+                        "broker_name": broker_name,
+                        "trading_mode": self.default_trading_mode.value,
+                        "current_pnl": 0.0,
+                        "current_pnl_percentage": 0.0,
+                        "timestamp": datetime.now().isoformat()
+                    })
+
+                    logger.info(
+                        f"Broadcasted trade_executed and active_position_created events for user {user_id}, "
+                        f"position_id={getattr(exec_result, 'active_position_id', None)}"
+                    )
                 else:
                     error_msg = getattr(exec_result, 'message', 'unknown')
                     logger.error(
@@ -1523,6 +1671,74 @@ class AutoTradeLiveFeed:
     # - Checks exit conditions (SL/Target hit)
     # - Broadcasts updates via WebSocket
     # - Auto-closes positions when conditions met
+
+    async def _sync_active_positions_from_db(self):
+        """
+        Sync active positions from database into memory on startup
+
+        This ensures exit signals can find eligible users after service restart
+
+        Critical for:
+        - Service restarts don't lose position tracking
+        - Exit signals can properly identify users with active positions
+        - Memory state matches database state
+        """
+        def db_job():
+            db = SessionLocal()
+            try:
+                # Get all active positions with trade execution details
+                active_positions = (
+                    db.query(ActivePosition)
+                    .join(AutoTradeExecution, ActivePosition.trade_execution_id == AutoTradeExecution.id)
+                    .filter(ActivePosition.is_active == True)
+                    .all()
+                )
+
+                result = []
+                for pos in active_positions:
+                    trade = (
+                        db.query(AutoTradeExecution)
+                        .filter(AutoTradeExecution.id == pos.trade_execution_id)
+                        .first()
+                    )
+                    if trade:
+                        result.append({
+                            'user_id': trade.user_id,
+                            'instrument_key': trade.instrument_key,
+                            'position_id': pos.id,
+                            'entry_price': Decimal(str(trade.entry_price)),
+                            'stop_loss': Decimal(str(trade.stop_loss)) if trade.stop_loss else Decimal("0"),
+                            'target': Decimal(str(trade.target_price)) if trade.target_price else Decimal("0"),
+                        })
+                return result
+            finally:
+                db.close()
+
+        try:
+            positions = await asyncio.to_thread(db_job)
+
+            # Populate memory dictionary
+            for pos_data in positions:
+                user_id = pos_data['user_id']
+                instrument_key = pos_data['instrument_key']
+
+                if user_id not in self.active_user_positions:
+                    self.active_user_positions[user_id] = {}
+
+                self.active_user_positions[user_id][instrument_key] = {
+                    'position_id': pos_data['position_id'],
+                    'entry_price': pos_data['entry_price'],
+                    'stop_loss': pos_data['stop_loss'],
+                    'target': pos_data['target'],
+                }
+
+            logger.info(
+                f"Synced {len(positions)} active positions from database into memory "
+                f"for {len(self.active_user_positions)} users"
+            )
+
+        except Exception:
+            logger.exception("Error syncing active positions from database")
 
 
 # Singleton instance
