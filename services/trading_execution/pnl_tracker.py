@@ -18,6 +18,7 @@ from services.trading_execution.strategy_engine import (
     SignalType,
     TrailingStopType
 )
+from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,8 @@ class RealTimePnLTracker:
                     position.current_pnl_percentage = float(pnl_data['pnl_percent'])
                     position.current_stop_loss = float(updated_sl)
                     position.highest_price_reached = float(pnl_data['highest_price'])
-                    position.mark_to_market_time = datetime.now()
-                    position.last_updated = datetime.now()
+                    position.mark_to_market_time = get_ist_now_naive()
+                    position.last_updated = get_ist_now_naive()
 
                     # If exit condition met, close position
                     if should_exit:
@@ -224,7 +225,7 @@ class RealTimePnLTracker:
                         highest_price=pnl_data['highest_price'],
                         trailing_sl_active=position.trailing_stop_triggered,
                         status="CLOSED" if should_exit else "ACTIVE",
-                        last_updated=datetime.now().isoformat()
+                        last_updated=get_ist_isoformat()
                     )
 
                     pnl_updates.append(pnl_update)
@@ -486,6 +487,126 @@ class RealTimePnLTracker:
             logger.error(f"Error checking exit conditions: {e}")
             return False, None
 
+    async def _place_exit_order(
+        self,
+        trade_execution: AutoTradeExecution,
+        exit_price: Decimal,
+        db: Session
+    ) -> Optional[str]:
+        """
+        Place exit order (SELL) to close position
+
+        Args:
+            trade_execution: Trade execution record
+            exit_price: Expected exit price
+            db: Database session
+
+        Returns:
+            Order ID if successful, None if failed or paper trading
+        """
+        try:
+            # Skip if paper trading
+            if trade_execution.trading_mode == "paper":
+                logger.info(f"Paper trading - skipping actual exit order placement")
+                return None
+
+            # Get broker configuration
+            from database.models import BrokerConfig
+
+            broker_config = (
+                db.query(BrokerConfig)
+                .filter(
+                    BrokerConfig.id == trade_execution.broker_config_id,
+                    BrokerConfig.is_active == True
+                )
+                .first()
+            )
+
+            if not broker_config:
+                logger.error(f"No active broker config found for trade {trade_execution.trade_id}")
+                return None
+
+            broker_name = broker_config.broker_name.lower()
+            quantity = trade_execution.quantity
+
+            # Place SELL order based on broker
+            if "upstox" in broker_name:
+                from services.upstox.upstox_order_service import get_upstox_order_service
+
+                # Get Upstox Order Service with V3 API
+                order_service = get_upstox_order_service(
+                    access_token=broker_config.access_token,
+                    use_sandbox=False
+                )
+
+                # Place exit (SELL) order using V3 API
+                result = order_service.place_order_v3(
+                    quantity=quantity,
+                    instrument_token=trade_execution.instrument_key,
+                    order_type="MARKET",
+                    transaction_type="SELL",  # SELL to exit position
+                    product="I",  # Intraday
+                    validity="DAY",
+                    price=0.0,  # Market order
+                    trigger_price=0.0,
+                    disclosed_quantity=0,
+                    is_amo=False,
+                    tag=f"exit_{trade_execution.trade_id}",
+                    slice=True  # Enable auto-slicing
+                )
+
+                if not result.get("success"):
+                    logger.error(f"Upstox exit order failed: {result.get('message')}")
+                    return None
+
+                # Extract order IDs
+                order_ids = result.get("data", {}).get("order_ids", [])
+                primary_order_id = order_ids[0] if order_ids else None
+                latency = result.get("metadata", {}).get("latency", 0)
+
+                logger.info(
+                    f"Upstox V3 exit order placed: {len(order_ids)} orders, "
+                    f"latency: {latency}ms, IDs: {order_ids}"
+                )
+
+                return primary_order_id
+
+            elif "angel" in broker_name:
+                from brokers.angel_broker import AngelOneBroker
+
+                broker = AngelOneBroker(broker_config)
+
+                order_result = broker.place_order(
+                    symbol=trade_execution.symbol,
+                    quantity=quantity,
+                    order_type="MARKET",
+                    transaction_type="SELL",
+                )
+
+                return order_result.get("orderid")
+
+            elif "dhan" in broker_name:
+                from brokers.dhan_broker import DhanBroker
+
+                broker = DhanBroker(broker_config)
+
+                order_result = broker.place_order(
+                    instrument_key=trade_execution.instrument_key,
+                    quantity=quantity,
+                    order_type="MARKET",
+                    transaction_type="SELL",
+                )
+
+                return order_result.get("orderId")
+
+            else:
+                logger.error(f"Unsupported broker for exit order: {broker_name}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error placing exit order: {e}")
+            return None
+
     async def _close_position(
         self,
         position: ActivePosition,
@@ -507,6 +628,15 @@ class RealTimePnLTracker:
         try:
             logger.info(f"🚪 Closing position {trade_execution.trade_id}: {exit_reason}")
 
+            # Place exit order if live trading
+            exit_order_id = None
+            if trade_execution.trading_mode == "live":
+                exit_order_id = await self._place_exit_order(
+                    trade_execution,
+                    exit_price,
+                    db
+                )
+
             # Calculate final PnL
             entry_price = Decimal(str(trade_execution.entry_price))
             quantity = trade_execution.quantity
@@ -523,8 +653,9 @@ class RealTimePnLTracker:
             pnl_percent = (net_pnl / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
 
             # Update trade execution
-            trade_execution.exit_time = datetime.now()
+            trade_execution.exit_time = get_ist_now_naive()
             trade_execution.exit_price = float(exit_price)
+            trade_execution.exit_order_id = exit_order_id
             trade_execution.exit_reason = exit_reason
             trade_execution.gross_pnl = float(gross_pnl)
             trade_execution.net_pnl = float(net_pnl)
@@ -533,7 +664,7 @@ class RealTimePnLTracker:
 
             # Deactivate position
             position.is_active = False
-            position.last_updated = datetime.now()
+            position.last_updated = get_ist_now_naive()
 
             db.commit()
 

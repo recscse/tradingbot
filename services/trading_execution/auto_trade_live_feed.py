@@ -38,6 +38,7 @@ from services.trading_execution.shared_instrument_registry import (
 )
 from router.unified_websocket_routes import broadcast_to_clients
 from utils.market_hours import is_market_open
+from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 
 logger = logging.getLogger("auto_trade_live_feed")
 logging.basicConfig(
@@ -339,7 +340,7 @@ class AutoTradeLiveFeed:
                         await broadcast_to_clients("market_status_update", {
                             "status": "closed",
                             "message": "Market is closed - auto-trading paused",
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": get_ist_isoformat()
                         })
 
                     # Sleep for 60 seconds and check again
@@ -354,7 +355,7 @@ class AutoTradeLiveFeed:
                         await broadcast_to_clients("market_status_update", {
                             "status": "open",
                             "message": "Market is open - auto-trading active",
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": get_ist_isoformat()
                         })
 
                 if self.ws_client_task and self.ws_client_task.done():
@@ -533,7 +534,8 @@ class AutoTradeLiveFeed:
 
             # Extract Greeks and market data
             option_greeks_data = market_ff.get("optionGreeks", {})
-            implied_vol = market_ff.get("iv")
+            # CRITICAL FIX: IV is inside optionGreeks, not marketFF
+            implied_vol = option_greeks_data.get("iv") if option_greeks_data else None
             open_int = market_ff.get("oi")
             vol = market_ff.get("vtt")
 
@@ -548,24 +550,48 @@ class AutoTradeLiveFeed:
                 bid_price_val = first_quote.get("bidP")
                 ask_price_val = first_quote.get("askP")
 
-            # Prepare Greeks
+            # Prepare Greeks with enhanced validation
             greeks = None
             if option_greeks_data and any(option_greeks_data.values()):
-                greeks = {
-                    "delta": float(option_greeks_data.get("delta", 0)),
-                    "theta": float(option_greeks_data.get("theta", 0)),
-                    "gamma": float(option_greeks_data.get("gamma", 0)),
-                    "vega": float(option_greeks_data.get("vega", 0)),
-                    "rho": float(option_greeks_data.get("rho", 0))
-                }
+                try:
+                    # CRITICAL FIX: Validate Greeks before using them
+                    delta_val = option_greeks_data.get("delta", 0)
+                    theta_val = option_greeks_data.get("theta", 0)
+                    gamma_val = option_greeks_data.get("gamma", 0)
+                    vega_val = option_greeks_data.get("vega", 0)
+                    rho_val = option_greeks_data.get("rho", 0)
 
-            # Safely convert volume
+                    # Ensure all values are valid numbers
+                    if delta_val is not None and theta_val is not None:
+                        greeks = {
+                            "delta": float(delta_val),
+                            "theta": float(theta_val),
+                            "gamma": float(gamma_val) if gamma_val is not None else 0.0,
+                            "vega": float(vega_val) if vega_val is not None else 0.0,
+                            "rho": float(rho_val) if rho_val is not None else 0.0
+                        }
+
+                        # VALIDATION: Delta should be between -1 and 1
+                        if not (-1 <= greeks["delta"] <= 1):
+                            logger.warning(
+                                f"Invalid Delta value {greeks['delta']} for {instrument_key} - discarding Greeks"
+                            )
+                            greeks = None
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Greeks conversion failed for {instrument_key}: {e}")
+                    greeks = None
+
+            # Safely convert volume with logging
             volume_val = None
             if vol is not None:
                 try:
                     volume_val = float(vol) if isinstance(vol, (int, float)) else float(str(vol))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    # CRITICAL FIX: Log volume conversion failures for debugging
+                    logger.warning(
+                        f"Volume conversion failed for {instrument_key}: vol={vol}, type={type(vol)}, error={e}"
+                    )
+                    volume_val = None
 
             # Update shared registry
             shared_registry.update_option_data(
@@ -867,7 +893,7 @@ class AutoTradeLiveFeed:
                 "symbol": instrument.stock_symbol,
                 "error": "Market is closed - trading not allowed",
                 "user_id": user_id,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": get_ist_isoformat()
             })
             return
 
@@ -940,7 +966,7 @@ class AutoTradeLiveFeed:
                         "signal_type": signal.signal_type.value,
                         "reason": "No active position to exit",
                         "user_id": user_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": get_ist_isoformat()
                     })
                     return
                 else:
@@ -973,7 +999,7 @@ class AutoTradeLiveFeed:
                                     "hold_duration_minutes": hold_duration.total_seconds() / 60,
                                     "min_hold_minutes": MIN_HOLD_TIME_MINUTES,
                                     "remaining_minutes": remaining_time,
-                                    "timestamp": datetime.now().isoformat()
+                                    "timestamp": get_ist_isoformat()
                                 })
                                 return
 
@@ -1003,7 +1029,7 @@ class AutoTradeLiveFeed:
                             "signal_type": signal.signal_type.value,
                             "user_id": user_id,
                             "error": closure_result.get('error'),
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": get_ist_isoformat()
                         })
                         return
 
@@ -1023,7 +1049,7 @@ class AutoTradeLiveFeed:
                         "signal_type": signal.signal_type.value,
                         "reason": "Position already exists",
                         "user_id": user_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": get_ist_isoformat()
                     })
                     return
 
@@ -1045,7 +1071,7 @@ class AutoTradeLiveFeed:
                     "error": "No premium data available",
                     "user_id": user_id,
                     "premium": float(instrument.live_option_premium),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": get_ist_isoformat()
                 })
                 return
 
@@ -1061,7 +1087,7 @@ class AutoTradeLiveFeed:
                     "error": f"Insufficient historical data ({current_candles}/30 candles)",
                     "user_id": user_id,
                     "candles_available": current_candles,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": get_ist_isoformat()
                 })
                 return
 
@@ -1142,7 +1168,7 @@ class AutoTradeLiveFeed:
                             "symbol": instrument.stock_symbol,
                             "error": f"Database commit failed: {str(commit_error)}",
                             "user_id": user_id,
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": get_ist_isoformat()
                         })
                         return
 
@@ -1180,7 +1206,7 @@ class AutoTradeLiveFeed:
                         "user_id": user_id,
                         "broker_name": broker_name,
                         "trading_mode": self.default_trading_mode.value,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": get_ist_isoformat()
                     })
 
                     # Broadcast Active Position Created Event (for UI position list)
@@ -1201,7 +1227,7 @@ class AutoTradeLiveFeed:
                         "trading_mode": self.default_trading_mode.value,
                         "current_pnl": 0.0,
                         "current_pnl_percentage": 0.0,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": get_ist_isoformat()
                     })
 
                     logger.info(
@@ -1218,7 +1244,7 @@ class AutoTradeLiveFeed:
                         "symbol": instrument.stock_symbol,
                         "error": error_msg,
                         "user_id": user_id,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": get_ist_isoformat()
                     })
             else:
                 # Trade preparation failed or not ready
@@ -1235,7 +1261,7 @@ class AutoTradeLiveFeed:
                     "status": prepared_status_value,
                     "reason": error_reason,
                     "user_id": user_id,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": get_ist_isoformat()
                 })
 
         except Exception:
@@ -1308,7 +1334,7 @@ class AutoTradeLiveFeed:
                     position.current_price = float(current_price)
                     position.current_pnl = float(pnl)
                     position.current_pnl_percentage = float(pnl_percent)
-                    position.last_updated = datetime.now()
+                    position.last_updated = get_ist_now_naive()
 
                     # Check exit conditions
                     should_exit, reason = self._check_exit_conditions_for_user(
@@ -1478,7 +1504,7 @@ class AutoTradeLiveFeed:
             )
 
             # Update trade
-            trade.exit_time = datetime.now()
+            trade.exit_time = get_ist_now_naive()
             trade.exit_price = float(exit_price)
             trade.exit_reason = exit_reason
             trade.net_pnl = float(pnl)
@@ -1487,7 +1513,7 @@ class AutoTradeLiveFeed:
 
             # Deactivate position
             position.is_active = False
-            position.last_updated = datetime.now()
+            position.last_updated = get_ist_now_naive()
 
             # Remove from active positions
             del self.active_user_positions[user_id][instrument.option_instrument_key]
@@ -1507,7 +1533,7 @@ class AutoTradeLiveFeed:
                 "exit_reason": exit_reason,
                 "pnl": float(pnl),
                 "pnl_percent": float(pnl_percent),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": get_ist_isoformat()
             })
 
             return {
@@ -1547,7 +1573,7 @@ class AutoTradeLiveFeed:
                 "live_spot_price": float(instrument.live_spot_price),
                 "live_option_premium": float(instrument.live_option_premium),
                 "state": instrument.state.value,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": get_ist_isoformat(),
             }
 
             await broadcast_to_clients("selected_stock_price_update", update_data)
