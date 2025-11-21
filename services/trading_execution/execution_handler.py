@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from database.models import AutoTradeExecution, ActivePosition, User, BrokerConfig
 from services.trading_execution.capital_manager import TradingMode
 from services.trading_execution.trade_prep import PreparedTrade, TradeStatus
+from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class TradeExecutionHandler:
                 message=f"Trade not ready for execution: {prepared_trade.status.value}",
                 trade_execution_id=None,
                 active_position_id=None,
-                timestamp=datetime.now().isoformat(),
+                timestamp=get_ist_isoformat(),
                 metadata={"error": "Trade not ready"},
             )
 
@@ -133,7 +134,7 @@ class TradeExecutionHandler:
                 message=str(e),
                 trade_execution_id=None,
                 active_position_id=None,
-                timestamp=datetime.now().isoformat(),
+                timestamp=get_ist_isoformat(),
                 metadata={"error": str(e)},
             )
 
@@ -160,7 +161,7 @@ class TradeExecutionHandler:
             trade_id = f"PAPER_{uuid.uuid4().hex[:12].upper()}"
 
             # Generate mock order ID
-            order_id = f"PT{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
+            order_id = f"PT{get_ist_now_naive().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
 
             # Simulate execution at prepared entry price
             entry_price = prepared_trade.entry_price
@@ -187,7 +188,7 @@ class TradeExecutionHandler:
                 signal_strength=float(
                     prepared_trade.metadata.get("signal_confidence", 0) * 100
                 ),
-                entry_time=datetime.now(),
+                entry_time=get_ist_now_naive(),
                 entry_price=float(entry_price),
                 entry_order_id=order_id,
                 quantity=quantity,
@@ -224,9 +225,9 @@ class TradeExecutionHandler:
                 trailing_stop_triggered=False,
                 highest_price_reached=float(entry_price),
                 unrealized_risk=float(prepared_trade.max_loss_amount),
-                mark_to_market_time=datetime.now(),
+                mark_to_market_time=get_ist_now_naive(),
                 is_active=True,
-                last_updated=datetime.now(),
+                last_updated=get_ist_now_naive(),
             )
 
             db.add(active_position)
@@ -246,7 +247,7 @@ class TradeExecutionHandler:
                 message="Paper trade executed successfully",
                 trade_execution_id=trade_execution.id,
                 active_position_id=active_position.id,
-                timestamp=datetime.now().isoformat(),
+                timestamp=get_ist_isoformat(),
                 metadata={
                     "trading_mode": "paper",
                     "symbol": prepared_trade.stock_symbol,
@@ -335,7 +336,7 @@ class TradeExecutionHandler:
                 strategy_name="supertrend_ema",
                 signal_type=f"BUY_{prepared_trade.option_type}",
                 signal_strength=signal_strength,
-                entry_time=datetime.now(),
+                entry_time=get_ist_now_naive(),
                 entry_price=float(actual_entry_price),
                 entry_order_id=broker_order_id,
                 quantity=actual_quantity,
@@ -370,9 +371,9 @@ class TradeExecutionHandler:
                 trailing_stop_triggered=False,
                 highest_price_reached=float(actual_entry_price),
                 unrealized_risk=float(prepared_trade.max_loss_amount),
-                mark_to_market_time=datetime.now(),
+                mark_to_market_time=get_ist_now_naive(),
                 is_active=True,
-                last_updated=datetime.now(),
+                last_updated=get_ist_now_naive(),
             )
 
             db.add(active_position)
@@ -390,7 +391,7 @@ class TradeExecutionHandler:
                 message="Live trade executed successfully",
                 trade_execution_id=trade_execution.id,
                 active_position_id=active_position.id,
-                timestamp=datetime.now().isoformat(),
+                timestamp=get_ist_isoformat(),
                 metadata={
                     "trading_mode": "live",
                     "broker": prepared_trade.broker_name,
@@ -428,24 +429,52 @@ class TradeExecutionHandler:
             transaction_type = "BUY"
 
             if "upstox" in broker_name:
-                from brokers.upstox_broker import UpstoxBroker
+                from services.upstox.upstox_order_service import get_upstox_order_service
 
-                broker = UpstoxBroker(broker_config)
+                # Get Upstox Order Service with V3 API
+                order_service = get_upstox_order_service(
+                    access_token=broker_config.access_token,
+                    use_sandbox=False
+                )
 
-                order_result = broker.place_order(
-                    instrument_key=prepared_trade.option_instrument_key,
+                # Place order using V3 API with auto-slicing
+                result = order_service.place_order_v3(
                     quantity=quantity,
+                    instrument_token=prepared_trade.option_instrument_key,
                     order_type="MARKET",
                     transaction_type=transaction_type,
-                    product_type="INTRADAY",
+                    product="I",  # Intraday
+                    validity="DAY",
+                    price=0.0,  # Market order
+                    trigger_price=0.0,
+                    disclosed_quantity=0,
+                    is_amo=False,
+                    tag="auto_trading",
+                    slice=True  # Enable auto-slicing for freeze quantity handling
+                )
+
+                if not result.get("success"):
+                    raise Exception(f"Upstox order failed: {result.get('message')}")
+
+                # Extract order IDs (may be multiple due to slicing)
+                order_ids = result.get("data", {}).get("order_ids", [])
+                primary_order_id = order_ids[0] if order_ids else None
+                latency = result.get("metadata", {}).get("latency", 0)
+
+                logger.info(
+                    f"Upstox V3 order placed: {len(order_ids)} orders, "
+                    f"latency: {latency}ms, IDs: {order_ids}"
                 )
 
                 return {
                     "success": True,
-                    "order_id": order_result.get("order_id"),
+                    "order_id": primary_order_id,
+                    "order_ids": order_ids,  # All order IDs (for sliced orders)
                     "price": prepared_trade.entry_price,
                     "quantity": quantity,
                     "broker": "Upstox",
+                    "latency_ms": latency,
+                    "sliced": len(order_ids) > 1
                 }
 
             elif "angel" in broker_name:

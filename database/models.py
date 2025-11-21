@@ -20,6 +20,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database.connection import Base
 from passlib.context import CryptContext
+from utils.timezone_utils import get_ist_now_naive
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -1279,8 +1280,8 @@ class AutoTradeExecution(Base):
     status = Column(
         String(20), default="ACTIVE", index=True
     )  # ACTIVE, CLOSED, CANCELLED
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=get_ist_now_naive)
+    updated_at = Column(DateTime, default=get_ist_now_naive, onupdate=get_ist_now_naive)
 
     # Relationships
     user = relationship("User", back_populates="auto_trade_executions")

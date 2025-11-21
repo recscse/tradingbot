@@ -10,7 +10,6 @@
       "Bash(node:*)",
       "Bash(sed:*)",
       "Bash(timeout:*)",
-      "Bash(rm:*)",
       "Bash(npm start)",
       "WebFetch(domain:upstox.com)",
       "WebFetch(domain:github.com)",
@@ -28,12 +27,15 @@
       "Read(~/**)",
       "Edit(~/.claude/settings.json)",
       "WebSearch",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(dir:*)",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx tailwindcss:*)",
+      "Bash(nul)"
     ],
     "deny": [],
-    "additionalDirectories": [
-      "C:\\Work\\P\\app\\tradingapp-main"
-    ]
+    "additionalDirectories": ["C:\\Work\\P\\app\\tradingapp-main"]
   },
   "autoApply": {
     "codingStandards": true,
@@ -73,10 +75,7 @@
   "tradingSystem": {
     "precisionMode": "decimal",
     "auditTrails": true,
-    "regulatoryCompliance": [
-      "SEBI",
-      "RBI"
-    ],
+    "regulatoryCompliance": ["SEBI", "RBI"],
     "marketHours": {
       "start": "09:15",
       "end": "15:30",

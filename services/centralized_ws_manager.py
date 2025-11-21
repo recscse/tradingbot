@@ -23,9 +23,9 @@ import asyncio
 import json
 import logging
 import os
-import time
+import time as time_module
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from decimal import Decimal
 from typing import Dict, Set, List, Optional, Callable, Any, Union
 import aiohttp
@@ -305,16 +305,20 @@ class CentralizedWebSocketManager:
             # Load the latest market snapshot
             snapshot_loaded = await self._load_market_snapshot()
 
-            # Determine market hours (including pre-market)
-            current_time = datetime.now().time()
-            current_day = datetime.now().weekday()
+            # Determine market hours using IST timezone for accuracy
+            import pytz
+            ist = pytz.timezone("Asia/Kolkata")
+            now_ist = datetime.now(ist)
+            current_time = now_ist.time()
+            current_day = now_ist.weekday()
+
+            pre_market_start = time(9, 0)   # 9:00 AM IST - Pre-open starts
+            market_close = time(15, 30)     # 3:30 PM IST - Market closes
+
             market_should_be_open = (
-                current_day < 5  # Weekday check (0=Monday, 4=Friday)
-                and current_time
-                >= datetime.strptime(
-                    "09:00:00", "%H:%M:%S"
-                ).time()  # Start at 9:00 AM for pre-market
-                and current_time <= datetime.strptime("15:30:00", "%H:%M:%S").time()
+                current_day < 5  # Weekday check (Monday=0, Friday=4)
+                and current_time >= pre_market_start
+                and current_time <= market_close
             )
 
             # Update connection status
@@ -332,17 +336,21 @@ class CentralizedWebSocketManager:
                 logger.info("🔄 Restarting existing WebSocket connection with new keys")
                 self.ws_client.stop()
 
-            # Start connection based on market hours
+            # CRITICAL FIX: ALWAYS start market open scheduler for automatic connections
+            # This ensures WebSocket connects at 9:00 AM and 9:15 AM automatically
+            logger.info("🕐 Starting market open scheduler for auto-connect at market hours")
+            self._schedule_market_open_check()
+
+            # Start connection immediately if market is currently open
             if market_should_be_open:
-                logger.info("🔄 Market should be open - starting WebSocket connection")
+                logger.info("🔄 Market is currently open - starting WebSocket connection immediately")
                 task = asyncio.create_task(self._maintain_connection())
                 self.background_tasks.add(task)
                 task.add_done_callback(self.background_tasks.discard)
             else:
                 logger.info(
-                    "💤 Market is likely closed - using snapshot data until market reopens"
+                    f"💤 Market is currently closed (IST time: {current_time.strftime('%H:%M:%S')}) - scheduler will auto-connect at 9:00 AM IST"
                 )
-                self._schedule_market_open_check()
 
             return True
 
@@ -1255,7 +1263,7 @@ class CentralizedWebSocketManager:
     async def _handle_market_data(self, data: dict):
         """Handle incoming market data with enhanced format handling"""
         try:
-            start_time = time.time()
+            start_time = time_module.time()
             self._last_raw_data = data.copy() if isinstance(data, dict) else data
             self.last_data_received = datetime.now()
 
@@ -1296,7 +1304,7 @@ class CentralizedWebSocketManager:
                     logger.warning(f"⚠️ Unknown message format: {str(data)[:200]}...")
 
             # Calculate processing time
-            processing_time = (time.time() - start_time) * 1000
+            processing_time = (time_module.time() - start_time) * 1000
 
             try:
                 # This is a separate method to avoid circular imports
@@ -2561,46 +2569,131 @@ class CentralizedWebSocketManager:
             return False
 
     def _schedule_market_open_check(self):
-        """Schedule periodic checks for market open"""
+        """
+        Schedule periodic checks for market open times.
+
+        This method creates a persistent background task that monitors current time
+        and automatically starts WebSocket connection at market open (9:00 AM IST).
+
+        Behavior:
+        - Checks every 60 seconds when market hours are approaching
+        - Checks every 300 seconds when market is definitely closed
+        - Automatically connects at 9:00 AM IST (pre-open session)
+        - Reconnects at 9:15 AM IST if connection failed during pre-open
+        - Stops checking during active trading hours (9:00 AM - 3:30 PM IST)
+
+        Note:
+            Uses IST timezone for accurate market timing detection.
+        """
+        import pytz
 
         async def check_market_open():
+            ist = pytz.timezone("Asia/Kolkata")
+            logger.info("🕐 Market open scheduler started - will auto-connect at 9:00 AM IST")
+
             while self.is_running:
                 try:
-                    current_time = datetime.now().time()
-                    current_day = datetime.now().weekday()
+                    # Get current IST time
+                    now_ist = datetime.now(ist)
+                    current_time = now_ist.time()
+                    current_day = now_ist.weekday()
 
+                    # Define market timings in IST
+                    pre_market_start = time(9, 0)   # 9:00 AM - Pre-open starts
+                    market_open = time(9, 15)       # 9:15 AM - Regular market opens
+                    market_close = time(15, 30)     # 3:30 PM - Market closes
+
+                    # Check if it's a weekday
+                    is_weekday = current_day < 5  # Monday=0, Friday=4
+
+                    # Determine if market should be open (9:00 AM - 3:30 PM IST on weekdays)
                     market_should_be_open = (
-                        current_day < 5
-                        and current_time
-                        >= datetime.strptime(
-                            "09:00:00", "%H:%M:%S"
-                        ).time()  # Start at 9:00 AM for pre-market
-                        and current_time
-                        <= datetime.strptime("15:30:00", "%H:%M:%S").time()
+                        is_weekday
+                        and current_time >= pre_market_start
+                        and current_time <= market_close
                     )
 
+                    # Special handling for 9:00 AM and 9:15 AM connection triggers
+                    is_pre_open_time = (
+                        is_weekday
+                        and current_time >= pre_market_start
+                        and current_time < market_open
+                    )
+
+                    is_market_open_time = (
+                        is_weekday
+                        and current_time >= market_open
+                        and current_time <= market_close
+                    )
+
+                    # Auto-connect logic
                     if market_should_be_open and not self.connection_ready.is_set():
-                        logger.info(
-                            "🔔 Market opening time detected - starting WebSocket connection"
-                        )
+                        if is_pre_open_time:
+                            logger.info(
+                                "🔔 PRE-OPEN TIME (9:00 AM IST) - Auto-starting WebSocket connection"
+                            )
+                        elif is_market_open_time:
+                            logger.info(
+                                "🔔 MARKET OPEN TIME (9:15 AM+ IST) - Auto-starting WebSocket connection"
+                            )
+                        else:
+                            logger.info(
+                                "🔔 Market hours detected - Starting WebSocket connection"
+                            )
+
                         self._shutdown_scheduled = False
 
+                        # Start connection in background
                         task = asyncio.create_task(self._maintain_connection())
                         self.background_tasks.add(task)
                         task.add_done_callback(self.background_tasks.discard)
 
+                        # Wait a bit before next check
                         await asyncio.sleep(60)
 
-                    sleep_time = 300 if not market_should_be_open else 1800
+                    # Dynamic sleep time based on market status
+                    if not is_weekday:
+                        # Weekend - check every 30 minutes
+                        sleep_time = 1800
+                        logger.debug("📅 Weekend - Next check in 30 minutes")
+                    elif market_should_be_open:
+                        # During market hours - check every 30 minutes (connection should be stable)
+                        sleep_time = 1800
+                        logger.debug("📊 Market hours - Next check in 30 minutes")
+                    elif current_time < pre_market_start:
+                        # Before market open - check more frequently as we approach 9:00 AM
+                        time_to_open = (
+                            datetime.combine(datetime.today(), pre_market_start)
+                            - datetime.combine(datetime.today(), current_time)
+                        ).total_seconds()
+
+                        if time_to_open <= 600:  # Within 10 minutes of market open
+                            sleep_time = 60  # Check every minute
+                            logger.info(f"⏰ Market opens in {int(time_to_open/60)} minutes - Checking every minute")
+                        elif time_to_open <= 1800:  # Within 30 minutes
+                            sleep_time = 300  # Check every 5 minutes
+                            logger.debug(f"⏰ Market opens in {int(time_to_open/60)} minutes - Checking every 5 minutes")
+                        else:
+                            sleep_time = 600  # Check every 10 minutes
+                            logger.debug("💤 Pre-market - Checking every 10 minutes")
+                    else:
+                        # After market close - check every 10 minutes
+                        sleep_time = 600
+                        logger.debug("💤 Post-market - Checking every 10 minutes")
+
                     await asyncio.sleep(sleep_time)
 
                 except Exception as e:
                     logger.error(f"❌ Error in market open check: {e}")
-                    await asyncio.sleep(300)
+                    logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                    await asyncio.sleep(300)  # Wait 5 minutes on error
+
+            logger.info("🛑 Market open scheduler stopped")
 
         task = asyncio.create_task(check_market_open())
         self.background_tasks.add(task)
         task.add_done_callback(self.background_tasks.discard)
+        logger.info("✅ Market open scheduler task created successfully")
 
     async def _update_cache(self, feed_data: dict):
         """Update market data cache with proper data extraction and field mapping"""
