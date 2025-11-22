@@ -1,0 +1,437 @@
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import apiClient from '../services/api';
+
+/**
+ * Performance Analytics Page - Premium Financial Dashboard
+ * Optimized for smooth UX with zero lag, rich visuals, and polished interactions
+ */
+const PerformanceAnalyticsPage = () => {
+  const [timeframe, setTimeframe] = useState('summary');
+  const [performanceData, setPerformanceData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [fetchingData, setFetchingData] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetch_performance_data = useCallback(async () => {
+    setFetchingData(true);
+    setError(null);
+
+    try {
+      const endpoint_map = {
+        'daily': '/v1/trading/execution/performance/daily',
+        'weekly': '/v1/trading/execution/performance/weekly',
+        'monthly': '/v1/trading/execution/performance/monthly',
+        'six_month': '/v1/trading/execution/performance/six-month',
+        'yearly': '/v1/trading/execution/performance/yearly',
+        'summary': '/v1/trading/execution/performance/summary'
+      };
+
+      const response = await apiClient.get(endpoint_map[timeframe]);
+      console.log('Backend response:', response.data);
+
+      if (response.data && response.data.metrics) {
+        setPerformanceData(response.data.metrics);
+      } else {
+        setPerformanceData(response.data);
+      }
+
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching performance data:', err);
+      const error_message = err.response?.data?.detail || err.message || 'Failed to fetch performance data';
+      setError(error_message);
+      setLoading(false);
+    } finally {
+      setFetchingData(false);
+    }
+  }, [timeframe]);
+
+  useEffect(() => {
+    fetch_performance_data();
+  }, [fetch_performance_data]);
+
+  const handle_timeframe_change = useCallback((new_timeframe) => {
+    if (new_timeframe !== timeframe && !fetchingData) {
+      setTimeframe(new_timeframe);
+    }
+  }, [timeframe, fetchingData]);
+
+  const format_currency = useCallback((value) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value || 0);
+  }, []);
+
+  const format_percentage = useCallback((value) => {
+    return `${value >= 0 ? '+' : ''}${(value || 0).toFixed(2)}%`;
+  }, []);
+
+  const get_color_class = useCallback((value) => {
+    if (value > 0) return 'tw-text-emerald-400';
+    if (value < 0) return 'tw-text-rose-400';
+    return 'tw-text-slate-400';
+  }, []);
+
+  const get_bg_color_class = useCallback((value) => {
+    if (value > 0) return 'tw-bg-emerald-500/10 tw-border-emerald-500/30';
+    if (value < 0) return 'tw-bg-rose-500/10 tw-border-rose-500/30';
+    return 'tw-bg-slate-500/10 tw-border-slate-500/30';
+  }, []);
+
+  const timeframe_options = useMemo(() => [
+    { value: 'daily', label: 'Today', icon: '1D' },
+    { value: 'weekly', label: 'Week', icon: '1W' },
+    { value: 'monthly', label: 'Month', icon: '1M' },
+    { value: 'six_month', label: '6 Months', icon: '6M' },
+    { value: 'yearly', label: 'Year', icon: '1Y' },
+    { value: 'summary', label: 'All Time', icon: 'ALL' }
+  ], []);
+
+  const profit_factor_badge = useMemo(() => {
+    const pf = performanceData?.profit_factor || 0;
+    if (pf >= 2) return { text: 'Exceptional', color: 'tw-bg-emerald-500/20 tw-text-emerald-300' };
+    if (pf >= 1.5) return { text: 'Excellent', color: 'tw-bg-cyan-500/20 tw-text-cyan-300' };
+    if (pf >= 1) return { text: 'Good', color: 'tw-bg-amber-500/20 tw-text-amber-300' };
+    return { text: 'Needs Work', color: 'tw-bg-rose-500/20 tw-text-rose-300' };
+  }, [performanceData]);
+
+  if (loading) {
+    return (
+      <div className="tw-min-h-screen tw-bg-gradient-to-br tw-from-slate-950 tw-via-slate-900 tw-to-slate-950 tw-flex tw-items-center tw-justify-center">
+        <div className="tw-text-center tw-space-y-4">
+          <div className="tw-relative tw-w-20 tw-h-20 tw-mx-auto">
+            <div className="tw-absolute tw-inset-0 tw-border-4 tw-border-slate-700/30 tw-rounded-full"></div>
+            <div className="tw-absolute tw-inset-0 tw-border-4 tw-border-cyan-500 tw-rounded-full tw-border-t-transparent tw-animate-spin"></div>
+          </div>
+          <div>
+            <p className="tw-text-slate-300 tw-text-lg tw-font-semibold">Loading Analytics</p>
+            <p className="tw-text-slate-500 tw-text-sm">Fetching performance metrics...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="tw-min-h-screen tw-bg-gradient-to-br tw-from-slate-950 tw-via-slate-900 tw-to-slate-950 tw-flex tw-items-center tw-justify-center tw-p-6">
+        <div className="tw-max-w-md tw-w-full">
+          <div className="tw-bg-slate-900/50 tw-backdrop-blur-xl tw-border tw-border-rose-500/30 tw-rounded-2xl tw-p-8 tw-shadow-2xl tw-space-y-6">
+            <div className="tw-w-16 tw-h-16 tw-bg-rose-500/10 tw-rounded-full tw-flex tw-items-center tw-justify-center tw-mx-auto">
+              <svg className="tw-w-8 tw-h-8 tw-text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div className="tw-text-center tw-space-y-2">
+              <h2 className="tw-text-rose-400 tw-text-xl tw-font-bold">Unable to Load Data</h2>
+              <p className="tw-text-slate-300">{error}</p>
+            </div>
+            <button
+              onClick={fetch_performance_data}
+              disabled={fetchingData}
+              className="tw-w-full tw-px-6 tw-py-3 tw-bg-gradient-to-r tw-from-rose-600 tw-to-rose-500 hover:tw-from-rose-500 hover:tw-to-rose-400 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-300 tw-shadow-lg hover:tw-shadow-rose-500/25 disabled:tw-opacity-50 disabled:tw-cursor-not-allowed"
+            >
+              {fetchingData ? 'Retrying...' : 'Retry Connection'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="tw-min-h-screen tw-bg-gradient-to-br tw-from-slate-950 tw-via-slate-900 tw-to-slate-950 tw-text-white">
+      {/* Sticky Header */}
+      <div className="tw-sticky tw-top-0 tw-z-50 tw-bg-slate-900/80 tw-backdrop-blur-xl tw-border-b tw-border-slate-800/50 tw-shadow-lg">
+        <div className="tw-max-w-7xl tw-mx-auto tw-px-4 sm:tw-px-6 tw-py-6">
+          <div className="tw-flex tw-flex-col md:tw-flex-row md:tw-items-center md:tw-justify-between tw-gap-4">
+            <div>
+              <h1 className="tw-text-3xl md:tw-text-4xl tw-font-bold tw-mb-1 tw-bg-gradient-to-r tw-from-cyan-400 tw-via-blue-400 tw-to-purple-400 tw-bg-clip-text tw-text-transparent">
+                Performance Analytics
+              </h1>
+              <p className="tw-text-slate-400 tw-text-sm md:tw-text-base">
+                Real-time trading performance and risk analysis
+              </p>
+            </div>
+
+            <button
+              onClick={fetch_performance_data}
+              disabled={fetchingData}
+              className="tw-px-5 tw-py-2.5 tw-bg-slate-800 hover:tw-bg-slate-700 tw-border tw-border-slate-700 hover:tw-border-cyan-500/50 tw-text-slate-200 tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-flex tw-items-center tw-gap-2 tw-self-start disabled:tw-opacity-50 disabled:tw-cursor-not-allowed tw-shadow-lg hover:tw-shadow-cyan-500/10"
+            >
+              <svg className={`tw-w-5 tw-h-5 ${fetchingData ? 'tw-animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span className="tw-hidden sm:tw-inline">{fetchingData ? 'Updating' : 'Refresh'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="tw-max-w-7xl tw-mx-auto tw-px-4 sm:tw-px-6 tw-py-6 tw-space-y-6">
+        {/* Timeframe Selector */}
+        <div className="tw-bg-slate-900/30 tw-p-2 tw-rounded-2xl tw-border tw-border-slate-800/50">
+          <div className="tw-flex tw-flex-wrap tw-gap-2">
+            {timeframe_options.map(option => (
+              <button
+                key={option.value}
+                onClick={() => handle_timeframe_change(option.value)}
+                disabled={fetchingData}
+                className={`tw-px-4 tw-py-2.5 tw-rounded-xl tw-font-semibold tw-text-sm tw-transition-all tw-duration-200 tw-flex tw-items-center tw-gap-2 disabled:tw-opacity-50 disabled:tw-cursor-not-allowed ${
+                  timeframe === option.value
+                    ? 'tw-bg-gradient-to-r tw-from-cyan-600 tw-to-blue-600 tw-text-white tw-shadow-lg tw-shadow-cyan-500/30 tw-scale-105'
+                    : 'tw-bg-slate-800/50 tw-text-slate-300 hover:tw-bg-slate-700/50 hover:tw-text-white hover:tw-scale-105'
+                }`}
+              >
+                <span className="tw-font-mono tw-text-xs tw-opacity-75">{option.icon}</span>
+                <span className="tw-hidden sm:tw-inline">{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {performanceData && (
+          <div className="tw-space-y-6">
+            {/* Hero Metrics */}
+            <div className="tw-grid tw-grid-cols-1 sm:tw-grid-cols-2 lg:tw-grid-cols-4 tw-gap-4">
+              {/* Total P&L */}
+              <div className={`tw-group tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-transition-all tw-duration-300 hover:tw-scale-105 hover:tw-shadow-2xl ${get_bg_color_class(parseFloat(performanceData.total_pnl || 0))}`}>
+                <div className="tw-absolute tw-inset-0 tw-bg-gradient-to-br tw-from-slate-800/50 tw-to-slate-900/50"></div>
+                <div className="tw-relative tw-p-5">
+                  <div className="tw-flex tw-items-center tw-justify-between tw-mb-3">
+                    <span className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider">Total P&L</span>
+                    <div className="tw-w-9 tw-h-9 tw-bg-amber-500/10 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                      <svg className="tw-w-5 tw-h-5 tw-text-amber-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd"/>
+                      </svg>
+                    </div>
+                  </div>
+                  <p className={`tw-text-2xl md:tw-text-3xl tw-font-bold tw-mb-1 ${get_color_class(parseFloat(performanceData.total_pnl || 0))}`}>
+                    {format_currency(performanceData.total_pnl)}
+                  </p>
+                  {performanceData.roi !== undefined && (
+                    <div className="tw-flex tw-items-center tw-gap-2">
+                      <span className={`tw-text-sm tw-font-semibold ${get_color_class(parseFloat(performanceData.roi || 0))}`}>
+                        {format_percentage(performanceData.roi)}
+                      </span>
+                      <span className="tw-text-slate-500 tw-text-xs">ROI</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Win Rate */}
+              <div className="tw-group tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-bg-cyan-500/10 tw-border-cyan-500/30 tw-transition-all tw-duration-300 hover:tw-scale-105 hover:tw-shadow-2xl hover:tw-shadow-cyan-500/20">
+                <div className="tw-absolute tw-inset-0 tw-bg-gradient-to-br tw-from-slate-800/50 tw-to-slate-900/50"></div>
+                <div className="tw-relative tw-p-5">
+                  <div className="tw-flex tw-items-center tw-justify-between tw-mb-3">
+                    <span className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider">Win Rate</span>
+                    <div className="tw-w-9 tw-h-9 tw-bg-cyan-500/10 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                      <svg className="tw-w-5 tw-h-5 tw-text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                    </div>
+                  </div>
+                  <p className="tw-text-2xl md:tw-text-3xl tw-font-bold tw-text-cyan-400 tw-mb-1">
+                    {performanceData.win_rate ? `${performanceData.win_rate.toFixed(1)}%` : '0%'}
+                  </p>
+                  <div className="tw-flex tw-items-center tw-gap-2 tw-text-xs">
+                    <span className="tw-text-emerald-400 tw-font-semibold">{performanceData.winning_trades || 0}W</span>
+                    <span className="tw-text-slate-600">/</span>
+                    <span className="tw-text-rose-400 tw-font-semibold">{performanceData.losing_trades || 0}L</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Profit Factor */}
+              <div className="tw-group tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-bg-emerald-500/10 tw-border-emerald-500/30 tw-transition-all tw-duration-300 hover:tw-scale-105 hover:tw-shadow-2xl hover:tw-shadow-emerald-500/20">
+                <div className="tw-absolute tw-inset-0 tw-bg-gradient-to-br tw-from-slate-800/50 tw-to-slate-900/50"></div>
+                <div className="tw-relative tw-p-5">
+                  <div className="tw-flex tw-items-center tw-justify-between tw-mb-3">
+                    <span className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider">Profit Factor</span>
+                    <div className="tw-w-9 tw-h-9 tw-bg-emerald-500/10 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                      <svg className="tw-w-5 tw-h-5 tw-text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                      </svg>
+                    </div>
+                  </div>
+                  <p className={`tw-text-2xl md:tw-text-3xl tw-font-bold tw-mb-1 ${
+                    (performanceData.profit_factor || 0) >= 2 ? 'tw-text-emerald-400' :
+                    (performanceData.profit_factor || 0) >= 1.5 ? 'tw-text-cyan-400' :
+                    (performanceData.profit_factor || 0) >= 1 ? 'tw-text-amber-400' : 'tw-text-rose-400'
+                  }`}>
+                    {performanceData.profit_factor ? performanceData.profit_factor.toFixed(2) : '0.00'}
+                  </p>
+                  <span className={`tw-text-xs tw-font-medium tw-px-2 tw-py-1 tw-rounded-full ${profit_factor_badge.color}`}>
+                    {profit_factor_badge.text}
+                  </span>
+                </div>
+              </div>
+
+              {/* Max Drawdown */}
+              <div className="tw-group tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-bg-rose-500/10 tw-border-rose-500/30 tw-transition-all tw-duration-300 hover:tw-scale-105 hover:tw-shadow-2xl hover:tw-shadow-rose-500/20">
+                <div className="tw-absolute tw-inset-0 tw-bg-gradient-to-br tw-from-slate-800/50 tw-to-slate-900/50"></div>
+                <div className="tw-relative tw-p-5">
+                  <div className="tw-flex tw-items-center tw-justify-between tw-mb-3">
+                    <span className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider">Max Drawdown</span>
+                    <div className="tw-w-9 tw-h-9 tw-bg-rose-500/10 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                      <svg className="tw-w-5 tw-h-5 tw-text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/>
+                      </svg>
+                    </div>
+                  </div>
+                  <p className="tw-text-2xl md:tw-text-3xl tw-font-bold tw-text-rose-400 tw-mb-1">
+                    {format_currency(Math.abs(performanceData.max_drawdown || 0))}
+                  </p>
+                  <span className="tw-text-xs tw-text-slate-500">Risk Exposure</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed Stats */}
+            <div className="tw-grid tw-grid-cols-1 lg:tw-grid-cols-2 tw-gap-6">
+              {/* Trading Performance */}
+              <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                <div className="tw-flex tw-items-center tw-gap-3 tw-mb-6 tw-pb-4 tw-border-b tw-border-slate-800">
+                  <div className="tw-w-10 tw-h-10 tw-bg-gradient-to-br tw-from-cyan-600 tw-to-blue-600 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                    <svg className="tw-w-5 tw-h-5 tw-text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                  </div>
+                  <h2 className="tw-text-xl tw-font-bold tw-text-white">Trading Performance</h2>
+                </div>
+                <div className="tw-space-y-3">
+                  {[
+                    { label: 'Total Trades', value: performanceData.total_trades || 0, color: 'tw-text-white' },
+                    { label: 'Winning Trades', value: performanceData.winning_trades || 0, color: 'tw-text-emerald-400' },
+                    { label: 'Losing Trades', value: performanceData.losing_trades || 0, color: 'tw-text-rose-400' },
+                    { label: 'Average Win', value: format_currency(performanceData.avg_win || 0), color: 'tw-text-emerald-400' },
+                    { label: 'Average Loss', value: format_currency(performanceData.avg_loss || 0), color: 'tw-text-rose-400' },
+                    { label: 'Best Trade', value: format_currency(performanceData.best_trade || 0), color: 'tw-text-emerald-400', highlight: true },
+                    { label: 'Worst Trade', value: format_currency(performanceData.worst_trade || 0), color: 'tw-text-rose-400', highlight: true }
+                  ].map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`tw-flex tw-justify-between tw-items-center tw-py-3 tw-px-4 tw-rounded-lg tw-transition-colors ${
+                        item.highlight
+                          ? `tw-bg-${item.color.includes('emerald') ? 'emerald' : 'rose'}-500/5 tw-border tw-border-${item.color.includes('emerald') ? 'emerald' : 'rose'}-500/20`
+                          : 'tw-bg-slate-800/30 hover:tw-bg-slate-800/50'
+                      }`}
+                    >
+                      <span className="tw-text-slate-300 tw-font-medium tw-text-sm">{item.label}</span>
+                      <span className={`tw-font-bold ${item.color} tw-text-base`}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Financial Metrics */}
+              <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                <div className="tw-flex tw-items-center tw-gap-3 tw-mb-6 tw-pb-4 tw-border-b tw-border-slate-800">
+                  <div className="tw-w-10 tw-h-10 tw-bg-gradient-to-br tw-from-purple-600 tw-to-pink-600 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                    <svg className="tw-w-5 tw-h-5 tw-text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                    </svg>
+                  </div>
+                  <h2 className="tw-text-xl tw-font-bold tw-text-white">Financial Metrics</h2>
+                </div>
+                <div className="tw-space-y-3">
+                  {[
+                    { label: 'Total Profit', value: format_currency(performanceData.total_profit || 0), color: 'tw-text-emerald-400' },
+                    { label: 'Total Loss', value: format_currency(performanceData.total_loss || 0), color: 'tw-text-rose-400' },
+                    performanceData.sharpe_ratio !== undefined && { label: 'Sharpe Ratio', value: performanceData.sharpe_ratio.toFixed(2), color: performanceData.sharpe_ratio >= 2 ? 'tw-text-emerald-400' : performanceData.sharpe_ratio >= 1 ? 'tw-text-cyan-400' : 'tw-text-amber-400' },
+                    performanceData.roi !== undefined && { label: 'ROI', value: format_percentage(performanceData.roi), color: get_color_class(parseFloat(performanceData.roi || 0)) },
+                    { label: 'Expectancy', value: format_currency(performanceData.expectancy || 0), color: get_color_class(parseFloat(performanceData.expectancy || 0)) },
+                    performanceData.total_fees !== undefined && { label: 'Total Fees', value: format_currency(performanceData.total_fees || 0), color: 'tw-text-amber-400', highlight: true }
+                  ].filter(Boolean).map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`tw-flex tw-justify-between tw-items-center tw-py-3 tw-px-4 tw-rounded-lg tw-transition-colors ${
+                        item.highlight
+                          ? 'tw-bg-amber-500/5 tw-border tw-border-amber-500/20'
+                          : 'tw-bg-slate-800/30 hover:tw-bg-slate-800/50'
+                      }`}
+                    >
+                      <span className="tw-text-slate-300 tw-font-medium tw-text-sm">{item.label}</span>
+                      <span className={`tw-font-bold ${item.color} tw-text-base`}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Risk Analysis */}
+            {performanceData.max_drawdown !== undefined && (
+              <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                <div className="tw-flex tw-items-center tw-gap-3 tw-mb-6 tw-pb-4 tw-border-b tw-border-slate-800">
+                  <div className="tw-w-10 tw-h-10 tw-bg-gradient-to-br tw-from-rose-600 tw-to-orange-600 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                    <svg className="tw-w-5 tw-h-5 tw-text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                  </div>
+                  <h2 className="tw-text-xl tw-font-bold tw-text-white">Risk Analysis</h2>
+                </div>
+                <div className="tw-grid tw-grid-cols-1 md:tw-grid-cols-3 tw-gap-6">
+                  <div className="tw-bg-gradient-to-br tw-from-rose-500/10 tw-to-rose-600/5 tw-border tw-border-rose-500/20 tw-rounded-xl tw-p-5 tw-transition-all hover:tw-border-rose-500/40">
+                    <p className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider tw-mb-3">Maximum Drawdown</p>
+                    <p className="tw-text-3xl tw-font-bold tw-text-rose-400 tw-mb-1">
+                      {format_currency(Math.abs(performanceData.max_drawdown))}
+                    </p>
+                    <p className="tw-text-xs tw-text-slate-500">Peak to trough decline</p>
+                  </div>
+                  <div className="tw-bg-gradient-to-br tw-from-amber-500/10 tw-to-amber-600/5 tw-border tw-border-amber-500/20 tw-rounded-xl tw-p-5 tw-transition-all hover:tw-border-amber-500/40">
+                    <p className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider tw-mb-3">Avg Risk/Trade</p>
+                    <p className="tw-text-3xl tw-font-bold tw-text-amber-400 tw-mb-1">
+                      {performanceData.total_trades > 0
+                        ? format_currency(Math.abs(performanceData.total_loss || 0) / performanceData.total_trades)
+                        : format_currency(0)
+                      }
+                    </p>
+                    <p className="tw-text-xs tw-text-slate-500">Per trade exposure</p>
+                  </div>
+                  <div className="tw-bg-gradient-to-br tw-from-cyan-500/10 tw-to-cyan-600/5 tw-border tw-border-cyan-500/20 tw-rounded-xl tw-p-5 tw-transition-all hover:tw-border-cyan-500/40">
+                    <p className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider tw-mb-3">Risk/Reward</p>
+                    <p className="tw-text-3xl tw-font-bold tw-text-cyan-400 tw-mb-1">
+                      {performanceData.avg_loss !== 0
+                        ? `1:${Math.abs((performanceData.avg_win || 0) / (performanceData.avg_loss || 1)).toFixed(2)}`
+                        : 'N/A'
+                      }
+                    </p>
+                    <p className="tw-text-xs tw-text-slate-500">Profit vs loss ratio</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Period Info */}
+            {performanceData.period_start && performanceData.period_end && (
+              <div className="tw-bg-gradient-to-r tw-from-cyan-900/20 tw-to-blue-900/20 tw-border tw-border-cyan-500/30 tw-rounded-2xl tw-p-6">
+                <div className="tw-flex tw-items-center tw-gap-4">
+                  <div className="tw-w-12 tw-h-12 tw-bg-cyan-500/10 tw-rounded-xl tw-flex tw-items-center tw-justify-center">
+                    <svg className="tw-w-6 tw-h-6 tw-text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="tw-font-semibold tw-text-lg tw-text-cyan-300 tw-mb-1">Analysis Period</p>
+                    <p className="tw-text-sm tw-text-slate-300">
+                      {new Date(performanceData.period_start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {' '}-{' '}
+                      {new Date(performanceData.period_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default PerformanceAnalyticsPage;

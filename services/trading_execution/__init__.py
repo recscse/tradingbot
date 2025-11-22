@@ -37,6 +37,12 @@ from services.trading_execution.pnl_tracker import (
     RealTimePnLTracker
 )
 
+from services.trading_execution.trade_analytics_service import (
+    trade_analytics_service,
+    PerformanceMetrics,
+    TradeAnalyticsService
+)
+
 __all__ = [
     'capital_manager',
     'TradingMode',
@@ -57,4 +63,7 @@ __all__ = [
     'pnl_tracker',
     'PositionPnL',
     'RealTimePnLTracker',
+    'trade_analytics_service',
+    'PerformanceMetrics',
+    'TradeAnalyticsService',
 ]

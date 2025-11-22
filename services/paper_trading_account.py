@@ -336,18 +336,27 @@ class PaperTradingAccountService:
             exit_value = exit_price * position.quantity * position.lot_size
             final_pnl = exit_value - position.invested_amount
             final_pnl_percentage = (final_pnl / position.invested_amount) * 100
-            
+
             # Update position
             position.current_price = exit_price
             position.current_value = exit_value
             position.pnl = final_pnl
             position.pnl_percentage = final_pnl_percentage
             position.status = "CLOSED"
-            
-            # Update account
+
+            # Update account - CRITICAL FIX: Properly reflect P&L in balance
+            # Formula: new_balance = old_balance - original_investment + exit_value
+            # Which is equivalent to: new_balance = old_balance + P&L
             account.used_margin -= position.invested_amount
             account.available_margin += exit_value  # Add exit value to available margin
             account.current_balance = account.current_balance - position.invested_amount + exit_value
+
+            # Update total P&L (cumulative across all closed positions)
+            account.total_pnl += final_pnl
+
+            # Update daily P&L (should be reset daily at market open)
+            account.daily_pnl += final_pnl
+
             account.positions_count -= 1
             account.updated_at = datetime.now(timezone.utc)
             
