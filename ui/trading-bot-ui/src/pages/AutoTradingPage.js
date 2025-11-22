@@ -360,6 +360,7 @@ const AutoTradingPage = () => {
         socketRef.current = null;
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -706,8 +707,6 @@ const AutoTradingPage = () => {
               {activePositions.length > 0 ? (
                 <div className="tw-grid tw-grid-cols-1 lg:tw-grid-cols-2 tw-gap-4">
                   {activePositions.map((position) => {
-                    const priceChange = position.current_price - position.entry_price;
-                    const priceChangePercent = ((priceChange / position.entry_price) * 100).toFixed(2);
                     const isProfit = position.current_pnl >= 0;
 
                     return (

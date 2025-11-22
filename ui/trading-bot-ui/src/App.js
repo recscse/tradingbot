@@ -33,6 +33,7 @@ import NotificationsDashboard from "./components/notifications/NotificationsDash
 import SecurityPage from "./pages/SecurityPage";
 import TermsModal from "./components/TermsModal";
 import { UnifiedMarketProvider } from "./hooks/useUnifiedMarketData";
+import LivePnLWidget from "./components/trading/LivePnLWidget";
 
 // 🎯 PROTECTED LAYOUT WRAPPER - This ensures all providers are available
 const ProtectedLayout = ({ children }) => (
@@ -40,6 +41,7 @@ const ProtectedLayout = ({ children }) => (
     <MarketProvider>
       <UnifiedMarketProvider>
         <Layout>{children}</Layout>
+        <LivePnLWidget />
       </UnifiedMarketProvider>
     </MarketProvider>
   </PrivateRoute>
