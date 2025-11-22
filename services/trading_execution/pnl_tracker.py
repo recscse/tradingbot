@@ -337,8 +337,12 @@ class RealTimePnLTracker:
         current_price: Decimal
     ) -> Decimal:
         """
-        Update trailing stop loss using SuperTrend-based approach with fallback
-        ENHANCED: Multi-tier trailing with SuperTrend, ATR-based, and percentage fallback
+        Update trailing stop loss using ENHANCED strategy engine with LOCK PROFIT mechanism
+
+        ENHANCED LOGIC (from strategy_engine.py):
+        1. If profit >= 50% of target: Trail to BREAKEVEN (make position risk-free)
+        2. If profit >= 100% of target: Lock 80% of profit
+        3. Otherwise: Use SuperTrend/ATR/percentage trailing
 
         Args:
             position: Active position
@@ -349,86 +353,50 @@ class RealTimePnLTracker:
             Updated stop loss level
         """
         try:
+            from services.trading_execution.strategy_engine import strategy_engine, TrailingStopType
+
             entry_price = Decimal(str(trade_execution.entry_price))
             current_sl = Decimal(str(position.current_stop_loss))
+            target_price = Decimal(str(trade_execution.target_1)) if trade_execution.target_1 else None
 
             # Determine position type (both CE and PE are long positions when buying options)
             position_type = "LONG"
 
-            # Attempt to get SuperTrend-based trailing from shared registry
+            # Get SuperTrend value from shared registry
+            supertrend_value = None
             try:
                 from services.trading_execution.shared_instrument_registry import shared_registry
 
                 instrument = shared_registry.get_instrument(position.instrument_key)
 
                 if instrument and hasattr(instrument, 'last_signal') and instrument.last_signal:
-                    # TIER 1: SuperTrend-based trailing (preferred method)
-                    supertrend_value = instrument.last_signal.indicators.get('supertrend_1x')
-
-                    if supertrend_value and supertrend_value > 0:
-                        supertrend_decimal = Decimal(str(supertrend_value))
-
-                        if position_type == "LONG":
-                            # Trail using SuperTrend (moves up only, never down)
-                            new_sl = max(current_sl, supertrend_decimal)
-
-                            if new_sl > current_sl:
-                                position.trailing_stop_triggered = True
-                                logger.info(
-                                    f"SuperTrend trailing SL updated: "
-                                    f"{current_sl:.2f} -> {new_sl:.2f} for position {position.id}"
-                                )
-
-                            return new_sl
-
-                # TIER 2: ATR-based trailing (if SuperTrend not available but Greeks available)
-                if instrument and hasattr(instrument, 'option_greeks') and instrument.option_greeks:
-                    option_greeks = instrument.option_greeks
-                    delta = option_greeks.get('delta', 0.5) if option_greeks else 0.5
-
-                    # Get spot ATR from historical data
-                    if hasattr(instrument, 'historical_spot_data') and instrument.historical_spot_data:
-                        spot_atr = instrument.historical_spot_data.get('atr', 0)
-
-                        if spot_atr > 0:
-                            # Convert spot ATR to premium terms using Delta
-                            premium_atr = Decimal(str(spot_atr)) * Decimal(str(abs(delta)))
-
-                            if current_price > entry_price:
-                                # In profit - use 2x ATR as trailing distance
-                                new_sl = current_price - (premium_atr * Decimal('2'))
-                                new_sl = max(current_sl, new_sl)
-
-                                if new_sl > current_sl:
-                                    position.trailing_stop_triggered = True
-                                    logger.info(
-                                        f"ATR-based trailing SL updated: "
-                                        f"{current_sl:.2f} -> {new_sl:.2f} (ATR={premium_atr:.2f})"
-                                    )
-
-                                return new_sl
+                    supertrend_raw = instrument.last_signal.indicators.get('supertrend_1x')
+                    if supertrend_raw and supertrend_raw > 0:
+                        supertrend_value = Decimal(str(supertrend_raw))
 
             except Exception as e:
-                logger.debug(f"Could not fetch SuperTrend/ATR for trailing SL: {e}")
+                logger.debug(f"Could not fetch SuperTrend for trailing SL: {e}")
 
-            # TIER 3: Percentage-based trailing (fallback method)
-            if current_price > entry_price:
-                # In profit - activate trailing at 2%
-                trailing_percent = Decimal('0.02')
-                potential_sl = current_price * (Decimal('1') - trailing_percent)
-                new_sl = max(current_sl, potential_sl)
+            # Use strategy engine's ENHANCED trailing stop with LOCK PROFIT
+            new_sl = strategy_engine.update_trailing_stop(
+                current_price=current_price,
+                entry_price=entry_price,
+                current_stop_loss=current_sl,
+                trailing_type=TrailingStopType.SUPERTREND_1X,
+                supertrend_value=supertrend_value,
+                position_type=position_type,
+                target_price=target_price  # Pass target for lock profit calculation
+            )
 
-                if new_sl > current_sl:
-                    position.trailing_stop_triggered = True
-                    logger.info(
-                        f"Percentage trailing SL updated: "
-                        f"{current_sl:.2f} -> {new_sl:.2f} (2% below {current_price:.2f})"
-                    )
+            # Update trailing stop triggered flag
+            if new_sl > current_sl:
+                position.trailing_stop_triggered = True
+                logger.info(
+                    f"Enhanced trailing SL updated: "
+                    f"{current_sl:.2f} -> {new_sl:.2f} for position {position.id}"
+                )
 
-                return new_sl
-            else:
-                # Not in profit - keep initial SL
-                return current_sl
+            return new_sl
 
         except Exception as e:
             logger.error(f"Error updating trailing SL: {e}")
