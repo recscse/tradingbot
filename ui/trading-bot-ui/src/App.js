@@ -22,6 +22,7 @@ import ProfilePage from "./pages/ProfilePage";
 import BacktestingPage from "./pages/BacktestingPage";
 import PaperTradingPage from "./pages/PaperTradingPage";
 import AutoTradingPage from "./pages/AutoTradingPage";
+import PerformanceAnalyticsPage from "./pages/PerformanceAnalyticsPage";
 import { MarketProvider } from "./context/MarketProvider";
 import EnhancedOptionChainPage from "./pages/EnhancedOptionChainPage";
 import AboutPage from "./pages/AboutPage";
@@ -157,6 +158,14 @@ const App = () => {
               element={
                 <ProtectedLayout>
                   <AutoTradingPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/performance-analytics"
+              element={
+                <ProtectedLayout>
+                  <PerformanceAnalyticsPage />
                 </ProtectedLayout>
               }
             />

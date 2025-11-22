@@ -1,6 +1,63 @@
 /* Import global responsive framework */
 @import './styles/responsive.css';
 
+/* Tailwind CSS - Direct import for CRA PostCSS processing */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom dark theme utilities for Tailwind pages */
+@layer utilities {
+  .dark-theme {
+    @apply tw-bg-slate-900 tw-text-white;
+  }
+
+  .card-gradient {
+    @apply tw-bg-gradient-to-br tw-from-slate-800 tw-to-slate-900;
+  }
+
+  .glass-card {
+    @apply tw-bg-slate-800/50 tw-backdrop-blur-sm tw-border tw-border-slate-700;
+  }
+
+  .success-gradient {
+    @apply tw-bg-gradient-to-br tw-from-success-500/10 tw-to-success-600/5;
+  }
+
+  .error-gradient {
+    @apply tw-bg-gradient-to-br tw-from-error-500/10 tw-to-error-600/5;
+  }
+
+  .primary-gradient {
+    @apply tw-bg-gradient-to-br tw-from-primary-500/10 tw-to-primary-600/5;
+  }
+}
+
+/* Custom scrollbar for Tailwind components */
+.tailwind-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tailwind-scrollbar::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.tailwind-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+.tailwind-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Smooth transitions for Tailwind components */
+.tw-transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
