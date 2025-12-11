@@ -39,7 +39,7 @@ jobs:
         cache-dependency-path: ui/trading-bot-ui/package-lock.json
         
     - name: Cache node modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ui/trading-bot-ui/node_modules
@@ -281,7 +281,7 @@ jobs:
         echo "Build validation completed"
         
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: frontend-build
@@ -289,9 +289,9 @@ jobs:
           ui/trading-bot-ui/build/
           ui/trading-bot-ui/coverage/
         retention-days: 7
-        
+
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: frontend-test-results

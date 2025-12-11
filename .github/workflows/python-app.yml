@@ -395,7 +395,7 @@ jobs:
           " || echo "Health check completed with warnings"
 
       - name: Upload test results and coverage
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results-backend
@@ -418,9 +418,12 @@ jobs:
       - name: Publish test results
         uses: dorny/test-reporter@v1
         if: always()
+        continue-on-error: true
         with:
           name: Backend Tests
-          path: test-results/*.xml
+          path: |
+            test-results/*.xml
+            test-results/**/*.xml
           reporter: java-junit
           fail-on-error: false
 

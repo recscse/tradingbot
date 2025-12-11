@@ -22,6 +22,7 @@ import ProfilePage from "./pages/ProfilePage";
 import BacktestingPage from "./pages/BacktestingPage";
 import PaperTradingPage from "./pages/PaperTradingPage";
 import AutoTradingPage from "./pages/AutoTradingPage";
+import PerformanceAnalyticsPage from "./pages/PerformanceAnalyticsPage";
 import { MarketProvider } from "./context/MarketProvider";
 import EnhancedOptionChainPage from "./pages/EnhancedOptionChainPage";
 import AboutPage from "./pages/AboutPage";
@@ -32,6 +33,7 @@ import NotificationsDashboard from "./components/notifications/NotificationsDash
 import SecurityPage from "./pages/SecurityPage";
 import TermsModal from "./components/TermsModal";
 import { UnifiedMarketProvider } from "./hooks/useUnifiedMarketData";
+import LivePnLWidget from "./components/trading/LivePnLWidget";
 
 // 🎯 PROTECTED LAYOUT WRAPPER - This ensures all providers are available
 const ProtectedLayout = ({ children }) => (
@@ -39,6 +41,7 @@ const ProtectedLayout = ({ children }) => (
     <MarketProvider>
       <UnifiedMarketProvider>
         <Layout>{children}</Layout>
+        <LivePnLWidget />
       </UnifiedMarketProvider>
     </MarketProvider>
   </PrivateRoute>
@@ -157,6 +160,14 @@ const App = () => {
               element={
                 <ProtectedLayout>
                   <AutoTradingPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/performance-analytics"
+              element={
+                <ProtectedLayout>
+                  <PerformanceAnalyticsPage />
                 </ProtectedLayout>
               }
             />

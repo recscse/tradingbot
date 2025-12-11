@@ -970,35 +970,44 @@ class AutoTradeLiveFeed:
                     })
                     return
                 else:
-                    # CRITICAL FIX: Check minimum hold time to prevent immediate exits
-                    MIN_HOLD_TIME_MINUTES = 5  # Don't exit positions within 5 minutes of entry
+                    # ENHANCED EXIT VALIDATION: Check profit AND hold time to prevent premature exits
+                    # This prevents booking unnecessary losses
 
                     if db_position:
                         trade_entry = db.query(AutoTradeExecution).filter(
                             AutoTradeExecution.id == db_position.trade_execution_id
                         ).first()
 
-                        if trade_entry and trade_entry.entry_time:
-                            from datetime import datetime, timedelta
-                            hold_duration = datetime.now() - trade_entry.entry_time
-                            min_duration = timedelta(minutes=MIN_HOLD_TIME_MINUTES)
+                        if trade_entry:
+                            from services.trading_execution.strategy_engine import strategy_engine
 
-                            if hold_duration < min_duration:
-                                remaining_time = (min_duration - hold_duration).total_seconds() / 60
+                            # Validate if exit should be allowed
+                            current_price = instrument.live_option_premium
+                            entry_price = Decimal(str(trade_entry.entry_price))
+                            entry_time = trade_entry.entry_time
+
+                            # Calculate current PnL percentage
+                            current_pnl_percent = ((current_price - entry_price) / entry_price) * Decimal('100')
+
+                            # Use strategy engine's exit validation
+                            allow_exit, exit_reason = strategy_engine.should_allow_exit_signal(
+                                current_price=current_price,
+                                entry_price=entry_price,
+                                entry_time=entry_time,
+                                current_pnl_percent=current_pnl_percent
+                            )
+
+                            if not allow_exit:
                                 logger.info(
-                                    f"⏳ EXIT signal for {instrument.stock_symbol} but position too new "
-                                    f"(held {hold_duration.total_seconds()/60:.1f}m, need {MIN_HOLD_TIME_MINUTES}m). "
-                                    f"Waiting {remaining_time:.1f}m more."
+                                    f"🚫 EXIT signal BLOCKED for {instrument.stock_symbol}: {exit_reason}"
                                 )
-                                # Broadcast cooldown message to UI
-                                await broadcast_to_clients("signal_cooldown", {
+                                # Broadcast exit blocked message to UI
+                                await broadcast_to_clients("exit_signal_blocked", {
                                     "symbol": instrument.stock_symbol,
                                     "signal_type": signal.signal_type.value,
-                                    "reason": f"Position must be held for at least {MIN_HOLD_TIME_MINUTES} minutes",
+                                    "reason": exit_reason,
                                     "user_id": user_id,
-                                    "hold_duration_minutes": hold_duration.total_seconds() / 60,
-                                    "min_hold_minutes": MIN_HOLD_TIME_MINUTES,
-                                    "remaining_minutes": remaining_time,
+                                    "current_pnl_percent": float(current_pnl_percent),
                                     "timestamp": get_ist_isoformat()
                                 })
                                 return

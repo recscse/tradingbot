@@ -19,6 +19,30 @@ from sqlalchemy.orm import Session
 if platform.system() == "Windows":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+    # Windows-specific: Suppress ConnectionResetError in asyncio
+    # This prevents "[WinError 10054] An existing connection was forcibly closed" errors
+    def _windows_exception_handler(loop, context):
+        """Custom exception handler for Windows asyncio to suppress connection reset errors"""
+        exception = context.get("exception")
+
+        # Suppress ConnectionResetError and ConnectionAbortedError (common on Windows)
+        if isinstance(exception, (ConnectionResetError, ConnectionAbortedError)):
+            # These are expected when connections close - don't log them
+            return
+
+        # For all other exceptions, use default handling
+        loop.default_exception_handler(context)
+
+    # Apply the custom exception handler to the event loop
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_exception_handler(_windows_exception_handler)
+    except RuntimeError:
+        # If no event loop exists yet, create one and set the handler
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.set_exception_handler(_windows_exception_handler)
+
 # Load environment variables FIRST
 load_dotenv()
 
@@ -107,8 +131,20 @@ from router.dhan_router import dhan_router
 # from router.trading_config_router import router as trading_config_router
 from router.config_router import router as config_router
 from router.upstox_router import upstox_router
+
+try:
+    from router.upstox_order_router import router as upstox_order_router
+    UPSTOX_ORDER_ROUTER_AVAILABLE = True
+    logger.info("✅ Upstox Order Management router imported successfully")
+except ImportError as e:
+    from fastapi import APIRouter
+    upstox_order_router = APIRouter()
+    UPSTOX_ORDER_ROUTER_AVAILABLE = False
+    logger.warning(f"⚠️ Upstox Order Management router not available: {e}")
+
 try:
     from router.fyers_router import fyers_router
+
     FYERS_AVAILABLE = True
 except ImportError:
     logger.warning("Fyers router not available - fyers_apiv3 module not installed")
@@ -580,17 +616,13 @@ async def lifespan(app: FastAPI):
                 except ImportError as e:
                     logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
                 except Exception as e:
-                    logger.error(
-                        f"❌ Error initializing real-time trading system: {e}"
-                    )
+                    logger.error(f"❌ Error initializing real-time trading system: {e}")
 
                 # Log initial status (don't await health check to avoid blocking)
                 logger.info(
                     "📊 Centralized WebSocket Status: Starting in background..."
                 )
-                logger.info(
-                    "📊 WebSocket will connect automatically when ready"
-                )
+                logger.info("📊 WebSocket will connect automatically when ready")
 
                 # 🚀 ENHANCED: Connect centralized manager to unified WebSocket manager with Real-Time Analytics
                 logger.info(
@@ -930,6 +962,8 @@ app.include_router(broker_router, prefix="/api/broker", tags=["Broker API"])
 app.include_router(config_router, tags=["Configuration"])
 app.include_router(stock_list_router, prefix="/api/stocks", tags=["Stock Data"])
 app.include_router(upstox_router, prefix="/api/broker/upstox", tags=["Upstox API"])
+if UPSTOX_ORDER_ROUTER_AVAILABLE:
+    app.include_router(upstox_order_router, tags=["Upstox Order Management V3"])
 if FYERS_AVAILABLE:
     app.include_router(fyers_router, prefix="/api/broker/fyers", tags=["Fyers API"])
 app.include_router(broker_profile_router, tags=["Broker Profile & Funds"])

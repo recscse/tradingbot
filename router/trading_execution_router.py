@@ -1305,7 +1305,7 @@ async def get_portfolio_summary(
 ):
     """
     Get comprehensive portfolio summary with real-time P&L and investments
-    
+
     **Returns:**
     - Total P&L (realized + unrealized)
     - Active positions count
@@ -1313,13 +1313,13 @@ async def get_portfolio_summary(
     - Available capital
     - Today's P&L
     - Overall portfolio performance
-    
+
     **Use Case:** Display portfolio dashboard with complete financial overview
     """
     try:
         from sqlalchemy import and_, func
         from datetime import datetime, date
-        
+
         # Get active positions with real-time PnL
         active_positions = db.query(ActivePosition).filter(
             and_(
@@ -1327,32 +1327,32 @@ async def get_portfolio_summary(
                 ActivePosition.is_active == True
             )
         ).all()
-        
+
         # Calculate total investment and unrealized P&L from active positions
         total_investment = Decimal('0')
         total_unrealized_pnl = Decimal('0')
         active_positions_data = []
-        
+
         for pos in active_positions:
             trade = db.query(AutoTradeExecution).filter(
                 AutoTradeExecution.id == pos.trade_execution_id
             ).first()
-            
+
             if trade:
                 investment = Decimal(str(trade.total_investment)) if trade.total_investment else (Decimal(str(trade.entry_price)) * Decimal(str(trade.quantity)))
                 total_investment += investment
                 total_unrealized_pnl += Decimal(str(pos.current_pnl))
-                
+
                 active_positions_data.append({
                     "symbol": pos.symbol,
                     "investment": float(investment),
                     "current_pnl": float(pos.current_pnl),
                     "pnl_percent": float(pos.current_pnl_percentage)
                 })
-        
+
         # Get realized P&L from closed trades
         today = date.today()
-        
+
         # Today's closed trades
         todays_closed_trades = db.query(AutoTradeExecution).filter(
             and_(
@@ -1361,11 +1361,11 @@ async def get_portfolio_summary(
                 func.date(AutoTradeExecution.exit_time) == today
             )
         ).all()
-        
+
         todays_realized_pnl = sum(
             Decimal(str(trade.net_pnl)) for trade in todays_closed_trades if trade.net_pnl
         )
-        
+
         # All time closed trades
         all_closed_trades = db.query(AutoTradeExecution).filter(
             and_(
@@ -1373,17 +1373,17 @@ async def get_portfolio_summary(
                 AutoTradeExecution.status == "CLOSED"
             )
         ).all()
-        
+
         total_realized_pnl = sum(
             Decimal(str(trade.net_pnl)) for trade in all_closed_trades if trade.net_pnl
         )
-        
+
         # Total P&L = Realized + Unrealized
         total_pnl = total_realized_pnl + total_unrealized_pnl
-        
+
         # Get capital information
         from services.trading_execution.capital_manager import capital_manager
-        
+
         if trading_mode == "paper":
             total_capital = capital_manager.paper_trading_capital
         else:
@@ -1392,14 +1392,14 @@ async def get_portfolio_summary(
                 total_capital = capital_manager._fetch_funds_from_broker(broker_config)
             else:
                 total_capital = Decimal('0')
-        
+
         # Calculate available capital
         available_capital = total_capital - total_investment + total_realized_pnl
-        
+
         # Calculate portfolio metrics
         total_pnl_percent = (total_pnl / total_capital * Decimal('100')) if total_capital > 0 else Decimal('0')
         todays_pnl_percent = ((todays_realized_pnl + total_unrealized_pnl) / total_capital * Decimal('100')) if total_capital > 0 else Decimal('0')
-        
+
         portfolio_summary = {
             "total_capital": float(total_capital),
             "available_capital": float(available_capital),
@@ -1419,9 +1419,254 @@ async def get_portfolio_summary(
             "total_trades_all_time": len(all_closed_trades),
             "timestamp": datetime.now().isoformat()
         }
-        
+
         return {"success": True, "portfolio_summary": portfolio_summary}
-        
+
     except Exception as e:
         logger.error(f"Error getting portfolio summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== PERFORMANCE ANALYTICS ENDPOINTS ====================
+
+
+@router.get("/performance/daily")
+async def get_daily_performance(
+    target_date: Optional[str] = Query(None, description="Target date (YYYY-MM-DD), default: today"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get daily trading performance metrics
+
+    **Returns:**
+    - Total trades for the day
+    - Win ratio and profit factor
+    - Total P&L and ROI
+    - Average profit/loss per trade
+    - Maximum drawdown
+    - Sharpe ratio
+    - Detailed trade list
+
+    **Use Case:** Daily performance review and analysis
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+        from datetime import date as date_obj
+
+        # Parse target date
+        if target_date:
+            target = date_obj.fromisoformat(target_date)
+        else:
+            target = None
+
+        performance = trade_analytics_service.get_daily_performance(
+            user_id=current_user.id,
+            db=db,
+            target_date=target
+        )
+
+        return performance
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error getting daily performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/weekly")
+async def get_weekly_performance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get weekly trading performance metrics (last 7 days)
+
+    **Returns:**
+    - All daily metrics aggregated for the week
+    - Daily breakdown of performance
+    - Week-over-week comparison (if available)
+
+    **Use Case:** Weekly performance review
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        performance = trade_analytics_service.get_weekly_performance(
+            user_id=current_user.id,
+            db=db
+        )
+
+        return performance
+
+    except Exception as e:
+        logger.error(f"Error getting weekly performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/monthly")
+async def get_monthly_performance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get monthly trading performance metrics (last 30 days)
+
+    **Returns:**
+    - All daily metrics aggregated for the month
+    - Daily breakdown of performance
+    - Month-over-month comparison (if available)
+
+    **Use Case:** Monthly performance review
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        performance = trade_analytics_service.get_monthly_performance(
+            user_id=current_user.id,
+            db=db
+        )
+
+        return performance
+
+    except Exception as e:
+        logger.error(f"Error getting monthly performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/six-month")
+async def get_six_month_performance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get 6-month trading performance metrics (last 180 days)
+
+    **Returns:**
+    - All metrics aggregated for 6 months
+    - Weekly breakdown of performance
+    - Trend analysis
+
+    **Use Case:** Long-term performance review
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        performance = trade_analytics_service.get_six_month_performance(
+            user_id=current_user.id,
+            db=db
+        )
+
+        return performance
+
+    except Exception as e:
+        logger.error(f"Error getting 6-month performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/yearly")
+async def get_yearly_performance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get 1-year trading performance metrics (last 365 days)
+
+    **Returns:**
+    - All metrics aggregated for the year
+    - Monthly breakdown of performance
+    - Year-over-year comparison (if available)
+
+    **Use Case:** Annual performance review
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        performance = trade_analytics_service.get_yearly_performance(
+            user_id=current_user.id,
+            db=db
+        )
+
+        return performance
+
+    except Exception as e:
+        logger.error(f"Error getting yearly performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/summary")
+async def get_performance_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get overall all-time performance summary
+
+    **Returns:**
+    - Total trades count
+    - Overall win ratio
+    - Overall profit factor
+    - Total P&L and ROI
+    - Average profit/loss per trade
+    - Maximum drawdown
+    - Sharpe ratio
+    - Trading statistics (symbols traded, strategies used)
+
+    **Use Case:** Complete trading performance overview
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        performance = trade_analytics_service.get_overall_performance(
+            user_id=current_user.id,
+            db=db
+        )
+
+        return performance
+
+    except Exception as e:
+        logger.error(f"Error getting overall performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/performance/detailed")
+async def get_detailed_performance(
+    limit: int = Query(100, description="Number of trades to fetch (max 500)"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get detailed trade-by-trade analysis
+
+    **Args:**
+    - limit: Number of recent trades to return (default: 100, max: 500)
+
+    **Returns:**
+    - Detailed list of all closed trades
+    - Trade-by-trade P&L breakdown
+    - Entry/exit details for each trade
+    - Duration and exit reason
+
+    **Use Case:** Detailed trade review and analysis
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        # Validate limit
+        if limit > 500:
+            limit = 500
+        elif limit < 1:
+            limit = 100
+
+        performance = trade_analytics_service.get_detailed_performance(
+            user_id=current_user.id,
+            db=db,
+            limit=limit
+        )
+
+        return performance
+
+    except Exception as e:
+        logger.error(f"Error getting detailed performance: {e}")
         raise HTTPException(status_code=500, detail=str(e))

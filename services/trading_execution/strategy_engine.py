@@ -85,10 +85,24 @@ class StrategyEngine:
         self.default_risk_reward_ratio = Decimal('2.0')  # 1:2 risk-reward
         self.min_confidence_threshold = Decimal('0.60')  # Minimum 60% confidence
 
+        # Exit Protection - Prevent premature exits
+        self.min_profit_before_exit_percent = Decimal('0.10')  # 10% minimum profit before allowing exit
+        self.min_hold_time_minutes = 5  # Minimum 5 minutes hold time
+
+        # Lock Profit Configuration - Make position risk-free
+        self.breakeven_profit_threshold = Decimal('0.50')  # Trail to breakeven at 50% of target
+        self.lock_profit_threshold = Decimal('1.00')  # Lock 80% profit when target hit
+        self.lock_profit_percent = Decimal('0.80')  # Lock 80% of profit
+
+        # Stop Loss Buffer - Prevent tight stops
+        self.sl_buffer_percent = Decimal('0.02')  # 2% buffer below SuperTrend for SL
+
         logger.info("Strategy Engine initialized with SuperTrend + EMA")
         logger.info(f"  EMA Period: {self.ema_period}")
         logger.info(f"  SuperTrend Period: {self.supertrend_period}")
         logger.info(f"  SuperTrend Multipliers: 1x={self.supertrend_multiplier_1x}, 2x={self.supertrend_multiplier_2x}")
+        logger.info(f"  Exit Protection: Min profit {self.min_profit_before_exit_percent:.0%}, Min hold {self.min_hold_time_minutes}min")
+        logger.info(f"  Lock Profit: Breakeven at {self.breakeven_profit_threshold:.0%} target, Lock {self.lock_profit_percent:.0%} at target")
 
     def calculate_ema(self, prices: List[float], period: int) -> np.ndarray:
         """
@@ -240,6 +254,56 @@ class StrategyEngine:
             logger.error(f"Error calculating SuperTrend: {e}")
             raise
 
+    def should_allow_exit_signal(
+        self,
+        current_price: Decimal,
+        entry_price: Decimal,
+        entry_time: Optional[datetime] = None,
+        current_pnl_percent: Optional[Decimal] = None
+    ) -> Tuple[bool, str]:
+        """
+        Check if exit signal should be allowed based on profit and hold time
+
+        This prevents premature exits that book unnecessary losses.
+
+        Args:
+            current_price: Current market price
+            entry_price: Entry price of position
+            entry_time: Entry timestamp (if available)
+            current_pnl_percent: Current PnL percentage (if available)
+
+        Returns:
+            Tuple of (allow_exit, reason)
+        """
+        # Calculate PnL if not provided
+        if current_pnl_percent is None:
+            current_pnl_percent = ((current_price - entry_price) / entry_price) * Decimal('100')
+
+        # Check minimum profit requirement
+        if current_pnl_percent < self.min_profit_before_exit_percent * Decimal('100'):
+            reason = (
+                f"Exit blocked: Current PnL {current_pnl_percent:.2f}% < "
+                f"minimum {self.min_profit_before_exit_percent * Decimal('100'):.0f}% required"
+            )
+            logger.debug(reason)
+            return False, reason
+
+        # Check minimum hold time requirement
+        if entry_time:
+            hold_duration = datetime.now() - entry_time
+            hold_minutes = hold_duration.total_seconds() / 60
+
+            if hold_minutes < self.min_hold_time_minutes:
+                reason = (
+                    f"Exit blocked: Hold time {hold_minutes:.1f}min < "
+                    f"minimum {self.min_hold_time_minutes}min required"
+                )
+                logger.debug(reason)
+                return False, reason
+
+        # Exit allowed
+        return True, f"Exit allowed: PnL={current_pnl_percent:.2f}%, sufficient hold time"
+
     def generate_signal(
         self,
         current_price: Decimal,
@@ -314,17 +378,32 @@ class StrategyEngine:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
                     reason = "Strong uptrend: Price above SuperTrend and EMA"
-                # EXIT CONDITIONS (only when conditions clearly deteriorate)
-                elif not trend_bullish and (not price_above_supertrend or not price_above_ema):
-                    # Both trend turned bearish AND price broke support levels
+                # EXIT CONDITIONS - ENHANCED: Require STRONG confirmation before exit
+                # This prevents premature exits on minor pullbacks
+                elif not trend_bullish and not price_above_supertrend and not price_above_ema:
+                    # ALL THREE must be bearish: Trend reversed, price below SuperTrend AND EMA
+                    # This ensures we don't exit on temporary weakness
                     signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
-                    reason = "Exit: Bearish trend with price below key levels"
+                    reason = "Exit: Strong bearish reversal - trend, price below SuperTrend & EMA"
+                elif trend_reversal_up == False and prev_trend_1x == 1 and current_trend_1x == -1:
+                    # Explicit trend reversal from bullish to bearish
+                    # Only if price also confirms by breaking both levels
+                    if not price_above_supertrend and not price_above_ema:
+                        signal_type = SignalType.EXIT_LONG
+                        confidence = Decimal('0.85')
+                        reason = "Exit: Confirmed trend reversal with price breakdown"
+                    else:
+                        # Trend reversed but price holding - HOLD and let trailing SL protect
+                        signal_type = SignalType.HOLD
+                        confidence = Decimal('0.50')
+                        reason = "Trend reversal but price holding - trailing SL active"
                 else:
                     # Neutral zone or minor pullback - HOLD
+                    # Let trailing stop loss protect the position
                     signal_type = SignalType.HOLD
                     confidence = Decimal('0.50')
-                    reason = "Waiting for clear signal - no strong trend"
+                    reason = "Waiting for clear signal - no strong reversal"
 
             # PE OPTIONS LOGIC (Buying Put Options)
             else:
@@ -344,25 +423,49 @@ class StrategyEngine:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
                     reason = "Strong downtrend: Price below SuperTrend and EMA (Buy Put)"
-                # EXIT CONDITIONS (only when conditions clearly improve)
-                elif not trend_bearish and (not price_below_supertrend or not price_below_ema):
-                    # Both trend turned bullish AND price broke resistance levels
+                # EXIT CONDITIONS - ENHANCED: Require STRONG confirmation before exit
+                # This prevents premature exits on minor bounces
+                elif not trend_bearish and not price_below_supertrend and not price_below_ema:
+                    # ALL THREE must be bullish: Trend reversed, price above SuperTrend AND EMA
+                    # This ensures we don't exit on temporary strength
                     signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
-                    reason = "Exit: Bullish trend with price above key levels (Exit Put)"
+                    reason = "Exit: Strong bullish reversal - trend, price above SuperTrend & EMA (Exit Put)"
+                elif trend_reversal_down == False and prev_trend_1x == -1 and current_trend_1x == 1:
+                    # Explicit trend reversal from bearish to bullish
+                    # Only if price also confirms by breaking both levels
+                    if not price_below_supertrend and not price_below_ema:
+                        signal_type = SignalType.EXIT_LONG
+                        confidence = Decimal('0.85')
+                        reason = "Exit: Confirmed trend reversal with price breakout (Exit Put)"
+                    else:
+                        # Trend reversed but price holding - HOLD and let trailing SL protect
+                        signal_type = SignalType.HOLD
+                        confidence = Decimal('0.50')
+                        reason = "Trend reversal but price holding - trailing SL active (Put)"
                 else:
                     # Neutral zone or minor bounce - HOLD
+                    # Let trailing stop loss protect the position
                     signal_type = SignalType.HOLD
                     confidence = Decimal('0.50')
-                    reason = "Waiting for clear signal - no strong trend"
+                    reason = "Waiting for clear signal - no strong reversal"
 
             # Calculate entry, stop loss, and target IN SPOT TERMS
             # These will be converted to premium terms later using convert_spot_signal_to_premium()
             entry_price = current_price
 
             # For both CE and PE: Use SuperTrend as stop loss (spot-based)
-            # The conversion to premium will happen in auto_trade_live_feed
-            stop_loss = current_supertrend_1x
+            # ENHANCED: Add buffer to prevent stop loss from being too tight
+            # This prevents premature SL hits on minor price movements
+            sl_buffer = entry_price * self.sl_buffer_percent
+
+            if option_type == "CE":
+                # For CE: SL below SuperTrend with buffer
+                stop_loss = current_supertrend_1x - sl_buffer
+            else:
+                # For PE: SL above SuperTrend with buffer
+                stop_loss = current_supertrend_1x + sl_buffer
+
             risk = abs(entry_price - stop_loss)
             target_price = entry_price + (risk * self.default_risk_reward_ratio) if option_type == "CE" else entry_price - (risk * self.default_risk_reward_ratio)
 
@@ -529,10 +632,19 @@ class StrategyEngine:
         current_stop_loss: Decimal,
         trailing_type: TrailingStopType,
         supertrend_value: Optional[Decimal] = None,
-        position_type: str = "LONG"
+        position_type: str = "LONG",
+        target_price: Optional[Decimal] = None
     ) -> Decimal:
         """
-        Update trailing stop loss based on current price and strategy
+        Update trailing stop loss with LOCK PROFIT mechanism
+
+        ENHANCED LOGIC:
+        1. If profit >= 50% of target: Trail to BREAKEVEN (make position risk-free)
+        2. If profit >= 100% of target: Lock 80% of profit
+        3. Otherwise: Use standard SuperTrend/percentage trailing
+
+        This implements the user's requirement to trail stop loss to target,
+        making position risk-free and locking in profits.
 
         Args:
             current_price: Current market price
@@ -541,6 +653,7 @@ class StrategyEngine:
             trailing_type: Type of trailing stop
             supertrend_value: Current SuperTrend value (for SuperTrend-based trailing)
             position_type: "LONG" or "SHORT"
+            target_price: Target price (for lock profit calculation)
 
         Returns:
             Updated stop loss price
@@ -554,30 +667,74 @@ class StrategyEngine:
         try:
             new_stop_loss = current_stop_loss
 
-            if trailing_type == TrailingStopType.SUPERTREND_1X or trailing_type == TrailingStopType.SUPERTREND_2X:
-                # Use SuperTrend as trailing stop
-                if supertrend_value:
-                    if position_type == "LONG":
-                        # Move SL up only (never down)
-                        new_stop_loss = max(current_stop_loss, supertrend_value)
-                    else:
-                        # Move SL down only (never up)
-                        new_stop_loss = min(current_stop_loss, supertrend_value)
+            # Calculate current profit
+            if position_type == "LONG":
+                current_profit = current_price - entry_price
+            else:
+                current_profit = entry_price - current_price
 
-            elif trailing_type == TrailingStopType.PERCENTAGE:
-                # Percentage-based trailing
-                trailing_percent = Decimal('0.02')  # 2% trailing
-
+            # Calculate target profit (if target provided)
+            if target_price:
                 if position_type == "LONG":
-                    # Trail below current price by 2%
-                    potential_stop = current_price * (Decimal('1') - trailing_percent)
-                    new_stop_loss = max(current_stop_loss, potential_stop)
+                    target_profit = target_price - entry_price
                 else:
-                    # Trail above current price by 2%
-                    potential_stop = current_price * (Decimal('1') + trailing_percent)
-                    new_stop_loss = min(current_stop_loss, potential_stop)
+                    target_profit = entry_price - target_price
 
-            logger.debug(f"Trailing SL updated: {current_stop_loss} -> {new_stop_loss}")
+                # Calculate profit percentage of target
+                profit_percent_of_target = (current_profit / target_profit) if target_profit > 0 else Decimal('0')
+
+                # LOCK PROFIT MECHANISM
+                # Level 1: >= 50% of target -> Trail to BREAKEVEN (risk-free)
+                if profit_percent_of_target >= self.breakeven_profit_threshold:
+                    breakeven_sl = entry_price
+                    new_stop_loss = max(current_stop_loss, breakeven_sl)
+
+                    if new_stop_loss > current_stop_loss:
+                        logger.info(
+                            f"LOCK PROFIT (Breakeven): Profit {profit_percent_of_target:.1%} of target, "
+                            f"trailing SL to breakeven {breakeven_sl:.2f}"
+                        )
+
+                # Level 2: >= 100% of target -> Lock 80% of profit
+                if profit_percent_of_target >= self.lock_profit_threshold:
+                    locked_profit = current_profit * self.lock_profit_percent
+                    locked_sl = entry_price + locked_profit if position_type == "LONG" else entry_price - locked_profit
+                    new_stop_loss = max(current_stop_loss, locked_sl)
+
+                    if new_stop_loss > current_stop_loss:
+                        logger.info(
+                            f"LOCK PROFIT (80%): Target hit, locking {self.lock_profit_percent:.0%} profit, "
+                            f"trailing SL to {locked_sl:.2f}"
+                        )
+
+            # Standard trailing mechanisms (when lock profit not applicable)
+            if new_stop_loss == current_stop_loss:
+                if trailing_type == TrailingStopType.SUPERTREND_1X or trailing_type == TrailingStopType.SUPERTREND_2X:
+                    # Use SuperTrend as trailing stop
+                    if supertrend_value:
+                        if position_type == "LONG":
+                            # Move SL up only (never down)
+                            new_stop_loss = max(current_stop_loss, supertrend_value)
+                        else:
+                            # Move SL down only (never up)
+                            new_stop_loss = min(current_stop_loss, supertrend_value)
+
+                elif trailing_type == TrailingStopType.PERCENTAGE:
+                    # Percentage-based trailing
+                    trailing_percent = Decimal('0.02')  # 2% trailing
+
+                    if position_type == "LONG":
+                        # Trail below current price by 2%
+                        potential_stop = current_price * (Decimal('1') - trailing_percent)
+                        new_stop_loss = max(current_stop_loss, potential_stop)
+                    else:
+                        # Trail above current price by 2%
+                        potential_stop = current_price * (Decimal('1') + trailing_percent)
+                        new_stop_loss = min(current_stop_loss, potential_stop)
+
+            if new_stop_loss != current_stop_loss:
+                logger.debug(f"Trailing SL updated: {current_stop_loss:.2f} -> {new_stop_loss:.2f}")
+
             return new_stop_loss
 
         except Exception as e:

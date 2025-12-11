@@ -143,7 +143,7 @@ jobs:
         fi
         
     - name: Upload vulnerability reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: vulnerability-reports-${{ matrix.ecosystem }}
@@ -248,7 +248,7 @@ jobs:
         echo "✅ Trading-specific security checks completed"
         
     - name: Upload analysis reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: code-analysis-reports
@@ -326,7 +326,7 @@ jobs:
     if: always()
     steps:
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       
     - name: Generate security summary
       run: |
@@ -366,7 +366,7 @@ jobs:
         cat security-summary.md
         
     - name: Upload security summary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: security-summary
         path: security-summary.md

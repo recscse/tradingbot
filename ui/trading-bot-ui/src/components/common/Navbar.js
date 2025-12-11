@@ -43,6 +43,7 @@ import {
   AccountBalance,
   Speed,
   AutoFixHigh,
+  BarChart,
 } from "@mui/icons-material";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "react-hot-toast";
@@ -117,6 +118,13 @@ const Navbar = () => {
       icon: <Assessment />,
       color: "#ed6c02",
       shortName: "Charts",
+    },
+    {
+      name: "Performance",
+      path: "/performance-analytics",
+      icon: <BarChart />,
+      color: "#0288d1",
+      shortName: "Metrics",
     },
     {
       name: "Backtesting",

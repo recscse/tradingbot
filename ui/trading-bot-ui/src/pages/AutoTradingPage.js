@@ -1,55 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Box,
-  Stack,
-  Container,
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  Alert,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  IconButton,
-  LinearProgress,
-  Tabs,
-  Tab,
-  Button,
-  Switch,
-  FormControlLabel,
-  Tooltip,
-  Collapse,
-} from "@mui/material";
-import {
-  AccountBalance as AccountBalanceIcon,
-  ShowChart as ShowChartIcon,
-  Timeline as TimelineIcon,
-  Assessment as AssessmentIcon,
-  Stop as StopIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Close as CloseIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
-  Info as InfoIcon,
-  SignalCellularAlt as SignalIcon,
-} from "@mui/icons-material";
 import api from "../services/api";
-import StockActivityChart from "../components/trading/StockActivityChart";
 
 const AutoTradingPage = () => {
-  // State management - Will be loaded from database
-  const [tradingMode, setTradingMode] = useState("paper"); // paper or live
-  const [executionMode, setExecutionMode] = useState("multi_demat"); // single_demat or multi_demat
+  const [tradingMode, setTradingMode] = useState("paper");
+  const [executionMode, setExecutionMode] = useState("multi_demat");
   const [selectedStocks, setSelectedStocks] = useState([]);
   const [activePositions, setActivePositions] = useState([]);
   const [tradeHistory, setTradeHistory] = useState([]);
@@ -59,26 +13,19 @@ const AutoTradingPage = () => {
     pnl_percent: 0,
     active_positions_count: 0,
   });
-  const [isLoading, setIsLoading] = useState(true); // Start with loading
-  const [stocksLoading, setStocksLoading] = useState(true); // Track stocks loading separately
+  const [isLoading, setIsLoading] = useState(true);
+  const [stocksLoading, setStocksLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
-  const [executionResults] = useState(null);
-  const [showCapitalBreakdown, setShowCapitalBreakdown] = useState(false);
-  const [showExecutionDetails, setShowExecutionDetails] = useState(false);
   const [emergencyStopLoading, setEmergencyStopLoading] = useState(false);
   const [autoTradingRunning, setAutoTradingRunning] = useState(false);
-
-  // Live activity tracking - PER STOCK CHART
-  const [activityFeed, setActivityFeed] = useState([]);
-  const [stockActivityStats, setStockActivityStats] = useState({}); // Per-stock activity count
-  const maxActivityItems = 10;
-  const [showLiveActivity, setShowLiveActivity] = useState(false);
-
-  // WebSocket ref
+  const [realtimeStats, setRealtimeStats] = useState({
+    signals_today: 0,
+    trades_today: 0,
+    active_stocks: 0
+  });
   const socketRef = useRef(null);
-  // Capital state
   const [capitalData, setCapitalData] = useState({
     total_available_capital: 0,
     total_used_margin: 0,
@@ -91,7 +38,6 @@ const AutoTradingPage = () => {
     trading_mode: "paper",
   });
 
-  // ---------- Data fetchers ----------
   const fetchActivePositions = useCallback(async () => {
     try {
       const response = await api.get("/v1/trading/execution/active-positions");
@@ -117,9 +63,7 @@ const AutoTradingPage = () => {
 
   const fetchTradeHistory = useCallback(async () => {
     try {
-      const response = await api.get(
-        "/v1/trading/execution/trade-history?limit=50"
-      );
+      const response = await api.get("/v1/trading/execution/trade-history?limit=50");
       if (response.data.success) {
         setTradeHistory(response.data.trades || []);
       }
@@ -130,9 +74,7 @@ const AutoTradingPage = () => {
 
   const fetchTradingPreferences = useCallback(async () => {
     try {
-      const response = await api.get(
-        "/v1/trading/execution/user-trading-preferences"
-      );
+      const response = await api.get("/v1/trading/execution/user-trading-preferences");
       if (response.data.success) {
         setTradingMode(response.data.trading_mode || "paper");
         setExecutionMode(response.data.execution_mode || "multi_demat");
@@ -144,9 +86,7 @@ const AutoTradingPage = () => {
 
   const fetchCapitalOverview = useCallback(async () => {
     try {
-      const response = await api.get(
-        `/v1/trading/execution/user-capital-overview?trading_mode=${tradingMode}`
-      );
+      const response = await api.get(`/v1/trading/execution/user-capital-overview?trading_mode=${tradingMode}`);
       if (response.data.success) {
         setCapitalData(response.data.capital_overview);
       }
@@ -156,28 +96,17 @@ const AutoTradingPage = () => {
   }, [tradingMode]);
 
   const fetchSelectedStocks = useCallback(async () => {
-    setStocksLoading(true); // Start loading
+    setStocksLoading(true);
     try {
       const response = await api.get("/v1/trading/execution/selected-stocks");
-
-      console.debug("fetchSelectedStocks response:", response?.data);
-
-      // Backend now returns clean, pre-parsed data - no complex parsing needed!
       const payload = response?.data;
-
       if (!payload || !payload.success) {
         setSelectedStocks([]);
         return;
       }
-
-      // Get stocks array from response
       const stocks = payload.stocks || [];
-
-      // Backend already parsed and validated everything - just use the data directly
       const cleanedStocks = stocks.map((stock) => ({
-        // All fields are already parsed by backend
         ...stock,
-        // Ensure numeric types with safe defaults
         strike_price: stock.strike_price || 0,
         lot_size: stock.lot_size || 0,
         premium: stock.premium || 0,
@@ -187,34 +116,27 @@ const AutoTradingPage = () => {
         target_profit: stock.target_profit || 0,
         selection_score: stock.selection_score || 0,
         price_at_selection: stock.price_at_selection || 0,
-        // Ensure strings with safe defaults
         symbol: stock.symbol || "",
         option_type: stock.option_type || "N/A",
         expiry_date: stock.expiry_date || "",
         option_instrument_key: stock.option_instrument_key || "",
         sector: stock.sector || "OTHER",
       }));
-
       setSelectedStocks(cleanedStocks);
     } catch (err) {
       console.error("Error fetching selected stocks:", err);
       setSelectedStocks([]);
     } finally {
-      setStocksLoading(false); // Always stop loading
+      setStocksLoading(false);
     }
   }, []);
 
-  // ---------- Trading Actions ----------
-  const handleClosePosition = async (positionId) => {
+  const handleClosePosition = useCallback(async (positionId) => {
     if (!window.confirm("Are you sure you want to close this position?")) {
       return;
     }
-
     try {
-      const response = await api.post(
-        `/v1/trading/execution/close-position/${positionId}`
-      );
-
+      const response = await api.post(`/v1/trading/execution/close-position/${positionId}`);
       if (response.data.success) {
         setSuccess(`Position closed. PnL: ₹${response.data.pnl.toFixed(2)}`);
         await fetchActivePositions();
@@ -224,126 +146,74 @@ const AutoTradingPage = () => {
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to close position");
     }
-  };
+  }, [fetchActivePositions, fetchPortfolioSummary, fetchTradeHistory]);
 
-  const handleEmergencyStopAll = async () => {
-    if (
-      !window.confirm(
-        "EMERGENCY STOP ALL POSITIONS\n\n" +
-          "This will immediately close ALL active positions at market price.\n\n" +
-          "Are you absolutely sure you want to continue?"
-      )
-    ) {
+  const handleEmergencyStopAll = useCallback(async () => {
+    if (!window.confirm("EMERGENCY STOP ALL POSITIONS\n\nThis will immediately close ALL active positions at market price.\n\nAre you absolutely sure you want to continue?")) {
       return;
     }
-
     setEmergencyStopLoading(true);
     setError(null);
-
     try {
       const closePromises = activePositions.map((position) =>
         api.post(`/v1/trading/execution/close-position/${position.position_id}`)
       );
-
       const results = await Promise.allSettled(closePromises);
-
-      const successCount = results.filter(
-        (r) => r.status === "fulfilled"
-      ).length;
+      const successCount = results.filter((r) => r.status === "fulfilled").length;
       const failCount = results.filter((r) => r.status === "rejected").length;
-
-      setSuccess(
-        `Emergency Stop Complete: ${successCount} positions closed${
-          failCount > 0 ? `, ${failCount} failed` : ""
-        }`
-      );
-
+      setSuccess(`Emergency Stop Complete: ${successCount} positions closed${failCount > 0 ? `, ${failCount} failed` : ""}`);
       await fetchActivePositions();
       await fetchPortfolioSummary();
       await fetchTradeHistory();
     } catch (err) {
-      setError(
-        "Emergency stop failed. Please try closing positions individually."
-      );
+      setError("Emergency stop failed. Please try closing positions individually.");
     } finally {
       setEmergencyStopLoading(false);
     }
-  };
+  }, [activePositions, fetchActivePositions, fetchPortfolioSummary, fetchTradeHistory]);
 
-  const handleTradingModeToggle = async () => {
+  const handleTradingModeToggle = useCallback(async () => {
     const newMode = tradingMode === "paper" ? "live" : "paper";
-
     if (newMode === "live") {
-      if (
-        !window.confirm(
-          "⚠️ SWITCHING TO LIVE TRADING\n\n" +
-            "This will use REAL MONEY from your broker account.\n\n" +
-            "Are you sure you want to continue?"
-        )
-      ) {
+      if (!window.confirm("⚠️ SWITCHING TO LIVE TRADING\n\nThis will use REAL MONEY from your broker account.\n\nAre you sure you want to continue?")) {
         return;
       }
     }
-
     try {
-      // Save to database
-      const response = await api.post(
-        `/v1/trading/execution/user-trading-preferences?trading_mode=${newMode}&execution_mode=${executionMode}`
-      );
-
+      const response = await api.post(`/v1/trading/execution/user-trading-preferences?trading_mode=${newMode}&execution_mode=${executionMode}`);
       if (response.data.success) {
         setTradingMode(newMode);
-        // Refresh capital data for new mode
         await fetchPortfolioSummary();
       }
     } catch (err) {
       console.error("Error updating trading mode:", err);
       setError("Failed to update trading mode");
     }
-  };
+  }, [tradingMode, executionMode, fetchPortfolioSummary]);
 
-  // ---------- WebSocket for Real-time PnL ----------
   const initializeWebSocket = useCallback(() => {
     try {
       const baseUrl = process.env.REACT_APP_API_URL || "http://localhost:8000";
-      const wsUrl =
-        baseUrl.replace("http://", "ws://").replace("https://", "wss://") +
-        "/ws/unified";
-
-      console.log("Connecting to WebSocket:", wsUrl);
+      const wsUrl = baseUrl.replace("http://", "ws://").replace("https://", "wss://") + "/ws/unified";
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        console.log("Connected to unified WebSocket for trading updates");
-
-        // Send client info
-        ws.send(
-          JSON.stringify({
-            type: "client_info",
-            client_type: "trading_execution",
-            timestamp: new Date().toISOString(),
-          })
-        );
-
-        // Subscribe to all trading events
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            events: ["all"], // Subscribe to all events including trading_signal
-          })
-        );
-
-        console.log("Subscribed to all trading events");
+        ws.send(JSON.stringify({
+          type: "client_info",
+          client_type: "trading_execution",
+          timestamp: new Date().toISOString(),
+        }));
+        ws.send(JSON.stringify({
+          type: "subscribe",
+          events: ["all"],
+        }));
       };
 
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-
-          // Handle PnL updates
           if (message.type === "pnl_update") {
             const data = message.data;
-            // Update specific position in activePositions
             setActivePositions((prev) =>
               prev.map((pos) =>
                 pos.position_id === data.position_id
@@ -359,274 +229,74 @@ const AutoTradingPage = () => {
                   : pos
               )
             );
-
-            // Refresh summary
             fetchPortfolioSummary();
           }
-
-          // Handle trading signals - Track per-stock activity
           if (message.type === "trading_signal") {
-            const signalData = message.data;
-            const symbol = signalData.symbol;
-
-            console.log(
-              `Signal: ${signalData.signal_type} for ${symbol} (Conf: ${signalData.confidence})`
-            );
-
-            // Update per-stock stats
-            setStockActivityStats((prev) => ({
+            setRealtimeStats(prev => ({
               ...prev,
-              [symbol]: {
-                symbol: symbol,
-                signals: (prev[symbol]?.signals || 0) + 1,
-                trades: prev[symbol]?.trades || 0,
-                pnl: prev[symbol]?.pnl || 0,
-                lastActivity: new Date().toISOString(),
-                status: signalData.signal_type,
-              },
+              signals_today: prev.signals_today + 1
             }));
-
-            // Add to activity feed
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "signal",
-                symbol: symbol,
-                message: `${signalData.signal_type.toUpperCase()} signal`,
-                details: `Confidence: ${(signalData.confidence * 100).toFixed(
-                  0
-                )}% | Price: ₹${signalData.price}`,
-                timestamp: new Date().toISOString(),
-                severity: "info",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
           }
-
-          // Handle signal skipped
-          if (message.type === "signal_skipped") {
-            console.log(
-              `Signal skipped for ${message.data.symbol}: ${message.data.reason}`
-            );
-
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "signal_skipped",
-                message: `Signal skipped for ${message.data.symbol}`,
-                details: message.data.reason,
-                timestamp: new Date().toISOString(),
-                severity: "warning",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
-          }
-
-          // Handle trade execution - Track per-stock
           if (message.type === "trade_executed") {
             const tradeData = message.data;
-            const symbol = tradeData.symbol;
-
-            setSuccess(
-              `Trade executed: ${symbol} ${
-                tradeData.option_type
-              } @ ₹${tradeData.entry_price.toFixed(2)}`
-            );
-
-            // Update per-stock stats
-            setStockActivityStats((prev) => ({
+            setSuccess(`Trade executed: ${tradeData.symbol} @ ₹${tradeData.entry_price.toFixed(2)}`);
+            setRealtimeStats(prev => ({
               ...prev,
-              [symbol]: {
-                ...(prev[symbol] || { signals: 0, trades: 0, pnl: 0 }),
-                symbol: symbol,
-                trades: (prev[symbol]?.trades || 0) + 1,
-                lastActivity: new Date().toISOString(),
-                status: "traded",
-              },
+              trades_today: prev.trades_today + 1
             }));
-
             fetchActivePositions();
             fetchPortfolioSummary();
             fetchSelectedStocks();
-
-            // Add to activity feed
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "trade_executed",
-                symbol: symbol,
-                message: `Trade Executed: ${tradeData.option_type}`,
-                details: `Entry: ₹${tradeData.entry_price.toFixed(2)} | Lots: ${
-                  tradeData.lot_size
-                } | Mode: ${tradeData.trading_mode}`,
-                timestamp: tradeData.timestamp || new Date().toISOString(),
-                severity: "success",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
           }
-
-          // CRITICAL FIX: Handle active position created event
-          // This is broadcasted when a position is opened and MUST be handled
-          // to display positions in real-time
           if (message.type === "active_position_created") {
             const posData = message.data;
-            console.log(
-              `Active position created: ${posData.symbol} @ ₹${posData.entry_price}`
-            );
-
-            // Add position to state immediately - don't wait for API refresh
             setActivePositions((prev) => {
-              // Check if position already exists (prevent duplicates)
-              const existingIndex = prev.findIndex(
-                (p) => p.position_id === posData.position_id
-              );
-
+              const existingIndex = prev.findIndex((p) => p.position_id === posData.position_id);
               if (existingIndex >= 0) {
-                // Update existing position
                 const updated = [...prev];
-                updated[existingIndex] = {
-                  ...updated[existingIndex],
-                  ...posData,
-                };
+                updated[existingIndex] = { ...updated[existingIndex], ...posData };
                 return updated;
               } else {
-                // Add new position at the top
-                return [
-                  {
-                    position_id: posData.position_id,
-                    trade_id: posData.trade_id,
-                    symbol: posData.symbol,
-                    instrument_key: posData.instrument_key,
-                    option_type: posData.option_type,
-                    strike_price: posData.strike_price,
-                    entry_price: posData.entry_price,
-                    current_price: posData.current_price || posData.entry_price,
-                    stop_loss: posData.stop_loss,
-                    target: posData.target,
-                    quantity: posData.quantity,
-                    current_pnl: posData.current_pnl || 0,
-                    current_pnl_percentage: posData.current_pnl_percentage || 0,
-                    broker_name: posData.broker_name,
-                    trading_mode: posData.trading_mode,
-                    entry_time: posData.timestamp,
-                    last_updated: posData.timestamp,
-                    trailing_stop_active: false,
-                  },
-                  ...prev,
-                ];
+                return [{
+                  position_id: posData.position_id,
+                  trade_id: posData.trade_id,
+                  symbol: posData.symbol,
+                  instrument_key: posData.instrument_key,
+                  option_type: posData.option_type,
+                  strike_price: posData.strike_price,
+                  entry_price: posData.entry_price,
+                  current_price: posData.current_price || posData.entry_price,
+                  stop_loss: posData.stop_loss,
+                  target: posData.target,
+                  quantity: posData.quantity,
+                  current_pnl: posData.current_pnl || 0,
+                  current_pnl_percentage: posData.current_pnl_percentage || 0,
+                  broker_name: posData.broker_name,
+                  trading_mode: posData.trading_mode,
+                  entry_time: posData.timestamp,
+                  last_updated: posData.timestamp,
+                  trailing_stop_active: false,
+                }, ...prev];
               }
             });
-
-            // Refresh summary data
             fetchPortfolioSummary();
             fetchSelectedStocks();
-
-            // Add to activity feed
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "position_created",
-                message: `Position Opened: ${posData.symbol}`,
-                details: `Entry: ₹${posData.entry_price.toFixed(2)} | SL: ₹${
-                  posData.stop_loss
-                } | Target: ₹${posData.target}`,
-                timestamp: posData.timestamp || new Date().toISOString(),
-                severity: "success",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
           }
-
-          // Handle trade errors
           if (message.type === "trade_error") {
-            setError(
-              `Trade error for ${message.data.symbol}: ${message.data.error}`
-            );
-
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "trade_error",
-                message: `Trade Error: ${message.data.symbol}`,
-                details: message.data.error,
-                timestamp: message.data.timestamp || new Date().toISOString(),
-                severity: "error",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
+            setError(`Trade error for ${message.data.symbol}: ${message.data.error}`);
           }
-
-          // Handle trade preparation failures
-          if (message.type === "trade_preparation_failed") {
-            console.warn(
-              `Trade prep failed for ${message.data.symbol}: ${message.data.status}`
-            );
-
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "trade_prep_failed",
-                message: `Trade Preparation Failed: ${message.data.symbol}`,
-                details: `Status: ${message.data.status}`,
-                timestamp: message.data.timestamp || new Date().toISOString(),
-                severity: "warning",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
-          }
-
-          // Handle position closed
           if (message.type === "position_closed") {
             const posData = message.data;
-            setSuccess(
-              `Position closed: ${posData.symbol} - PnL: ₹${posData.pnl.toFixed(
-                2
-              )}`
-            );
+            setSuccess(`Position closed: ${posData.symbol} - PnL: ₹${posData.pnl.toFixed(2)}`);
             fetchActivePositions();
             fetchPortfolioSummary();
             fetchTradeHistory();
-
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "position_closed",
-                message: `Position Closed: ${posData.symbol}`,
-                details: `PnL: ₹${posData.pnl.toFixed(2)} | Exit: ₹${
-                  posData.exit_price
-                }`,
-                timestamp: posData.timestamp || new Date().toISOString(),
-                severity: posData.pnl >= 0 ? "success" : "error",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
           }
-
-          // Handle position closing
-          if (message.type === "position_closing") {
-            console.log(`Closing position for ${message.data.symbol}...`);
-
-            setActivityFeed((prev) => [
-              {
-                id: Date.now(),
-                type: "position_closing",
-                message: `Closing Position: ${message.data.symbol}`,
-                details: "Exit signal triggered",
-                timestamp: message.data.timestamp || new Date().toISOString(),
-                severity: "info",
-              },
-              ...prev.slice(0, maxActivityItems - 1),
-            ]);
-          }
-
-          // Handle live price updates for selected stocks
           if (message.type === "selected_stock_price_update") {
             const data = message.data;
             setSelectedStocks((prev) =>
               prev.map((stock) =>
-                stock.option_instrument_key === data.option_instrument_key ||
-                stock.symbol === data.symbol
+                stock.option_instrument_key === data.option_instrument_key || stock.symbol === data.symbol
                   ? {
                       ...stock,
                       live_price: data.live_option_premium,
@@ -648,10 +318,8 @@ const AutoTradingPage = () => {
       };
 
       ws.onclose = (event) => {
-        console.log("WebSocket connection closed:", event.code);
         setTimeout(() => {
           if (socketRef.current === ws) {
-            console.log("Attempting to reconnect WebSocket...");
             initializeWebSocket();
           }
         }, 5000);
@@ -665,20 +333,11 @@ const AutoTradingPage = () => {
     } catch (err) {
       console.error("WebSocket connection error:", err);
     }
-  }, [
-    fetchActivePositions,
-    fetchPortfolioSummary,
-    fetchSelectedStocks,
-    fetchTradeHistory,
-  ]);
+  }, [fetchActivePositions, fetchPortfolioSummary, fetchSelectedStocks, fetchTradeHistory]);
 
-  // ---------- Effects ----------
-  // OPTIMIZED: Load ALL data in parallel for INSTANT page load
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        // CRITICAL FIX: Load EVERYTHING in parallel - don't wait for preferences!
-        // This makes the page load 3-5x faster
         await Promise.allSettled([
           fetchTradingPreferences(),
           fetchSelectedStocks(),
@@ -687,1934 +346,651 @@ const AutoTradingPage = () => {
           fetchCapitalOverview(),
           fetchTradeHistory(),
         ]);
-
-        console.log("All initial data loaded successfully");
       } catch (err) {
         console.error("Error loading initial data:", err);
       } finally {
-        // Mark page as loaded - this happens FAST now!
         setIsLoading(false);
       }
-
-      // Initialize WebSocket after data loaded
       initializeWebSocket();
     };
-
     loadInitialData();
-
     return () => {
       if (socketRef.current) {
         socketRef.current.close();
         socketRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // OPTIMIZED: Auto-refresh every 5 seconds (less server load)
-  // WebSocket provides real-time updates, so polling can be slower
   useEffect(() => {
     const interval = setInterval(() => {
-      // Only refresh if page is visible (performance optimization)
       if (document.visibilityState === "visible") {
         fetchPortfolioSummary();
         fetchActivePositions();
       }
-    }, 5000); // Changed from 2s to 5s - WebSocket handles real-time updates
-
+    }, 5000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchPortfolioSummary, fetchActivePositions]);
 
-  // OPTIMIZED: Poll auto-trading status every 10 seconds
   useEffect(() => {
     const checkAutoTradingStatus = async () => {
-      // Skip if page not visible (save resources)
       if (document.visibilityState !== "visible") return;
-
       try {
-        const response = await api.get(
-          "/v1/trading/execution/auto-trading-status"
-        );
+        const response = await api.get("/v1/trading/execution/auto-trading-status");
         if (response.data.success) {
           setAutoTradingRunning(response.data.websocket_running || false);
         }
       } catch (err) {
-        // Silently fail - status check is not critical
         console.error("Failed to get auto-trading status:", err);
       }
     };
-
-    // Check immediately
     checkAutoTradingStatus();
-
-    // Then poll every 10 seconds (reduced from 5s - less server load)
     const interval = setInterval(checkAutoTradingStatus, 10000);
-
     return () => clearInterval(interval);
   }, []);
 
-  const formatCurrency = (amount) => {
+  useEffect(() => {
+    setRealtimeStats(prev => ({
+      ...prev,
+      active_stocks: selectedStocks.length
+    }));
+  }, [selectedStocks]);
+
+  const formatCurrency = useCallback((amount) => {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
       minimumFractionDigits: 2,
     }).format(amount || 0);
-  };
+  }, []);
 
-  const formatPercentage = (value = 0) => {
+  const formatPercentage = useCallback((value = 0) => {
     const num = Number.isFinite(value) ? value : 0;
     return `${num >= 0 ? "+" : ""}${num.toFixed(2)}%`;
-  };
+  }, []);
+
+  const getPnlColor = useCallback((value) => {
+    if (value > 0) return 'tw-text-emerald-300';
+    if (value < 0) return 'tw-text-rose-300';
+    return 'tw-text-slate-300';
+  }, []);
+
+  const getPnlBgColor = useCallback((value) => {
+    if (value > 0) return 'tw-bg-emerald-500/10 tw-border-emerald-500/30';
+    if (value < 0) return 'tw-bg-rose-500/10 tw-border-rose-500/30';
+    return 'tw-bg-slate-500/10 tw-border-slate-500/30';
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="tw-min-h-screen tw-bg-gradient-to-br tw-from-slate-950 tw-via-slate-900 tw-to-slate-950 tw-flex tw-items-center tw-justify-center">
+        <div className="tw-text-center tw-space-y-4">
+          <div className="tw-relative tw-w-20 tw-h-20 tw-mx-auto">
+            <div className="tw-absolute tw-inset-0 tw-border-4 tw-border-slate-700/30 tw-rounded-full"></div>
+            <div className="tw-absolute tw-inset-0 tw-border-4 tw-border-cyan-500 tw-rounded-full tw-border-t-transparent tw-animate-spin"></div>
+          </div>
+          <div>
+            <p className="tw-text-slate-300 tw-text-lg tw-font-semibold">Loading Trading Dashboard</p>
+            <p className="tw-text-slate-500 tw-text-sm">Initializing systems...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <Container maxWidth="xl" sx={{ py: 2 }}>
-      {/* Emergency Controls - Sticky Header */}
-      <Box
-        sx={{
-          position: "sticky",
-          top: 0,
-          zIndex: 1000,
-          bgcolor: "background.paper",
-          borderBottom: 1,
-          borderColor: "divider",
-          mb: 3,
-          pb: 2,
-          pt: 1,
-        }}
-      >
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-          spacing={2}
-        >
+    <div className="tw-min-h-screen tw-bg-gradient-to-br tw-from-slate-950 tw-via-slate-900 tw-to-slate-950 tw-p-4 md:tw-p-6 lg:tw-p-8">
+      {/* Sticky Header with Emergency Controls */}
+      <div className="tw-sticky tw-top-0 tw-z-50 tw-bg-slate-900/95 tw-backdrop-blur-xl tw-border-b tw-border-slate-700/50 tw-mb-6 tw-p-4 tw-rounded-2xl tw-shadow-2xl">
+        <div className="tw-flex tw-flex-col lg:tw-flex-row lg:tw-items-center lg:tw-justify-between tw-gap-4">
           {/* Left: Title & Mode */}
-          <Box>
-            <Typography
-              variant="h5"
-              component="h1"
-              fontWeight={600}
-              sx={{ mb: 0.5 }}
-            >
-              Automated Trading
-            </Typography>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Chip
-                label={tradingMode === "paper" ? "PAPER" : "LIVE"}
-                color={tradingMode === "paper" ? "info" : "error"}
-                size="small"
-                sx={{ fontWeight: 600 }}
-              />
-              <Typography variant="caption" color="text.secondary">
-                {activePositions.length} Active Position
-                {activePositions.length !== 1 ? "s" : ""}
-              </Typography>
-            </Stack>
-          </Box>
+          <div>
+            <h1 className="tw-text-2xl tw-font-bold tw-text-white tw-mb-2">Automated Trading</h1>
+            <div className="tw-flex tw-items-center tw-gap-3">
+              <span className={`tw-px-3 tw-py-1 tw-rounded-full tw-text-xs tw-font-bold tw-uppercase ${tradingMode === "paper" ? 'tw-bg-cyan-500/20 tw-text-cyan-300 tw-border tw-border-cyan-500/30' : 'tw-bg-rose-500/20 tw-text-rose-300 tw-border tw-border-rose-500/30'}`}>
+                {tradingMode === "paper" ? "PAPER" : "LIVE"}
+              </span>
+              <span className="tw-text-slate-400 tw-text-sm">
+                {activePositions.length} Active Position{activePositions.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </div>
 
           {/* Center: Quick P&L */}
-          <Box sx={{ textAlign: "center", px: 3 }}>
-            <Typography variant="caption" color="text.secondary">
-              Total P&L
-            </Typography>
-            <Typography
-              variant="h5"
-              fontWeight={700}
-              color={pnlSummary.total_pnl >= 0 ? "success.main" : "error.main"}
-            >
+          <div className="tw-text-center lg:tw-px-6">
+            <p className="tw-text-slate-400 tw-text-xs tw-uppercase tw-tracking-wider tw-mb-1">Total P&L</p>
+            <p className={`tw-text-3xl tw-font-bold ${getPnlColor(pnlSummary.total_pnl)}`}>
               {formatCurrency(pnlSummary.total_pnl)}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
+            </p>
+            <p className={`tw-text-sm ${getPnlColor(pnlSummary.pnl_percent)}`}>
               {formatPercentage(pnlSummary.pnl_percent)}
-            </Typography>
-          </Box>
+            </p>
+          </div>
 
-          {/* Right: Emergency Controls */}
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Tooltip title="Close all active positions immediately">
-              <Button
-                variant="contained"
-                color="error"
-                size="large"
-                startIcon={<StopIcon />}
-                onClick={handleEmergencyStopAll}
-                disabled={emergencyStopLoading || activePositions.length === 0}
-                sx={{
-                  fontWeight: 600,
-                  minWidth: 180,
-                  boxShadow: 3,
-                  "&:hover": {
-                    boxShadow: 6,
-                  },
-                }}
-              >
-                {emergencyStopLoading ? "STOPPING..." : "EMERGENCY STOP"}
-              </Button>
-            </Tooltip>
-          </Stack>
-        </Stack>
-      </Box>
+          {/* Right: Emergency Stop */}
+          <button
+            onClick={handleEmergencyStopAll}
+            disabled={emergencyStopLoading || activePositions.length === 0}
+            className="tw-px-6 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-shadow-lg hover:tw-shadow-xl disabled:tw-opacity-50 disabled:tw-cursor-not-allowed tw-flex tw-items-center tw-justify-center tw-gap-2"
+          >
+            <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+            </svg>
+            {emergencyStopLoading ? "STOPPING..." : "EMERGENCY STOP"}
+          </button>
+        </div>
+      </div>
 
       {/* Alerts */}
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
+        <div className="tw-mb-6 tw-p-4 tw-bg-rose-500/10 tw-border tw-border-rose-500/30 tw-rounded-xl tw-flex tw-items-start tw-gap-3">
+          <svg className="tw-w-5 tw-h-5 tw-text-rose-400 tw-flex-shrink-0 tw-mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <div className="tw-flex-1">
+            <p className="tw-text-rose-300 tw-font-medium">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="tw-text-rose-400 hover:tw-text-rose-300">
+            <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       )}
       {success && (
-        <Alert
-          severity="success"
-          sx={{ mb: 2 }}
-          onClose={() => setSuccess(null)}
-        >
-          {success}
-        </Alert>
+        <div className="tw-mb-6 tw-p-4 tw-bg-emerald-500/10 tw-border tw-border-emerald-500/30 tw-rounded-xl tw-flex tw-items-start tw-gap-3">
+          <svg className="tw-w-5 tw-h-5 tw-text-emerald-400 tw-flex-shrink-0 tw-mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <div className="tw-flex-1">
+            <p className="tw-text-emerald-300 tw-font-medium">{success}</p>
+          </div>
+          <button onClick={() => setSuccess(null)} className="tw-text-emerald-400 hover:tw-text-emerald-300">
+            <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       )}
 
-      {isLoading && <LinearProgress sx={{ mb: 2 }} />}
+      {/* Portfolio Summary */}
+      <div className="tw-mb-6 tw-bg-slate-900/50 tw-backdrop-blur-xl tw-border tw-border-slate-700/50 tw-rounded-2xl tw-p-6 tw-shadow-2xl">
+        <h2 className="tw-text-xl tw-font-bold tw-text-white tw-mb-6">Portfolio Summary</h2>
+        <div className="tw-grid tw-grid-cols-1 sm:tw-grid-cols-2 lg:tw-grid-cols-4 tw-gap-4">
+          <div className={`tw-p-5 tw-rounded-xl tw-border ${getPnlBgColor(pnlSummary.total_pnl)}`}>
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Total P&L</p>
+            <p className={`tw-text-3xl tw-font-bold ${getPnlColor(pnlSummary.total_pnl)}`}>
+              {formatCurrency(pnlSummary.total_pnl)}
+            </p>
+            <p className={`tw-text-sm tw-mt-1 ${getPnlColor(pnlSummary.pnl_percent)}`}>
+              {formatPercentage(pnlSummary.pnl_percent)}
+            </p>
+          </div>
+          <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Active Positions</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-white">{pnlSummary.active_positions_count}</p>
+          </div>
+          <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Total Investment</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-white">{formatCurrency(pnlSummary.total_investment)}</p>
+          </div>
+          <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Available Capital</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-cyan-400">{formatCurrency(capitalData.total_free_margin)}</p>
+          </div>
+        </div>
+      </div>
 
-      <Grid container spacing={2.5}>
-        {/* Portfolio Summary - Top Priority */}
-        <Grid item xs={12}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
-                Portfolio Summary
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor:
-                        pnlSummary.total_pnl >= 0
-                          ? "success.light"
-                          : "error.light",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="white"
-                      sx={{ opacity: 0.9, display: "block", mb: 0.5 }}
-                    >
-                      Total P&L
-                    </Typography>
-                    <Typography variant="h5" color="white" fontWeight={700}>
-                      {formatCurrency(pnlSummary.total_pnl)}
-                    </Typography>
-                    <Typography variant="body2" color="white" sx={{ mt: 0.5 }}>
-                      {formatPercentage(pnlSummary.pnl_percent)}
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Active Positions
-                    </Typography>
-                    <Typography variant="h5" fontWeight={700}>
-                      {pnlSummary.active_positions_count}
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Total Investment
-                    </Typography>
-                    <Typography variant="h5" fontWeight={700}>
-                      {formatCurrency(pnlSummary.total_investment)}
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Available Capital
-                    </Typography>
-                    <Typography
-                      variant="h5"
-                      fontWeight={700}
-                      color="primary.main"
-                    >
-                      {formatCurrency(capitalData.total_free_margin)}
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Live Stock Activity Chart - Per Stock Visualization */}
-        <StockActivityChart
-          stockActivityStats={stockActivityStats}
-          showLiveActivity={showLiveActivity}
-          setShowLiveActivity={setShowLiveActivity}
-        />
-
-        {/* Keep collapsed OLD timeline for reference - will remove later */}
-        {false && activityFeed.length > 0 && (
-          <Grid item xs={12}>
-            <Card elevation={2}>
-              <CardContent>
-                <Collapse in={false}>
-                  <Box sx={{ mt: 2, position: "relative" }}>
-                    {activityFeed.length === 0 ? (
-                      <Alert severity="info" sx={{ borderRadius: 2 }}>
-                        No recent activity. The timeline will show trades, signals, and system events in real-time.
-                      </Alert>
-                    ) : (
-                      <Box sx={{ position: "relative", pl: 2 }}>
-                        {/* Vertical Timeline Line */}
-                        <Box
-                          sx={{
-                            position: "absolute",
-                            left: "29px",
-                            top: "20px",
-                            bottom: "20px",
-                            width: "2px",
-                            bgcolor: "divider",
-                          }}
-                        />
-
-                        {/* Timeline Items */}
-                        <Stack spacing={2.5}>
-                          {activityFeed.map((activity, index) => {
-                            const getIcon = () => {
-                              if (activity.type === "trade_executed" || activity.type === "position_created") {
-                                return <CheckCircleIcon />;
-                              } else if (activity.type === "position_closed") {
-                                return activity.severity === "success" ? <TrendingUpIcon /> : <TrendingDownIcon />;
-                              } else if (activity.type === "signal") {
-                                return <SignalIcon />;
-                              } else if (activity.severity === "error") {
-                                return <ErrorIcon />;
-                              } else if (activity.severity === "warning") {
-                                return <WarningIcon />;
-                              } else {
-                                return <InfoIcon />;
-                              }
-                            };
-
-                            const getColor = () => {
-                              if (activity.severity === "success") return "success.main";
-                              if (activity.severity === "error") return "error.main";
-                              if (activity.severity === "warning") return "warning.main";
-                              return "info.main";
-                            };
-
-                            return (
-                              <Box
-                                key={activity.id}
-                                sx={{
-                                  display: "flex",
-                                  gap: 2,
-                                  position: "relative",
-                                  animation: index === 0 ? "fadeSlideIn 0.5s ease-out" : "none",
-                                  "@keyframes fadeSlideIn": {
-                                    from: {
-                                      opacity: 0,
-                                      transform: "translateY(-10px)",
-                                    },
-                                    to: {
-                                      opacity: 1,
-                                      transform: "translateY(0)",
-                                    },
-                                  },
-                                }}
-                              >
-                                {/* Timeline Icon */}
-                                <Box
-                                  sx={{
-                                    width: 40,
-                                    height: 40,
-                                    borderRadius: "50%",
-                                    bgcolor: "background.paper",
-                                    border: 2,
-                                    borderColor: getColor(),
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    flexShrink: 0,
-                                    zIndex: 1,
-                                    color: getColor(),
-                                  }}
-                                >
-                                  {getIcon()}
-                                </Box>
-
-                                {/* Activity Card */}
-                                <Box
-                                  sx={{
-                                    flex: 1,
-                                    bgcolor: "background.default",
-                                    borderRadius: 2,
-                                    p: 2,
-                                    border: 1,
-                                    borderColor: "divider",
-                                    transition: "all 0.2s",
-                                    "&:hover": {
-                                      borderColor: getColor(),
-                                      boxShadow: `0 2px 8px ${getColor()}20`,
-                                      transform: "translateX(4px)",
-                                    },
-                                  }}
-                                >
-                                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 0.5 }}>
-                                    <Typography variant="body1" fontWeight={600}>
-                                      {activity.message}
-                                    </Typography>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        fontFamily: "monospace",
-                                        bgcolor: "background.paper",
-                                        px: 1,
-                                        py: 0.5,
-                                        borderRadius: 1,
-                                        border: 1,
-                                        borderColor: "divider",
-                                      }}
-                                    >
-                                      {new Date(activity.timestamp).toLocaleTimeString("en-IN", {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                        second: "2-digit",
-                                      })}
-                                    </Typography>
-                                  </Stack>
-                                  <Typography variant="body2" color="text.secondary">
-                                    {activity.details}
-                                  </Typography>
-                                  <Box sx={{ mt: 1 }}>
-                                    <Chip
-                                      label={
-                                        activity.severity === "success"
-                                          ? "Success"
-                                          : activity.severity === "error"
-                                          ? "Error"
-                                          : activity.severity === "warning"
-                                          ? "Warning"
-                                          : "Info"
-                                      }
-                                      size="small"
-                                      color={
-                                        activity.severity === "success"
-                                          ? "success"
-                                          : activity.severity === "error"
-                                          ? "error"
-                                          : activity.severity === "warning"
-                                          ? "warning"
-                                          : "info"
-                                      }
-                                    />
-                                  </Box>
-                                </Box>
-                              </Box>
-                            );
-                          })}
-                        </Stack>
-                      </Box>
-                    )}
-                  </Box>
-                </Collapse>
-              </CardContent>
-            </Card>
-          </Grid>
+      {/* Real-time Activity Stats - NEW DESIGN */}
+      <div className="tw-mb-6 tw-bg-gradient-to-br tw-from-slate-900/50 tw-to-slate-800/50 tw-backdrop-blur-xl tw-border tw-border-slate-700/50 tw-rounded-2xl tw-p-6 tw-shadow-2xl">
+        <div className="tw-flex tw-items-center tw-justify-between tw-mb-6">
+          <h2 className="tw-text-xl tw-font-bold tw-text-white tw-flex tw-items-center tw-gap-3">
+            <span className="tw-relative tw-flex tw-h-3 tw-w-3">
+              <span className={`tw-animate-ping tw-absolute tw-inline-flex tw-h-full tw-w-full tw-rounded-full ${autoTradingRunning ? 'tw-bg-emerald-400' : 'tw-bg-slate-400'} tw-opacity-75`}></span>
+              <span className={`tw-relative tw-inline-flex tw-rounded-full tw-h-3 tw-w-3 ${autoTradingRunning ? 'tw-bg-emerald-500' : 'tw-bg-slate-500'}`}></span>
+            </span>
+            Real-Time Activity
+          </h2>
+          <span className={`tw-px-3 tw-py-1 tw-rounded-full tw-text-xs tw-font-bold ${autoTradingRunning ? 'tw-bg-emerald-500/20 tw-text-emerald-300 tw-border tw-border-emerald-500/30' : 'tw-bg-slate-500/20 tw-text-slate-400 tw-border tw-border-slate-500/30'}`}>
+            {autoTradingRunning ? 'MONITORING' : 'IDLE'}
+          </span>
+        </div>
+        <div className="tw-grid tw-grid-cols-1 sm:tw-grid-cols-3 tw-gap-4">
+          <div className="tw-p-5 tw-bg-cyan-500/10 tw-rounded-xl tw-border tw-border-cyan-500/30">
+            <div className="tw-flex tw-items-center tw-justify-between tw-mb-2">
+              <p className="tw-text-cyan-300 tw-text-sm tw-font-medium">Signals Today</p>
+              <svg className="tw-w-5 tw-h-5 tw-text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+              </svg>
+            </div>
+            <p className="tw-text-3xl tw-font-bold tw-text-cyan-400">{realtimeStats.signals_today}</p>
+          </div>
+          <div className="tw-p-5 tw-bg-emerald-500/10 tw-rounded-xl tw-border tw-border-emerald-500/30">
+            <div className="tw-flex tw-items-center tw-justify-between tw-mb-2">
+              <p className="tw-text-emerald-300 tw-text-sm tw-font-medium">Trades Executed</p>
+              <svg className="tw-w-5 tw-h-5 tw-text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <p className="tw-text-3xl tw-font-bold tw-text-emerald-400">{realtimeStats.trades_today}</p>
+          </div>
+          <div className="tw-p-5 tw-bg-amber-500/10 tw-rounded-xl tw-border tw-border-amber-500/30">
+            <div className="tw-flex tw-items-center tw-justify-between tw-mb-2">
+              <p className="tw-text-amber-300 tw-text-sm tw-font-medium">Active Stocks</p>
+              <svg className="tw-w-5 tw-h-5 tw-text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+              </svg>
+            </div>
+            <p className="tw-text-3xl tw-font-bold tw-text-amber-400">{realtimeStats.active_stocks}</p>
+          </div>
+        </div>
+        {autoTradingRunning && (
+          <div className="tw-mt-4 tw-p-4 tw-bg-slate-800/30 tw-rounded-xl tw-border tw-border-slate-700/30">
+            <p className="tw-text-sm tw-text-slate-300">
+              <span className="tw-font-semibold tw-text-emerald-400">Strategy Active:</span> Monitoring {selectedStocks.length} stocks • Real-time signal processing • Auto-execution enabled
+            </p>
+          </div>
         )}
+      </div>
 
-        {/* Trading Settings */}
-        <Grid item xs={12}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
-                Trading Settings
-              </Typography>
-
-              <Grid container spacing={2.5}>
-                {/* Trading Mode */}
-                <Grid item xs={12} sm={6}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                      border:
-                        tradingMode === "live" ? "2px solid" : "1px solid",
-                      borderColor:
-                        tradingMode === "live" ? "error.main" : "divider",
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 1 }}
-                    >
-                      Trading Mode
-                    </Typography>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={tradingMode === "live"}
-                          onChange={handleTradingModeToggle}
-                          color="error"
-                        />
-                      }
-                      label={
-                        <Typography variant="body2" fontWeight={500}>
-                          {tradingMode === "paper"
-                            ? "Paper Trading"
-                            : "Live Trading"}
-                        </Typography>
-                      }
-                    />
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mt: 0.5 }}
-                    >
-                      {tradingMode === "paper"
-                        ? "Virtual ₹10 lakhs - No real money"
-                        : "⚠️ Real money trading - Actual broker API"}
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                {/* Execution Mode */}
-                <Grid item xs={12} sm={6}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                      border: "1px solid",
-                      borderColor: "divider",
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 1 }}
-                    >
-                      Execution Mode
-                    </Typography>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={executionMode === "multi_demat"}
-                          onChange={async (e) => {
-                            const newMode = e.target.checked
-                              ? "multi_demat"
-                              : "single_demat";
-                            try {
-                              const response = await api.post(
-                                `/v1/trading/execution/user-trading-preferences?trading_mode=${tradingMode}&execution_mode=${newMode}`
-                              );
-                              if (response.data.success) {
-                                setExecutionMode(newMode);
-                              }
-                            } catch (err) {
-                              console.error(
-                                "Error updating execution mode:",
-                                err
-                              );
-                            }
-                          }}
-                          color="primary"
-                        />
-                      }
-                      label={
-                        <Typography variant="body2" fontWeight={500}>
-                          {executionMode === "multi_demat"
-                            ? "Multi-Demat"
-                            : "Single-Demat"}
-                        </Typography>
-                      }
-                    />
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mt: 0.5 }}
-                    >
-                      {executionMode === "multi_demat"
-                        ? "Distribute across all active demats"
-                        : "Execute on default demat only"}
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-
-              {/* Auto-Trading Status Indicator */}
-              <Box
-                sx={{
-                  mt: 2.5,
-                  p: 2,
-                  bgcolor: autoTradingRunning ? "success.50" : "grey.50",
-                  borderRadius: 1,
-                }}
-              >
-                <Stack direction="row" alignItems="center" spacing={1}>
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: "50%",
-                      bgcolor: autoTradingRunning ? "success.main" : "grey.400",
-                      animation: autoTradingRunning
-                        ? "pulse 2s infinite"
-                        : "none",
-                      "@keyframes pulse": {
-                        "0%, 100%": { opacity: 1 },
-                        "50%": { opacity: 0.5 },
-                      },
-                    }}
-                  />
-                  <Typography
-                    variant="body2"
-                    fontWeight={600}
-                    color={
-                      autoTradingRunning ? "success.main" : "text.secondary"
-                    }
-                  >
-                    {autoTradingRunning
-                      ? `Auto-Trading Active - Monitoring ${selectedStocks.length} stocks`
-                      : "Auto-Trading will start automatically when stocks are selected"}
-                  </Typography>
-                </Stack>
-                {autoTradingRunning && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ display: "block", mt: 1, ml: 3 }}
-                  >
-                    Strategy running on live data • Trades execute automatically
-                    on valid signals • Real-time PnL tracking active
-                  </Typography>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Capital Overview */}
-        <Grid item xs={12}>
-          <Card elevation={2}>
-            <CardContent>
-              <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-                sx={{ mb: 2.5 }}
-              >
-                <Typography variant="h6" fontWeight={600}>
-                  Capital Overview
-                </Typography>
-                <Chip
-                  label={`${capitalData.active_demats || 0} Active Demat${
-                    (capitalData.active_demats || 0) !== 1 ? "s" : ""
-                  }`}
-                  size="small"
-                  color="primary"
-                  variant="outlined"
+      {/* Trading Settings */}
+      <div className="tw-mb-6 tw-bg-slate-900/50 tw-backdrop-blur-xl tw-border tw-border-slate-700/50 tw-rounded-2xl tw-p-6 tw-shadow-2xl">
+        <h2 className="tw-text-xl tw-font-bold tw-text-white tw-mb-6">Trading Settings</h2>
+        <div className="tw-grid tw-grid-cols-1 md:tw-grid-cols-2 tw-gap-6">
+          <div className={`tw-p-5 tw-rounded-xl tw-border ${tradingMode === "live" ? 'tw-border-rose-500/50 tw-bg-rose-500/5' : 'tw-border-slate-700/50 tw-bg-slate-800/30'}`}>
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-3">Trading Mode</p>
+            <label className="tw-flex tw-items-center tw-gap-3 tw-cursor-pointer">
+              <div className="tw-relative">
+                <input
+                  type="checkbox"
+                  checked={tradingMode === "live"}
+                  onChange={handleTradingModeToggle}
+                  className="tw-sr-only tw-peer"
                 />
-              </Stack>
-
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Total Capital
-                    </Typography>
-                    <Typography variant="h5" fontWeight={700}>
-                      {formatCurrency(capitalData.total_available_capital || 0)}
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Used Margin
-                    </Typography>
-                    <Typography
-                      variant="h5"
-                      fontWeight={700}
-                      color="error.main"
-                    >
-                      {formatCurrency(capitalData.total_used_margin || 0)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {capitalData.capital_utilization_percent?.toFixed(1) || 0}
-                      % utilized
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Free Margin
-                    </Typography>
-                    <Typography
-                      variant="h5"
-                      fontWeight={700}
-                      color="success.main"
-                    >
-                      {formatCurrency(capitalData.total_free_margin || 0)}
-                    </Typography>
-                  </Box>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box
-                    sx={{
-                      p: 2,
-                      bgcolor: "background.default",
-                      borderRadius: 1,
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      color="text.secondary"
-                      sx={{ display: "block", mb: 0.5 }}
-                    >
-                      Max Per Trade
-                    </Typography>
-                    <Typography
-                      variant="h5"
-                      fontWeight={700}
-                      color="primary.main"
-                    >
-                      {formatCurrency(capitalData.max_trade_allocation || 0)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      20% of total
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-
-              {/* Per-Demat Breakdown - Collapsible */}
-              {capitalData.demats && capitalData.demats.length > 0 && (
-                <Box sx={{ mt: 2.5 }}>
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      setShowCapitalBreakdown(!showCapitalBreakdown)
+                <div className="tw-w-14 tw-h-7 tw-bg-slate-700 tw-peer-focus:tw-outline-none tw-rounded-full tw-peer tw-peer-checked:after:tw-translate-x-full peer-checked:after:tw-border-white after:tw-content-[''] after:tw-absolute after:tw-top-0.5 after:tw-left-[4px] after:tw-bg-white after:tw-border-slate-300 after:tw-border after:tw-rounded-full after:tw-h-6 after:tw-w-6 after:tw-transition-all tw-peer-checked:tw-bg-rose-600"></div>
+              </div>
+              <div>
+                <p className="tw-text-white tw-font-medium">{tradingMode === "paper" ? "Paper Trading" : "Live Trading"}</p>
+                <p className="tw-text-xs tw-text-slate-400">
+                  {tradingMode === "paper" ? "Virtual ₹10 lakhs - No real money" : "⚠️ Real money trading - Actual broker API"}
+                </p>
+              </div>
+            </label>
+          </div>
+          <div className="tw-p-5 tw-bg-slate-800/30 tw-rounded-xl tw-border tw-border-slate-700/50">
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-3">Execution Mode</p>
+            <label className="tw-flex tw-items-center tw-gap-3 tw-cursor-pointer">
+              <div className="tw-relative">
+                <input
+                  type="checkbox"
+                  checked={executionMode === "multi_demat"}
+                  onChange={async (e) => {
+                    const newMode = e.target.checked ? "multi_demat" : "single_demat";
+                    try {
+                      const response = await api.post(`/v1/trading/execution/user-trading-preferences?trading_mode=${tradingMode}&execution_mode=${newMode}`);
+                      if (response.data.success) {
+                        setExecutionMode(newMode);
+                      }
+                    } catch (err) {
+                      console.error("Error updating execution mode:", err);
                     }
-                    endIcon={
-                      showCapitalBreakdown ? (
-                        <ExpandLessIcon />
-                      ) : (
-                        <ExpandMoreIcon />
-                      )
-                    }
-                    sx={{ mb: showCapitalBreakdown ? 1.5 : 0 }}
-                  >
-                    Demat Breakdown
-                  </Button>
-                  <Collapse in={showCapitalBreakdown}>
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Broker</TableCell>
-                            <TableCell align="right">Available</TableCell>
-                            <TableCell align="right">Used</TableCell>
-                            <TableCell align="right">Free</TableCell>
-                            <TableCell align="right">Utilization</TableCell>
-                            <TableCell align="center">Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {capitalData.demats.map((demat, idx) => (
-                            <TableRow key={idx}>
-                              <TableCell>
-                                <Typography variant="body2" fontWeight={600}>
-                                  {demat.broker_name?.toUpperCase() || "N/A"}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                {formatCurrency(demat.available_margin || 0)}
-                              </TableCell>
-                              <TableCell align="right">
-                                {formatCurrency(demat.used_margin || 0)}
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography
-                                  variant="body2"
-                                  fontWeight={600}
-                                  color={
-                                    demat.free_margin > 0
-                                      ? "success.main"
-                                      : "error.main"
-                                  }
-                                >
-                                  {formatCurrency(demat.free_margin || 0)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Stack
-                                  direction="row"
-                                  alignItems="center"
-                                  spacing={1}
-                                  justifyContent="flex-end"
-                                >
-                                  <LinearProgress
-                                    variant="determinate"
-                                    value={Math.min(
-                                      demat.utilization_percent || 0,
-                                      100
-                                    )}
-                                    sx={{ width: 60 }}
-                                    color={
-                                      (demat.utilization_percent || 0) > 80
-                                        ? "error"
-                                        : (demat.utilization_percent || 0) > 50
-                                        ? "warning"
-                                        : "success"
-                                    }
-                                  />
-                                  <Typography variant="caption">
-                                    {(demat.utilization_percent || 0).toFixed(
-                                      0
-                                    )}
-                                    %
-                                  </Typography>
-                                </Stack>
-                              </TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={
-                                    demat.token_valid ? "Active" : "Expired"
-                                  }
-                                  color={
-                                    demat.token_valid ? "success" : "error"
-                                  }
-                                  size="small"
-                                />
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Collapse>
-                </Box>
+                  }}
+                  className="tw-sr-only tw-peer"
+                />
+                <div className="tw-w-14 tw-h-7 tw-bg-slate-700 tw-peer-focus:tw-outline-none tw-rounded-full tw-peer tw-peer-checked:after:tw-translate-x-full peer-checked:after:tw-border-white after:tw-content-[''] after:tw-absolute after:tw-top-0.5 after:tw-left-[4px] after:tw-bg-white after:tw-border-slate-300 after:tw-border after:tw-rounded-full after:tw-h-6 after:tw-w-6 after:tw-transition-all tw-peer-checked:tw-bg-cyan-600"></div>
+              </div>
+              <div>
+                <p className="tw-text-white tw-font-medium">{executionMode === "multi_demat" ? "Multi-Demat" : "Single-Demat"}</p>
+                <p className="tw-text-xs tw-text-slate-400">
+                  {executionMode === "multi_demat" ? "Distribute across all active demats" : "Execute on default demat only"}
+                </p>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Capital Overview */}
+      <div className="tw-mb-6 tw-bg-slate-900/50 tw-backdrop-blur-xl tw-border tw-border-slate-700/50 tw-rounded-2xl tw-p-6 tw-shadow-2xl">
+        <div className="tw-flex tw-items-center tw-justify-between tw-mb-6">
+          <h2 className="tw-text-xl tw-font-bold tw-text-white">Capital Overview</h2>
+          <span className="tw-px-3 tw-py-1 tw-rounded-full tw-text-xs tw-font-bold tw-bg-cyan-500/20 tw-text-cyan-300 tw-border tw-border-cyan-500/30">
+            {capitalData.active_demats || 0} Active Demat{(capitalData.active_demats || 0) !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <div className="tw-grid tw-grid-cols-1 sm:tw-grid-cols-2 lg:tw-grid-cols-4 tw-gap-4">
+          <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Total Capital</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-white">{formatCurrency(capitalData.total_available_capital || 0)}</p>
+          </div>
+          <div className="tw-p-5 tw-bg-rose-500/10 tw-rounded-xl tw-border tw-border-rose-500/30">
+            <p className="tw-text-rose-300 tw-text-sm tw-mb-2">Used Margin</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-rose-400">{formatCurrency(capitalData.total_used_margin || 0)}</p>
+            <p className="tw-text-xs tw-text-slate-400 tw-mt-1">{capitalData.capital_utilization_percent?.toFixed(1) || 0}% utilized</p>
+          </div>
+          <div className="tw-p-5 tw-bg-emerald-500/10 tw-rounded-xl tw-border tw-border-emerald-500/30">
+            <p className="tw-text-emerald-300 tw-text-sm tw-mb-2">Free Margin</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-emerald-400">{formatCurrency(capitalData.total_free_margin || 0)}</p>
+          </div>
+          <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
+            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Max Per Trade</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-cyan-400">{formatCurrency(capitalData.max_trade_allocation || 0)}</p>
+            <p className="tw-text-xs tw-text-slate-400 tw-mt-1">20% of total</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabbed Content */}
+      <div className="tw-bg-slate-900/50 tw-backdrop-blur-xl tw-border tw-border-slate-700/50 tw-rounded-2xl tw-shadow-2xl tw-overflow-hidden">
+        <div className="tw-flex tw-border-b tw-border-slate-700/50">
+          {['Active Positions', 'Selected Stocks', 'Trade History'].map((tab, index) => (
+            <button
+              key={index}
+              onClick={() => setActiveTab(index)}
+              className={`tw-flex-1 tw-px-6 tw-py-4 tw-font-semibold tw-transition-all tw-duration-200 ${
+                activeTab === index
+                  ? 'tw-bg-slate-800 tw-text-white tw-border-b-2 tw-border-cyan-500'
+                  : 'tw-text-slate-400 hover:tw-text-white hover:tw-bg-slate-800/50'
+              }`}
+            >
+              {tab} ({index === 0 ? activePositions.length : index === 1 ? selectedStocks.length : tradeHistory.length})
+            </button>
+          ))}
+        </div>
+
+        <div className="tw-p-6">
+          {/* Active Positions Tab - REDESIGNED */}
+          {activeTab === 0 && (
+            <div>
+              {activePositions.length > 0 ? (
+                <div className="tw-grid tw-grid-cols-1 lg:tw-grid-cols-2 tw-gap-4">
+                  {activePositions.map((position) => {
+                    const isProfit = position.current_pnl >= 0;
+
+                    return (
+                      <div
+                        key={position.position_id}
+                        className={`tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-transition-all tw-duration-300 hover:tw-shadow-2xl hover:tw-scale-[1.02] ${
+                          isProfit
+                            ? 'tw-bg-gradient-to-br tw-from-emerald-950/40 tw-to-emerald-900/20 tw-border-emerald-500/30'
+                            : 'tw-bg-gradient-to-br tw-from-rose-950/40 tw-to-rose-900/20 tw-border-rose-500/30'
+                        }`}
+                      >
+                        {/* Real-time Pulse Indicator */}
+                        <div className="tw-absolute tw-top-4 tw-right-4">
+                          <span className="tw-relative tw-flex tw-h-3 tw-w-3">
+                            <span className={`tw-animate-ping tw-absolute tw-inline-flex tw-h-full tw-w-full tw-rounded-full ${isProfit ? 'tw-bg-emerald-400' : 'tw-bg-rose-400'} tw-opacity-75`}></span>
+                            <span className={`tw-relative tw-inline-flex tw-rounded-full tw-h-3 tw-w-3 ${isProfit ? 'tw-bg-emerald-500' : 'tw-bg-rose-500'}`}></span>
+                          </span>
+                        </div>
+
+                        <div className="tw-p-6">
+                          {/* Header: Symbol & Type */}
+                          <div className="tw-flex tw-items-start tw-justify-between tw-mb-4">
+                            <div>
+                              <h3 className="tw-text-2xl tw-font-bold tw-text-white tw-mb-1">{position.symbol}</h3>
+                              <div className="tw-flex tw-items-center tw-gap-2">
+                                <span className={`tw-px-3 tw-py-1 tw-rounded-full tw-text-xs tw-font-bold ${
+                                  position.signal_type?.includes("CE")
+                                    ? 'tw-bg-emerald-500/30 tw-text-emerald-200 tw-border tw-border-emerald-500/50'
+                                    : 'tw-bg-rose-500/30 tw-text-rose-200 tw-border tw-border-rose-500/50'
+                                }`}>
+                                  {position.signal_type}
+                                </span>
+                                <span className="tw-text-xs tw-text-slate-400 tw-font-medium">
+                                  {position.broker_name?.toUpperCase() || "BROKER"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Large P&L Display */}
+                            <div className="tw-text-right">
+                              <div className={`tw-text-3xl tw-font-bold ${getPnlColor(position.current_pnl)}`}>
+                                {formatCurrency(position.current_pnl)}
+                              </div>
+                              <div className={`tw-text-lg tw-font-semibold ${getPnlColor(position.current_pnl_percentage)}`}>
+                                {formatPercentage(position.current_pnl_percentage)}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Price Progress Bar */}
+                          <div className="tw-mb-4">
+                            <div className="tw-flex tw-justify-between tw-text-xs tw-text-slate-400 tw-mb-2">
+                              <span>Entry: {formatCurrency(position.entry_price)}</span>
+                              <span>Current: {formatCurrency(position.current_price)}</span>
+                            </div>
+                            <div className="tw-relative tw-h-2 tw-bg-slate-800 tw-rounded-full tw-overflow-hidden">
+                              <div
+                                className={`tw-absolute tw-h-full tw-rounded-full tw-transition-all tw-duration-500 ${
+                                  isProfit ? 'tw-bg-gradient-to-r tw-from-emerald-500 tw-to-emerald-400' : 'tw-bg-gradient-to-r tw-from-rose-500 tw-to-rose-400'
+                                }`}
+                                style={{ width: `${Math.min(Math.abs(position.current_pnl_percentage) * 2, 100)}%` }}
+                              ></div>
+                            </div>
+                            <div className="tw-flex tw-justify-between tw-text-xs tw-mt-1">
+                              <span className="tw-text-slate-500">SL: {formatCurrency(position.stop_loss || 0)}</span>
+                              <span className="tw-text-slate-500">Target: {formatCurrency(position.target || 0)}</span>
+                            </div>
+                          </div>
+
+                          {/* Stats Grid */}
+                          <div className="tw-grid tw-grid-cols-3 tw-gap-3 tw-mb-4">
+                            <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
+                              <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Quantity</div>
+                              <div className="tw-text-lg tw-font-bold tw-text-white">{position.quantity}</div>
+                            </div>
+                            <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
+                              <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Investment</div>
+                              <div className="tw-text-sm tw-font-bold tw-text-cyan-400">
+                                {formatCurrency(position.entry_price * position.quantity)}
+                              </div>
+                            </div>
+                            <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
+                              <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Value</div>
+                              <div className="tw-text-sm tw-font-bold tw-text-white">
+                                {formatCurrency(position.current_price * position.quantity)}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="tw-flex tw-gap-2">
+                            <button
+                              onClick={() => handleClosePosition(position.position_id)}
+                              className="tw-flex-1 tw-px-4 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-shadow-lg hover:tw-shadow-xl tw-flex tw-items-center tw-justify-center tw-gap-2"
+                            >
+                              <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                              Close Position
+                            </button>
+                            {position.trailing_stop_active && (
+                              <div className="tw-px-4 tw-py-3 tw-bg-amber-500/20 tw-border tw-border-amber-500/30 tw-rounded-xl tw-flex tw-items-center tw-justify-center">
+                                <svg className="tw-w-5 tw-h-5 tw-text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Time Indicator */}
+                          <div className="tw-mt-3 tw-text-xs tw-text-slate-500 tw-flex tw-items-center tw-gap-2">
+                            <svg className="tw-w-4 tw-h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Entry: {new Date(position.entry_time).toLocaleString('en-IN', {
+                              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="tw-text-center tw-py-16">
+                  <div className="tw-relative tw-w-24 tw-h-24 tw-mx-auto tw-mb-6">
+                    <svg className="tw-w-full tw-h-full tw-text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                  </div>
+                  <h3 className="tw-text-xl tw-font-bold tw-text-slate-300 tw-mb-2">No Active Positions</h3>
+                  <p className="tw-text-slate-500 tw-mb-6">Your trading positions will appear here in real-time</p>
+                  <div className="tw-inline-flex tw-items-center tw-gap-2 tw-px-6 tw-py-3 tw-bg-cyan-500/10 tw-border tw-border-cyan-500/30 tw-rounded-xl tw-text-cyan-300">
+                    <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    <span className="tw-text-sm tw-font-semibold">Auto-trading active - Waiting for signals</span>
+                  </div>
+                </div>
               )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Execution Results Summary */}
-        {executionResults &&
-          executionResults.execution_mode === "multi_demat" && (
-            <Grid item xs={12}>
-              <Card elevation={2}>
-                <CardContent>
-                  <Stack
-                    direction="row"
-                    alignItems="center"
-                    justifyContent="space-between"
-                    sx={{ mb: 2.5 }}
-                  >
-                    <Typography variant="h6" fontWeight={600}>
-                      Execution Results
-                    </Typography>
-                    <Chip
-                      label={`${(
-                        (executionResults.successful_executions /
-                          executionResults.total_selections) *
-                        100
-                      ).toFixed(0)}% Success Rate`}
-                      color="success"
-                      size="small"
-                    />
-                  </Stack>
-
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 0.5 }}
-                        >
-                          Total Trades
-                        </Typography>
-                        <Typography variant="h5" fontWeight={700}>
-                          {executionResults.successful_executions}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 0.5 }}
-                        >
-                          Capital Allocated
-                        </Typography>
-                        <Typography
-                          variant="h5"
-                          fontWeight={700}
-                          color="primary.main"
-                        >
-                          {formatCurrency(
-                            executionResults.total_allocated_capital
-                          )}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 0.5 }}
-                        >
-                          Total Quantity
-                        </Typography>
-                        <Typography variant="h5" fontWeight={700}>
-                          {executionResults.total_quantity}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box
-                        sx={{
-                          p: 2,
-                          bgcolor: "background.default",
-                          borderRadius: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ display: "block", mb: 0.5 }}
-                        >
-                          Stocks Executed
-                        </Typography>
-                        <Typography variant="h5" fontWeight={700}>
-                          {executionResults.executions?.length || 0}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  </Grid>
-
-                  {/* Per-Stock Execution Breakdown - Collapsible */}
-                  {executionResults.executions &&
-                    executionResults.executions.length > 0 && (
-                      <Box sx={{ mt: 2.5 }}>
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            setShowExecutionDetails(!showExecutionDetails)
-                          }
-                          endIcon={
-                            showExecutionDetails ? (
-                              <ExpandLessIcon />
-                            ) : (
-                              <ExpandMoreIcon />
-                            )
-                          }
-                          sx={{ mb: showExecutionDetails ? 1.5 : 0 }}
-                        >
-                          Execution Details
-                        </Button>
-                        <Collapse in={showExecutionDetails}>
-                          <TableContainer component={Paper} variant="outlined">
-                            <Table size="small">
-                              <TableHead>
-                                <TableRow>
-                                  <TableCell>Stock</TableCell>
-                                  <TableCell>Demats Used</TableCell>
-                                  <TableCell align="right">Capital</TableCell>
-                                  <TableCell align="right">Quantity</TableCell>
-                                  <TableCell align="center">Status</TableCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {executionResults.executions.map(
-                                  (exec, idx) => (
-                                    <TableRow key={idx}>
-                                      <TableCell>
-                                        <Typography
-                                          variant="body2"
-                                          fontWeight={600}
-                                        >
-                                          {exec.symbol}
-                                        </Typography>
-                                      </TableCell>
-                                      <TableCell>
-                                        <Chip
-                                          label={`${exec.successful_executions}/${exec.total_demats}`}
-                                          color={
-                                            exec.successful_executions > 0
-                                              ? "success"
-                                              : "error"
-                                          }
-                                          size="small"
-                                        />
-                                      </TableCell>
-                                      <TableCell align="right">
-                                        {formatCurrency(
-                                          exec.total_allocated_capital || 0
-                                        )}
-                                      </TableCell>
-                                      <TableCell align="right">
-                                        {exec.total_quantity || 0}
-                                      </TableCell>
-                                      <TableCell align="center">
-                                        <Chip
-                                          label={
-                                            exec.success ? "Success" : "Failed"
-                                          }
-                                          color={
-                                            exec.success ? "success" : "error"
-                                          }
-                                          size="small"
-                                        />
-                                      </TableCell>
-                                    </TableRow>
-                                  )
-                                )}
-                              </TableBody>
-                            </Table>
-                          </TableContainer>
-                        </Collapse>
-                      </Box>
-                    )}
-                </CardContent>
-              </Card>
-            </Grid>
+            </div>
           )}
 
-        {/* Tabbed Content */}
-        <Grid item xs={12}>
-          <Card elevation={2}>
-            <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-              <Tabs
-                value={activeTab}
-                onChange={(e, v) => setActiveTab(v)}
-                variant="fullWidth"
-              >
-                <Tab
-                  label="Active Positions"
-                  icon={<TimelineIcon />}
-                  iconPosition="start"
-                  sx={{ minHeight: 64 }}
-                />
-                <Tab
-                  label="Selected Stocks"
-                  icon={<ShowChartIcon />}
-                  iconPosition="start"
-                  sx={{ minHeight: 64 }}
-                />
-                <Tab
-                  label="Trade History"
-                  icon={<AssessmentIcon />}
-                  iconPosition="start"
-                  sx={{ minHeight: 64 }}
-                />
-                {executionResults &&
-                  executionResults.execution_mode === "multi_demat" && (
-                    <Tab
-                      label="Demat Details"
-                      icon={<AccountBalanceIcon />}
-                      iconPosition="start"
-                      sx={{ minHeight: 64 }}
-                    />
-                  )}
-              </Tabs>
-            </Box>
+          {/* Selected Stocks Tab */}
+          {activeTab === 1 && (
+            <div>
+              {stocksLoading ? (
+                <div className="tw-text-center tw-py-12">
+                  <div className="tw-animate-spin tw-rounded-full tw-h-12 tw-w-12 tw-border-b-2 tw-border-cyan-500 tw-mx-auto"></div>
+                  <p className="tw-text-slate-400 tw-mt-4">Loading selected stocks...</p>
+                </div>
+              ) : selectedStocks.length > 0 ? (
+                <div className="tw-space-y-3">
+                  {selectedStocks.map((stock, idx) => {
+                    const lotsToTrade = stock.position_size_lots || 1;
+                    const lotSize = stock.lot_size || 0;
+                    const totalQty = lotsToTrade * lotSize;
+                    const ltp = stock.live_price || stock.premium || 0;
+                    const capitalRequired = ltp * totalQty;
+                    return (
+                      <div key={idx} className="tw-bg-gradient-to-r tw-from-slate-800/80 tw-to-slate-900/80 tw-rounded-xl tw-p-5 tw-border tw-border-slate-700/50 hover:tw-border-cyan-500/50 tw-transition-all tw-duration-300 hover:tw-shadow-xl">
+                        <div className="tw-grid tw-grid-cols-12 tw-gap-4 tw-items-center">
+                          {/* Symbol & Type */}
+                          <div className="tw-col-span-3">
+                            <div className="tw-text-2xl tw-font-extrabold tw-text-white tw-mb-1">{stock.symbol}</div>
+                            <div className="tw-flex tw-items-center tw-gap-2">
+                              <span className={`tw-inline-block tw-px-3 tw-py-1 tw-rounded-md tw-text-xs tw-font-bold ${stock.option_type === "CE" ? 'tw-bg-green-600 tw-text-white' : 'tw-bg-red-600 tw-text-white'}`}>
+                                {stock.option_type || "N/A"}
+                              </span>
+                              <span className="tw-text-xs tw-text-slate-400">{stock.sector || "N/A"}</span>
+                            </div>
+                          </div>
 
-            {/* Active Positions Tab */}
-            {activeTab === 0 && (
-              <CardContent sx={{ p: 3 }}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  justifyContent="space-between"
-                  sx={{ mb: 2.5 }}
-                >
-                  <Typography variant="h6" fontWeight={600}>
-                    Active Positions ({activePositions.length})
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Live Updates Every Second
-                  </Typography>
-                </Stack>
+                          {/* Strike & LTP */}
+                          <div className="tw-col-span-3">
+                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Strike / LTP</div>
+                            <div className="tw-text-lg tw-font-bold tw-text-white">{formatCurrency(stock.strike_price || 0)}</div>
+                            <div className="tw-text-base tw-font-bold tw-text-cyan-400">{formatCurrency(ltp)}</div>
+                          </div>
 
-                {activePositions.length > 0 ? (
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 600 }}>Broker</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Symbol</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Mode</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Entry
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Current
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Qty
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Lots
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Investment
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            P&L
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            P&L %
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            SL
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Target
-                          </TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 600 }}>
-                            Trailing
-                          </TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 600 }}>
-                            Time
-                          </TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 600 }}>
-                            Action
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {activePositions.map((position) => {
-                          const duration = position.entry_time
-                            ? Math.floor(
-                                (new Date() - new Date(position.entry_time)) /
-                                  (1000 * 60)
-                              )
-                            : 0;
+                          {/* Lot Info */}
+                          <div className="tw-col-span-2">
+                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Lot Size</div>
+                            <div className="tw-text-lg tw-font-bold tw-text-white">{lotSize}</div>
+                            <div className="tw-text-sm tw-text-slate-400">x {lotsToTrade} lots</div>
+                          </div>
 
-                          return (
-                            <TableRow key={position.position_id} hover>
-                              <TableCell>
-                                <Chip
-                                  label={(position.broker_name || "N/A").toUpperCase()}
-                                  size="small"
-                                  color={position.broker_name ? "primary" : "default"}
-                                  variant="outlined"
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body2" fontWeight={600}>
-                                  {position.symbol}
-                                </Typography>
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                >
-                                  {position.trade_id}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={position.signal_type}
-                                  size="small"
-                                  color={
-                                    position.signal_type?.includes("CE")
-                                      ? "success"
-                                      : "error"
-                                  }
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={(position.trading_mode || "paper").toUpperCase()}
-                                  size="small"
-                                  color={position.trading_mode === "live" ? "error" : "info"}
-                                />
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2">
-                                  {formatCurrency(position.entry_price)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Stack
-                                  direction="row"
-                                  alignItems="center"
-                                  justifyContent="flex-end"
-                                  spacing={0.5}
-                                >
-                                  <Typography variant="body2">
-                                    {formatCurrency(position.current_price)}
-                                  </Typography>
-                                  {position.current_price >
-                                  position.entry_price ? (
-                                    <TrendingUpIcon
-                                      color="success"
-                                      fontSize="small"
-                                    />
-                                  ) : (
-                                    <TrendingDownIcon
-                                      color="error"
-                                      fontSize="small"
-                                    />
-                                  )}
-                                </Stack>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2">
-                                  {position.quantity}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2">
-                                  {position.lots_traded || 0}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2" fontWeight={600}>
-                                  {formatCurrency(position.total_investment || 0)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography
-                                  variant="body2"
-                                  color={
-                                    position.current_pnl >= 0
-                                      ? "success.main"
-                                      : "error.main"
-                                  }
-                                  fontWeight={600}
-                                >
-                                  {formatCurrency(position.current_pnl)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Chip
-                                  label={formatPercentage(
-                                    position.current_pnl_percentage
-                                  )}
-                                  color={
-                                    position.current_pnl_percentage >= 0
-                                      ? "success"
-                                      : "error"
-                                  }
-                                  size="small"
-                                />
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2">
-                                  {formatCurrency(position.stop_loss)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2">
-                                  {formatCurrency(position.target)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={
-                                    position.trailing_stop_active ? "ON" : "OFF"
-                                  }
-                                  color={
-                                    position.trailing_stop_active
-                                      ? "success"
-                                      : "default"
-                                  }
-                                  size="small"
-                                  sx={{ minWidth: 50 }}
-                                />
-                              </TableCell>
-                              <TableCell align="center">
-                                <Typography variant="body2">
-                                  {duration}m
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="center">
-                                <Tooltip title="Close Position">
-                                  <IconButton
-                                    color="error"
-                                    size="small"
-                                    onClick={() =>
-                                      handleClosePosition(position.position_id)
-                                    }
-                                  >
-                                    <CloseIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                ) : (
-                  <Alert severity="info" sx={{ mt: 2 }}>
-                    No active positions. Execute trades to see live positions
-                    here.
-                  </Alert>
-                )}
-              </CardContent>
-            )}
+                          {/* Capital Required */}
+                          <div className="tw-col-span-2">
+                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Capital</div>
+                            <div className="tw-text-lg tw-font-extrabold tw-text-orange-400">{formatCurrency(capitalRequired)}</div>
+                          </div>
 
-            {/* Selected Stocks Tab */}
-            {activeTab === 1 && (
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
-                  Selected Stocks ({selectedStocks.length})
-                </Typography>
-
-                {/* Loading indicator for stocks */}
-                {stocksLoading && (
-                  <Box sx={{ textAlign: "center", py: 4 }}>
-                    <LinearProgress sx={{ mb: 2 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      Loading selected stocks...
-                    </Typography>
-                  </Box>
-                )}
-
-                {!stocksLoading && selectedStocks.length > 0 ? (
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 600 }}>Symbol</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Instrument</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Strike
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Expiry
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            LTP
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Change %
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Lot Size
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Lots to Trade
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Total Qty
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Capital Required
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Score
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>
-                            Status
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {selectedStocks.map((stock, idx) => {
-                          const lotsToTrade = stock.position_size_lots || 1;
-                          const lotSize = stock.lot_size || 0;
-                          const totalQty = lotsToTrade * lotSize;
-                          const ltp = stock.live_price || stock.entry_price || 0;
-                          const capitalRequired = ltp * totalQty;
-
-                          return (
-                            <TableRow key={idx} hover>
-                              <TableCell>
-                                <Typography variant="body2" fontWeight={600}>
-                                  {stock.symbol}
-                                </Typography>
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                >
-                                  {stock.sector || "N/A"}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="caption" sx={{ fontFamily: "monospace" }}>
-                                  {stock.instrument_key ? stock.instrument_key.split("|")[1] : "N/A"}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={stock.option_type || "N/A"}
-                                  color={
-                                    stock.option_type === "CE"
-                                      ? "success"
-                                      : "error"
-                                  }
-                                  size="small"
-                                  sx={{ minWidth: 40 }}
-                                />
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2" fontWeight={600}>
-                                  {formatCurrency(stock.strike_price || 0)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Typography variant="body2">
-                                  {stock.expiry_date || "N/A"}
-                                </Typography>
-                              </TableCell>
-                            <TableCell align="right">
-                              <Typography
-                                variant="body2"
-                                fontWeight={600}
-                                color="primary"
-                              >
-                                {formatCurrency(
-                                  stock.live_price || stock.premium || 0
-                                )}
-                              </Typography>
-                              {stock.live_price && (
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                >
-                                  At sel: {formatCurrency(stock.premium || 0)}
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell align="right">
-                              {stock.price_change_percent !== undefined &&
-                              stock.price_change_percent !== null ? (
-                                <Chip
-                                  label={`${
-                                    stock.price_change_percent >= 0 ? "+" : ""
-                                  }${stock.price_change_percent.toFixed(2)}%`}
-                                  color={
-                                    stock.price_change_percent >= 0
-                                      ? "success"
-                                      : "error"
-                                  }
-                                  size="small"
-                                />
-                              ) : (
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                >
-                                  -
-                                </Typography>
-                              )}
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" fontWeight={600}>
-                                {lotSize}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" fontWeight={700} color="primary">
-                                {lotsToTrade}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" fontWeight={600}>
-                                {totalQty}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" fontWeight={700} color="error.main">
-                                {formatCurrency(capitalRequired)}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                @ {formatCurrency(ltp)}/unit
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Chip
-                                label={`${(
-                                  (stock.selection_score || 0) * 100
-                                ).toFixed(0)}%`}
-                                color={
-                                  (stock.selection_score || 0) >= 0.8
-                                    ? "success"
-                                    : "warning"
-                                }
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={stock.trade_status || "SELECTED"}
-                                size="small"
-                                color={
-                                  stock.trade_status === "TRADED" ? "success" :
-                                  stock.trade_status === "IN_POSITION" ? "warning" :
-                                  "info"
-                                }
-                              />
-                            </TableCell>
-                          </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                ) : !stocksLoading ? (
-                  <Alert severity="info" sx={{ mt: 2 }}>
-                    No stocks selected yet. Stock selection runs automatically
-                    during market hours (9:00-9:15 AM pre-open).
-                  </Alert>
-                ) : null}
-              </CardContent>
-            )}
-
-            {/* Trade History Tab */}
-            {activeTab === 2 && (
-              <CardContent sx={{ p: 3 }}>
-                <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
-                  Trade History ({tradeHistory.length})
-                </Typography>
-
-                {tradeHistory.length > 0 ? (
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 600 }}>Broker</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Symbol</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Entry Date
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Entry Time
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Entry Price
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Exit Date
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Exit Time
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Exit Price
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Quantity
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Lots
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            Investment
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            P&L
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            P&L %
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>
-                            Mode
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>
-                            Exit Reason
-                          </TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 600 }}>
-                            Duration
-                          </TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {tradeHistory.map((trade, idx) => (
-                          <TableRow key={idx} hover>
-                            <TableCell>
-                              <Chip
-                                label={(trade.broker_name || "N/A").toUpperCase()}
-                                size="small"
-                                color={trade.broker_name ? "primary" : "default"}
-                                variant="outlined"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" fontWeight={600}>
-                                {trade.symbol}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={trade.signal_type}
-                                size="small"
-                                color={
-                                  trade.signal_type?.includes("CE")
-                                    ? "success"
-                                    : "error"
-                                }
-                              />
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {trade.entry_date || "N/A"}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {trade.entry_time_str || "N/A"}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatCurrency(trade.entry_price)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {trade.exit_date || "N/A"}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {trade.exit_time_str || "N/A"}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {formatCurrency(trade.exit_price)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {trade.quantity || 0}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2">
-                                {trade.lots_traded || 0}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography variant="body2" fontWeight={600}>
-                                {formatCurrency(trade.total_investment)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography
-                                variant="body2"
-                                color={
-                                  trade.net_pnl >= 0
-                                    ? "success.main"
-                                    : "error.main"
-                                }
-                                fontWeight={600}
-                              >
-                                {formatCurrency(trade.net_pnl)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Chip
-                                label={formatPercentage(trade.pnl_percentage)}
-                                color={
-                                  trade.pnl_percentage >= 0
-                                    ? "success"
-                                    : "error"
-                                }
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={(trade.trading_mode || "paper").toUpperCase()}
-                                size="small"
-                                color={trade.trading_mode === "live" ? "error" : "info"}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {trade.exit_reason}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="center">
-                              <Typography variant="body2">
-                                {trade.duration_minutes
-                                  ? trade.duration_minutes + "m"
-                                  : "N/A"}
-                              </Typography>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                ) : (
-                  <Alert severity="info" sx={{ mt: 2 }}>
-                    No trade history available.
-                  </Alert>
-                )}
-              </CardContent>
-            )}
-
-            {/* Per-Demat Details Tab */}
-            {activeTab === 3 &&
-              executionResults &&
-              executionResults.execution_mode === "multi_demat" && (
-                <CardContent sx={{ p: 3 }}>
-                  <Typography variant="h6" fontWeight={600} sx={{ mb: 2.5 }}>
-                    Per-Demat Execution Details
-                  </Typography>
-
-                  {executionResults.executions &&
-                  executionResults.executions.length > 0 ? (
-                    executionResults.executions.map(
-                      (stockExec, stockIdx) =>
-                        stockExec.demat_executions &&
-                        stockExec.demat_executions.length > 0 && (
-                          <Box key={stockIdx} sx={{ mb: 3 }}>
-                            <Typography
-                              variant="subtitle1"
-                              fontWeight={600}
-                              sx={{ mb: 1.5 }}
-                            >
-                              {stockExec.symbol}
-                              <Chip
-                                label={`${stockExec.successful_executions} Demat(s)`}
-                                size="small"
-                                color="primary"
-                                sx={{ ml: 1 }}
-                              />
-                            </Typography>
-                            <TableContainer
-                              component={Paper}
-                              variant="outlined"
-                            >
-                              <Table size="small">
-                                <TableHead>
-                                  <TableRow>
-                                    <TableCell sx={{ fontWeight: 600 }}>
-                                      Broker
-                                    </TableCell>
-                                    <TableCell
-                                      align="right"
-                                      sx={{ fontWeight: 600 }}
-                                    >
-                                      Lots
-                                    </TableCell>
-                                    <TableCell
-                                      align="right"
-                                      sx={{ fontWeight: 600 }}
-                                    >
-                                      Qty
-                                    </TableCell>
-                                    <TableCell
-                                      align="right"
-                                      sx={{ fontWeight: 600 }}
-                                    >
-                                      Entry
-                                    </TableCell>
-                                    <TableCell
-                                      align="right"
-                                      sx={{ fontWeight: 600 }}
-                                    >
-                                      Capital
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600 }}>
-                                      Trade ID
-                                    </TableCell>
-                                    <TableCell sx={{ fontWeight: 600 }}>
-                                      Status
-                                    </TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {stockExec.demat_executions.map(
-                                    (dematExec, dematIdx) => (
-                                      <TableRow key={dematIdx} hover>
-                                        <TableCell>
-                                          <Typography
-                                            variant="body2"
-                                            fontWeight={600}
-                                          >
-                                            {dematExec.broker_name?.toUpperCase() ||
-                                              "N/A"}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell align="right">
-                                          <Typography variant="body2">
-                                            {dematExec.lots || 0}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell align="right">
-                                          <Typography variant="body2">
-                                            {dematExec.quantity || 0}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell align="right">
-                                          <Typography variant="body2">
-                                            {formatCurrency(
-                                              dematExec.entry_price || 0
-                                            )}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell align="right">
-                                          <Typography
-                                            variant="body2"
-                                            fontWeight={600}
-                                            color="primary.main"
-                                          >
-                                            {formatCurrency(
-                                              dematExec.allocated_capital || 0
-                                            )}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Typography
-                                            variant="caption"
-                                            sx={{ fontFamily: "monospace" }}
-                                          >
-                                            {dematExec.trade_id || "N/A"}
-                                          </Typography>
-                                        </TableCell>
-                                        <TableCell>
-                                          <Chip
-                                            label={
-                                              dematExec.success
-                                                ? "Success"
-                                                : "Failed"
-                                            }
-                                            color={
-                                              dematExec.success
-                                                ? "success"
-                                                : "error"
-                                            }
-                                            size="small"
-                                          />
-                                          {!dematExec.success &&
-                                            dematExec.error && (
-                                              <Typography
-                                                variant="caption"
-                                                color="error.main"
-                                                display="block"
-                                                sx={{ mt: 0.5 }}
-                                              >
-                                                {dematExec.error}
-                                              </Typography>
-                                            )}
-                                        </TableCell>
-                                      </TableRow>
-                                    )
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </TableContainer>
-                          </Box>
-                        )
-                    )
-                  ) : (
-                    <Alert severity="info" sx={{ mt: 2 }}>
-                      No per-demat execution details available.
-                    </Alert>
-                  )}
-                </CardContent>
+                          {/* Status */}
+                          <div className="tw-col-span-2 tw-text-right">
+                            <span className={`tw-inline-block tw-px-4 tw-py-2 tw-rounded-lg tw-text-sm tw-font-bold ${stock.trade_status === "TRADED" ? 'tw-bg-green-600 tw-text-white' : stock.trade_status === "IN_POSITION" ? 'tw-bg-yellow-600 tw-text-white' : 'tw-bg-blue-600 tw-text-white'}`}>
+                              {stock.trade_status || "SELECTED"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="tw-text-center tw-py-12">
+                  <svg className="tw-w-16 tw-h-16 tw-text-slate-600 tw-mx-auto tw-mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                  </svg>
+                  <p className="tw-text-slate-400 tw-text-lg">No stocks selected yet</p>
+                  <p className="tw-text-slate-500 tw-text-sm tw-mt-2">Stock selection runs automatically during market hours (9:00-9:15 AM)</p>
+                </div>
               )}
-          </Card>
-        </Grid>
-      </Grid>
-    </Container>
+            </div>
+          )}
+
+          {/* Trade History Tab */}
+          {activeTab === 2 && (
+            <div>
+              {tradeHistory.length > 0 ? (
+                <div className="tw-space-y-3">
+                  {tradeHistory.map((trade, idx) => {
+                    const isProfitable = trade.net_pnl >= 0;
+                    return (
+                      <div key={idx} className={`tw-bg-gradient-to-r tw-rounded-xl tw-p-5 tw-border tw-transition-all tw-duration-300 hover:tw-shadow-xl ${isProfitable ? 'tw-from-green-900/20 tw-to-slate-900/80 tw-border-green-700/30 hover:tw-border-green-500/50' : 'tw-from-red-900/20 tw-to-slate-900/80 tw-border-red-700/30 hover:tw-border-red-500/50'}`}>
+                        <div className="tw-grid tw-grid-cols-12 tw-gap-4 tw-items-center">
+                          {/* Symbol & Type */}
+                          <div className="tw-col-span-3">
+                            <div className="tw-text-2xl tw-font-extrabold tw-text-white tw-mb-1">{trade.symbol}</div>
+                            <div className="tw-flex tw-items-center tw-gap-2">
+                              <span className={`tw-inline-block tw-px-3 tw-py-1 tw-rounded-md tw-text-xs tw-font-bold ${trade.signal_type?.includes("CE") ? 'tw-bg-green-600 tw-text-white' : 'tw-bg-red-600 tw-text-white'}`}>
+                                {trade.signal_type}
+                              </span>
+                              <span className="tw-text-xs tw-text-slate-400">{trade.broker_name?.toUpperCase() || "N/A"}</span>
+                            </div>
+                          </div>
+
+                          {/* Entry & Exit Prices */}
+                          <div className="tw-col-span-3">
+                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Entry → Exit</div>
+                            <div className="tw-flex tw-items-center tw-gap-2">
+                              <span className="tw-text-base tw-font-bold tw-text-white">{formatCurrency(trade.entry_price)}</span>
+                              <svg className="tw-w-4 tw-h-4 tw-text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                              </svg>
+                              <span className="tw-text-base tw-font-bold tw-text-cyan-400">{formatCurrency(trade.exit_price)}</span>
+                            </div>
+                            <div className="tw-text-xs tw-text-slate-500 tw-mt-0.5">Qty: {trade.quantity || 0}</div>
+                          </div>
+
+                          {/* P&L Amount */}
+                          <div className="tw-col-span-3">
+                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">P&L Amount</div>
+                            <div className={`tw-text-2xl tw-font-extrabold ${isProfitable ? 'tw-text-green-400' : 'tw-text-red-400'}`}>
+                              {formatCurrency(trade.net_pnl)}
+                            </div>
+                          </div>
+
+                          {/* P&L % & Exit Reason */}
+                          <div className="tw-col-span-3 tw-text-right">
+                            <div className={`tw-inline-block tw-px-4 tw-py-2 tw-rounded-lg tw-text-lg tw-font-extrabold tw-mb-2 ${isProfitable ? 'tw-bg-green-600 tw-text-white' : 'tw-bg-red-600 tw-text-white'}`}>
+                              {formatPercentage(trade.pnl_percentage)}
+                            </div>
+                            <div className="tw-text-xs tw-text-slate-400 tw-mt-1">{trade.exit_reason}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="tw-text-center tw-py-12">
+                  <svg className="tw-w-16 tw-h-16 tw-text-slate-600 tw-mx-auto tw-mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <p className="tw-text-slate-400 tw-text-lg">No trade history available</p>
+                  <p className="tw-text-slate-500 tw-text-sm tw-mt-2">Completed trades will appear here</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 
