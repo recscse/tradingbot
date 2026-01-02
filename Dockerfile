@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.11-slim-bookworm as builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY requirements.txt .
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
 
 # Stage 2: Runtime
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
@@ -24,26 +24,11 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=production
 
-# Install runtime dependencies and Playwright requirements
+# Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     libpq5 \
-    curl \
-    libnss3 \
-    libnspr4 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpango-1.0-0 \
-    libcairo2 && \
+    curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder
@@ -53,7 +38,7 @@ COPY --from=builder /app/requirements.txt .
 # Install dependencies
 RUN pip install --no-cache /wheels/*
 
-# Install Playwright browsers and system dependencies
+# Install Playwright browsers and their system dependencies
 RUN python -m playwright install chromium && \
     python -m playwright install-deps chromium
 
