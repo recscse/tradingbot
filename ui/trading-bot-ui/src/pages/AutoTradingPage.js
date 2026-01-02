@@ -1,5 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import api from "../services/api";
+import ActivePositionCard from "../components/ActivePositionCard";
+import SelectedStockCard from "../components/SelectedStockCard";
+import TradeHistoryItem from "../components/TradeHistoryItem";
 
 const AutoTradingPage = () => {
   const [tradingMode, setTradingMode] = useState("paper");
@@ -38,11 +41,79 @@ const AutoTradingPage = () => {
     trading_mode: "paper",
   });
 
+  const [lastUpdated, setLastUpdated] = useState(new Date());
+  const [wsConnected, setWsConnected] = useState(false);
+  const [showLiveConfirmation, setShowLiveConfirmation] = useState(false);
+  
+  // WebSocket Throttling Refs
+  const updatesBuffer = useRef({
+    activePositions: {}, // Map by position_id
+    selectedStocks: {},  // Map by symbol/key
+    pnlSummary: null,
+    hasUpdates: false
+  });
+
+  // Batch process WebSocket updates
+  useEffect(() => {
+    const processUpdates = () => {
+      if (!updatesBuffer.current.hasUpdates) return;
+
+      const buffer = updatesBuffer.current;
+      
+      // Batch update active positions
+      if (Object.keys(buffer.activePositions).length > 0) {
+        setActivePositions(prev => {
+          let hasChanges = false;
+          const newPositions = prev.map(pos => {
+            if (buffer.activePositions[pos.position_id]) {
+              hasChanges = true;
+              return { ...pos, ...buffer.activePositions[pos.position_id] };
+            }
+            return pos;
+          });
+          
+          // Also handle new positions created via WS
+          // Note: Full sync is handled by fetchActivePositions, this is just for updates
+          return hasChanges ? newPositions : prev;
+        });
+        buffer.activePositions = {};
+      }
+
+      // Batch update selected stocks
+      if (Object.keys(buffer.selectedStocks).length > 0) {
+        setSelectedStocks(prev => {
+          let hasChanges = false;
+          const newStocks = prev.map(stock => {
+            const key = stock.option_instrument_key || stock.symbol;
+            if (buffer.selectedStocks[key]) {
+              hasChanges = true;
+              return { ...stock, ...buffer.selectedStocks[key] };
+            }
+            return stock;
+          });
+          return hasChanges ? newStocks : prev;
+        });
+        buffer.selectedStocks = {};
+      }
+
+      buffer.hasUpdates = false;
+    };
+
+    const interval = setInterval(processUpdates, 500); // 500ms throttle
+    return () => clearInterval(interval);
+  }, []);
+
   const fetchActivePositions = useCallback(async () => {
     try {
       const response = await api.get("/v1/trading/execution/active-positions");
       if (response.data.success) {
-        setActivePositions(response.data.active_positions || []);
+        const newPositions = response.data.active_positions || [];
+        setActivePositions(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(newPositions)) {
+            return newPositions;
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.error("Error fetching active positions:", err);
@@ -54,7 +125,12 @@ const AutoTradingPage = () => {
     try {
       const response = await api.get("/v1/trading/execution/pnl-summary");
       if (response.data.success) {
-        setPnlSummary(response.data.summary);
+        setPnlSummary(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(response.data.summary)) {
+            return response.data.summary;
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.error("Error fetching PnL summary:", err);
@@ -63,14 +139,20 @@ const AutoTradingPage = () => {
 
   const fetchTradeHistory = useCallback(async () => {
     try {
-      const response = await api.get("/v1/trading/execution/trade-history?limit=50");
+      const response = await api.get(`/v1/trading/execution/trade-history?limit=50&trading_mode=${tradingMode}`);
       if (response.data.success) {
-        setTradeHistory(response.data.trades || []);
+        const newHistory = response.data.trades || [];
+        setTradeHistory(prev => {
+          if (JSON.stringify(prev) !== JSON.stringify(newHistory)) {
+            return newHistory;
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.error("Error fetching trade history:", err);
     }
-  }, []);
+  }, [tradingMode]);
 
   const fetchTradingPreferences = useCallback(async () => {
     try {
@@ -96,12 +178,15 @@ const AutoTradingPage = () => {
   }, [tradingMode]);
 
   const fetchSelectedStocks = useCallback(async () => {
-    setStocksLoading(true);
+    // Only show loading state if we have no data
+    if (selectedStocks.length === 0) setStocksLoading(true);
+    
     try {
       const response = await api.get("/v1/trading/execution/selected-stocks");
       const payload = response?.data;
       if (!payload || !payload.success) {
-        setSelectedStocks([]);
+        // Only clear if we expected data but got error/empty
+        if (selectedStocks.length > 0) setSelectedStocks([]);
         return;
       }
       const stocks = payload.stocks || [];
@@ -122,14 +207,34 @@ const AutoTradingPage = () => {
         option_instrument_key: stock.option_instrument_key || "",
         sector: stock.sector || "OTHER",
       }));
-      setSelectedStocks(cleanedStocks);
+      
+      setSelectedStocks(prev => {
+        if (JSON.stringify(prev) !== JSON.stringify(cleanedStocks)) {
+          return cleanedStocks;
+        }
+        return prev;
+      });
     } catch (err) {
       console.error("Error fetching selected stocks:", err);
-      setSelectedStocks([]);
+      // Only clear if we strictly need to
+      // setSelectedStocks([]); 
     } finally {
       setStocksLoading(false);
     }
-  }, []);
+  }, [selectedStocks.length]);
+
+  const handleManualRefresh = useCallback(async () => {
+    setIsLoading(true);
+    await Promise.allSettled([
+      fetchActivePositions(),
+      fetchPortfolioSummary(),
+      fetchTradeHistory(),
+      fetchSelectedStocks(),
+      fetchCapitalOverview()
+    ]);
+    setLastUpdated(new Date());
+    setIsLoading(false);
+  }, [fetchActivePositions, fetchPortfolioSummary, fetchTradeHistory, fetchSelectedStocks, fetchCapitalOverview]);
 
   const handleClosePosition = useCallback(async (positionId) => {
     if (!window.confirm("Are you sure you want to close this position?")) {
@@ -139,14 +244,12 @@ const AutoTradingPage = () => {
       const response = await api.post(`/v1/trading/execution/close-position/${positionId}`);
       if (response.data.success) {
         setSuccess(`Position closed. PnL: ₹${response.data.pnl.toFixed(2)}`);
-        await fetchActivePositions();
-        await fetchPortfolioSummary();
-        await fetchTradeHistory();
+        handleManualRefresh();
       }
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to close position");
     }
-  }, [fetchActivePositions, fetchPortfolioSummary, fetchTradeHistory]);
+  }, [handleManualRefresh]);
 
   const handleEmergencyStopAll = useCallback(async () => {
     if (!window.confirm("EMERGENCY STOP ALL POSITIONS\n\nThis will immediately close ALL active positions at market price.\n\nAre you absolutely sure you want to continue?")) {
@@ -162,34 +265,41 @@ const AutoTradingPage = () => {
       const successCount = results.filter((r) => r.status === "fulfilled").length;
       const failCount = results.filter((r) => r.status === "rejected").length;
       setSuccess(`Emergency Stop Complete: ${successCount} positions closed${failCount > 0 ? `, ${failCount} failed` : ""}`);
-      await fetchActivePositions();
-      await fetchPortfolioSummary();
-      await fetchTradeHistory();
+      handleManualRefresh();
     } catch (err) {
       setError("Emergency stop failed. Please try closing positions individually.");
     } finally {
       setEmergencyStopLoading(false);
     }
-  }, [activePositions, fetchActivePositions, fetchPortfolioSummary, fetchTradeHistory]);
+  }, [activePositions, handleManualRefresh]);
 
-  const handleTradingModeToggle = useCallback(async () => {
-    const newMode = tradingMode === "paper" ? "live" : "paper";
-    if (newMode === "live") {
-      if (!window.confirm("⚠️ SWITCHING TO LIVE TRADING\n\nThis will use REAL MONEY from your broker account.\n\nAre you sure you want to continue?")) {
-        return;
-      }
-    }
+  const updateTradingMode = useCallback(async (mode) => {
     try {
-      const response = await api.post(`/v1/trading/execution/user-trading-preferences?trading_mode=${newMode}&execution_mode=${executionMode}`);
+      const response = await api.post(`/v1/trading/execution/user-trading-preferences?trading_mode=${mode}&execution_mode=${executionMode}`);
       if (response.data.success) {
-        setTradingMode(newMode);
-        await fetchPortfolioSummary();
+        setTradingMode(mode);
+        setShowLiveConfirmation(false);
       }
     } catch (err) {
       console.error("Error updating trading mode:", err);
       setError("Failed to update trading mode");
+      setShowLiveConfirmation(false);
     }
-  }, [tradingMode, executionMode, fetchPortfolioSummary]);
+  }, [executionMode]);
+
+  const handleTradingModeToggle = useCallback(() => {
+    if (tradingMode === "paper") {
+      setShowLiveConfirmation(true);
+    } else {
+      updateTradingMode("paper");
+    }
+  }, [tradingMode, updateTradingMode]);
+
+  // Refresh data when trading mode changes
+  useEffect(() => {
+    fetchPortfolioSummary();
+    fetchCapitalOverview();
+  }, [tradingMode, fetchPortfolioSummary, fetchCapitalOverview]);
 
   const initializeWebSocket = useCallback(() => {
     try {
@@ -198,6 +308,7 @@ const AutoTradingPage = () => {
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        setWsConnected(true);
         ws.send(JSON.stringify({
           type: "client_info",
           client_type: "trading_execution",
@@ -212,31 +323,28 @@ const AutoTradingPage = () => {
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+          
           if (message.type === "pnl_update") {
             const data = message.data;
-            setActivePositions((prev) =>
-              prev.map((pos) =>
-                pos.position_id === data.position_id
-                  ? {
-                      ...pos,
-                      current_price: data.current_price,
-                      current_pnl: data.pnl,
-                      current_pnl_percentage: data.pnl_percent,
-                      stop_loss: data.stop_loss,
-                      trailing_stop_active: data.trailing_sl_active,
-                      last_updated: data.last_updated,
-                    }
-                  : pos
-              )
-            );
-            fetchPortfolioSummary();
+            updatesBuffer.current.activePositions[data.position_id] = {
+              current_price: data.current_price,
+              current_pnl: data.pnl,
+              current_pnl_percentage: data.pnl_percent,
+              stop_loss: data.stop_loss,
+              trailing_stop_active: data.trailing_sl_active,
+              last_updated: data.last_updated,
+            };
+            updatesBuffer.current.hasUpdates = true;
+            // Also trigger summary fetch periodically via interval, not here
           }
+          
           if (message.type === "trading_signal") {
             setRealtimeStats(prev => ({
               ...prev,
               signals_today: prev.signals_today + 1
             }));
           }
+          
           if (message.type === "trade_executed") {
             const tradeData = message.data;
             setSuccess(`Trade executed: ${tradeData.symbol} @ ₹${tradeData.entry_price.toFixed(2)}`);
@@ -244,73 +352,64 @@ const AutoTradingPage = () => {
               ...prev,
               trades_today: prev.trades_today + 1
             }));
-            fetchActivePositions();
-            fetchPortfolioSummary();
-            fetchSelectedStocks();
+            // Immediate refresh for important events
+            handleManualRefresh();
           }
+          
           if (message.type === "active_position_created") {
+            // Immediate update for new position creation
             const posData = message.data;
             setActivePositions((prev) => {
               const existingIndex = prev.findIndex((p) => p.position_id === posData.position_id);
-              if (existingIndex >= 0) {
-                const updated = [...prev];
-                updated[existingIndex] = { ...updated[existingIndex], ...posData };
-                return updated;
-              } else {
-                return [{
-                  position_id: posData.position_id,
-                  trade_id: posData.trade_id,
-                  symbol: posData.symbol,
-                  instrument_key: posData.instrument_key,
-                  option_type: posData.option_type,
-                  strike_price: posData.strike_price,
-                  entry_price: posData.entry_price,
-                  current_price: posData.current_price || posData.entry_price,
-                  stop_loss: posData.stop_loss,
-                  target: posData.target,
-                  quantity: posData.quantity,
-                  current_pnl: posData.current_pnl || 0,
-                  current_pnl_percentage: posData.current_pnl_percentage || 0,
-                  broker_name: posData.broker_name,
-                  trading_mode: posData.trading_mode,
-                  entry_time: posData.timestamp,
-                  last_updated: posData.timestamp,
-                  trailing_stop_active: false,
-                }, ...prev];
-              }
+              if (existingIndex >= 0) return prev;
+              
+              return [{
+                position_id: posData.position_id,
+                trade_id: posData.trade_id,
+                symbol: posData.symbol,
+                instrument_key: posData.instrument_key,
+                option_type: posData.option_type,
+                strike_price: posData.strike_price,
+                entry_price: posData.entry_price,
+                current_price: posData.current_price || posData.entry_price,
+                stop_loss: posData.stop_loss,
+                target: posData.target,
+                quantity: posData.quantity,
+                current_pnl: posData.current_pnl || 0,
+                current_pnl_percentage: posData.current_pnl_percentage || 0,
+                broker_name: posData.broker_name,
+                trading_mode: posData.trading_mode,
+                entry_time: posData.timestamp,
+                last_updated: posData.timestamp,
+                trailing_stop_active: false,
+              }, ...prev];
             });
-            fetchPortfolioSummary();
-            fetchSelectedStocks();
           }
+          
           if (message.type === "trade_error") {
             setError(`Trade error for ${message.data.symbol}: ${message.data.error}`);
           }
+          
           if (message.type === "position_closed") {
             const posData = message.data;
             setSuccess(`Position closed: ${posData.symbol} - PnL: ₹${posData.pnl.toFixed(2)}`);
-            fetchActivePositions();
-            fetchPortfolioSummary();
-            fetchTradeHistory();
+            handleManualRefresh();
           }
+          
           if (message.type === "selected_stock_price_update") {
             const data = message.data;
-            setSelectedStocks((prev) =>
-              prev.map((stock) =>
-                stock.option_instrument_key === data.option_instrument_key || stock.symbol === data.symbol
-                  ? {
-                      ...stock,
-                      live_price: data.live_option_premium,
-                      live_spot_price: data.live_spot_price,
-                      price_change: data.price_change,
-                      price_change_percent: data.price_change_percent,
-                      unrealized_pnl: data.unrealized_pnl,
-                      unrealized_pnl_percent: data.unrealized_pnl_percent,
-                      state: data.state,
-                      last_updated: data.timestamp,
-                    }
-                  : stock
-              )
-            );
+            const key = data.option_instrument_key || data.symbol;
+            updatesBuffer.current.selectedStocks[key] = {
+              live_price: data.live_option_premium,
+              live_spot_price: data.live_spot_price,
+              price_change: data.price_change,
+              price_change_percent: data.price_change_percent,
+              unrealized_pnl: data.unrealized_pnl,
+              unrealized_pnl_percent: data.unrealized_pnl_percent,
+              state: data.state,
+              last_updated: data.timestamp,
+            };
+            updatesBuffer.current.hasUpdates = true;
           }
         } catch (parseError) {
           console.error("Error parsing WebSocket message:", parseError);
@@ -318,6 +417,7 @@ const AutoTradingPage = () => {
       };
 
       ws.onclose = (event) => {
+        setWsConnected(false);
         setTimeout(() => {
           if (socketRef.current === ws) {
             initializeWebSocket();
@@ -327,13 +427,15 @@ const AutoTradingPage = () => {
 
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
+        setWsConnected(false);
       };
 
       socketRef.current = ws;
     } catch (err) {
       console.error("WebSocket connection error:", err);
+      setWsConnected(false);
     }
-  }, [fetchActivePositions, fetchPortfolioSummary, fetchSelectedStocks, fetchTradeHistory]);
+  }, [handleManualRefresh]);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -364,14 +466,24 @@ const AutoTradingPage = () => {
   }, []);
 
   useEffect(() => {
+    if (activeTab === 0) fetchActivePositions();
+    if (activeTab === 1) fetchSelectedStocks();
+    if (activeTab === 2) fetchTradeHistory();
+  }, [activeTab, fetchActivePositions, fetchSelectedStocks, fetchTradeHistory]);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
-        fetchPortfolioSummary();
-        fetchActivePositions();
+        if (activeTab === 0) fetchActivePositions();
+        // Only fetch stocks if we don't have them yet. 
+        // Once loaded, they are static for the day (prices update via WebSocket)
+        if (selectedStocks.length === 0) fetchSelectedStocks(); 
+        if (activeTab === 2) fetchTradeHistory(); 
+        fetchPortfolioSummary(); 
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [fetchPortfolioSummary, fetchActivePositions]);
+  }, [activeTab, fetchPortfolioSummary, fetchActivePositions, fetchSelectedStocks, fetchTradeHistory, selectedStocks.length]);
 
   useEffect(() => {
     const checkAutoTradingStatus = async () => {
@@ -398,11 +510,11 @@ const AutoTradingPage = () => {
   }, [selectedStocks]);
 
   const formatCurrency = useCallback((amount) => {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
+    const formatted = new Intl.NumberFormat('en-IN', {
       minimumFractionDigits: 2,
-    }).format(amount || 0);
+      maximumFractionDigits: 2
+    }).format(Math.abs(amount || 0));
+    return `${amount < 0 ? '-' : ''}₹${formatted}`;
   }, []);
 
   const formatPercentage = useCallback((value = 0) => {
@@ -411,8 +523,8 @@ const AutoTradingPage = () => {
   }, []);
 
   const getPnlColor = useCallback((value) => {
-    if (value > 0) return 'tw-text-emerald-300';
-    if (value < 0) return 'tw-text-rose-300';
+    if (value > 0) return 'tw-text-emerald-500';
+    if (value < 0) return 'tw-text-rose-500';
     return 'tw-text-slate-300';
   }, []);
 
@@ -421,6 +533,17 @@ const AutoTradingPage = () => {
     if (value < 0) return 'tw-bg-rose-500/10 tw-border-rose-500/30';
     return 'tw-bg-slate-500/10 tw-border-slate-500/30';
   }, []);
+
+  const groupedTradeHistory = useMemo(() => {
+    return Object.entries(
+      tradeHistory.reduce((groups, trade) => {
+        const date = trade.entry_date || 'Unknown Date';
+        if (!groups[date]) groups[date] = [];
+        groups[date].push(trade);
+        return groups;
+      }, {})
+    );
+  }, [tradeHistory]);
 
   if (isLoading) {
     return (
@@ -454,6 +577,11 @@ const AutoTradingPage = () => {
               <span className="tw-text-slate-400 tw-text-sm">
                 {activePositions.length} Active Position{activePositions.length !== 1 ? "s" : ""}
               </span>
+              {/* WebSocket Status */}
+              <div className="tw-flex tw-items-center tw-gap-1.5 tw-px-2 tw-py-1 tw-bg-slate-800/50 tw-rounded-full tw-border tw-border-slate-700/50" title={wsConnected ? "Real-time connection active" : "Connecting..."}>
+                <span className={`tw-w-2 tw-h-2 tw-rounded-full ${wsConnected ? 'tw-bg-emerald-500 tw-animate-pulse' : 'tw-bg-rose-500'}`}></span>
+                <span className="tw-text-[10px] tw-font-medium tw-text-slate-400">{wsConnected ? "LIVE" : "OFFLINE"}</span>
+              </div>
             </div>
           </div>
 
@@ -468,18 +596,38 @@ const AutoTradingPage = () => {
             </p>
           </div>
 
-          {/* Right: Emergency Stop */}
-          <button
-            onClick={handleEmergencyStopAll}
-            disabled={emergencyStopLoading || activePositions.length === 0}
-            className="tw-px-6 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-shadow-lg hover:tw-shadow-xl disabled:tw-opacity-50 disabled:tw-cursor-not-allowed tw-flex tw-items-center tw-justify-center tw-gap-2"
-          >
-            <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-            </svg>
-            {emergencyStopLoading ? "STOPPING..." : "EMERGENCY STOP"}
-          </button>
+          {/* Right: Controls */}
+          <div className="tw-flex tw-gap-3">
+            {/* Manual Refresh Button */}
+            <div className="tw-flex tw-flex-col tw-items-end tw-justify-center">
+              <button 
+                onClick={handleManualRefresh} 
+                disabled={isLoading}
+                className="tw-p-3 tw-bg-slate-800 hover:tw-bg-slate-700 tw-text-slate-300 hover:tw-text-white tw-rounded-xl tw-transition-all tw-border tw-border-slate-700 hover:tw-border-slate-600 disabled:tw-opacity-50"
+                title="Force Refresh Data"
+              >
+                <svg className={`tw-w-5 tw-h-5 ${isLoading ? 'tw-animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
+              <span className="tw-text-[10px] tw-text-slate-500 tw-mt-1">
+                Updated: {lastUpdated.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+
+            {/* Emergency Stop */}
+            <button
+              onClick={handleEmergencyStopAll}
+              disabled={emergencyStopLoading || activePositions.length === 0}
+              className="tw-px-6 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-shadow-lg hover:tw-shadow-xl disabled:tw-opacity-50 disabled:tw-cursor-not-allowed tw-flex tw-items-center tw-justify-center tw-gap-2"
+            >
+              <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+              </svg>
+              {emergencyStopLoading ? "STOPPING..." : "EMERGENCY STOP"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -706,129 +854,13 @@ const AutoTradingPage = () => {
             <div>
               {activePositions.length > 0 ? (
                 <div className="tw-grid tw-grid-cols-1 lg:tw-grid-cols-2 tw-gap-4">
-                  {activePositions.map((position) => {
-                    const isProfit = position.current_pnl >= 0;
-
-                    return (
-                      <div
-                        key={position.position_id}
-                        className={`tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-transition-all tw-duration-300 hover:tw-shadow-2xl hover:tw-scale-[1.02] ${
-                          isProfit
-                            ? 'tw-bg-gradient-to-br tw-from-emerald-950/40 tw-to-emerald-900/20 tw-border-emerald-500/30'
-                            : 'tw-bg-gradient-to-br tw-from-rose-950/40 tw-to-rose-900/20 tw-border-rose-500/30'
-                        }`}
-                      >
-                        {/* Real-time Pulse Indicator */}
-                        <div className="tw-absolute tw-top-4 tw-right-4">
-                          <span className="tw-relative tw-flex tw-h-3 tw-w-3">
-                            <span className={`tw-animate-ping tw-absolute tw-inline-flex tw-h-full tw-w-full tw-rounded-full ${isProfit ? 'tw-bg-emerald-400' : 'tw-bg-rose-400'} tw-opacity-75`}></span>
-                            <span className={`tw-relative tw-inline-flex tw-rounded-full tw-h-3 tw-w-3 ${isProfit ? 'tw-bg-emerald-500' : 'tw-bg-rose-500'}`}></span>
-                          </span>
-                        </div>
-
-                        <div className="tw-p-6">
-                          {/* Header: Symbol & Type */}
-                          <div className="tw-flex tw-items-start tw-justify-between tw-mb-4">
-                            <div>
-                              <h3 className="tw-text-2xl tw-font-bold tw-text-white tw-mb-1">{position.symbol}</h3>
-                              <div className="tw-flex tw-items-center tw-gap-2">
-                                <span className={`tw-px-3 tw-py-1 tw-rounded-full tw-text-xs tw-font-bold ${
-                                  position.signal_type?.includes("CE")
-                                    ? 'tw-bg-emerald-500/30 tw-text-emerald-200 tw-border tw-border-emerald-500/50'
-                                    : 'tw-bg-rose-500/30 tw-text-rose-200 tw-border tw-border-rose-500/50'
-                                }`}>
-                                  {position.signal_type}
-                                </span>
-                                <span className="tw-text-xs tw-text-slate-400 tw-font-medium">
-                                  {position.broker_name?.toUpperCase() || "BROKER"}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Large P&L Display */}
-                            <div className="tw-text-right">
-                              <div className={`tw-text-3xl tw-font-bold ${getPnlColor(position.current_pnl)}`}>
-                                {formatCurrency(position.current_pnl)}
-                              </div>
-                              <div className={`tw-text-lg tw-font-semibold ${getPnlColor(position.current_pnl_percentage)}`}>
-                                {formatPercentage(position.current_pnl_percentage)}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Price Progress Bar */}
-                          <div className="tw-mb-4">
-                            <div className="tw-flex tw-justify-between tw-text-xs tw-text-slate-400 tw-mb-2">
-                              <span>Entry: {formatCurrency(position.entry_price)}</span>
-                              <span>Current: {formatCurrency(position.current_price)}</span>
-                            </div>
-                            <div className="tw-relative tw-h-2 tw-bg-slate-800 tw-rounded-full tw-overflow-hidden">
-                              <div
-                                className={`tw-absolute tw-h-full tw-rounded-full tw-transition-all tw-duration-500 ${
-                                  isProfit ? 'tw-bg-gradient-to-r tw-from-emerald-500 tw-to-emerald-400' : 'tw-bg-gradient-to-r tw-from-rose-500 tw-to-rose-400'
-                                }`}
-                                style={{ width: `${Math.min(Math.abs(position.current_pnl_percentage) * 2, 100)}%` }}
-                              ></div>
-                            </div>
-                            <div className="tw-flex tw-justify-between tw-text-xs tw-mt-1">
-                              <span className="tw-text-slate-500">SL: {formatCurrency(position.stop_loss || 0)}</span>
-                              <span className="tw-text-slate-500">Target: {formatCurrency(position.target || 0)}</span>
-                            </div>
-                          </div>
-
-                          {/* Stats Grid */}
-                          <div className="tw-grid tw-grid-cols-3 tw-gap-3 tw-mb-4">
-                            <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
-                              <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Quantity</div>
-                              <div className="tw-text-lg tw-font-bold tw-text-white">{position.quantity}</div>
-                            </div>
-                            <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
-                              <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Investment</div>
-                              <div className="tw-text-sm tw-font-bold tw-text-cyan-400">
-                                {formatCurrency(position.entry_price * position.quantity)}
-                              </div>
-                            </div>
-                            <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
-                              <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Value</div>
-                              <div className="tw-text-sm tw-font-bold tw-text-white">
-                                {formatCurrency(position.current_price * position.quantity)}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Action Buttons */}
-                          <div className="tw-flex tw-gap-2">
-                            <button
-                              onClick={() => handleClosePosition(position.position_id)}
-                              className="tw-flex-1 tw-px-4 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-shadow-lg hover:tw-shadow-xl tw-flex tw-items-center tw-justify-center tw-gap-2"
-                            >
-                              <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                              Close Position
-                            </button>
-                            {position.trailing_stop_active && (
-                              <div className="tw-px-4 tw-py-3 tw-bg-amber-500/20 tw-border tw-border-amber-500/30 tw-rounded-xl tw-flex tw-items-center tw-justify-center">
-                                <svg className="tw-w-5 tw-h-5 tw-text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                                </svg>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Time Indicator */}
-                          <div className="tw-mt-3 tw-text-xs tw-text-slate-500 tw-flex tw-items-center tw-gap-2">
-                            <svg className="tw-w-4 tw-h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Entry: {new Date(position.entry_time).toLocaleString('en-IN', {
-                              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {activePositions.map((position) => (
+                    <ActivePositionCard 
+                      key={position.position_id} 
+                      position={position} 
+                      onClose={handleClosePosition} 
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="tw-text-center tw-py-16">
@@ -860,56 +892,9 @@ const AutoTradingPage = () => {
                 </div>
               ) : selectedStocks.length > 0 ? (
                 <div className="tw-space-y-3">
-                  {selectedStocks.map((stock, idx) => {
-                    const lotsToTrade = stock.position_size_lots || 1;
-                    const lotSize = stock.lot_size || 0;
-                    const totalQty = lotsToTrade * lotSize;
-                    const ltp = stock.live_price || stock.premium || 0;
-                    const capitalRequired = ltp * totalQty;
-                    return (
-                      <div key={idx} className="tw-bg-gradient-to-r tw-from-slate-800/80 tw-to-slate-900/80 tw-rounded-xl tw-p-5 tw-border tw-border-slate-700/50 hover:tw-border-cyan-500/50 tw-transition-all tw-duration-300 hover:tw-shadow-xl">
-                        <div className="tw-grid tw-grid-cols-12 tw-gap-4 tw-items-center">
-                          {/* Symbol & Type */}
-                          <div className="tw-col-span-3">
-                            <div className="tw-text-2xl tw-font-extrabold tw-text-white tw-mb-1">{stock.symbol}</div>
-                            <div className="tw-flex tw-items-center tw-gap-2">
-                              <span className={`tw-inline-block tw-px-3 tw-py-1 tw-rounded-md tw-text-xs tw-font-bold ${stock.option_type === "CE" ? 'tw-bg-green-600 tw-text-white' : 'tw-bg-red-600 tw-text-white'}`}>
-                                {stock.option_type || "N/A"}
-                              </span>
-                              <span className="tw-text-xs tw-text-slate-400">{stock.sector || "N/A"}</span>
-                            </div>
-                          </div>
-
-                          {/* Strike & LTP */}
-                          <div className="tw-col-span-3">
-                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Strike / LTP</div>
-                            <div className="tw-text-lg tw-font-bold tw-text-white">{formatCurrency(stock.strike_price || 0)}</div>
-                            <div className="tw-text-base tw-font-bold tw-text-cyan-400">{formatCurrency(ltp)}</div>
-                          </div>
-
-                          {/* Lot Info */}
-                          <div className="tw-col-span-2">
-                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Lot Size</div>
-                            <div className="tw-text-lg tw-font-bold tw-text-white">{lotSize}</div>
-                            <div className="tw-text-sm tw-text-slate-400">x {lotsToTrade} lots</div>
-                          </div>
-
-                          {/* Capital Required */}
-                          <div className="tw-col-span-2">
-                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Capital</div>
-                            <div className="tw-text-lg tw-font-extrabold tw-text-orange-400">{formatCurrency(capitalRequired)}</div>
-                          </div>
-
-                          {/* Status */}
-                          <div className="tw-col-span-2 tw-text-right">
-                            <span className={`tw-inline-block tw-px-4 tw-py-2 tw-rounded-lg tw-text-sm tw-font-bold ${stock.trade_status === "TRADED" ? 'tw-bg-green-600 tw-text-white' : stock.trade_status === "IN_POSITION" ? 'tw-bg-yellow-600 tw-text-white' : 'tw-bg-blue-600 tw-text-white'}`}>
-                              {stock.trade_status || "SELECTED"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {selectedStocks.map((stock, idx) => (
+                    <SelectedStockCard key={idx} stock={stock} />
+                  ))}
                 </div>
               ) : (
                 <div className="tw-text-center tw-py-12">
@@ -927,55 +912,20 @@ const AutoTradingPage = () => {
           {activeTab === 2 && (
             <div>
               {tradeHistory.length > 0 ? (
-                <div className="tw-space-y-3">
-                  {tradeHistory.map((trade, idx) => {
-                    const isProfitable = trade.net_pnl >= 0;
-                    return (
-                      <div key={idx} className={`tw-bg-gradient-to-r tw-rounded-xl tw-p-5 tw-border tw-transition-all tw-duration-300 hover:tw-shadow-xl ${isProfitable ? 'tw-from-green-900/20 tw-to-slate-900/80 tw-border-green-700/30 hover:tw-border-green-500/50' : 'tw-from-red-900/20 tw-to-slate-900/80 tw-border-red-700/30 hover:tw-border-red-500/50'}`}>
-                        <div className="tw-grid tw-grid-cols-12 tw-gap-4 tw-items-center">
-                          {/* Symbol & Type */}
-                          <div className="tw-col-span-3">
-                            <div className="tw-text-2xl tw-font-extrabold tw-text-white tw-mb-1">{trade.symbol}</div>
-                            <div className="tw-flex tw-items-center tw-gap-2">
-                              <span className={`tw-inline-block tw-px-3 tw-py-1 tw-rounded-md tw-text-xs tw-font-bold ${trade.signal_type?.includes("CE") ? 'tw-bg-green-600 tw-text-white' : 'tw-bg-red-600 tw-text-white'}`}>
-                                {trade.signal_type}
-                              </span>
-                              <span className="tw-text-xs tw-text-slate-400">{trade.broker_name?.toUpperCase() || "N/A"}</span>
-                            </div>
-                          </div>
-
-                          {/* Entry & Exit Prices */}
-                          <div className="tw-col-span-3">
-                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">Entry → Exit</div>
-                            <div className="tw-flex tw-items-center tw-gap-2">
-                              <span className="tw-text-base tw-font-bold tw-text-white">{formatCurrency(trade.entry_price)}</span>
-                              <svg className="tw-w-4 tw-h-4 tw-text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                              </svg>
-                              <span className="tw-text-base tw-font-bold tw-text-cyan-400">{formatCurrency(trade.exit_price)}</span>
-                            </div>
-                            <div className="tw-text-xs tw-text-slate-500 tw-mt-0.5">Qty: {trade.quantity || 0}</div>
-                          </div>
-
-                          {/* P&L Amount */}
-                          <div className="tw-col-span-3">
-                            <div className="tw-text-xs tw-text-slate-400 tw-uppercase tw-mb-1">P&L Amount</div>
-                            <div className={`tw-text-2xl tw-font-extrabold ${isProfitable ? 'tw-text-green-400' : 'tw-text-red-400'}`}>
-                              {formatCurrency(trade.net_pnl)}
-                            </div>
-                          </div>
-
-                          {/* P&L % & Exit Reason */}
-                          <div className="tw-col-span-3 tw-text-right">
-                            <div className={`tw-inline-block tw-px-4 tw-py-2 tw-rounded-lg tw-text-lg tw-font-extrabold tw-mb-2 ${isProfitable ? 'tw-bg-green-600 tw-text-white' : 'tw-bg-red-600 tw-text-white'}`}>
-                              {formatPercentage(trade.pnl_percentage)}
-                            </div>
-                            <div className="tw-text-xs tw-text-slate-400 tw-mt-1">{trade.exit_reason}</div>
-                          </div>
-                        </div>
+                <div className="tw-space-y-6">
+                  {/* Group trades by date */}
+                  {groupedTradeHistory.map(([date, trades]) => (
+                    <div key={date}>
+                      <h3 className="tw-text-slate-400 tw-text-sm tw-font-bold tw-uppercase tw-mb-3 tw-pl-1">
+                        {date}
+                      </h3>
+                      <div className="tw-space-y-3">
+                        {trades.map((trade, idx) => (
+                          <TradeHistoryItem key={idx} trade={trade} />
+                        ))}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="tw-text-center tw-py-12">
@@ -990,6 +940,66 @@ const AutoTradingPage = () => {
           )}
         </div>
       </div>
+      {/* Live Trading Confirmation Modal */}
+      {showLiveConfirmation && (
+        <div className="tw-fixed tw-inset-0 tw-z-[100] tw-flex tw-items-center tw-justify-center tw-p-4 tw-bg-slate-950/80 tw-backdrop-blur-sm">
+          <div className="tw-bg-slate-900 tw-border tw-border-rose-500/30 tw-rounded-2xl tw-shadow-2xl tw-max-w-md tw-w-full tw-overflow-hidden tw-animate-in tw-fade-in tw-zoom-in-95 tw-duration-200">
+            <div className="tw-p-6">
+              <div className="tw-flex tw-items-center tw-gap-4 tw-mb-4">
+                <div className="tw-p-3 tw-bg-rose-500/10 tw-rounded-full tw-border tw-border-rose-500/20">
+                  <svg className="tw-w-8 tw-h-8 tw-text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="tw-text-xl tw-font-bold tw-text-white">Enable Live Trading?</h3>
+                  <p className="tw-text-rose-400 tw-text-sm tw-font-medium">Real Money Risk Warning</p>
+                </div>
+              </div>
+              
+              <div className="tw-space-y-4 tw-mb-6">
+                <p className="tw-text-slate-300 tw-text-sm tw-leading-relaxed">
+                  You are about to switch to <span className="tw-text-white tw-font-bold">LIVE TRADING</span> mode.
+                </p>
+                <div className="tw-bg-rose-500/5 tw-border tw-border-rose-500/20 tw-rounded-xl tw-p-4">
+                  <ul className="tw-space-y-2 tw-text-sm tw-text-slate-300">
+                    <li className="tw-flex tw-items-start tw-gap-2">
+                      <span className="tw-text-rose-500 tw-mt-0.5">•</span>
+                      Trades will be executed on your real broker account.
+                    </li>
+                    <li className="tw-flex tw-items-start tw-gap-2">
+                      <span className="tw-text-rose-500 tw-mt-0.5">•</span>
+                      Real funds will be used for all transactions.
+                    </li>
+                    <li className="tw-flex tw-items-start tw-gap-2">
+                      <span className="tw-text-rose-500 tw-mt-0.5">•</span>
+                      Profit and Loss will be real financial impact.
+                    </li>
+                  </ul>
+                </div>
+                <p className="tw-text-slate-400 tw-text-xs">
+                  Please ensure your risk management settings (Stop Loss, Max Daily Loss) are correctly configured before proceeding.
+                </p>
+              </div>
+
+              <div className="tw-flex tw-gap-3">
+                <button
+                  onClick={() => setShowLiveConfirmation(false)}
+                  className="tw-flex-1 tw-py-3 tw-bg-slate-800 hover:tw-bg-slate-700 tw-text-slate-300 tw-rounded-xl tw-font-medium tw-transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => updateTradingMode("live")}
+                  className="tw-flex-1 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-bold tw-transition-colors tw-shadow-lg hover:tw-shadow-rose-900/20"
+                >
+                  Confirm Live Trading
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

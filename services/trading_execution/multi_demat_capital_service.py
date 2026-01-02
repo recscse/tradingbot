@@ -33,7 +33,7 @@ class MultiDematCapitalService:
         self.max_per_trade_allocation_percent = Decimal('0.20')  # 20% max per trade
         logger.info("Multi-Demat Capital Service initialized")
 
-    def get_user_total_capital(
+    async def get_user_total_capital(
         self,
         user_id: int,
         db: Session,
@@ -59,7 +59,7 @@ class MultiDematCapitalService:
         try:
             # Paper trading mode - return virtual capital
             if trading_mode == "paper":
-                return self._get_paper_trading_capital(user_id, db)
+                return await self._get_paper_trading_capital(user_id, db)
 
             # Live trading mode - aggregate from all demats
             return self._get_live_trading_capital(user_id, db)
@@ -68,30 +68,64 @@ class MultiDematCapitalService:
             logger.error(f"Error getting user capital for user {user_id}: {e}")
             raise
 
-    def _get_paper_trading_capital(self, user_id: int, db: Session) -> Dict[str, Any]:
-        """Get paper trading virtual capital"""
-        paper_capital = Decimal('1000000')  # 10 Lakhs virtual
-
-        # Get used capital from active positions
-        used_capital = self._calculate_used_capital(user_id, db, trading_mode="paper")
+    async def _get_paper_trading_capital(self, user_id: int, db: Session) -> Dict[str, Any]:
+        """Get paper trading virtual capital using the singleton service"""
+        from services.paper_trading_account import paper_trading_service
+        
+        # Get actual paper account state
+        paper_account = await paper_trading_service.get_account(user_id)
+        
+        if paper_account:
+            # Calculate totals based on PaperAccount state
+            # total_available_capital (PaperAccount.current_balance) includes Cash + PnL
+            # total_used_margin (PaperAccount.used_margin) is blocked capital
+            # total_free_margin (PaperAccount.available_margin) is free cash for new trades
+            
+            # Note: In PaperAccount logic:
+            # available_margin = initial - used + pnl
+            # current_balance = initial - used (cash balance) -- Wait, let's verify PaperAccount logic
+            # Logic from execute_trade:
+            # used_margin += invested
+            # available_margin -= invested
+            # current_balance -= invested
+            # Logic from close_position:
+            # available_margin += invested + pnl
+            # current_balance += invested + pnl
+            
+            # So:
+            # available_margin = Free Cash (Available for trading)
+            # current_balance = Free Cash (Same as available_margin in this implementation)
+            # used_margin = Blocked Margin
+            # Total Equity = available_margin + used_margin
+            
+            total_free_margin = Decimal(str(paper_account.available_margin))
+            total_used_margin = Decimal(str(paper_account.used_margin))
+            paper_capital = total_free_margin + total_used_margin
+            
+        else:
+            # Fallback if account doesn't exist yet (create it implicitly)
+            await paper_trading_service.create_paper_account(user_id)
+            paper_capital = Decimal('1000000')
+            total_used_margin = Decimal('0')
+            total_free_margin = paper_capital
 
         return {
             "user_id": user_id,
             "trading_mode": "paper",
             "total_available_capital": float(paper_capital),
-            "total_used_margin": float(used_capital),
-            "total_free_margin": float(paper_capital - used_capital),
-            "capital_utilization_percent": float((used_capital / paper_capital) * 100) if paper_capital > 0 else 0,
+            "total_used_margin": float(total_used_margin),
+            "total_free_margin": float(total_free_margin),
+            "capital_utilization_percent": float((total_used_margin / paper_capital) * 100) if paper_capital > 0 else 0,
             "max_trade_allocation": float(paper_capital * self.max_per_trade_allocation_percent),
             "demats": [
                 {
                     "broker_name": "paper_trading",
                     "available_margin": float(paper_capital),
-                    "used_margin": float(used_capital),
-                    "free_margin": float(paper_capital - used_capital),
+                    "used_margin": float(total_used_margin),
+                    "free_margin": float(total_free_margin),
                     "is_active": True,
                     "token_valid": True,
-                    "utilization_percent": float((used_capital / paper_capital) * 100) if paper_capital > 0 else 0
+                    "utilization_percent": float((total_used_margin / paper_capital) * 100) if paper_capital > 0 else 0
                 }
             ],
             "timestamp": datetime.now().isoformat()
