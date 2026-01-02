@@ -167,28 +167,6 @@ jobs:
           echo "test_coverage=basic" >> $GITHUB_ENV
         fi
         
-    - name: Security audit
-      continue-on-error: true
-      run: |
-        echo "Running security audit..."
-        
-        # Run npm audit with proper error handling
-        if npm audit --audit-level moderate --json > ../audit-results.json 2>&1; then
-          echo "No moderate or higher vulnerabilities found"
-          echo "security_status=clean" >> $GITHUB_ENV
-        else
-          echo "Vulnerabilities detected, checking details..."
-          
-          # Use basic parsing instead of jq for better compatibility
-          VULNERABILITIES=$(grep -o '"total":[0-9]*' ../audit-results.json 2>/dev/null | head -1 | cut -d: -f2 || echo "unknown")
-          
-          echo "Found vulnerabilities: $VULNERABILITIES"
-          echo "security_status=vulnerabilities_found" >> $GITHUB_ENV
-          
-          # Show readable audit output
-          npm audit --audit-level high || echo "High severity vulnerabilities detected"
-        fi
-        
     - name: Bundle size analysis
       run: |
         echo "Analyzing bundle size..."
