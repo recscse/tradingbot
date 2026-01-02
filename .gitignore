@@ -100,4 +100,10 @@ docker-compose.override.yml
 
 models/trading_model.pkl
 
+# Environment variables
+.env
+.env.*
+!.env.production.template
+!.env.template
+
 kafka/kafka_2.13-4.1.0
