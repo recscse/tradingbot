@@ -80,7 +80,6 @@ jobs:
 
   dependency-scanning:
     runs-on: ubuntu-latest
-    if: false  # Temporarily disabled - re-enable after fixing dependency issues
     strategy:
       matrix:
         ecosystem: [python, npm]
@@ -155,7 +154,6 @@ jobs:
 
   code-analysis:
     runs-on: ubuntu-latest
-    if: false  # Temporarily disabled - re-enable after fixing tool installation issues
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4

@@ -463,26 +463,4 @@ jobs:
           echo "Running Semgrep security scan..."
           semgrep --config=auto --json --output=semgrep-report.json . 2>/dev/null || echo "Semgrep scan completed with warnings"
 
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: [test, security-scan]
-    if: github.ref == 'refs/heads/feature-branch'
 
-    steps:
-      - name: Deploy to Staging
-        run: |
-          echo "[DEPLOY] Deploying to staging environment..."
-          echo "Branch: ${{ github.ref }}"
-          # Add your staging deployment commands here
-
-  deploy-production:
-    runs-on: ubuntu-latest
-    needs: [test, security-scan]
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Deploy to Production
-        run: |
-          echo "[DEPLOY] Deploying to production environment..."
-          echo "This would trigger Render deployment..."
-          # Add production deployment webhook/API calls here
