@@ -119,7 +119,7 @@
     "name": "CANARA BANK",
     "trading_symbol": "CANBK"
   },
-  "NSE_EQ|INE745G01035": {
+  "NSE_EQ|INE745G01043": {
     "symbol": "MCX",
     "name": "MULTI COMMODITY EXCHANGE",
     "trading_symbol": "MCX"
@@ -179,7 +179,7 @@
     "name": "YES BANK LIMITED",
     "trading_symbol": "YESBANK"
   },
-  "NSE_EQ|INE531F01015": {
+  "NSE_EQ|INE531F01023": {
     "symbol": "NUVAMA",
     "name": "NUVAMA WEALTH MANAGE LTD",
     "trading_symbol": "NUVAMA"
@@ -389,7 +389,7 @@
     "name": "LIC HOUSING FINANCE LTD",
     "trading_symbol": "LICHSGFIN"
   },
-  "NSE_EQ|INE596I01012": {
+  "NSE_EQ|INE596I01020": {
     "symbol": "CAMS",
     "name": "COMPUTER AGE MNGT SER LTD",
     "trading_symbol": "CAMS"
