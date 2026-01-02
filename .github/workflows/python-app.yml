@@ -76,7 +76,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 black isort bandit safety
+          pip install flake8 black isort
 
           # Install testing framework dependencies first
           echo "Installing comprehensive testing framework..."
