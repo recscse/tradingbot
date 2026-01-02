@@ -53,6 +53,10 @@ COPY --from=builder /app/requirements.txt .
 # Install dependencies
 RUN pip install --no-cache /wheels/*
 
+# Install Playwright browsers and system dependencies
+RUN python -m playwright install chromium && \
+    python -m playwright install-deps chromium
+
 # Copy application code
 COPY . .
 

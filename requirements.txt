@@ -11,7 +11,6 @@ annotated-types==0.7.0
 anyio==4.8.0
 astunparse==1.6.3
 async-timeout>=4.0.3,<5.0.0
-asyncio==3.4.3
 attrs==25.1.0
 autobahn==19.11.2
 Automat==24.8.1
@@ -197,7 +196,6 @@ tzdata==2025.1
 upstox==2.0.3
 upstox-python-sdk==2.12.0
 urllib3==2.3.0
-uuid==1.30
 uvicorn==0.34.1
 watchfiles==1.0.4
 webencodings==0.5.1
