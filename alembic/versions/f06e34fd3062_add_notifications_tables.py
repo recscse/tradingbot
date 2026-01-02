@@ -101,7 +101,7 @@ def upgrade() -> None:
                existing_type=sa.VARCHAR(),
                type_=sa.Text(),
                existing_nullable=False)
-    op.drop_column('notifications', 'read')
+    op.execute('ALTER TABLE notifications DROP COLUMN IF EXISTS "read"')
     # ### end Alembic commands ###
 
 

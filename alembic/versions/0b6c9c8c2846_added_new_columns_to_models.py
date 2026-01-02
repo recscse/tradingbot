@@ -43,7 +43,7 @@ def upgrade() -> None:
     op.alter_column('otp_codes', 'phone_number',
                existing_type=sa.VARCHAR(),
                nullable=True)
-    op.drop_constraint('otp_codes_phone_number_key', 'otp_codes', type_='unique')
+    op.execute('ALTER TABLE otp_codes DROP CONSTRAINT IF EXISTS otp_codes_phone_number_key')
     op.add_column('users', sa.Column('phone_verified', sa.Boolean(), nullable=True))
     op.add_column('users', sa.Column('google_id', sa.String(), nullable=True))
     op.add_column('users', sa.Column('avatar_url', sa.String(), nullable=True))
