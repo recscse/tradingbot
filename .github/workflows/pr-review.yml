@@ -8,6 +8,10 @@ on:
   pull_request_review:
     types: [submitted]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
@@ -17,6 +21,7 @@ permissions:
 jobs:
   pr-validation:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: github.event.pull_request.draft == false
     
     steps:
@@ -135,19 +140,6 @@ jobs:
           echo "ℹ️  Could not analyze complexity (no Python files or radon failed)"
         fi
         
-    - name: Security analysis
-      run: |
-        echo "🔒 Checking for security issues in changed files..."
-        
-        # Check for potential secrets in diff
-        SECRETS_FOUND=$(git diff origin/main...HEAD | grep -i -E "(password|secret|key|token|api)" || true)
-        
-        if [ ! -z "$SECRETS_FOUND" ]; then
-          echo "⚠️  Potential secrets found in changes:"
-          echo "$SECRETS_FOUND"
-          echo "Please review and ensure no secrets are committed"
-        fi
-        
     - name: Comment on PR with analysis
       uses: actions/github-script@v6
       if: always()
@@ -163,8 +155,7 @@ jobs:
           comment += `**Checks Performed:**\n`;
           comment += `- ✅ PR title validation\n`;
           comment += `- ✅ Branch naming convention\n`;
-          comment += `- ✅ Code complexity analysis\n`;
-          comment += `- ✅ Security scan\n\n`;
+          comment += `- ✅ Code complexity analysis\n\n`;
           
           comment += `**Next Steps:**\n`;
           comment += `1. Backend tests will run automatically\n`;

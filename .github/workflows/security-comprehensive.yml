@@ -23,6 +23,10 @@ on:
         - code-analysis
         - docker
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
@@ -31,6 +35,7 @@ permissions:
 jobs:
   secret-scanning:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4

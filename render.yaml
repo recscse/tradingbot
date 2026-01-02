@@ -1,0 +1,46 @@
+services:
+  # Backend Service
+  - type: web
+    name: trading-bot-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start.sh
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trading-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: trading-cache
+          property: connectionString
+    autoDeploy: false  # We trigger via CI/CD
+
+  # Database
+  - type: psql
+    name: trading-db
+    plan: starter
+    ipAllowList: [] # Allow all for now, restrict in production console
+
+  # Redis Cache
+  - type: redis
+    name: trading-cache
+    plan: starter
+    ipAllowList: [] 
+
+  # Background Worker (if needed separately)
+  # - type: worker
+  #   name: trading-bot-worker
+  #   env: python
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: python -m services.background_worker
+  #   envVars:
+  #     - key: DATABASE_URL
+  #       fromDatabase:
+  #         name: trading-db
+  #         property: connectionString
