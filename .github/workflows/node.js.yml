@@ -2,7 +2,7 @@ name: Frontend CI/CD Enhanced
 
 on:
   push:
-    branches: [ "main", "feature-branch" ]
+    branches: [ "main" ]
     paths: 
       - 'ui/trading-bot-ui/**'
       - '.github/workflows/node.js.yml'

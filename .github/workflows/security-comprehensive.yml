@@ -3,7 +3,7 @@ name: Security Comprehensive
 
 on:
   push:
-    branches: [ "main", "feature-branch" ]
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
   schedule:

@@ -3,7 +3,7 @@ name: Backend CI/CD
 
 on:
   push:
-    branches: ["main", "feature-branch"]
+    branches: ["main"]
     paths:
       - "**/*.py"
       - "requirements.txt"
