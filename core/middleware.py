@@ -5,6 +5,8 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from core.config import JWT_SECRET as CONFIG_SECRET
+
 #  Configure Logger (Console Only)
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -21,7 +23,7 @@ console_handler.setFormatter(console_formatter)
 logger.addHandler(console_handler)
 
 #  Load Secret Keys
-SECRET_KEY = os.getenv("JWT_SECRET", "your-access-secret-key")
+SECRET_KEY = CONFIG_SECRET
 ALGORITHM = "HS256"
 
 #  Allowed Origins (Frontend URLs)
@@ -34,6 +36,7 @@ ALLOWED_ORIGINS = [
     "https://www.growthquantix.com",  #  Production Frontend
     "https://api.growthquantix.com",  #  Production Backend
     "https://api.growthquantix.com/v1",  #  Production Backend (API Version)
+    "https://growth-quantix.netlify.app", #  Alternative Netlify URL
 ]
 
 
