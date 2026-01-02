@@ -1,17 +1,22 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useUnifiedMarketData } from "../../hooks/useUnifiedMarketData";
-import { Minimize2, Maximize2, TrendingUp, TrendingDown, X } from "lucide-react";
+import {
+  Minimize2,
+  Maximize2,
+  TrendingUp,
+  TrendingDown,
+  X,
+} from "lucide-react";
+import "./LivePnLWidget.css";
 
-/**
- * LivePnLWidget - Compact floating widget displaying live P&L for active positions
- *
- * Features:
- * - Always visible on screen (floating)
- * - Draggable and resizable
- * - Real-time P&L updates via WebSocket
- * - Responsive on all screen sizes
- * - Tailwind CSS styling
- */
+/** -------------------------------------
+ * SAFE NUMBER HELPER
+ * ----------------------------------- */
+const safeNum = (value, fallback = 0) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+};
+
 const LivePnLWidget = () => {
   const { marketData, isConnected } = useUnifiedMarketData();
   const [positions, setPositions] = useState([]);
@@ -19,34 +24,24 @@ const LivePnLWidget = () => {
   const [isVisible, setIsVisible] = useState(true);
   const [totalPnL, setTotalPnL] = useState(0);
 
-  useEffect(() => {
-    fetch_active_positions();
-  }, []);
-
-  useEffect(() => {
-    if (positions.length > 0 && marketData) {
-      calculate_total_pnl();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions, marketData]);
-
-  const fetch_active_positions = async () => {
+  const fetch_active_positions = useCallback(async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/v1/trading/execution/active-positions`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await fetch(
+        `${process.env.REACT_APP_API_URL}/api/v1/trading/execution/active-positions`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
       if (response.ok) {
         const data = await response.json();
 
         if (Array.isArray(data)) {
           setPositions(data);
-        } else if (data && Array.isArray(data.positions)) {
-          setPositions(data.positions);
-        } else if (data && typeof data === 'object') {
+        } else if (data && Array.isArray(data.active_positions)) {
+          setPositions(data.active_positions);
+        } else if (data && typeof data === "object") {
           setPositions([data]);
         } else {
           setPositions([]);
@@ -56,138 +51,238 @@ const LivePnLWidget = () => {
       console.error("Error fetching positions:", error);
       setPositions([]);
     }
-  };
+  }, []);
 
-  const calculate_total_pnl = () => {
+  /** -------------------------------------
+   * TOTAL PNL CALCULATION
+   * ----------------------------------- */
+  const calculate_total_pnl = useCallback(() => {
     let total = 0;
 
     positions.forEach((position) => {
-      const current_price = marketData[position.instrument_key]?.ltp ||
-                           marketData[position.symbol]?.ltp ||
-                           position.current_price ||
-                           position.entry_price;
-
+      const entry_price = safeNum(position.entry_price ?? position.avg_price);
+      const quantity = safeNum(position.quantity, 1);
       const signal_type = position.signal_type || position.trade_type || "BUY";
-      const quantity = position.quantity || 1;
-      const entry_price = position.entry_price || 0;
 
-      const pnl = (current_price - entry_price) * quantity * (signal_type === "BUY" ? 1 : -1);
+      const marketLtpByKey =
+        position.instrument_key && marketData
+          ? marketData[position.instrument_key]?.ltp
+          : undefined;
+
+      const marketLtpBySymbol =
+        position.symbol && marketData
+          ? marketData[position.symbol]?.ltp
+          : undefined;
+
+      const current_price = safeNum(
+        marketLtpByKey ??
+          marketLtpBySymbol ??
+          position.current_price ??
+          entry_price
+      );
+
+      const direction = signal_type === "BUY" ? 1 : -1;
+      const pnl = (current_price - entry_price) * quantity * direction;
+
       total += pnl;
     });
 
     setTotalPnL(total);
-  };
+  }, [positions, marketData]);
 
+  useEffect(() => {
+    fetch_active_positions();
+  }, [fetch_active_positions]);
+
+  useEffect(() => {
+    if (positions.length > 0) {
+      calculate_total_pnl();
+    }
+  }, [positions, marketData, calculate_total_pnl]);
+
+  /** -------------------------------------
+   * SINGLE POSITION PNL
+   * ----------------------------------- */
   const get_position_pnl = (position) => {
-    const current_price = marketData[position.instrument_key]?.ltp ||
-                         marketData[position.symbol]?.ltp ||
-                         position.current_price ||
-                         position.entry_price;
+    const instrumentKey = position.instrument_key;
+    const symbol = position.symbol || position.trading_symbol;
 
+    const marketLtpByKey =
+      instrumentKey && marketData ? marketData[instrumentKey]?.ltp : undefined;
+
+    const marketLtpBySymbol =
+      symbol && marketData ? marketData[symbol]?.ltp : undefined;
+
+    const entry_price = safeNum(position.entry_price ?? position.avg_price);
+    const quantity = safeNum(position.quantity, 1);
     const signal_type = position.signal_type || position.trade_type || "BUY";
-    const quantity = position.quantity || 1;
-    const entry_price = position.entry_price || 0;
 
-    const pnl = (current_price - entry_price) * quantity * (signal_type === "BUY" ? 1 : -1);
-    const pnl_percent = ((current_price - entry_price) / entry_price) * 100 * (signal_type === "BUY" ? 1 : -1);
+    const current_price = safeNum(
+      marketLtpByKey ??
+        marketLtpBySymbol ??
+        position.current_price ??
+        entry_price
+    );
 
-    return { pnl, pnl_percent, current_price, signal_type };
+    const direction = signal_type === "BUY" ? 1 : -1;
+    const pnl = (current_price - entry_price) * quantity * direction;
+
+    const pnl_percent =
+      entry_price > 0
+        ? ((current_price - entry_price) / entry_price) * 100 * direction
+        : 0;
+
+    return {
+      pnl,
+      pnl_percent,
+      current_price,
+      signal_type,
+    };
   };
 
   if (!isVisible) {
     return (
       <button
         onClick={() => setIsVisible(true)}
-        className="fixed bottom-4 right-4 z-50 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2"
+        className="tw-fixed tw-bottom-4 tw-right-4 tw-z-50 tw-bg-gradient-to-r tw-from-blue-600 tw-to-blue-700 tw-text-white tw-px-4 tw-py-2 tw-rounded-lg tw-shadow-lg hover:tw-shadow-xl tw-transition-all tw-duration-200 tw-flex tw-items-center tw-gap-2"
       >
-        <TrendingUp className="w-4 h-4" />
-        <span className="text-sm font-semibold">Show P&L</span>
+        <TrendingUp className="tw-w-4 tw-h-4" />
+        <span className="tw-text-sm tw-font-semibold">Show P&L</span>
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 sm:w-96 max-w-full">
-      <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg shadow-2xl border border-gray-700 overflow-hidden">
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-3 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
-            <h3 className="text-white text-sm font-bold">Live P&L</h3>
+    <div className="tw-fixed tw-bottom-4 tw-right-4 tw-z-50 tw-w-80 sm:tw-w-96 tw-max-w-full">
+      <div className="tw-bg-gradient-to-br tw-from-gray-900 tw-to-gray-800 tw-rounded-lg tw-shadow-2xl tw-border tw-border-gray-700 tw-overflow-hidden">
+        {/* HEADER */}
+        <div className="tw-bg-gradient-to-r tw-from-blue-600 tw-to-blue-700 tw-px-3 tw-py-2 tw-flex tw-items-center tw-justify-between">
+          <div className="tw-flex tw-items-center tw-gap-2">
+            <div
+              className={`tw-w-2 tw-h-2 tw-rounded-full ${
+                isConnected ? "tw-bg-green-400 tw-animate-pulse" : "tw-bg-red-400"
+              }`}
+            />
+            <h3 className="tw-text-white tw-text-sm tw-font-bold">Live P&L</h3>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="tw-flex tw-items-center tw-gap-2">
             <button
               onClick={() => setIsMinimized(!isMinimized)}
-              className="text-white hover:bg-blue-600 rounded p-1 transition-colors"
+              className="tw-text-white hover:tw-bg-blue-600 tw-rounded tw-p-1 tw-transition-colors"
             >
-              {isMinimized ? <Maximize2 className="w-4 h-4" /> : <Minimize2 className="w-4 h-4" />}
+              {isMinimized ? (
+                <Maximize2 className="tw-w-4 tw-h-4" />
+              ) : (
+                <Minimize2 className="tw-w-4 tw-h-4" />
+              )}
             </button>
             <button
               onClick={() => setIsVisible(false)}
-              className="text-white hover:bg-blue-600 rounded p-1 transition-colors"
+              className="tw-text-white hover:tw-bg-blue-600 tw-rounded tw-p-1 tw-transition-colors"
             >
-              <X className="w-4 h-4" />
+              <X className="tw-w-4 tw-h-4" />
             </button>
           </div>
         </div>
 
-        <div className="px-3 py-2 bg-gray-800 border-b border-gray-700">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-300 text-xs font-medium">Total P&L</span>
-            <div className="flex items-center gap-1">
-              {totalPnL >= 0 ? (
-                <TrendingUp className="w-4 h-4 text-green-400" />
+        {/* TOTAL PNL BAR */}
+        <div className="tw-px-3 tw-py-2 tw-bg-gray-800 tw-border-b tw-border-gray-700">
+          <div className="tw-flex tw-items-center tw-justify-between">
+            <span className="tw-text-gray-300 tw-text-xs tw-font-medium">Total P&L</span>
+
+            <div className="tw-flex tw-items-center tw-gap-1">
+              {totalPnL > 0 ? (
+                <TrendingUp className="tw-w-4 tw-h-4 tw-text-emerald-400" />
+              ) : totalPnL < 0 ? (
+                <TrendingDown className="tw-w-4 tw-h-4 tw-text-rose-400" />
               ) : (
-                <TrendingDown className="w-4 h-4 text-red-400" />
+                <TrendingUp className="tw-w-4 tw-h-4 tw-text-gray-400" />
               )}
-              <span className={`text-lg font-bold ${totalPnL >= 0 ? "text-green-400" : "text-red-400"}`}>
-                ₹{totalPnL.toFixed(2)}
+
+              <span
+                className={`tw-text-lg tw-font-bold ${
+                  totalPnL > 0 ? "tw-text-emerald-400" : totalPnL < 0 ? "tw-text-rose-400" : "tw-text-gray-400"
+                }`}
+              >
+                ₹{safeNum(totalPnL).toFixed(2)}
               </span>
             </div>
           </div>
-          <div className="text-gray-400 text-xs mt-1">
-            {positions.length} Active Position{positions.length !== 1 ? "s" : ""}
+
+          <div className="tw-text-gray-400 tw-text-xs tw-mt-1">
+            {positions.length} Active Position
+            {positions.length !== 1 ? "s" : ""}
           </div>
         </div>
 
+        {/* POSITIONS LIST */}
         {!isMinimized && (
-          <div className="max-h-64 overflow-y-auto custom-scrollbar">
+          <div className="tw-max-h-64 tw-overflow-y-auto custom-scrollbar">
             {positions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-400 text-sm">
+              <div className="tw-px-3 tw-py-4 tw-text-center tw-text-gray-400 tw-text-sm">
                 No active positions
               </div>
             ) : (
-              <div className="divide-y divide-gray-700">
+              <div className="tw-divide-y tw-divide-gray-700">
                 {positions.map((position, index) => {
-                  const { pnl, pnl_percent, current_price, signal_type } = get_position_pnl(position);
-                  const is_profit = pnl >= 0;
+                  if (!position) return null;
+                  const { pnl, pnl_percent, current_price, signal_type } =
+                    get_position_pnl(position);
 
                   return (
-                    <div key={position.position_id || index} className="px-3 py-2 hover:bg-gray-700 transition-colors">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-white text-sm font-semibold truncate max-w-[120px]">
+                    <div
+                      key={position.position_id || index}
+                      className="tw-px-3 tw-py-2 hover:tw-bg-gray-700 tw-transition-colors"
+                    >
+                      <div className="tw-flex tw-items-center tw-justify-between tw-mb-1">
+                        <div className="tw-flex tw-items-center tw-gap-2">
+                          <span className="tw-text-white tw-text-sm tw-font-semibold tw-truncate tw-max-w-[120px]">
                             {position.symbol || position.trading_symbol}
                           </span>
-                          <span className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${
-                            signal_type === "BUY"
-                              ? "bg-green-900 text-green-300"
-                              : "bg-red-900 text-red-300"
-                          }`}>
+
+                          <span
+                            className={`tw-text-xs tw-px-1.5 tw-py-0.5 tw-rounded tw-whitespace-nowrap ${
+                              signal_type === "BUY"
+                                ? "tw-bg-emerald-500/20 tw-text-emerald-400"
+                                : "tw-bg-rose-500/20 tw-text-rose-400"
+                            }`}
+                          >
                             {signal_type}
                           </span>
                         </div>
-                        <div className={`text-sm font-bold ${is_profit ? "text-green-400" : "text-red-400"}`}>
-                          {is_profit ? "+" : ""}₹{pnl.toFixed(2)}
+
+                        <div
+                          className={`tw-text-sm tw-font-bold ${
+                            pnl > 0 ? "tw-text-emerald-400" : pnl < 0 ? "tw-text-rose-400" : "tw-text-gray-400"
+                          }`}
+                        >
+                          {pnl >= 0 ? "+" : ""}₹{safeNum(pnl).toFixed(2)}
                         </div>
                       </div>
-                      <div className="flex items-center justify-between text-xs text-gray-400">
-                        <div className="flex items-center gap-3">
-                          <span>Qty: {position.quantity || 0}</span>
-                          <span>Entry: ₹{(position.entry_price || 0).toFixed(2)}</span>
+
+                      <div className="tw-flex tw-items-center tw-justify-between tw-text-xs tw-text-gray-400">
+                        <div className="tw-flex tw-items-center tw-gap-3">
+                          <span>Qty: {safeNum(position.quantity)}</span>
+                          <span>
+                            Entry: ₹
+                            {safeNum(
+                              position.entry_price ?? position.avg_price
+                            ).toFixed(2)}
+                          </span>
                         </div>
-                        <div className={`flex items-center gap-1 ${is_profit ? "text-green-400" : "text-red-400"}`}>
-                          <span>₹{current_price.toFixed(2)}</span>
-                          <span className="font-medium">({pnl_percent >= 0 ? "+" : ""}{pnl_percent.toFixed(2)}%)</span>
+
+                        <div
+                          className={`tw-flex tw-items-center tw-gap-1 ${
+                            pnl > 0 ? "tw-text-emerald-400" : pnl < 0 ? "tw-text-rose-400" : "tw-text-gray-400"
+                          }`}
+                        >
+                          <span>₹{safeNum(current_price).toFixed(2)}</span>
+
+                          <span className="tw-font-medium">
+                            ({pnl_percent >= 0 ? "+" : ""}
+                            {safeNum(pnl_percent).toFixed(2)}%)
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -198,34 +293,20 @@ const LivePnLWidget = () => {
           </div>
         )}
 
-        <div className="px-3 py-1.5 bg-gray-900 border-t border-gray-700 flex items-center justify-between">
+        {/* FOOTER */}
+        <div className="tw-px-3 tw-py-1.5 tw-bg-gray-900 tw-border-t tw-border-gray-700 tw-flex tw-items-center tw-justify-between">
           <button
             onClick={fetch_active_positions}
-            className="text-blue-400 hover:text-blue-300 text-xs font-medium transition-colors"
+            className="tw-text-blue-400 hover:tw-text-blue-300 tw-text-xs tw-font-medium tw-transition-colors"
           >
             Refresh
           </button>
-          <span className="text-gray-500 text-xs">
+
+          <span className="tw-text-gray-500 tw-text-xs">
             {isConnected ? "Live" : "Disconnected"}
           </span>
         </div>
       </div>
-
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: #1f2937;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #4b5563;
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #6b7280;
-        }
-      `}</style>
     </div>
   );
 };

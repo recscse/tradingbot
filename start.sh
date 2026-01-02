@@ -2,7 +2,7 @@
 
 set -e
 
-PORT=${PORT:-10000}
+PORT=${PORT:-8000}
 
 echo "Installing Playwright browser for automation..."
 export PLAYWRIGHT_BROWSERS_PATH=/tmp/.playwright
