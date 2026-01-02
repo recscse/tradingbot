@@ -348,7 +348,8 @@ class TradingCapitalManager:
         available_capital: Decimal,
         option_premium: Decimal,
         lot_size: int,
-        max_loss_percent: Optional[Decimal] = None
+        max_loss_percent: Optional[Decimal] = None,
+        max_lots: Optional[int] = None
     ) -> CapitalAllocation:
         """
         Calculate optimal position size based on capital and risk management
@@ -358,6 +359,7 @@ class TradingCapitalManager:
             option_premium: Current option premium price
             lot_size: Lot size for the option contract
             max_loss_percent: Maximum loss as percentage of capital (optional)
+            max_lots: Maximum number of lots to trade (optional)
 
         Returns:
             CapitalAllocation with position details
@@ -394,6 +396,11 @@ class TradingCapitalManager:
 
             # Take minimum of both constraints
             recommended_lots = min(max_lots_by_capital, max_lots_by_risk)
+            
+            # Apply external max_lots constraint if provided
+            if max_lots is not None and max_lots > 0:
+                recommended_lots = min(recommended_lots, max_lots)
+                
             recommended_lots = max(1, recommended_lots)  # At least 1 lot
 
             # Calculate actual values

@@ -105,7 +105,8 @@ class TradeAnalyticsService:
         self,
         user_id: int,
         db: Session,
-        target_date: Optional[date] = None
+        target_date: Optional[date] = None,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get daily performance metrics
@@ -114,6 +115,7 @@ class TradeAnalyticsService:
             user_id: User identifier
             db: Database session
             target_date: Target date (default: today)
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with daily performance metrics
@@ -122,14 +124,20 @@ class TradeAnalyticsService:
             if target_date is None:
                 target_date = self._get_ist_now().date()
 
-            # Get trades for the day
-            trades = db.query(AutoTradeExecution).filter(
+            # Base query
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED",
                     func.date(AutoTradeExecution.exit_time) == target_date
                 )
-            ).all()
+            )
+
+            # Apply trading mode filter if provided
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.all()
 
             if not trades:
                 return self._empty_performance("daily", target_date)
@@ -151,7 +159,8 @@ class TradeAnalyticsService:
     def get_weekly_performance(
         self,
         user_id: int,
-        db: Session
+        db: Session,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get weekly performance metrics (last 7 days)
@@ -159,6 +168,7 @@ class TradeAnalyticsService:
         Args:
             user_id: User identifier
             db: Database session
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with weekly performance metrics
@@ -167,13 +177,18 @@ class TradeAnalyticsService:
             now_ist = self._get_ist_now()
             week_ago = now_ist - timedelta(days=7)
 
-            trades = db.query(AutoTradeExecution).filter(
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED",
                     AutoTradeExecution.exit_time >= week_ago
                 )
-            ).all()
+            )
+
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.all()
 
             if not trades:
                 return self._empty_performance("weekly", now_ist.date())
@@ -199,7 +214,8 @@ class TradeAnalyticsService:
     def get_monthly_performance(
         self,
         user_id: int,
-        db: Session
+        db: Session,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get monthly performance metrics (last 30 days)
@@ -207,6 +223,7 @@ class TradeAnalyticsService:
         Args:
             user_id: User identifier
             db: Database session
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with monthly performance metrics
@@ -215,13 +232,18 @@ class TradeAnalyticsService:
             now_ist = self._get_ist_now()
             month_ago = now_ist - timedelta(days=30)
 
-            trades = db.query(AutoTradeExecution).filter(
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED",
                     AutoTradeExecution.exit_time >= month_ago
                 )
-            ).all()
+            )
+
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.all()
 
             if not trades:
                 return self._empty_performance("monthly", now_ist.date())
@@ -247,7 +269,8 @@ class TradeAnalyticsService:
     def get_six_month_performance(
         self,
         user_id: int,
-        db: Session
+        db: Session,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get 6-month performance metrics (last 180 days)
@@ -255,6 +278,7 @@ class TradeAnalyticsService:
         Args:
             user_id: User identifier
             db: Database session
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with 6-month performance metrics
@@ -263,13 +287,18 @@ class TradeAnalyticsService:
             now_ist = self._get_ist_now()
             six_months_ago = now_ist - timedelta(days=180)
 
-            trades = db.query(AutoTradeExecution).filter(
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED",
                     AutoTradeExecution.exit_time >= six_months_ago
                 )
-            ).all()
+            )
+
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.all()
 
             if not trades:
                 return self._empty_performance("6-month", now_ist.date())
@@ -295,7 +324,8 @@ class TradeAnalyticsService:
     def get_yearly_performance(
         self,
         user_id: int,
-        db: Session
+        db: Session,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get 1-year performance metrics (last 365 days)
@@ -303,6 +333,7 @@ class TradeAnalyticsService:
         Args:
             user_id: User identifier
             db: Database session
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with 1-year performance metrics
@@ -311,13 +342,18 @@ class TradeAnalyticsService:
             now_ist = self._get_ist_now()
             year_ago = now_ist - timedelta(days=365)
 
-            trades = db.query(AutoTradeExecution).filter(
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED",
                     AutoTradeExecution.exit_time >= year_ago
                 )
-            ).all()
+            )
+
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.all()
 
             if not trades:
                 return self._empty_performance("yearly", now_ist.date())
@@ -343,7 +379,8 @@ class TradeAnalyticsService:
     def get_overall_performance(
         self,
         user_id: int,
-        db: Session
+        db: Session,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get overall all-time performance metrics
@@ -351,17 +388,23 @@ class TradeAnalyticsService:
         Args:
             user_id: User identifier
             db: Database session
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with overall performance metrics
         """
         try:
-            trades = db.query(AutoTradeExecution).filter(
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED"
                 )
-            ).all()
+            )
+
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.all()
 
             if not trades:
                 return self._empty_performance("overall", self._get_ist_now().date())
@@ -393,7 +436,8 @@ class TradeAnalyticsService:
         self,
         user_id: int,
         db: Session,
-        limit: int = 100
+        limit: int = 100,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get detailed trade-by-trade analysis
@@ -402,17 +446,24 @@ class TradeAnalyticsService:
             user_id: User identifier
             db: Database session
             limit: Maximum number of trades to return
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Dictionary with detailed trade information
         """
         try:
-            trades = db.query(AutoTradeExecution).filter(
+            query = db.query(AutoTradeExecution).filter(
                 and_(
                     AutoTradeExecution.user_id == user_id,
                     AutoTradeExecution.status == "CLOSED"
                 )
-            ).order_by(AutoTradeExecution.exit_time.desc()).limit(limit).all()
+            )
+
+            # Apply trading mode filter if provided
+            if trading_mode:
+                query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+            trades = query.order_by(AutoTradeExecution.exit_time.desc()).limit(limit).all()
 
             if not trades:
                 return {
@@ -464,6 +515,91 @@ class TradeAnalyticsService:
 
         except Exception as e:
             logger.error(f"Error getting detailed performance: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_system_health_analytics(
+        self,
+        user_id: int,
+        db: Session
+    ) -> Dict[str, Any]:
+        """
+        Get system health and operational analytics
+
+        Args:
+            user_id: User identifier
+            db: Database session
+
+        Returns:
+            Dictionary with system health metrics
+        """
+        try:
+            # Get all trades for latency analysis
+            trades = db.query(AutoTradeExecution).filter(
+                AutoTradeExecution.user_id == user_id
+            ).all()
+
+            if not trades:
+                return {
+                    "success": True,
+                    "latency_metrics": {"avg_signal_latency": 0, "avg_execution_latency": 0},
+                    "hourly_distribution": [],
+                    "broker_performance": []
+                }
+
+            # 1. Latency Analysis
+            signal_latencies = [t.signal_generation_latency_ms for t in trades if t.signal_generation_latency_ms is not None]
+            exec_latencies = [t.order_execution_latency_ms for t in trades if t.order_execution_latency_ms is not None]
+
+            avg_signal_latency = sum(signal_latencies) / len(signal_latencies) if signal_latencies else 0
+            avg_exec_latency = sum(exec_latencies) / len(exec_latencies) if exec_latencies else 0
+
+            # 2. Hourly Distribution
+            hourly_stats = {}
+            for trade in trades:
+                if not trade.entry_time:
+                    continue
+                
+                # Convert to IST for correct hourly bucketing
+                entry_time_ist = self._to_ist(trade.entry_time)
+                hour = entry_time_ist.hour
+                
+                if hour not in hourly_stats:
+                    hourly_stats[hour] = {"hour": f"{hour:02d}:00", "trades": 0, "wins": 0, "pnl": 0.0}
+                
+                hourly_stats[hour]["trades"] += 1
+                if trade.net_pnl:
+                    hourly_stats[hour]["pnl"] += float(trade.net_pnl)
+                    if trade.net_pnl > 0:
+                        hourly_stats[hour]["wins"] += 1
+
+            hourly_distribution = sorted(hourly_stats.values(), key=lambda x: x["hour"])
+
+            # 3. Broker Performance
+            broker_stats = {}
+            for trade in trades:
+                broker = trade.broker_name or "Unknown"
+                if broker not in broker_stats:
+                    broker_stats[broker] = {"broker": broker, "trades": 0, "pnl": 0.0}
+                
+                broker_stats[broker]["trades"] += 1
+                if trade.net_pnl:
+                    broker_stats[broker]["pnl"] += float(trade.net_pnl)
+
+            broker_performance = list(broker_stats.values())
+
+            return {
+                "success": True,
+                "latency_metrics": {
+                    "avg_signal_latency_ms": round(avg_signal_latency, 2),
+                    "avg_execution_latency_ms": round(avg_exec_latency, 2),
+                    "total_trades_analyzed": len(trades)
+                },
+                "hourly_distribution": hourly_distribution,
+                "broker_performance": broker_performance
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting system health analytics: {e}")
             return {"success": False, "error": str(e)}
 
     def _calculate_metrics(self, trades: List[AutoTradeExecution]) -> PerformanceMetrics:

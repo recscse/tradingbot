@@ -324,6 +324,7 @@ class MultiDematTradeExecutor:
                 }
 
             # Override quantity with calculated lots
+            prepared_trade.position_size_lots = lots_to_trade
             prepared_trade.quantity = lots_to_trade * lot_size
 
             # Execute trade
