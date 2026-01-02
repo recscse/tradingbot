@@ -16,14 +16,14 @@ if not DATABASE_URL:
 try:
     engine = create_engine(
         DATABASE_URL,
-        pool_size=5,  # Reduced from 20 to prevent pool exhaustion
-        max_overflow=5,  # Reduced from 10 to prevent timeout issues
-        pool_timeout=60,  # Increased timeout to 60 seconds
-        pool_recycle=3600,  # Recycle connections after 1 hour
+        pool_size=int(os.getenv("DB_POOL_SIZE", 5)),
+        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", 10)),
+        pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", 60)),
+        pool_recycle=int(os.getenv("DB_POOL_RECYCLE", 3600)),
         pool_pre_ping=True,  # Validate connections before use
-        echo=False,  # Set True for debugging SQL queries
+        echo=os.getenv("DB_ECHO", "False").lower() == "true",
         connect_args={
-            "connect_timeout": 30,  # Connection timeout
+            "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", 30)),
             "application_name": "trading_app"
         }
     )
