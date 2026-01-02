@@ -424,36 +424,29 @@ def upgrade() -> None:
         unique=False,
     )
     op.execute("DROP INDEX IF EXISTS idx_combined_signal_strength;")
-    op.drop_index("idx_signal_validity", table_name="fibonacci_ema_signals")
-    op.drop_index("idx_symbol_signal_time", table_name="fibonacci_ema_signals")
-    op.drop_index("ix_fibonacci_ema_signals_id", table_name="fibonacci_ema_signals")
-    op.drop_index("ix_fibonacci_ema_signals_symbol", table_name="fibonacci_ema_signals")
+    op.execute("DROP INDEX IF EXISTS idx_signal_validity")
+    op.execute("DROP INDEX IF EXISTS idx_symbol_signal_time")
+    op.execute("DROP INDEX IF EXISTS ix_fibonacci_ema_signals_id")
+    op.execute("DROP INDEX IF EXISTS ix_fibonacci_ema_signals_symbol")
     op.drop_table("fibonacci_ema_signals")
-    op.drop_index("idx_exit_signals", table_name="trade_monitoring_logs")
-    op.drop_index("idx_trade_monitor_time", table_name="trade_monitoring_logs")
-    op.drop_index("idx_user_monitor_time", table_name="trade_monitoring_logs")
-    op.drop_index("ix_trade_monitoring_logs_id", table_name="trade_monitoring_logs")
+    op.execute("DROP INDEX IF EXISTS idx_exit_signals")
+    op.execute("DROP INDEX IF EXISTS idx_trade_monitor_time")
+    op.execute("DROP INDEX IF EXISTS idx_user_monitor_time")
+    op.execute("DROP INDEX IF EXISTS ix_trade_monitoring_logs_id")
     op.drop_table("trade_monitoring_logs")
-    op.drop_index("idx_paper_account_user", table_name="paper_trading_accounts")
-    op.drop_index("ix_paper_trading_accounts_id", table_name="paper_trading_accounts")
+    op.execute("DROP INDEX IF EXISTS idx_paper_account_user")
+    op.execute("DROP INDEX IF EXISTS ix_paper_trading_accounts_id")
     op.drop_table("paper_trading_accounts")
-    op.drop_index("idx_user_analytics_date", table_name="daily_auto_trading_analytics")
-    op.drop_index(
-        "ix_daily_auto_trading_analytics_id", table_name="daily_auto_trading_analytics"
-    )
+    op.execute("DROP INDEX IF EXISTS idx_user_analytics_date")
+    op.execute("DROP INDEX IF EXISTS ix_daily_auto_trading_analytics_id")
     op.drop_table("daily_auto_trading_analytics")
-    op.drop_index("ix_auto_trading_configs_id", table_name="auto_trading_configs")
+    op.execute("DROP INDEX IF EXISTS ix_auto_trading_configs_id")
     op.drop_table("auto_trading_configs")
-    op.drop_index("idx_option_type_status", table_name="options_trade_executions")
-    op.drop_index("idx_trading_mode_session", table_name="options_trade_executions")
-    op.drop_index("idx_underlying_symbol_date", table_name="options_trade_executions")
-    op.drop_index(
-        "ix_options_trade_executions_id", table_name="options_trade_executions"
-    )
-    op.drop_index(
-        "ix_options_trade_executions_underlying_symbol",
-        table_name="options_trade_executions",
-    )
+    op.execute("DROP INDEX IF EXISTS idx_option_type_status")
+    op.execute("DROP INDEX IF EXISTS idx_trading_mode_session")
+    op.execute("DROP INDEX IF EXISTS idx_underlying_symbol_date")
+    op.execute("DROP INDEX IF EXISTS ix_options_trade_executions_id")
+    op.execute("DROP INDEX IF EXISTS ix_options_trade_executions_underlying_symbol")
     op.drop_table("options_trade_executions")
     op.alter_column(
         "user_trading_config",
