@@ -110,7 +110,6 @@ optree==0.14.1
 orjson==3.11.2
 packaging==24.2
 pandas==2.2.3
-pandas-ta==0.3.14b0
 passlib==1.7.4
 pathspec==0.12.1
 peewee==3.17.9
