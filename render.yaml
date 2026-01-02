@@ -19,6 +19,10 @@ services:
           type: redis
           name: trading-cache
           property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: SECRET_KEY
+        sync: false
     autoDeploy: false  # We trigger via CI/CD
 
   # Database
