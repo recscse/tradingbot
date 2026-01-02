@@ -44,91 +44,184 @@ def upgrade() -> None:
     sa.UniqueConstraint('user_id')
     )
     op.create_index(op.f('ix_user_notification_preferences_id'), 'user_notification_preferences', ['id'], unique=False)
-    op.alter_column('broker_configs', 'available_margin',
+    
+    # Check if columns exist in broker_configs, add if missing, alter if present
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [c['name'] for c in inspector.get_columns('broker_configs')]
+
+    if 'available_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('available_margin', sa.Float(), nullable=True, comment='Available margin for trading'))
+    else:
+        op.alter_column('broker_configs', 'available_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Available margin for trading',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'used_margin',
+
+    if 'used_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('used_margin', sa.Float(), nullable=True, comment='Currently used margin'))
+    else:
+        op.alter_column('broker_configs', 'used_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Currently used margin',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'payin_amount',
+
+    if 'payin_amount' not in columns:
+        op.add_column('broker_configs', sa.Column('payin_amount', sa.Float(), nullable=True, comment='Instant payin amount'))
+    else:
+        op.alter_column('broker_configs', 'payin_amount',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Instant payin amount',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'span_margin',
+
+    if 'span_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('span_margin', sa.Float(), nullable=True, comment='SPAN margin for F&O'))
+    else:
+        op.alter_column('broker_configs', 'span_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='SPAN margin for F&O',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'adhoc_margin',
+
+    if 'adhoc_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('adhoc_margin', sa.Float(), nullable=True, comment='Adhoc margin'))
+    else:
+        op.alter_column('broker_configs', 'adhoc_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Adhoc margin',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'notional_cash',
+
+    if 'notional_cash' not in columns:
+        op.add_column('broker_configs', sa.Column('notional_cash', sa.Float(), nullable=True, comment='Notional cash'))
+    else:
+        op.alter_column('broker_configs', 'notional_cash',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Notional cash',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'exposure_margin',
+
+    if 'exposure_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('exposure_margin', sa.Float(), nullable=True, comment='Exposure margin for F&O'))
+    else:
+        op.alter_column('broker_configs', 'exposure_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Exposure margin for F&O',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'commodity_available_margin',
+
+    if 'commodity_available_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('commodity_available_margin', sa.Float(), nullable=True, comment='Commodity available margin'))
+    else:
+        op.alter_column('broker_configs', 'commodity_available_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Commodity available margin',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'commodity_used_margin',
+
+    if 'commodity_used_margin' not in columns:
+        op.add_column('broker_configs', sa.Column('commodity_used_margin', sa.Float(), nullable=True, comment='Commodity used margin'))
+    else:
+        op.alter_column('broker_configs', 'commodity_used_margin',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Commodity used margin',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'total_portfolio_value',
+
+    if 'total_portfolio_value' not in columns:
+        op.add_column('broker_configs', sa.Column('total_portfolio_value', sa.Float(), nullable=True, comment='Total portfolio value'))
+    else:
+        op.alter_column('broker_configs', 'total_portfolio_value',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Total portfolio value',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'margin_utilization_percent',
+
+    if 'margin_utilization_percent' not in columns:
+        op.add_column('broker_configs', sa.Column('margin_utilization_percent', sa.Float(), nullable=True, comment='Margin utilization percentage'))
+    else:
+        op.alter_column('broker_configs', 'margin_utilization_percent',
                existing_type=sa.DOUBLE_PRECISION(precision=53),
                comment='Margin utilization percentage',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'funds_last_updated',
+
+    if 'funds_last_updated' not in columns:
+        op.add_column('broker_configs', sa.Column('funds_last_updated', sa.DateTime(), nullable=True, comment='Last funds data update'))
+    else:
+        op.alter_column('broker_configs', 'funds_last_updated',
                existing_type=postgresql.TIMESTAMP(),
                comment='Last funds data update',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'user_name',
+
+    if 'user_name' not in columns:
+        op.add_column('broker_configs', sa.Column('user_name', sa.String(), nullable=True, comment='Broker account user name'))
+    else:
+        op.alter_column('broker_configs', 'user_name',
                existing_type=sa.VARCHAR(),
                comment='Broker account user name',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'email',
+
+    if 'email' not in columns:
+        op.add_column('broker_configs', sa.Column('email', sa.String(), nullable=True, comment='Broker account email'))
+    else:
+        op.alter_column('broker_configs', 'email',
                existing_type=sa.VARCHAR(),
                comment='Broker account email',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'user_type',
+
+    if 'user_type' not in columns:
+        op.add_column('broker_configs', sa.Column('user_type', sa.String(), nullable=True, comment='User type (individual, etc.)'))
+    else:
+        op.alter_column('broker_configs', 'user_type',
                existing_type=sa.VARCHAR(),
                comment='User type (individual, etc.)',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'exchanges',
+
+    if 'exchanges' not in columns:
+        op.add_column('broker_configs', sa.Column('exchanges', sa.JSON(), nullable=True, comment='Enabled exchanges'))
+    else:
+        op.alter_column('broker_configs', 'exchanges',
                existing_type=postgresql.JSON(astext_type=sa.Text()),
                comment='Enabled exchanges',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'products',
+
+    if 'products' not in columns:
+        op.add_column('broker_configs', sa.Column('products', sa.JSON(), nullable=True, comment='Enabled products'))
+    else:
+        op.alter_column('broker_configs', 'products',
                existing_type=postgresql.JSON(astext_type=sa.Text()),
                comment='Enabled products',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'order_types',
+
+    if 'order_types' not in columns:
+        op.add_column('broker_configs', sa.Column('order_types', sa.JSON(), nullable=True, comment='Enabled order types'))
+    else:
+        op.alter_column('broker_configs', 'order_types',
                existing_type=postgresql.JSON(astext_type=sa.Text()),
                comment='Enabled order types',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'poa_enabled',
+
+    if 'poa_enabled' not in columns:
+        op.add_column('broker_configs', sa.Column('poa_enabled', sa.Boolean(), nullable=True, comment='Power of Attorney enabled'))
+    else:
+        op.alter_column('broker_configs', 'poa_enabled',
                existing_type=sa.BOOLEAN(),
                comment='Power of Attorney enabled',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'ddpi_enabled',
+
+    if 'ddpi_enabled' not in columns:
+        op.add_column('broker_configs', sa.Column('ddpi_enabled', sa.Boolean(), nullable=True, comment='DDPI enabled'))
+    else:
+        op.alter_column('broker_configs', 'ddpi_enabled',
                existing_type=sa.BOOLEAN(),
                comment='DDPI enabled',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'account_status',
+
+    if 'account_status' not in columns:
+        op.add_column('broker_configs', sa.Column('account_status', sa.String(), nullable=True, comment='Account status'))
+    else:
+        op.alter_column('broker_configs', 'account_status',
                existing_type=sa.VARCHAR(),
                comment='Account status',
                existing_nullable=True)
-    op.alter_column('broker_configs', 'profile_last_updated',
+
+    if 'profile_last_updated' not in columns:
+        op.add_column('broker_configs', sa.Column('profile_last_updated', sa.DateTime(), nullable=True, comment='Last profile data update'))
+    else:
+        op.alter_column('broker_configs', 'profile_last_updated',
                existing_type=postgresql.TIMESTAMP(),
                comment='Last profile data update',
                existing_nullable=True)
