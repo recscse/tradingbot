@@ -118,7 +118,7 @@ Closes #
 ---
 
 **By submitting this PR, I confirm that:**
-- [ ] My code follows the project's coding standards (CLAUDE.md)
+- [ ] My code follows the project's coding standards (GEMINI.md)
 - [ ] I have performed a self-review of my code
 - [ ] I have commented my code where necessary
 - [ ] I have made corresponding changes to documentation

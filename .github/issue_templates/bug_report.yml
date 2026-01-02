@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## 🤖 Claude Code Agent Integration
-        This bug report will be automatically analyzed by our Claude Code Agent for faster resolution.
+        ## 🤖 Gemini Code Agent Integration
+        This bug report will be automatically analyzed by our Gemini Code Agent for faster resolution.
         Please provide as much detail as possible to help with automated analysis.
         
   - type: dropdown
@@ -157,7 +157,7 @@ body:
       value: |
         ## 🤖 What Happens Next?
         
-        1. **Automated Analysis**: Claude Code Agent will analyze this bug report
+        1. **Automated Analysis**: Gemini Code Agent will analyze this bug report
         2. **Categorization**: The bug will be automatically categorized and prioritized
         3. **Investigation Guide**: You'll receive automated debugging suggestions
         4. **Team Assignment**: The issue will be routed to the appropriate team
