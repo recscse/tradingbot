@@ -1,9 +1,44 @@
 [build]
-  base = "ui/trading-bot-ui"  # ✅ Set the frontend directory
-  publish = "build"  # ✅ Where Netlify deploys from
-  command = "CI=false DISABLE_ESLINT_PLUGIN=true ESLINT_NO_DEV_ERRORS=true npm install && npm run build"  # ✅ Disable ESLint errors in CI mode
+  base = "ui/trading-bot-ui"
+  publish = "build"
+  # Use 'npm ci' for faster, reliable builds. 
+  # CI=false prevents build failure on warnings.
+  command = "CI=false DISABLE_ESLINT_PLUGIN=true ESLINT_NO_DEV_ERRORS=true npm ci && npm run build"
 
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# 🔒 Global Security Headers (Applied to ALL paths)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # HSTS: Force HTTPS for 1 year, include subdomains
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    # Permissions: Disable sensitive features not needed
+    Permissions-Policy = "geolocation=(), camera=(), microphone=(), payment=()"
+    # CSP: Baseline protection (Adjust 'connect-src' if external APIs are added)
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:;"
+
+# ⚡ Caching for Static Assets (Images, JS, CSS) - Cache for 1 year
+[[headers]]
+  for = "/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# 🚫 No Caching for HTML (Ensure users always get the latest app version)
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# 🚫 No Caching for Service Worker
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"

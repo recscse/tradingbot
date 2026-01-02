@@ -1,0 +1,20 @@
+groups:
+- name: trading_alerts
+  rules:
+  - alert: HighErrorRate
+    expr: rate(http_requests_total{status=~"5.."}[1m]) > 1
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High HTTP error rate"
+      description: "HTTP error rate is > 1 req/s"
+
+  - alert: HighLatency
+    expr: http_request_duration_seconds_bucket{le="0.5"} < 0.9
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High API Latency"
+      description: "90% of requests are taking longer than 0.5s"
