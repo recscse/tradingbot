@@ -1,8 +1,8 @@
-# 🤖 Claude Code Agent Integration
+# 🤖 Gemini Code Agent Integration
 
-This document explains how Claude Code agents are integrated into the GitHub repository for automated assistance with various development tasks.
+This document explains how Gemini Code agents are integrated into the GitHub repository for automated assistance with various development tasks.
 
-## 🎯 Available Claude Code Features
+## 🎯 Available Gemini Code Features
 
 ### 1. **Automated Code Review Agent** 🔍
 **Trigger**: Every Pull Request
@@ -18,7 +18,7 @@ This document explains how Claude Code agents are integrated into the GitHub rep
 
 **Example Output:**
 ```markdown
-🤖 Claude Code Agent Analysis
+🤖 Gemini Code Agent Analysis
 ================================
 
 ## 📊 Code Analysis Summary
@@ -27,7 +27,7 @@ This document explains how Claude Code agents are integrated into the GitHub rep
 - Trading-related files changed: 1
 
 ## ⚠️ Trading System Changes Detected
-**Claude Code Agent Recommendations:**
+**Gemini Code Agent Recommendations:**
 1. ✅ Verify risk management logic
 2. ✅ Test with paper trading first
 3. ✅ Validate position sizing calculations
@@ -56,7 +56,7 @@ This document explains how Claude Code agents are integrated into the GitHub rep
 
 ### 4. **Manual Task Agent** ⚡
 **Trigger**: Manual workflow dispatch
-**Purpose**: On-demand Claude Code assistance
+**Purpose**: On-demand Gemini Code assistance
 
 **Available Tasks:**
 - `code_review`: Comprehensive code analysis
@@ -65,7 +65,7 @@ This document explains how Claude Code agents are integrated into the GitHub rep
 - `security_audit`: Security-focused review
 - `documentation_update`: Documentation completeness check
 
-## 🚀 How to Use Claude Code Agents
+## 🚀 How to Use Gemini Code Agents
 
 ### Automatic Triggers
 
@@ -74,12 +74,12 @@ This document explains how Claude Code agents are integrated into the GitHub rep
 2. Make your code changes
 3. Push to GitHub
 4. Create a Pull Request
-5. **Claude Code Agent automatically analyzes and comments**
+5. **Gemini Code Agent automatically analyzes and comments**
 
 #### For Bug Analysis:
 1. Create a new issue
 2. Add the `bug` label
-3. **Claude Code Agent automatically analyzes and provides investigation guidance**
+3. **Gemini Code Agent automatically analyzes and provides investigation guidance**
 
 #### For Security Monitoring:
 - **Automatically runs** on every push to main branch
@@ -92,13 +92,13 @@ This document explains how Claude Code agents are integrated into the GitHub rep
 ```bash
 # Via GitHub UI:
 1. Go to Actions tab
-2. Select "Claude Code Agent"
+2. Select "Gemini Code Agent"
 3. Click "Run workflow"
 4. Choose task type (code_review, security_audit, etc.)
 5. Click "Run workflow"
 
 # Via GitHub CLI:
-gh workflow run claude-code-agent.yml -f task_type=security_audit
+gh workflow run gemini-code-agent.yml -f task_type=security_audit
 ```
 
 ## 🛠️ Agent Capabilities by File Type
@@ -150,7 +150,7 @@ gh workflow run claude-code-agent.yml -f task_type=security_audit
 
 #### File Path Filters:
 ```yaml
-# In claude-code-agent.yml
+# In gemini-code-agent.yml
 paths:
   - '**/*.py'        # Python files
   - '**/*.js'        # JavaScript files
@@ -228,7 +228,7 @@ The agent automatically categorizes code changes:
 ## 🔮 Future Enhancements
 
 ### Planned Features
-- **Real Claude API Integration**: Direct Claude Code API calls
+- **Real Gemini API Integration**: Direct Gemini Code API calls
 - **Custom Rule Sets**: Trading platform-specific rules
 - **Performance Benchmarking**: Automated performance testing
 - **Documentation Generation**: Auto-generated code documentation
@@ -236,7 +236,7 @@ The agent automatically categorizes code changes:
 
 ### Integration Roadmap
 1. **Phase 1**: Basic automated analysis ✅
-2. **Phase 2**: Claude API integration (planned)
+2. **Phase 2**: Gemini API integration (planned)
 3. **Phase 3**: Custom trading rules (planned)
 4. **Phase 4**: Advanced ML analysis (future)
 
@@ -269,4 +269,4 @@ def calculate_position_size(risk_per_trade: float, stop_loss: float) -> int:
 
 ---
 
-*🤖 Claude Code Agent Integration - Enhancing development workflow with AI-powered assistance*
+*🤖 Gemini Code Agent Integration - Enhancing development workflow with AI-powered assistance*

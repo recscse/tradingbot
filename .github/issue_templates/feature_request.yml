@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## 🤖 Claude Code Agent Integration
-        This feature request will be analyzed by our Claude Code Agent to provide:
+        ## 🤖 Gemini Code Agent Integration
+        This feature request will be analyzed by our Gemini Code Agent to provide:
         - Implementation complexity analysis
         - Architecture recommendations
         - Technical feasibility assessment
@@ -198,7 +198,7 @@ body:
       value: |
         ## 🤖 What Happens Next?
         
-        1. **Automated Analysis**: Claude Code Agent will analyze this feature request
+        1. **Automated Analysis**: Gemini Code Agent will analyze this feature request
         2. **Feasibility Assessment**: Technical complexity and implementation approach evaluation
         3. **Architecture Planning**: High-level design recommendations and considerations
         4. **Priority Scoring**: Feature will be scored against platform roadmap priorities
