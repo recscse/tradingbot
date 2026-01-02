@@ -11,6 +11,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = "8d698efd7ec5"
@@ -448,23 +449,58 @@ def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_options_trade_executions_id")
     op.execute("DROP INDEX IF EXISTS ix_options_trade_executions_underlying_symbol")
     op.execute("DROP TABLE IF EXISTS options_trade_executions CASCADE")
-    op.alter_column(
-        "user_trading_config",
-        "option_strategy",
-        existing_type=sa.VARCHAR(length=50),
-        type_=sa.String(length=20),
-        existing_nullable=True,
-        existing_server_default=sa.text("'ATM_STRADDLE'::character varying"),
-    )
-    op.create_index(
-        "idx_user_trading_config_user_id",
-        "user_trading_config",
-        ["user_id"],
-        unique=False,
-    )
-    op.create_index(
-        op.f("ix_user_trading_config_id"), "user_trading_config", ["id"], unique=False
-    )
+    
+    # Check if user_trading_config exists, create if not
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    if not inspector.has_table("user_trading_config"):
+        op.create_table(
+            "user_trading_config",
+            sa.Column("id", sa.Integer(), nullable=False, primary_key=True),
+            sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True),
+            sa.Column("trade_mode", sa.String(20), default="PAPER"),
+            sa.Column("default_qty", sa.Integer(), default=1),
+            sa.Column("stop_loss_percent", sa.Float(), default=2.0),
+            sa.Column("target_percent", sa.Float(), default=4.0),
+            sa.Column("max_positions", sa.Integer(), default=3),
+            sa.Column("risk_per_trade_percent", sa.Float(), default=1.0),
+            sa.Column("default_strategy", sa.String(50), default="MOMENTUM"),
+            sa.Column("default_timeframe", sa.String(10), default="5M"),
+            sa.Column("option_strategy", sa.String(20), default="BUY"),
+            sa.Column("option_expiry_preference", sa.String(20), default="NEAREST"),
+            sa.Column("enable_option_trading", sa.Boolean(), default=True),
+            sa.Column("enable_auto_square_off", sa.Boolean(), default=True),
+            sa.Column("enable_bracket_orders", sa.Boolean(), default=False),
+            sa.Column("enable_trailing_stop", sa.Boolean(), default=False),
+            sa.Column("enable_trade_notifications", sa.Boolean(), default=True),
+            sa.Column("enable_profit_loss_alerts", sa.Boolean(), default=True),
+            sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
+            sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), onupdate=sa.func.now()),
+        )
+    else:
+        op.alter_column(
+            "user_trading_config",
+            "option_strategy",
+            existing_type=sa.VARCHAR(length=50),
+            type_=sa.String(length=20),
+            existing_nullable=True,
+            existing_server_default=sa.text("'ATM_STRADDLE'::character varying"),
+        )
+
+    # Indexes are created if not exists (handled by IF NOT EXISTS usually, but alembic create_index fails if exists)
+    # So we should check for indexes too or use safe creation
+    if not inspector.has_table("user_trading_config") or not any(i['name'] == 'idx_user_trading_config_user_id' for i in inspector.get_indexes('user_trading_config')):
+        op.create_index(
+            "idx_user_trading_config_user_id",
+            "user_trading_config",
+            ["user_id"],
+            unique=False,
+        )
+    
+    if not inspector.has_table("user_trading_config") or not any(i['name'] == op.f("ix_user_trading_config_id") for i in inspector.get_indexes('user_trading_config')):
+        op.create_index(
+            op.f("ix_user_trading_config_id"), "user_trading_config", ["id"], unique=False
+        )
     # ### end Alembic commands ###
 
 
