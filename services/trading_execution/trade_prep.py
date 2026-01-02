@@ -135,6 +135,7 @@ class TradePrepService:
         volume: Optional[float] = None,
         bid_price: Optional[float] = None,
         ask_price: Optional[float] = None,
+        target_lots: Optional[int] = None,
     ) -> PreparedTrade:
         """
         Prepare trade with live market data already provided (optimized for auto-trading)
@@ -178,6 +179,36 @@ class TradePrepService:
             logger.info(
                 f"Preparing trade for user {user_id}: {stock_symbol} {option_type} {strike_price} (with live data)"
             )
+
+            # Step 0: Validate/Fetch Lot Size if missing or suspicious (lot_size=1 is usually wrong for options)
+            if lot_size <= 1:
+                try:
+                    from services.upstox_option_service import upstox_option_service
+                    # Fetch contract details to get authoritative lot size
+                    # Use public get_underlying_key to get correct key for symbol/index
+                    underlying_key = upstox_option_service.get_underlying_key(stock_symbol, db)
+                    contracts = upstox_option_service.get_option_contracts(underlying_key, db)
+                    if contracts and len(contracts) > 0:
+                        fetched_lot_size = int(contracts[0].get("lot_size", 0))
+                        if fetched_lot_size > 0:
+                            lot_size = fetched_lot_size
+                            logger.info(f"Fetched corrected lot_size for {stock_symbol} ({underlying_key}): {lot_size}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch lot size from broker: {e}")
+
+            if lot_size <= 0:
+                 return self._create_error_trade(
+                    TradeStatus.INVALID_PARAMS,
+                    user_id,
+                    stock_symbol,
+                    option_instrument_key,
+                    option_type,
+                    strike_price,
+                    expiry_date,
+                    0,
+                    trading_mode,
+                    "Invalid lot size. Cannot execute trade without valid lot size.",
+                )
 
             # Step 1: Validate broker configuration
             broker_config = capital_manager.get_active_broker_config(user_id, db)
@@ -297,7 +328,7 @@ class TradePrepService:
 
             # Step 4: Calculate position size based on capital
             capital_allocation = capital_manager.calculate_position_size(
-                available_capital, current_premium, lot_size
+                available_capital, current_premium, lot_size, max_lots=target_lots
             )
 
             # Step 5: Validate sufficient capital
@@ -553,6 +584,35 @@ class TradePrepService:
             logger.info(
                 f"Preparing trade for user {user_id}: {stock_symbol} {option_type} {strike_price}"
             )
+
+            # Step 0: Validate/Fetch Lot Size if missing
+            if lot_size <= 1:
+                try:
+                    from services.upstox_option_service import upstox_option_service
+                    # Fetch contract details to get authoritative lot size
+                    underlying_key = upstox_option_service.get_underlying_key(stock_symbol, db)
+                    contracts = upstox_option_service.get_option_contracts(underlying_key, db)
+                    if contracts and len(contracts) > 0:
+                        fetched_lot_size = int(contracts[0].get("lot_size", 0))
+                        if fetched_lot_size > 0:
+                            lot_size = fetched_lot_size
+                            logger.info(f"Fetched missing/corrected lot_size for {stock_symbol} ({underlying_key}): {lot_size}")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch lot size from broker: {e}")
+
+            if lot_size <= 0:
+                return self._create_error_trade(
+                    TradeStatus.INVALID_PARAMS,
+                    user_id,
+                    stock_symbol,
+                    option_instrument_key,
+                    option_type,
+                    strike_price,
+                    expiry_date,
+                    0,
+                    trading_mode,
+                    "Invalid lot size: 0. Cannot execute trade without valid lot size.",
+                )
 
             # Step 1: Validate broker configuration
             broker_config = capital_manager.get_active_broker_config(user_id, db)
