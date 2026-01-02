@@ -7,10 +7,25 @@ import apiClient from '../services/api';
  */
 const PerformanceAnalyticsPage = () => {
   const [timeframe, setTimeframe] = useState('summary');
+  const [tradingMode, setTradingMode] = useState('paper');
   const [performanceData, setPerformanceData] = useState(null);
+  const [tradeList, setTradeList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchingData, setFetchingData] = useState(false);
   const [error, setError] = useState(null);
+
+  const fetch_trade_list = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/v1/trading/execution/trade-history', {
+        params: { limit: 50, trading_mode: tradingMode }
+      });
+      if (response.data.success) {
+        setTradeList(response.data.trades || []);
+      }
+    } catch (err) {
+      console.error('Error fetching trade list:', err);
+    }
+  }, [tradingMode]);
 
   const fetch_performance_data = useCallback(async () => {
     setFetchingData(true);
@@ -26,7 +41,10 @@ const PerformanceAnalyticsPage = () => {
         'summary': '/v1/trading/execution/performance/summary'
       };
 
-      const response = await apiClient.get(endpoint_map[timeframe]);
+      // Pass trading_mode as query param
+      const response = await apiClient.get(endpoint_map[timeframe], {
+        params: { trading_mode: tradingMode }
+      });
       console.log('Backend response:', response.data);
 
       if (response.data && response.data.metrics) {
@@ -34,6 +52,9 @@ const PerformanceAnalyticsPage = () => {
       } else {
         setPerformanceData(response.data);
       }
+      
+      // Fetch trade list as well
+      await fetch_trade_list();
 
       setLoading(false);
     } catch (err) {
@@ -44,7 +65,7 @@ const PerformanceAnalyticsPage = () => {
     } finally {
       setFetchingData(false);
     }
-  }, [timeframe]);
+  }, [timeframe, tradingMode, fetch_trade_list]);
 
   useEffect(() => {
     fetch_performance_data();
@@ -56,13 +77,16 @@ const PerformanceAnalyticsPage = () => {
     }
   }, [timeframe, fetchingData]);
 
+  const toggleTradingMode = useCallback(() => {
+    setTradingMode(prev => prev === 'paper' ? 'live' : 'paper');
+  }, []);
+
   const format_currency = useCallback((value) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
+    const formatted = new Intl.NumberFormat('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    }).format(value || 0);
+    }).format(Math.abs(value || 0));
+    return `${value < 0 ? '-' : ''}₹${formatted}`;
   }, []);
 
   const format_percentage = useCallback((value) => {
@@ -157,16 +181,31 @@ const PerformanceAnalyticsPage = () => {
               </p>
             </div>
 
-            <button
-              onClick={fetch_performance_data}
-              disabled={fetchingData}
-              className="tw-px-5 tw-py-2.5 tw-bg-slate-800 hover:tw-bg-slate-700 tw-border tw-border-slate-700 hover:tw-border-cyan-500/50 tw-text-slate-200 tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-flex tw-items-center tw-gap-2 tw-self-start disabled:tw-opacity-50 disabled:tw-cursor-not-allowed tw-shadow-lg hover:tw-shadow-cyan-500/10"
-            >
-              <svg className={`tw-w-5 tw-h-5 ${fetchingData ? 'tw-animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-              </svg>
-              <span className="tw-hidden sm:tw-inline">{fetchingData ? 'Updating' : 'Refresh'}</span>
-            </button>
+            <div className="tw-flex tw-items-center tw-gap-4">
+              {/* Trading Mode Toggle */}
+              <button
+                onClick={toggleTradingMode}
+                className={`tw-flex tw-items-center tw-gap-2 tw-px-4 tw-py-2 tw-rounded-xl tw-font-bold tw-text-sm tw-transition-all tw-duration-300 ${
+                  tradingMode === 'live'
+                    ? 'tw-bg-rose-500/20 tw-text-rose-400 tw-border tw-border-rose-500/30 hover:tw-bg-rose-500/30'
+                    : 'tw-bg-cyan-500/20 tw-text-cyan-400 tw-border tw-border-cyan-500/30 hover:tw-bg-cyan-500/30'
+                }`}
+              >
+                <div className={`tw-w-2 tw-h-2 tw-rounded-full ${tradingMode === 'live' ? 'tw-bg-rose-500 tw-animate-pulse' : 'tw-bg-cyan-500'}`}></div>
+                {tradingMode === 'live' ? 'LIVE DATA' : 'PAPER TRADING'}
+              </button>
+
+              <button
+                onClick={fetch_performance_data}
+                disabled={fetchingData}
+                className="tw-px-5 tw-py-2.5 tw-bg-slate-800 hover:tw-bg-slate-700 tw-border tw-border-slate-700 hover:tw-border-cyan-500/50 tw-text-slate-200 tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-flex tw-items-center tw-gap-2 tw-self-start disabled:tw-opacity-50 disabled:tw-cursor-not-allowed tw-shadow-lg hover:tw-shadow-cyan-500/10"
+              >
+                <svg className={`tw-w-5 tw-h-5 ${fetchingData ? 'tw-animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <span className="tw-hidden sm:tw-inline">{fetchingData ? 'Updating' : 'Refresh'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -204,10 +243,7 @@ const PerformanceAnalyticsPage = () => {
                   <div className="tw-flex tw-items-center tw-justify-between tw-mb-3">
                     <span className="tw-text-slate-400 tw-text-xs tw-font-semibold tw-uppercase tw-tracking-wider">Total P&L</span>
                     <div className="tw-w-9 tw-h-9 tw-bg-amber-500/10 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
-                      <svg className="tw-w-5 tw-h-5 tw-text-amber-400" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd"/>
-                      </svg>
+                      <span className="tw-text-amber-400 tw-font-bold tw-text-lg">₹</span>
                     </div>
                   </div>
                   <p className={`tw-text-2xl md:tw-text-3xl tw-font-bold tw-mb-1 ${get_color_class(parseFloat(performanceData.total_pnl || 0))}`}>
@@ -427,6 +463,60 @@ const PerformanceAnalyticsPage = () => {
                 </div>
               </div>
             )}
+
+            {/* Recent Trades List */}
+            <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-overflow-hidden tw-shadow-xl">
+              <div className="tw-p-6 tw-border-b tw-border-slate-800">
+                <h2 className="tw-text-xl tw-font-bold tw-text-white">Recent Trades</h2>
+              </div>
+              <div className="tw-overflow-x-auto">
+                <table className="tw-w-full tw-text-sm tw-text-left">
+                  <thead className="tw-text-xs tw-text-slate-400 tw-uppercase tw-bg-slate-800/50">
+                    <tr>
+                      <th className="tw-px-6 tw-py-4">Symbol</th>
+                      <th className="tw-px-6 tw-py-4">Signal</th>
+                      <th className="tw-px-6 tw-py-4">Entry Price</th>
+                      <th className="tw-px-6 tw-py-4">Exit Price</th>
+                      <th className="tw-px-6 tw-py-4">Quantity</th>
+                      <th className="tw-px-6 tw-py-4">PnL</th>
+                      <th className="tw-px-6 tw-py-4">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tw-divide-y tw-divide-slate-800">
+                    {tradeList.length > 0 ? (
+                      tradeList.map((trade, idx) => (
+                        <tr key={idx} className="tw-hover:bg-slate-800/30 tw-transition-colors">
+                          <td className="tw-px-6 tw-py-4 tw-font-medium tw-text-white">{trade.symbol}</td>
+                          <td className="tw-px-6 tw-py-4">
+                            <span className={`tw-px-2 tw-py-1 tw-rounded-md tw-text-xs tw-font-bold ${
+                              trade.signal_type?.includes('BUY') ? 'tw-bg-emerald-500/20 tw-text-emerald-400' : 
+                              trade.signal_type?.includes('SELL') ? 'tw-bg-rose-500/20 tw-text-rose-400' : 'tw-bg-slate-500/20 tw-text-slate-400'
+                            }`}>
+                              {trade.signal_type}
+                            </span>
+                          </td>
+                          <td className="tw-px-6 tw-py-4 tw-text-slate-300">{format_currency(trade.entry_price)}</td>
+                          <td className="tw-px-6 tw-py-4 tw-text-slate-300">{format_currency(trade.exit_price)}</td>
+                          <td className="tw-px-6 tw-py-4 tw-text-slate-300">{trade.quantity}</td>
+                          <td className={`tw-px-6 tw-py-4 tw-font-bold ${get_color_class(trade.net_pnl)}`}>
+                            {format_currency(trade.net_pnl)}
+                          </td>
+                          <td className="tw-px-6 tw-py-4 tw-text-slate-400">
+                            {trade.exit_time_str || trade.entry_time_str}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="7" className="tw-px-6 tw-py-12 tw-text-center tw-text-slate-500">
+                          No trades found for this period
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>
