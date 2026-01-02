@@ -15,10 +15,8 @@ venv/
 htmlcov/
 .pytest_cache/
 tests/
-ui/
 docs/
 docker-compose*.yml
-Dockerfile
 README.md
 LICENSE
 .coverage
