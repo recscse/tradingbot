@@ -453,7 +453,7 @@ class AutoTradingCoordinator:
             # 1. Resolve Option Contract first
             db = SessionLocal()
             option_details = await self._resolve_option_contract(
-                symbol, signal.option_type, current_price, signal.fibonacci_level, db
+                signal.instrument_key, symbol, signal.option_type, current_price, signal.fibonacci_level, db
             )
             
             if not option_details:
@@ -797,16 +797,15 @@ class AutoTradingCoordinator:
             logger.error(f"Error calculating position size: {e}")
             return 50, 50  # Default fallback
     
-    async def _resolve_option_contract(self, symbol: str, option_type: str, 
+    async def _resolve_option_contract(self, underlying_key: str, symbol: str, option_type: str, 
                                      current_price: float, fibonacci_level: str, db: Session) -> Optional[Dict]:
         """
         Resolve option contract details using UpstoxOptionService
         """
         try:
-            # 1. Get underlying instrument key
-            underlying_key = upstox_option_service._get_underlying_key(symbol, db)
+            # 1. Validate underlying key
             if not underlying_key:
-                logger.error(f"Could not resolve underlying key for {symbol}")
+                logger.error(f"Invalid underlying key for {symbol}")
                 return None
 
             # 2. Determine expiry date (e.g., next Thursday)
