@@ -185,9 +185,10 @@ class TradePrepService:
             if lot_size <= 1:
                 try:
                     from services.upstox_option_service import upstox_option_service
+                    from services.optimized_instrument_service import get_primary_instrument_key
                     # Fetch contract details to get authoritative lot size
-                    # Use public get_underlying_key to get correct key for symbol/index
-                    underlying_key = upstox_option_service.get_underlying_key(stock_symbol, db)
+                    # Use optimized service to get correct key for symbol/index
+                    underlying_key = get_primary_instrument_key(stock_symbol)
                     contracts = upstox_option_service.get_option_contracts(underlying_key, db)
                     if contracts and len(contracts) > 0:
                         fetched_lot_size = int(contracts[0].get("lot_size", 0))
@@ -590,8 +591,9 @@ class TradePrepService:
             if lot_size <= 1:
                 try:
                     from services.upstox_option_service import upstox_option_service
+                    from services.optimized_instrument_service import get_primary_instrument_key
                     # Fetch contract details to get authoritative lot size
-                    underlying_key = upstox_option_service.get_underlying_key(stock_symbol, db)
+                    underlying_key = get_primary_instrument_key(stock_symbol)
                     contracts = upstox_option_service.get_option_contracts(underlying_key, db)
                     if contracts and len(contracts) > 0:
                         fetched_lot_size = int(contracts[0].get("lot_size", 0))
