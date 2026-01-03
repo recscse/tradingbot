@@ -118,43 +118,33 @@ async def get_futures_contracts(
     db: Session = Depends(get_db),
 ):
     """
-    Get futures contracts by instrument key or symbol
-    Supports both: /futures/key/RELIANCE and /futures/key/NSE_EQ|RELIANCE
+    Get futures contracts by instrument key
     """
     try:
-        # Handle both formats: symbol (RELIANCE) or instrument_key (NSE_EQ|RELIANCE)
-        if "|" in instrument_key:
-            parts = instrument_key.split("|", 1)
-            symbol = parts[1] if len(parts) > 1 else parts[0]
-        else:
-            symbol = instrument_key
-
-        symbol = symbol.upper()
-
         # Handle ISIN codes - return empty list
         import re
 
-        if re.match(r"^INE[A-Z0-9]{9}$", symbol):
-            return {
+        if re.search(r"INE[A-Z0-9]{9}", instrument_key):
+             return {
                 "status": "success",
                 "input": instrument_key,
-                "symbol": symbol,
+                "symbol": instrument_key,
                 "futures": [],
                 "count": 0,
                 "message": "ISIN codes not supported for futures",
                 "retrieved_at": datetime.now().isoformat(),
             }
 
-        futures = upstox_option_service.get_futures_contracts(symbol, db)
+        futures = upstox_option_service.get_futures_contracts(instrument_key, db)
 
         if futures is None or len(futures) == 0:
             return {
                 "status": "success",
                 "input": instrument_key,
-                "symbol": symbol,
+                "symbol": instrument_key,  # Just return input as symbol
                 "futures": [],
                 "count": 0,
-                "message": f"No futures contracts found for {symbol}",
+                "message": f"No futures contracts found for {instrument_key}",
                 "retrieved_at": datetime.now().isoformat(),
             }
 
@@ -162,7 +152,7 @@ async def get_futures_contracts(
         return {
             "status": "success",
             "input": instrument_key,
-            "symbol": symbol,
+            "symbol": instrument_key,
             "futures": futures,
             "count": len(futures),
             "retrieved_at": datetime.now().isoformat(),
@@ -174,50 +164,4 @@ async def get_futures_contracts(
         logger.error(f"Error getting futures contracts for {instrument_key}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error retrieving futures contracts: {str(e)}"
-        )
-
-
-@option_router.get("/symbol/{symbol}/instrument-key")
-async def get_instrument_key_for_symbol(
-    symbol: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Get the primary instrument_key for a symbol using the service's mapping.
-    Example: NIFTY -> NSE_INDEX|Nifty 50, RELIANCE -> NSE_EQ|RELIANCE
-    """
-    try:
-        symbol_upper = symbol.upper()
-
-        # Use service logic to resolve instrument key
-        primary_instrument_key = upstox_option_service._get_underlying_key(
-            symbol_upper, db
-        )
-
-        # Quick stats: try contracts count (optional)
-        try:
-            contracts = upstox_option_service.get_option_contracts(
-                primary_instrument_key, db
-            )
-            contract_count = len(contracts) if contracts else 0
-        except Exception:
-            contract_count = 0
-
-        return {
-            "status": "success",
-            "symbol": symbol_upper,
-            "instrument_key": primary_instrument_key,
-            "fno_data": {
-                "option_contracts_count": contract_count,
-                "message": "Direct API integration - no redundant fetching!",
-            },
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting instrument key for {symbol}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error resolving instrument key: {str(e)}"
         )
