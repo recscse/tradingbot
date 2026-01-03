@@ -26,6 +26,19 @@ import {
   ExpandLess as ExpandLessIcon,
   Refresh as RefreshIcon,
   Search as SearchIcon,
+  DashboardRounded,
+  CategoryRounded,
+  TrendingUpRounded,
+  ShowChartRounded,
+  BoltRounded,
+  AccountBalanceRounded,
+  CurrencyRupeeRounded,
+  ReceiptLongRounded,
+  AnalyticsRounded,
+  TrendingDownRounded,
+  BarChartRounded,
+  VerifiedRounded,
+  VerticalAlignBottomRounded,
 } from "@mui/icons-material";
 import StocksList from "../components/common/StocksList";
 import StocksListOptimized from "../components/common/StocksListOptimized";
@@ -81,16 +94,52 @@ const DASHBOARD_COLORS = {
 };
 // Section navigation - moved outside component
 const SECTIONS = [
-  { id: "overview", label: "OVERVIEW", icon: "📊" },
-  { id: "search", label: "SEARCH", icon: "🔍" },
-  { id: "sectors", label: "SECTORS", icon: "🏢" },
-  { id: "movers", label: "TOP MOVERS", icon: "🚀" },
-  { id: "gaps", label: "GAP ANALYSIS", icon: "📈" },
-  { id: "breakouts", label: "BREAKOUTS", icon: "⚡" },
-  { id: "indices", label: "INDICES", icon: "🏛️" },
-  { id: "mcx", label: "MCX & F&O", icon: "💰" },
-  { id: "fno", label: "FNO STOCKS", icon: "📋" },
-  { id: "analytics", label: "ANALYTICS", icon: "🔍" },
+  {
+    id: "overview",
+    label: "OVERVIEW",
+    icon: <DashboardRounded fontSize="small" />,
+  },
+  { id: "search", label: "SEARCH", icon: <SearchIcon fontSize="small" /> },
+  {
+    id: "sectors",
+    label: "SECTORS",
+    icon: <CategoryRounded fontSize="small" />,
+  },
+  {
+    id: "movers",
+    label: "TOP MOVERS",
+    icon: <TrendingUpRounded fontSize="small" />,
+  },
+  {
+    id: "gaps",
+    label: "GAP ANALYSIS",
+    icon: <ShowChartRounded fontSize="small" />,
+  },
+  {
+    id: "breakouts",
+    label: "BREAKOUTS",
+    icon: <BoltRounded fontSize="small" />,
+  },
+  {
+    id: "indices",
+    label: "INDICES",
+    icon: <AccountBalanceRounded fontSize="small" />,
+  },
+  {
+    id: "mcx",
+    label: "MCX & F&O",
+    icon: <CurrencyRupeeRounded fontSize="small" />,
+  },
+  {
+    id: "fno",
+    label: "FNO STOCKS",
+    icon: <ReceiptLongRounded fontSize="small" />,
+  },
+  {
+    id: "analytics",
+    label: "ANALYTICS",
+    icon: <AnalyticsRounded fontSize="small" />,
+  },
 ];
 // FIXED: Helper function to safely extract numeric values
 const safeNumber = (value, defaultValue = 0) => {
@@ -106,7 +155,6 @@ const SectionNavigation = ({
   colors,
   isMobile,
 }) => {
-  const theme = useTheme();
   const [isScrolled, setIsScrolled] = React.useState(false);
   const scrollContainerRef = React.useRef(null);
 
@@ -195,14 +243,10 @@ const SectionNavigation = ({
                     boxShadow: isActive
                       ? `0 4px 12px ${colors.primary}40`
                       : "none",
-                    border: isActive
-                      ? "none"
-                      : `1px solid ${colors.border}`,
+                    border: isActive ? "none" : `1px solid ${colors.border}`,
                     transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                     "&:hover": {
-                      bgcolor: isActive
-                        ? colors.primary
-                        : colors.surfaceHover,
+                      bgcolor: isActive ? colors.primary : colors.surfaceHover,
                       color: isActive ? "white" : colors.text,
                       transform: "translateY(-1px)",
                     },
@@ -228,7 +272,6 @@ const DashboardPage = () => {
   const colors = DASHBOARD_COLORS[theme.palette.mode] || DASHBOARD_COLORS.light;
   const {
     isConnected,
-    connectionStatus,
     marketData,
     marketStatus,
     totalStocks,
@@ -241,14 +284,11 @@ const DashboardPage = () => {
     volumeAnalysis,
     intradayStocks,
     recordMovers,
-    isStale,
     reconnect,
     getStocksBySector,
     searchStocks,
     getMarketSummary,
     indicesData,
-    totalIndices,
-    majorIndicesCount,
     getIndicesByPerformance,
     getMarketSentimentFromIndices,
     getIndicesSummary,
@@ -334,7 +374,13 @@ const DashboardPage = () => {
           gap_down: data.data.gap_down || [],
           summary: data.data.summary || null,
         });
-        console.log("Gap analysis loaded:", data.data.gap_up?.length || 0, "gap up,", data.data.gap_down?.length || 0, "gap down");
+        console.log(
+          "Gap analysis loaded:",
+          data.data.gap_up?.length || 0,
+          "gap up,",
+          data.data.gap_down?.length || 0,
+          "gap down"
+        );
       }
     } catch (error) {
       console.error("Failed to fetch gap analysis:", error);
@@ -366,10 +412,19 @@ const DashboardPage = () => {
   }, [fnoLoading]);
   // Load Gap Analysis when gaps section is accessed
   useEffect(() => {
-    if (activeSection === "gaps" && gapAnalysisData.gap_up.length === 0 && gapAnalysisData.gap_down.length === 0) {
+    if (
+      activeSection === "gaps" &&
+      gapAnalysisData.gap_up.length === 0 &&
+      gapAnalysisData.gap_down.length === 0
+    ) {
       fetchGapAnalysis();
     }
-  }, [activeSection, fetchGapAnalysis, gapAnalysisData.gap_up.length, gapAnalysisData.gap_down.length]);
+  }, [
+    activeSection,
+    fetchGapAnalysis,
+    gapAnalysisData.gap_up.length,
+    gapAnalysisData.gap_down.length,
+  ]);
 
   // Load FNO stocks when component mounts or when FNO section is accessed
   useEffect(() => {
@@ -818,12 +873,14 @@ const DashboardPage = () => {
     };
 
     // Use API-loaded gap analysis data if available, fallback to WebSocket data
-    const gapUp = gapAnalysisData.gap_up.length > 0
-      ? gapAnalysisData.gap_up.slice(0, 25)
-      : extractGapData(gapAnalysis, "gap_up", 25);
-    const gapDown = gapAnalysisData.gap_down.length > 0
-      ? gapAnalysisData.gap_down.slice(0, 25)
-      : extractGapData(gapAnalysis, "gap_down", 25);
+    const gapUp =
+      gapAnalysisData.gap_up.length > 0
+        ? gapAnalysisData.gap_up.slice(0, 25)
+        : extractGapData(gapAnalysis, "gap_up", 25);
+    const gapDown =
+      gapAnalysisData.gap_down.length > 0
+        ? gapAnalysisData.gap_down.slice(0, 25)
+        : extractGapData(gapAnalysis, "gap_down", 25);
     const intradayBoosters = extractAnalyticsData(
       intradayStocks,
       "all_candidates",
@@ -1238,7 +1295,13 @@ const DashboardPage = () => {
           </Box>
 
           {/* Right Side: Status & Actions */}
-          <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1, sm: 2 } }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: { xs: 1, sm: 2 },
+            }}
+          >
             {/* Market Status Pill */}
             <Box
               sx={{
@@ -1288,7 +1351,9 @@ const DashboardPage = () => {
                   color: isConnected ? colors.positive : colors.negative,
                   fontWeight: 600,
                   fontSize: "0.75rem",
-                  bgcolor: isConnected ? colors.positive + "10" : colors.negative + "10",
+                  bgcolor: isConnected
+                    ? colors.positive + "10"
+                    : colors.negative + "10",
                   px: 1,
                   py: 0.25,
                   borderRadius: "6px",
@@ -1689,7 +1754,7 @@ const DashboardPage = () => {
         }}
       >
         <MemoizedStocksListWithLivePrices
-          title={`🏛️ INDICES (${indices.length})`}
+          title={`INDICES (${indices.length})`} titleIcon={<AccountBalanceRounded />}
           data={indices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={true} // Always show volume
@@ -1719,7 +1784,7 @@ const DashboardPage = () => {
           }}
         >
           <MemoizedStocksListOptimized
-            title={`🚀 GAINERS (${getTopMoversData().gainers.length})`}
+            title={`GAINERS (${getTopMoversData().gainers.length})`} titleIcon={<TrendingUpRounded />}
             symbols={getTopMoversData().gainers}
             showVolume={true} // Always show volume
             showSector={true} // Always show sector
@@ -1742,7 +1807,7 @@ const DashboardPage = () => {
           }}
         >
           <MemoizedStocksListOptimized
-            title={`📉 LOSERS (${getTopMoversData().losers.length})`}
+            title={`LOSERS (${getTopMoversData().losers.length})`} titleIcon={<TrendingDownRounded />}
             symbols={getTopMoversData().losers}
             showVolume={true} // Always show volume
             showSector={true} // Always show sector
@@ -1769,7 +1834,7 @@ const DashboardPage = () => {
           }}
         >
           <MemoizedStocksList
-            title={`⚡ BOOSTERS (${intradayBoosters.length})`}
+            title={`BOOSTERS (${intradayBoosters.length})`} titleIcon={<BoltRounded />}
             data={intradayBoosters}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
@@ -1796,7 +1861,7 @@ const DashboardPage = () => {
           }}
         >
           <MemoizedStocksList
-            title={`📊 VOLUME (${volumeLeaders.length})`}
+            title={`VOLUME (${volumeLeaders.length})`} titleIcon={<BarChartRounded />}
             data={volumeLeaders}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
@@ -1861,7 +1926,7 @@ const DashboardPage = () => {
           }}
         >
           <MemoizedStocksList
-            title={`📊 RESULTS (${searchResults.length})`}
+            title={`RESULTS (${searchResults.length})`} titleIcon={<SearchIcon />}
             data={searchResults}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
@@ -2049,7 +2114,7 @@ const DashboardPage = () => {
         }}
       >
         <MemoizedStocksListWithLivePrices
-          title={`🏛️ MAJOR INDICES (${enhancedMajorIndices.length})`}
+          title={`MAJOR INDICES (${enhancedMajorIndices.length})`} titleIcon={<AccountBalanceRounded />}
           data={enhancedMajorIndices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={false} // Hide volume for indices
@@ -2073,7 +2138,7 @@ const DashboardPage = () => {
         }}
       >
         <MemoizedStocksListWithLivePrices
-          title={`🏢 SECTOR INDICES (${sectorIndices.length})`}
+          title={`SECTOR INDICES (${sectorIndices.length})`} titleIcon={<CategoryRounded />}
           data={sectorIndices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={false} // Hide volume for indices
@@ -2102,7 +2167,7 @@ const DashboardPage = () => {
             }}
           >
             <MemoizedStocksListWithLivePrices
-              title={`📈 TOP GAINING INDICES (${indicesPerformance.gainers.length})`}
+              title={`TOP GAINING INDICES (${indicesPerformance.gainers.length})`} titleIcon={<TrendingUpRounded />}
               data={indicesPerformance.gainers.slice(0, isMobile ? 5 : 10)}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={false} // Hide volume for indices
@@ -2130,7 +2195,7 @@ const DashboardPage = () => {
             }}
           >
             <MemoizedStocksListWithLivePrices
-              title={`📉 TOP LOSING INDICES (${indicesPerformance.losers.length})`}
+              title={`TOP LOSING INDICES (${indicesPerformance.losers.length})`} titleIcon={<TrendingDownRounded />}
               data={indicesPerformance.losers.slice(0, isMobile ? 5 : 10)}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={false} // Hide volume for indices
@@ -2156,7 +2221,7 @@ const DashboardPage = () => {
         }}
       >
         <MemoizedStocksListWithLivePrices
-          title={`🏛️ ALL INDICES (${indices.length})`}
+          title={`ALL INDICES (${indices.length})`} titleIcon={<AccountBalanceRounded />}
           data={indices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={true} // Always show volume
@@ -2310,7 +2375,7 @@ const DashboardPage = () => {
         }}
       >
         <MemoizedStocksList
-          title={`📊 VOLUME LEADERS (${volumeLeaders.length})`}
+          title={`VOLUME LEADERS (${volumeLeaders.length})`} titleIcon={<BarChartRounded />}
           data={volumeLeaders}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={true} // Always show volume
@@ -2345,7 +2410,7 @@ const DashboardPage = () => {
           </Box>
         ) : gapUp.length > 0 ? (
           <MemoizedStocksList
-            title={`📈 GAP UP (${gapUp.length})`}
+            title={`GAP UP (${gapUp.length})`} titleIcon={<TrendingUpRounded />}
             data={gapUp}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
@@ -2391,7 +2456,7 @@ const DashboardPage = () => {
           </Box>
         ) : gapDown.length > 0 ? (
           <MemoizedStocksList
-            title={`📉 GAP DOWN (${gapDown.length})`}
+            title={`GAP DOWN (${gapDown.length})`} titleIcon={<TrendingDownRounded />}
             data={gapDown}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
@@ -3020,7 +3085,7 @@ const DashboardPage = () => {
           {fnoIndices.length > 0 && (
             <Box sx={{ mb: 2 }}>
               <MemoizedStocksListWithLivePrices
-                title={`🏛️ F&O INDICES (${fnoIndices.length})`}
+                title={`F&O INDICES (${fnoIndices.length})`} titleIcon={<AccountBalanceRounded />}
                 data={fnoIndicesWithLiveData}
                 layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
                 showVolume={false} // Hide volume for indices
@@ -3040,7 +3105,7 @@ const DashboardPage = () => {
           {/* Stocks Section */}
           {fnoStocks.length > 0 && (
             <MemoizedStocksList
-              title={`📈 F&O STOCKS (${fnoStocks.length})`}
+              title={`F&O STOCKS (${fnoStocks.length})`} titleIcon={<ReceiptLongRounded />}
               data={fnoStocksWithLiveData}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={true} // Always show volume
@@ -3210,7 +3275,7 @@ const DashboardPage = () => {
         >
           {newHighs.length > 0 ? (
             <MemoizedStocksList
-              title={`🎯 NEW HIGHS (${newHighs.length})`}
+              title={`NEW HIGHS (${newHighs.length})`} titleIcon={<VerifiedRounded />}
               data={newHighs}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={true} // Always show volume
@@ -3249,7 +3314,7 @@ const DashboardPage = () => {
         >
           {newLows.length > 0 ? (
             <MemoizedStocksList
-              title={`⬇️ NEW LOWS (${newLows.length})`}
+              title={`NEW LOWS (${newLows.length})`} titleIcon={<VerticalAlignBottomRounded />}
               data={newLows}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={true} // Always show volume

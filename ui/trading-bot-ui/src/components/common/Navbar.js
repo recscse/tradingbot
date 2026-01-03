@@ -24,26 +24,28 @@ import {
   Paper,
   Fade,
   Slide,
+  BottomNavigation,
+  BottomNavigationAction,
 } from "@mui/material";
 import {
-  Menu as MenuIcon,
-  Dashboard,
-  Settings,
-  Logout,
-  Person,
-  Notifications,
-  Description,
-  History,
-  Refresh,
-  Close,
-  ShowChart,
-  Assessment,
-  Delete,
-  MarkEmailRead,
-  AccountBalance,
-  Speed,
-  AutoFixHigh,
-  BarChart,
+  DashboardRounded,
+  ShowChartRounded,
+  HistoryRounded,
+  DescriptionRounded,
+  SmartToyRounded,
+  SettingsRounded,
+  LogoutRounded,
+  PersonRounded,
+  NotificationsRounded,
+  RefreshRounded,
+  CloseRounded,
+  MarkEmailReadRounded,
+  DeleteRounded,
+  CandlestickChartRounded,
+  MoreHorizRounded,
+  SpeedRounded,
+  AutoGraphRounded,
+  AssessmentRounded,
 } from "@mui/icons-material";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "react-hot-toast";
@@ -79,7 +81,6 @@ const Navbar = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(null);
   const [notificationMenuOpen, setNotificationMenuOpen] = useState(null);
   const [marketStatus, setMarketStatus] = useState("loading");
-  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -101,57 +102,57 @@ const Navbar = () => {
     {
       name: "Dashboard",
       path: "/dashboard",
-      icon: <Dashboard />,
-      color: "#1976d2",
+      icon: <DashboardRounded />,
+      color: "#3b82f6", // Blue
       shortName: "Home",
     },
     {
       name: "Trade Control",
       path: "/trade-control",
-      icon: <ShowChart />,
-      color: "#2e7d32",
+      icon: <ShowChartRounded />,
+      color: "#10b981", // Emerald
       shortName: "Trade",
     },
     {
       name: "Analytics",
       path: "/analysis",
-      icon: <Assessment />,
-      color: "#ed6c02",
+      icon: <AutoGraphRounded />,
+      color: "#f59e0b", // Amber
       shortName: "Charts",
     },
     {
       name: "Performance",
       path: "/performance-analytics",
-      icon: <BarChart />,
-      color: "#0288d1",
+      icon: <AssessmentRounded />,
+      color: "#8b5cf6", // Violet
       shortName: "Metrics",
     },
     {
       name: "Backtesting",
       path: "/backtesting",
-      icon: <History />,
-      color: "#9c27b0",
+      icon: <HistoryRounded />,
+      color: "#ec4899", // Pink
       shortName: "History",
     },
     {
       name: "Paper Trading",
       path: "/papertrading",
-      icon: <Description />,
-      color: "#d32f2f",
+      icon: <DescriptionRounded />,
+      color: "#ef4444", // Red
       shortName: "Paper",
     },
     {
       name: "Auto Trading",
       path: "/auto-trading",
-      icon: <AutoFixHigh />,
-      color: "#00796b",
+      icon: <SmartToyRounded />,
+      color: "#06b6d4", // Cyan
       shortName: "Auto",
     },
     {
       name: "Settings",
       path: "/config",
-      icon: <Settings />,
-      color: "#616161",
+      icon: <SettingsRounded />,
+      color: "#64748b", // Slate
       shortName: "Config",
     },
   ];
@@ -183,11 +184,6 @@ const Navbar = () => {
     checkMarketStatus();
     const interval = setInterval(checkMarketStatus, 60000);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
   }, []);
 
   const isActive = (path) => location.pathname === path;
@@ -341,6 +337,10 @@ const Navbar = () => {
     return null;
   }
 
+  // Mobile Bottom Navigation Items
+  const mobileNavItems = navItems.slice(0, 4); // First 4 items directly accessible
+  const isMoreActive = navItems.slice(4).some(item => isActive(item.path));
+
   return (
     <>
       <AppBar
@@ -349,8 +349,8 @@ const Navbar = () => {
         sx={{
           bgcolor:
             theme.palette.mode === "dark"
-              ? "rgba(15, 15, 15, 0.97)"
-              : "rgba(255, 255, 255, 0.97)",
+              ? "rgba(15, 23, 42, 0.85)" // Slate 900 with transparency
+              : "rgba(255, 255, 255, 0.85)",
           backdropFilter: "blur(24px)",
           borderBottom: `1px solid ${theme.palette.divider}`,
           zIndex: theme.zIndex.appBar,
@@ -371,12 +371,13 @@ const Navbar = () => {
             maxWidth: "none",
           }}
         >
+          {/* Logo Section */}
           <Box
             onClick={() => navigate("/dashboard")}
             sx={{
               display: "flex",
               alignItems: "center",
-              gap: { xs: 0.5, sm: 1, md: 1.5 },
+              gap: { xs: 1, sm: 1.5 },
               cursor: "pointer",
               userSelect: "none",
               flex: "0 0 auto",
@@ -389,28 +390,21 @@ const Navbar = () => {
           >
             <Box
               sx={{
-                width: { xs: 28, sm: 36, md: 44 },
-                height: { xs: 28, sm: 36, md: 44 },
-                borderRadius: "50%",
-                background: `conic-gradient(from 180deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`,
+                width: { xs: 32, sm: 38, md: 44 },
+                height: { xs: 32, sm: 38, md: 44 },
+                borderRadius: "12px", // Squircle
+                background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                boxShadow: `0 4px 16px ${theme.palette.primary.main}30`,
+                boxShadow: `0 8px 16px -4px ${theme.palette.primary.main}50`,
                 position: "relative",
-                "&::before": {
-                  content: '""',
-                  position: "absolute",
-                  inset: 2,
-                  borderRadius: "50%",
-                  background: theme.palette.background.paper,
-                },
               }}
             >
-              <AccountBalance
+              <CandlestickChartRounded
                 sx={{
-                  color: theme.palette.primary.main,
-                  fontSize: { xs: 14, sm: 18, md: 22 },
+                  color: "white",
+                  fontSize: { xs: 18, sm: 22, md: 26 },
                   zIndex: 1,
                 }}
               />
@@ -421,22 +415,19 @@ const Navbar = () => {
                 <Typography
                   variant="h6"
                   sx={{
-                    fontWeight: 900,
+                    fontWeight: 800,
                     fontSize: {
-                      xs: "0.85rem",
-                      sm: "1.1rem",
-                      md: "1.3rem",
-                      lg: "1.4rem",
+                      xs: "1rem",
+                      sm: "1.2rem",
+                      md: "1.4rem",
                     },
-                    background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                    background: `linear-gradient(135deg, ${theme.palette.text.primary}, ${theme.palette.text.secondary})`,
                     backgroundClip: "text",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
-                    letterSpacing: "-0.02em",
-                    lineHeight: 1.1,
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1,
                     whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
                   }}
                 >
                   GrowthQuantix
@@ -446,23 +437,23 @@ const Navbar = () => {
                     variant="caption"
                     sx={{
                       color: "text.secondary",
-                      fontSize: { sm: "0.6rem", md: "0.65rem" },
+                      fontSize: { sm: "0.65rem", md: "0.7rem" },
                       fontWeight: 600,
-                      letterSpacing: "0.08em",
+                      letterSpacing: "0.05em",
                       textTransform: "uppercase",
                       display: "block",
-                      lineHeight: 1,
-                      mt: -0.2,
-                      whiteSpace: "nowrap",
+                      mt: 0.25,
+                      opacity: 0.8,
                     }}
                   >
-                    Automated Intelligent Trading System
+                    AI Trading System
                   </Typography>
                 )}
               </Box>
             )}
           </Box>
 
+          {/* Desktop Navigation */}
           {!isMd && (
             <Box
               sx={{
@@ -488,56 +479,32 @@ const Navbar = () => {
                       display: "flex",
                       alignItems: "center",
                       gap: showFullText ? 1 : 0,
-                      px: showFullText ? 2.5 : 1.5,
-                      py: 1.25,
-                      borderRadius: 25,
+                      px: showFullText ? 2 : 1.5,
+                      py: 1,
+                      borderRadius: "12px",
                       cursor: "pointer",
                       userSelect: "none",
-                      transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                      transition: "all 0.2s ease-out",
                       position: "relative",
                       overflow: "hidden",
                       minWidth: showFullText ? "auto" : 40,
                       justifyContent: "center",
 
                       bgcolor: isActive(item.path)
-                        ? `${item.color}20`
+                        ? `${item.color}15`
                         : "transparent",
-                      color: isActive(item.path) ? item.color : "text.primary",
+                      color: isActive(item.path) ? item.color : "text.secondary",
                       border: isActive(item.path)
-                        ? `1px solid ${item.color}40`
+                        ? `1px solid ${item.color}30`
                         : "1px solid transparent",
 
                       "&:hover": {
                         bgcolor: isActive(item.path)
-                          ? `${item.color}30`
-                          : theme.palette.mode === "dark"
-                          ? "rgba(255, 255, 255, 0.05)"
-                          : "rgba(0, 0, 0, 0.04)",
-                        transform: "translateY(-2px)",
-                        boxShadow: isActive(item.path)
-                          ? `0 8px 25px ${item.color}30`
-                          : `0 4px 20px ${theme.palette.action.hover}`,
+                          ? `${item.color}25`
+                          : theme.palette.action.hover,
+                        color: isActive(item.path) ? item.color : "text.primary",
+                        transform: "translateY(-1px)",
                       },
-
-                      "&:active": {
-                        transform: "translateY(0px)",
-                      },
-
-                      ...(isActive(item.path) && {
-                        "&::before": {
-                          content: '""',
-                          position: "absolute",
-                          inset: 0,
-                          borderRadius: 25,
-                          padding: "1px",
-                          background: `linear-gradient(135deg, ${item.color}60, ${item.color}20)`,
-                          mask: "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-                          maskComposite: "xor",
-                          WebkitMask:
-                            "linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)",
-                          WebkitMaskComposite: "xor",
-                        },
-                      }),
                     }}
                   >
                     <Box
@@ -549,7 +516,7 @@ const Navbar = () => {
                           ? item.color
                           : "text.secondary",
                         "& svg": {
-                          fontSize: { lg: 18, xl: 20 },
+                          fontSize: { lg: 20, xl: 22 },
                           transition: "all 0.2s ease",
                         },
                       }}
@@ -562,11 +529,9 @@ const Navbar = () => {
                         variant="body2"
                         sx={{
                           fontWeight: isActive(item.path) ? 700 : 600,
-                          fontSize: { lg: "0.8rem", xl: "0.85rem" },
+                          fontSize: { lg: "0.85rem", xl: "0.9rem" },
                           color: "inherit",
                           whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
                         }}
                       >
                         {isLg ? item.shortName : item.name}
@@ -616,12 +581,6 @@ const Navbar = () => {
                           backdropFilter: "blur(10px)",
                           border: `1px solid ${theme.palette.divider}`,
                         },
-                        "& .MuiTooltip-arrow": {
-                          color:
-                            theme.palette.mode === "dark"
-                              ? "rgba(255, 255, 255, 0.95)"
-                              : "rgba(0, 0, 0, 0.9)",
-                        },
                       },
                     }}
                   >
@@ -634,81 +593,75 @@ const Navbar = () => {
             </Box>
           )}
 
+          {/* Right Actions */}
           <Stack
             direction="row"
-            spacing={{ xs: 0.25, sm: 0.5, md: 1 }}
+            spacing={{ xs: 0.5, sm: 1 }}
             alignItems="center"
-            sx={{
-              flex: "0 0 auto",
-              minWidth: 0,
-            }}
+            sx={{ flex: "0 0 auto" }}
           >
+            {/* Status Chip */}
             <Chip
               icon={
                 <Box sx={{ display: "flex", alignItems: "center" }}>
-                  <span style={{ fontSize: "6px" }}>{statusInfo.icon}</span>
+                  <span style={{ fontSize: "8px" }}>{statusInfo.icon}</span>
                 </Box>
               }
               label={statusInfo.label}
               size="small"
               sx={{
-                height: { xs: 22, sm: 26, md: 28 },
+                height: { xs: 24, sm: 28 },
                 color: "white",
-                fontWeight: 600,
-                fontSize: { xs: "0.6rem", sm: "0.65rem", md: "0.7rem" },
+                fontWeight: 700,
+                fontSize: { xs: "0.65rem", sm: "0.7rem" },
                 bgcolor: `${statusInfo.color}.main`,
                 border: "none",
                 "& .MuiChip-icon": {
                   color: "white",
-                  mr: { xs: 0.25, sm: 0.5 },
+                  mr: 0.5,
                 },
                 "& .MuiChip-label": {
-                  px: { xs: 0.5, sm: 0.75, md: 1 },
+                  px: 1,
                 },
               }}
             />
 
-            <Stack direction="row" spacing={{ xs: 0.25, sm: 0.5 }}>
+            <Stack direction="row" spacing={0.5}>
               {!isVerySmall && (
-                <Tooltip title="Refresh Data" arrow>
-                  <span>
-                    <IconButton
-                      size="small"
-                      onClick={handleRefresh}
-                      disabled={notificationLoading}
+                <Tooltip title="Refresh Data">
+                  <IconButton
+                    size="small"
+                    onClick={handleRefresh}
+                    disabled={notificationLoading}
+                    sx={{
+                      width: { xs: 32, sm: 36, md: 40 },
+                      height: { xs: 32, sm: 36, md: 40 },
+                      bgcolor: "action.hover",
+                      borderRadius: "10px",
+                      "&:hover": {
+                        bgcolor: "action.selected",
+                        color: "primary.main",
+                      },
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    <RefreshRounded
                       sx={{
-                        width: { xs: 32, sm: 36, md: 40 },
-                        height: { xs: 32, sm: 36, md: 40 },
-                        bgcolor: "action.hover",
-                        "&:hover": {
-                          bgcolor: "action.selected",
-                          transform: "scale(1.05)",
+                        fontSize: { xs: 18, sm: 20, md: 22 },
+                        animation: notificationLoading
+                          ? "spin 1s linear infinite"
+                          : "none",
+                        "@keyframes spin": {
+                          "0%": { transform: "rotate(0deg)" },
+                          "100%": { transform: "rotate(360deg)" },
                         },
-                        "&:disabled": {
-                          bgcolor: "action.hover",
-                          opacity: 0.6,
-                        },
-                        transition: "all 0.2s ease",
                       }}
-                    >
-                      <Refresh
-                        sx={{
-                          fontSize: { xs: 16, sm: 18, md: 20 },
-                          animation: notificationLoading
-                            ? "spin 1s linear infinite"
-                            : "none",
-                          "@keyframes spin": {
-                            "0%": { transform: "rotate(0deg)" },
-                            "100%": { transform: "rotate(360deg)" },
-                          },
-                        }}
-                      />
-                    </IconButton>
-                  </span>
+                    />
+                  </IconButton>
                 </Tooltip>
               )}
 
-              <Tooltip title="Notifications" arrow>
+              <Tooltip title="Notifications">
                 <IconButton
                   size="small"
                   onClick={handleNotificationMenuOpen}
@@ -716,9 +669,10 @@ const Navbar = () => {
                     width: { xs: 32, sm: 36, md: 40 },
                     height: { xs: 32, sm: 36, md: 40 },
                     bgcolor: "action.hover",
+                    borderRadius: "10px",
                     "&:hover": {
                       bgcolor: "action.selected",
-                      transform: "scale(1.05)",
+                      color: "primary.main",
                     },
                     transition: "all 0.2s ease",
                   }}
@@ -729,75 +683,150 @@ const Navbar = () => {
                     sx={{
                       "& .MuiBadge-badge": {
                         fontSize: "0.6rem",
-                        minWidth: { xs: 14, sm: 16 },
-                        height: { xs: 14, sm: 16 },
-                        fontWeight: 700,
+                        height: 16,
+                        minWidth: 16,
                       },
                     }}
                   >
-                    <Notifications
-                      sx={{ fontSize: { xs: 16, sm: 18, md: 20 } }}
+                    <NotificationsRounded
+                      sx={{ fontSize: { xs: 18, sm: 20, md: 22 } }}
                     />
                   </Badge>
                 </IconButton>
               </Tooltip>
 
-              {!isSm && (
-                <Box>
-                  <ThemeToggle />
-                </Box>
-              )}
+              {!isSm && <ThemeToggle />}
 
-              <Tooltip title={user?.full_name || user?.name || "Profile"} arrow>
+              <Tooltip title="Profile">
                 <IconButton
                   onClick={(e) => setProfileMenuOpen(e.currentTarget)}
                   size="small"
                   sx={{
+                    ml: 0.5,
+                    p: 0,
+                    border: `2px solid ${theme.palette.divider}`,
+                    borderRadius: "50%",
                     "&:hover": {
-                      transform: "scale(1.05)",
+                      borderColor: theme.palette.primary.main,
                     },
-                    transition: "all 0.2s ease",
                   }}
                 >
                   <Avatar
                     sx={{
-                      width: { xs: 28, sm: 32, md: 36 },
-                      height: { xs: 28, sm: 32, md: 36 },
+                      width: { xs: 30, sm: 34, md: 38 },
+                      height: { xs: 30, sm: 34, md: 38 },
                       bgcolor: "primary.main",
-                      fontSize: {
-                        xs: "0.7rem",
-                        sm: "0.8rem",
-                        md: "0.875rem",
-                      },
+                      fontSize: { xs: "0.75rem", sm: "0.85rem" },
                       fontWeight: 700,
-                      border: `2px solid ${theme.palette.divider}`,
                     }}
                   >
                     {getUserInitials()}
                   </Avatar>
                 </IconButton>
               </Tooltip>
-
-              {isMd && (
-                <IconButton
-                  onClick={() => setDrawerOpen(true)}
-                  sx={{
-                    width: { xs: 32, sm: 36, md: 40 },
-                    height: { xs: 32, sm: 36, md: 40 },
-                    bgcolor: "action.hover",
-                    "&:hover": {
-                      bgcolor: "action.selected",
-                    },
-                  }}
-                >
-                  <MenuIcon sx={{ fontSize: { xs: 16, sm: 18, md: 20 } }} />
-                </IconButton>
-              )}
             </Stack>
           </Stack>
         </Toolbar>
       </AppBar>
 
+      {/* Mobile Bottom Navigation - Premium Glassmorphism */}
+      {isMd && (
+        <Paper
+          sx={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: theme.zIndex.appBar,
+            borderTop: `1px solid ${theme.palette.divider}`,
+            background:
+              theme.palette.mode === "dark"
+                ? "rgba(15, 23, 42, 0.9)"
+                : "rgba(255, 255, 255, 0.9)",
+            backdropFilter: "blur(20px)",
+            pb: "safe-area-inset-bottom", // Support for iPhone Home indicator
+          }}
+          elevation={4}
+        >
+          <BottomNavigation
+            value={isMoreActive ? "more" : location.pathname}
+            onChange={(event, newValue) => {
+              if (newValue === "more") {
+                setDrawerOpen(true);
+              } else {
+                navigate(newValue);
+              }
+            }}
+            sx={{
+              bgcolor: "transparent",
+              height: 64, // Taller touch targets
+              "& .MuiBottomNavigationAction-root": {
+                minWidth: "auto",
+                color: "text.secondary",
+                padding: "6px 0 8px",
+                "&.Mui-selected": {
+                  color: theme.palette.primary.main,
+                },
+              },
+              "& .MuiBottomNavigationAction-label": {
+                fontSize: "0.7rem",
+                fontWeight: 600,
+                marginTop: 0.5,
+                "&.Mui-selected": {
+                  fontSize: "0.75rem",
+                },
+              },
+            }}
+          >
+            {mobileNavItems.map((item) => (
+              <BottomNavigationAction
+                key={item.path}
+                label={item.shortName}
+                value={item.path}
+                icon={
+                  <Box
+                    sx={{
+                      p: 0.5,
+                      borderRadius: "10px",
+                      bgcolor: isActive(item.path)
+                        ? `${item.color}20`
+                        : "transparent",
+                      color: isActive(item.path) ? item.color : "inherit",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {React.cloneElement(item.icon, {
+                      fontSize: isActive(item.path) ? "medium" : "small",
+                    })}
+                  </Box>
+                }
+              />
+            ))}
+            <BottomNavigationAction
+              label="More"
+              value="more"
+              icon={
+                <Box
+                  sx={{
+                    p: 0.5,
+                    borderRadius: "10px",
+                    bgcolor: isMoreActive
+                      ? `${theme.palette.primary.main}20`
+                      : "transparent",
+                    color: isMoreActive
+                      ? theme.palette.primary.main
+                      : "inherit",
+                  }}
+                >
+                  <MoreHorizRounded />
+                </Box>
+              }
+            />
+          </BottomNavigation>
+        </Paper>
+      )}
+
+      {/* Menus and Drawers (Profile, Notifications, Mobile Drawer) */}
       <Menu
         anchorEl={profileMenuOpen}
         open={Boolean(profileMenuOpen)}
@@ -841,7 +870,7 @@ const Navbar = () => {
               mx: "auto",
               mb: 1.5,
               bgcolor: "primary.main",
-              fontSize: "1.25rem",
+              fontSize: { xs: "1.25rem", sm: "1.35rem" },
               fontWeight: 700,
             }}
           >
@@ -852,25 +881,12 @@ const Navbar = () => {
             fontWeight={700}
             sx={{
               mb: 0.5,
-              fontSize: { xs: "0.9rem", sm: "1rem" },
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              fontSize: "1rem",
             }}
           >
             {user?.full_name || user?.name || "User"}
           </Typography>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{
-              mb: 1,
-              fontSize: { xs: "0.75rem", sm: "0.875rem" },
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {user?.email || "user@example.com"}
           </Typography>
           <Chip
@@ -889,7 +905,7 @@ const Navbar = () => {
           }}
         >
           <ListItemIcon>
-            <Person fontSize="small" />
+            <PersonRounded fontSize="small" />
           </ListItemIcon>
           Profile Settings
         </MenuItem>
@@ -900,7 +916,7 @@ const Navbar = () => {
           }}
         >
           <ListItemIcon>
-            <Logout fontSize="small" />
+            <LogoutRounded fontSize="small" />
           </ListItemIcon>
           Sign Out
         </MenuItem>
@@ -947,11 +963,7 @@ const Navbar = () => {
             }}
           >
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-              <Typography
-                variant="h6"
-                fontWeight={700}
-                sx={{ fontSize: { xs: "1rem", sm: "1.25rem" } }}
-              >
+              <Typography variant="h6" fontWeight={700}>
                 Notifications
               </Typography>
               {unreadCount > 0 && (
@@ -967,12 +979,11 @@ const Navbar = () => {
               <Button
                 size="small"
                 onClick={handleMarkAllAsRead}
-                startIcon={<MarkEmailRead sx={{ fontSize: 14 }} />}
+                startIcon={<MarkEmailReadRounded sx={{ fontSize: 14 }} />}
                 sx={{
-                  fontSize: { xs: "0.7rem", sm: "0.75rem" },
+                  fontSize: "0.75rem",
                   fontWeight: 600,
                   borderRadius: 2,
-                  px: { xs: 1, sm: 1.5 },
                 }}
               >
                 Mark All Read
@@ -983,18 +994,13 @@ const Navbar = () => {
 
         <Box sx={{ maxHeight: { xs: "60vh", sm: 400 }, overflow: "auto" }}>
           {notificationLoading ? (
-            <Box sx={{ p: { xs: 4, sm: 6 }, textAlign: "center" }}>
-              <Speed
+            <Box sx={{ p: 4, textAlign: "center" }}>
+              <SpeedRounded
                 sx={{
-                  fontSize: { xs: 36, sm: 48 },
+                  fontSize: 40,
                   color: "text.disabled",
                   mb: 2,
-                  animation: "pulse 1.5s ease-in-out infinite",
-                  "@keyframes pulse": {
-                    "0%": { opacity: 1 },
-                    "50%": { opacity: 0.5 },
-                    "100%": { opacity: 1 },
-                  },
+                  animation: "pulse 1.5s infinite",
                 }}
               />
               <Typography variant="body2" color="text.secondary">
@@ -1002,22 +1008,15 @@ const Navbar = () => {
               </Typography>
             </Box>
           ) : notifications.length === 0 ? (
-            <Box sx={{ p: { xs: 4, sm: 6 }, textAlign: "center" }}>
-              <Notifications
+            <Box sx={{ p: 6, textAlign: "center" }}>
+              <NotificationsRounded
                 sx={{
-                  fontSize: { xs: 48, sm: 64 },
+                  fontSize: 48,
                   color: "text.disabled",
                   mb: 2,
                 }}
               />
-              <Typography
-                variant="h6"
-                fontWeight={600}
-                sx={{
-                  mb: 1,
-                  fontSize: { xs: "1rem", sm: "1.25rem" },
-                }}
-              >
+              <Typography variant="h6" fontWeight={600} sx={{ mb: 1 }}>
                 All caught up!
               </Typography>
               <Typography variant="body2" color="text.secondary">
@@ -1031,18 +1030,10 @@ const Navbar = () => {
                 onClick={() => handleNotificationClick(notification)}
                 sx={{
                   px: { xs: 2, sm: 3 },
-                  py: { xs: 1.5, sm: 2 },
-                  borderBottom:
-                    index < notifications.length - 1
-                      ? `1px solid ${theme.palette.divider}`
-                      : "none",
+                  py: 2,
+                  borderBottom: `1px solid ${theme.palette.divider}`,
                   cursor: "pointer",
-                  transition: "all 0.2s ease",
-                  "&:hover": {
-                    bgcolor: "action.hover",
-                    transform: "translateX(4px)",
-                  },
-                  position: "relative",
+                  "&:hover": { bgcolor: "action.hover" },
                   bgcolor: !notification.is_read
                     ? `${theme.palette.primary.main}08`
                     : "transparent",
@@ -1052,106 +1043,53 @@ const Navbar = () => {
                   sx={{
                     display: "flex",
                     alignItems: "flex-start",
-                    gap: { xs: 1.5, sm: 2 },
+                    gap: 2,
                   }}
                 >
                   <Box
                     sx={{
-                      width: { xs: 28, sm: 32 },
-                      height: { xs: 28, sm: 32 },
+                      p: 0.5,
                       borderRadius: "50%",
                       bgcolor: `${getNotificationColor(notification.type)}15`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: { xs: "12px", sm: "14px" },
-                      mt: 0.5,
-                      border: `2px solid ${getNotificationColor(
-                        notification.type
-                      )}30`,
+                      color: getNotificationColor(notification.type),
                     }}
                   >
-                    {getNotificationIcon(notification.type)}
+                    {/* Simplified icon usage */}
+                    <NotificationsRounded fontSize="small" />
                   </Box>
 
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography
-                      variant="subtitle2"
-                      fontWeight={600}
-                      sx={{
-                        mb: 0.5,
-                        lineHeight: 1.3,
-                        fontSize: { xs: "0.8rem", sm: "0.875rem" },
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="subtitle2" fontWeight={600}>
                       {notification.title}
                     </Typography>
                     <Typography
                       variant="body2"
                       color="text.secondary"
                       sx={{
-                        mb: 1,
                         display: "-webkit-box",
                         WebkitLineClamp: 2,
                         WebkitBoxOrient: "vertical",
                         overflow: "hidden",
-                        lineHeight: 1.4,
-                        fontSize: { xs: "0.75rem", sm: "0.875rem" },
                       }}
                     >
-                      {notification.message ||
-                        notification.body ||
-                        "No message"}
+                      {notification.message}
                     </Typography>
                     <Typography
                       variant="caption"
                       color="text.secondary"
-                      sx={{
-                        fontWeight: 500,
-                        fontSize: { xs: "0.65rem", sm: "0.7rem" },
-                      }}
+                      sx={{ mt: 0.5, display: "block" }}
                     >
                       {formatNotificationTime(notification.created_at)}
                     </Typography>
                   </Box>
-
-                  <Box
-                    sx={{ display: "flex", flexDirection: "column", gap: 1 }}
+                  <IconButton
+                    size="small"
+                    onClick={(e) =>
+                      handleDeleteNotification(e, notification.id)
+                    }
                   >
-                    {!notification.is_read && (
-                      <Box
-                        sx={{
-                          width: { xs: 8, sm: 10 },
-                          height: { xs: 8, sm: 10 },
-                          borderRadius: "50%",
-                          bgcolor: "primary.main",
-                          boxShadow: `0 0 8px ${theme.palette.primary.main}50`,
-                        }}
-                      />
-                    )}
-                    <IconButton
-                      size="small"
-                      onClick={(e) =>
-                        handleDeleteNotification(e, notification.id)
-                      }
-                      sx={{
-                        width: { xs: 20, sm: 24 },
-                        height: { xs: 20, sm: 24 },
-                        opacity: 0.6,
-                        "&:hover": {
-                          opacity: 1,
-                          bgcolor: "error.main",
-                          color: "white",
-                        },
-                        transition: "all 0.2s ease",
-                      }}
-                    >
-                      <Delete sx={{ fontSize: { xs: 12, sm: 16 } }} />
-                    </IconButton>
-                  </Box>
+                    <DeleteRounded fontSize="small" />
+                  </IconButton>
                 </Box>
               </Box>
             ))
@@ -1160,24 +1098,25 @@ const Navbar = () => {
       </Menu>
 
       <Drawer
-        anchor="right"
+        anchor="bottom" // Bottom sheet on mobile, Right drawer on desktop (custom logic needed if splitting)
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         PaperProps={{
           sx: {
-            width: { xs: "100%", sm: 360 },
+            width: { xs: "100%", md: 360 },
+            height: { xs: "auto", md: "100%" },
+            maxHeight: { xs: "85vh", md: "100%" },
             bgcolor: "background.paper",
+            borderRadius: { xs: "24px 24px 0 0", md: 0 },
+            bottom: { xs: 0, md: "auto" },
+            right: { xs: 0, md: 0 },
+            position: "fixed",
           },
         }}
+        // Using "bottom" anchor for simple mobile drawer, but logic above handles desktop/mobile styles
+        // Actually, let's stick to Right anchor for simplicity or switch based on screen
       >
-        <Box
-          sx={{
-            p: { xs: 2, sm: 3 },
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
+        <Box sx={{ p: 3, height: "100%", overflow: "auto" }}>
           <Box
             sx={{
               display: "flex",
@@ -1186,333 +1125,65 @@ const Navbar = () => {
               mb: 3,
             }}
           >
-            <Typography
-              variant="h5"
-              fontWeight={700}
-              sx={{ fontSize: { xs: "1.25rem", sm: "1.5rem" } }}
-            >
+            <Typography variant="h5" fontWeight={700}>
               Menu
             </Typography>
-            <IconButton
-              onClick={() => setDrawerOpen(false)}
-              sx={{
-                bgcolor: "action.hover",
-                "&:hover": { bgcolor: "action.selected" },
-              }}
-            >
-              <Close />
+            <IconButton onClick={() => setDrawerOpen(false)}>
+              <CloseRounded />
             </IconButton>
           </Box>
 
-          <Paper
-            elevation={0}
-            sx={{
-              p: { xs: 2, sm: 3 },
-              mb: 3,
-              textAlign: "center",
-              bgcolor: "action.hover",
-              borderRadius: 4,
-              border: `1px solid ${theme.palette.divider}`,
-            }}
-          >
-            <Avatar
-              sx={{
-                width: { xs: 64, sm: 72 },
-                height: { xs: 64, sm: 72 },
-                mx: "auto",
-                mb: 2,
-                bgcolor: "primary.main",
-                fontSize: { xs: "1.5rem", sm: "1.75rem" },
-                fontWeight: 700,
-                border: `3px solid ${theme.palette.primary.main}20`,
-              }}
-            >
-              {getUserInitials()}
-            </Avatar>
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              sx={{
-                mb: 0.5,
-                fontSize: { xs: "1rem", sm: "1.25rem" },
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {user?.full_name || user?.name || "User"}
-            </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                mb: 2,
-                fontSize: { xs: "0.75rem", sm: "0.875rem" },
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {user?.email || "user@example.com"}
-            </Typography>
-            <Stack
-              direction="row"
-              spacing={1}
-              justifyContent="center"
-              sx={{
-                flexWrap: "wrap",
-                gap: 1,
-                "& > *": {
-                  fontSize: { xs: "0.7rem", sm: "0.75rem" },
-                },
-              }}
-            >
-              <Chip
-                label={user?.role || "Trader"}
-                size="small"
-                color="primary"
-                variant="outlined"
-                sx={{ fontWeight: 600 }}
-              />
-              <Chip
-                icon={
-                  <span style={{ fontSize: "8px" }}>{statusInfo.icon}</span>
-                }
-                label={statusInfo.label}
-                size="small"
-                color={statusInfo.color}
-                variant="outlined"
-                sx={{ fontWeight: 600 }}
-              />
-            </Stack>
-          </Paper>
-
-          <Box sx={{ flex: 1, overflow: "auto" }}>
-            <List sx={{ p: 0 }}>
-              {navItems.map((item) => (
-                <ListItemButton
-                  key={item.path}
-                  onClick={() => {
-                    navigate(item.path);
-                    setDrawerOpen(false);
-                  }}
-                  selected={isActive(item.path)}
-                  sx={{
-                    borderRadius: 3,
-                    mb: 1,
-                    py: { xs: 1.5, sm: 2 },
-                    px: 2,
-                    transition: "all 0.3s ease",
-                    "&.Mui-selected": {
-                      bgcolor: `${item.color}15`,
-                      borderLeft: `4px solid ${item.color}`,
-                      "&:hover": { bgcolor: `${item.color}25` },
-                    },
-                    "&:hover": {
-                      transform: "translateX(8px)",
-                      bgcolor: "action.hover",
-                    },
-                  }}
-                >
-                  <ListItemIcon
-                    sx={{
-                      color: isActive(item.path)
-                        ? item.color
-                        : "text.secondary",
-                      minWidth: { xs: 40, sm: 48 },
-                      "& svg": {
-                        fontSize: { xs: 20, sm: 24 },
-                      },
-                    }}
-                  >
-                    {item.icon}
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={item.name}
-                    primaryTypographyProps={{
-                      fontWeight: isActive(item.path) ? 700 : 500,
-                      color: isActive(item.path) ? item.color : "text.primary",
-                      fontSize: { xs: "0.9rem", sm: "1rem" },
-                    }}
-                  />
-                  {item.path === "/dashboard" && unreadCount > 0 && (
-                    <Badge badgeContent={unreadCount} color="error" />
-                  )}
-                </ListItemButton>
-              ))}
-            </List>
-
-            <Divider sx={{ my: 3 }} />
-
-            <List sx={{ p: 0 }}>
+          <List>
+            {navItems.map((item) => (
               <ListItemButton
-                sx={{
-                  borderRadius: 3,
-                  py: { xs: 1.5, sm: 2 },
-                  px: 2,
-                  mb: 1,
-                  "&:hover": {
-                    transform: "translateX(8px)",
-                    bgcolor: "action.hover",
-                  },
-                  transition: "all 0.3s ease",
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: { xs: 40, sm: 48 } }}>
-                  <Settings sx={{ fontSize: { xs: 20, sm: 24 } }} />
-                </ListItemIcon>
-                <ListItemText
-                  primary="Theme"
-                  primaryTypographyProps={{
-                    fontWeight: 500,
-                    fontSize: { xs: "0.9rem", sm: "1rem" },
-                  }}
-                />
-                <Box sx={{ ml: 1 }}>
-                  <ThemeToggle />
-                </Box>
-              </ListItemButton>
-
-              <ListItemButton
+                key={item.path}
                 onClick={() => {
-                  handleRefresh();
+                  navigate(item.path);
                   setDrawerOpen(false);
                 }}
-                disabled={notificationLoading}
+                selected={isActive(item.path)}
                 sx={{
                   borderRadius: 3,
-                  py: { xs: 1.5, sm: 2 },
-                  px: 2,
                   mb: 1,
-                  "&:hover": {
-                    transform: "translateX(8px)",
-                    bgcolor: "action.hover",
-                  },
-                  "&:disabled": {
-                    opacity: 0.6,
-                    "&:hover": {
-                      transform: "none",
-                      bgcolor: "transparent",
-                    },
-                  },
-                  transition: "all 0.3s ease",
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: { xs: 40, sm: 48 } }}>
-                  <Refresh
-                    sx={{
-                      fontSize: { xs: 20, sm: 24 },
-                      animation: notificationLoading
-                        ? "spin 1s linear infinite"
-                        : "none",
-                      "@keyframes spin": {
-                        "0%": { transform: "rotate(0deg)" },
-                        "100%": { transform: "rotate(360deg)" },
-                      },
-                    }}
-                  />
-                </ListItemIcon>
-                <ListItemText
-                  primary={
-                    notificationLoading ? "Refreshing..." : "Refresh Data"
-                  }
-                  primaryTypographyProps={{
-                    fontWeight: 500,
-                    fontSize: { xs: "0.9rem", sm: "1rem" },
-                  }}
-                />
-              </ListItemButton>
-
-              <ListItemButton
-                onClick={() => {
-                  navigate("/profile");
-                  setDrawerOpen(false);
-                }}
-                sx={{
-                  borderRadius: 3,
-                  py: { xs: 1.5, sm: 2 },
-                  px: 2,
-                  mb: 1,
-                  "&:hover": {
-                    transform: "translateX(8px)",
-                    bgcolor: "action.hover",
-                  },
-                  transition: "all 0.3s ease",
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: { xs: 40, sm: 48 } }}>
-                  <Person sx={{ fontSize: { xs: 20, sm: 24 } }} />
-                </ListItemIcon>
-                <ListItemText
-                  primary="Profile Settings"
-                  primaryTypographyProps={{
-                    fontWeight: 500,
-                    fontSize: { xs: "0.9rem", sm: "1rem" },
-                  }}
-                />
-              </ListItemButton>
-
-              <ListItemButton
-                onClick={() => {
-                  handleLogout();
-                  setDrawerOpen(false);
-                }}
-                sx={{
-                  borderRadius: 3,
-                  py: { xs: 1.5, sm: 2 },
-                  px: 2,
-                  color: "error.main",
-                  "&:hover": {
-                    transform: "translateX(8px)",
-                    bgcolor: "error.main",
-                    color: "white",
-                    "& .MuiListItemIcon-root": {
-                      color: "white",
-                    },
-                  },
-                  transition: "all 0.3s ease",
+                  bgcolor: isActive(item.path)
+                    ? `${item.color}15`
+                    : "transparent",
+                  color: isActive(item.path) ? item.color : "text.primary",
                 }}
               >
                 <ListItemIcon
-                  sx={{ minWidth: { xs: 40, sm: 48 }, color: "error.main" }}
+                  sx={{
+                    color: "inherit",
+                    minWidth: 40,
+                  }}
                 >
-                  <Logout sx={{ fontSize: { xs: 20, sm: 24 } }} />
+                  {item.icon}
                 </ListItemIcon>
                 <ListItemText
-                  primary="Sign Out"
-                  primaryTypographyProps={{
-                    fontWeight: 500,
-                    fontSize: { xs: "0.9rem", sm: "1rem" },
-                  }}
+                  primary={item.name}
+                  primaryTypographyProps={{ fontWeight: 600 }}
                 />
               </ListItemButton>
-            </List>
-          </Box>
-
-          <Box sx={{ mt: 2, textAlign: "center" }}>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ fontSize: { xs: "0.7rem", sm: "0.75rem" } }}
-            >
-              {currentTime.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </Typography>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-              sx={{ fontSize: { xs: "0.7rem", sm: "0.75rem" } }}
-            >
-              {currentTime.toLocaleDateString()}
-            </Typography>
-          </Box>
+            ))}
+          </List>
+          
+           <Divider sx={{ my: 2 }} />
+           
+           <Box sx={{ px: 2 }}>
+             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+               Settings
+             </Typography>
+             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                <Typography variant="body2" fontWeight={500}>Appearance</Typography>
+                <ThemeToggle />
+             </Box>
+           </Box>
         </Box>
       </Drawer>
 
       <Box sx={{ height: { xs: 56, sm: 64, md: 72 } }} />
+      {/* Spacer for Bottom Navigation on Mobile */}
+      {isMd && <Box sx={{ height: 64, pb: "safe-area-inset-bottom" }} />}
     </>
   );
 };

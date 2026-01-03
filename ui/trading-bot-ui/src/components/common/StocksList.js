@@ -21,6 +21,7 @@ import {
   Tooltip,
 } from "@mui/material";
 import { Info, ShowChart as OptionsIcon } from "@mui/icons-material";
+import { motion } from "framer-motion";
 import OptionChainModal from "../options/OptionChainModal";
 
 const StocksList = memo(
@@ -317,8 +318,13 @@ const StocksList = memo(
                     const changePercentValue = item.change_percent || 0;
 
                     return (
-                      <Box
+                      <motion.div
                         key={item.instrument_key || item.symbol || index}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.2, delay: index * 0.05 }}
+                      >
+                      <Box
                         sx={{
                           bgcolor: "transparent",
                           borderRadius: 0,
@@ -582,6 +588,7 @@ const StocksList = memo(
                           </Box>
                         </Box>
                       </Box>
+                      </motion.div>
                     );
                   })}
                 </Stack>
@@ -909,8 +916,12 @@ const StocksList = memo(
                         );
 
                         return (
-                          <TableRow
+                          <motion.tr
                             key={stock.instrument_key || stock.symbol || index}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2, delay: index * 0.03 }}
+                            component={TableRow}
                             hover
                             sx={{
                               cursor: "pointer",
@@ -1208,7 +1219,7 @@ const StocksList = memo(
                                 </Tooltip>
                               </TableCell>
                             )}
-                          </TableRow>
+                          </motion.tr>
                         );
                       })}
                     </TableBody>
