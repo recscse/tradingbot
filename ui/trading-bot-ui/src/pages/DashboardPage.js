@@ -1722,7 +1722,7 @@ const DashboardPage = () => {
             title={`🚀 GAINERS (${getTopMoversData().gainers.length})`}
             symbols={getTopMoversData().gainers}
             showVolume={true} // Always show volume
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             maxItems={isMobile ? 5 : 8} // Show fewer items on mobile
             isLoading={getTopMoversData().gainers.length === 0}
             compact={true}
@@ -1745,7 +1745,7 @@ const DashboardPage = () => {
             title={`📉 LOSERS (${getTopMoversData().losers.length})`}
             symbols={getTopMoversData().losers}
             showVolume={true} // Always show volume
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             maxItems={isMobile ? 5 : 8} // Show fewer items on mobile
             isLoading={getTopMoversData().losers.length === 0}
             compact={true}
@@ -1867,7 +1867,7 @@ const DashboardPage = () => {
             showVolume={true} // Always show volume
             showOptionChain={true} // Enable option chain for search results
             showName={true}
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             maxItems={50} // Keep maxItems for search results
             isLoading={!isConnected}
             density="standard" // Use standard density for search results
@@ -2222,7 +2222,7 @@ const DashboardPage = () => {
             title="" // Title already shown above
             symbols={getTopMoversData().gainers}
             showVolume={true} // Always show volume
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             maxItems={
               expandedSection === "gainers"
                 ? isMobile
@@ -2283,7 +2283,7 @@ const DashboardPage = () => {
             title="" // Title already shown above
             symbols={getTopMoversData().losers}
             showVolume={true} // Always show volume
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             maxItems={
               expandedSection === "losers"
                 ? isMobile
@@ -2314,7 +2314,7 @@ const DashboardPage = () => {
           data={volumeLeaders}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
           showVolume={true} // Always show volume
-          showSector={!isMobile} // Show sector on larger screens if table
+          showSector={true} // Always show sector
           maxItems={isMobile ? 15 : 20} // Show fewer items on mobile
           isLoading={!isConnected}
           // Remove fixed containerHeight to allow natural flow
@@ -2349,7 +2349,7 @@ const DashboardPage = () => {
             data={gapUp}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={gapLoading}
@@ -2395,7 +2395,7 @@ const DashboardPage = () => {
             data={gapDown}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
             showVolume={true} // Always show volume
-            showSector={!isMobile} // Show sector on larger screens if table
+            showSector={true} // Always show sector
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
             isLoading={gapLoading}
@@ -3045,7 +3045,7 @@ const DashboardPage = () => {
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={true} // Always show volume
               showName={true}
-              showSector={!isMobile} // Show sector for F&O stocks on desktop
+              showSector={true} // Always show sector
               maxItems={isMobile ? fnoStocks.length : fnoStocks.length} // Show all on mobile, limit on desktop if needed
               isLoading={fnoLoading}
               emptyMessage="No F&O stocks found"
@@ -3214,7 +3214,7 @@ const DashboardPage = () => {
               data={newHighs}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={true} // Always show volume
-              showSector={!isMobile} // Show sector on larger screens if table
+              showSector={true} // Always show sector
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
               // Remove fixed containerHeight to allow natural flow
@@ -3253,7 +3253,7 @@ const DashboardPage = () => {
               data={newLows}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
               showVolume={true} // Always show volume
-              showSector={!isMobile} // Show sector on larger screens if table
+              showSector={true} // Always show sector
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
               // Remove fixed containerHeight to allow natural flow
