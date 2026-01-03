@@ -236,7 +236,7 @@ class UnifiedTradingExecutor:
             order_data = {
                 "symbol": signal.symbol,
                 "instrument_key": signal.instrument_key,
-                "quantity": signal.quantity * signal.lot_size,
+                "quantity": signal.quantity,
                 "price": signal.entry_price,
                 "order_type": "LIMIT",
                 "product": "MIS",  # Intraday

@@ -56,6 +56,7 @@ class SharedInstrument:
     strike_price: Decimal
     expiry_date: str
     lot_size: int
+    target_lots: int = 1
 
     state: InstrumentState = InstrumentState.MONITORING
 
@@ -123,7 +124,8 @@ class SharedInstrumentRegistry:
         option_type: str,
         strike_price: Decimal,
         expiry_date: str,
-        lot_size: int
+        lot_size: int,
+        target_lots: int = 1
     ) -> SharedInstrument:
         """
         Register an instrument in shared registry (idempotent)
@@ -136,12 +138,15 @@ class SharedInstrumentRegistry:
             strike_price: Strike price
             expiry_date: Expiry date
             lot_size: Lot size
+            target_lots: Recommended number of lots
 
         Returns:
             SharedInstrument instance
         """
         if option_key in self.instruments:
-            # Already registered
+            # Already registered - update target_lots if provided
+            if target_lots > 1:
+                self.instruments[option_key].target_lots = target_lots
             return self.instruments[option_key]
 
         instrument = SharedInstrument(
@@ -151,7 +156,8 @@ class SharedInstrumentRegistry:
             option_type=option_type,
             strike_price=strike_price,
             expiry_date=expiry_date,
-            lot_size=lot_size
+            lot_size=lot_size,
+            target_lots=target_lots
         )
 
         self.instruments[option_key] = instrument
