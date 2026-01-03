@@ -29,7 +29,9 @@ from services.database.trading_db_service import TradingDatabaseService
 from services.centralized_ws_manager import CentralizedWebSocketManager
 from services.margin_aware_trading_service import MarginAwareTradingService
 from services.broker_funds_sync_service import broker_funds_sync_service
+from services.upstox_option_service import upstox_option_service
 from database.connection import SessionLocal
+from database.models import FNOStockMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -443,22 +445,45 @@ class AutoTradingCoordinator:
     async def _execute_fibonacci_signal(self, session: TradingSession, signal: FibonacciSignal, 
                                       symbol: str, current_price: float):
         """Execute Fibonacci trading signal using unified executor"""
+        db = None
         try:
             # Determine trading mode based on session
             trading_mode = TradingMode.PAPER if session.mode == SystemMode.PAPER_TRADING else TradingMode.LIVE
             
-            # Calculate position size and option details
-            position_size, lot_size = await self._calculate_position_size(session, signal, current_price)
-            
-            # Get option contract details for the signal
+            # 1. Resolve Option Contract first
+            db = SessionLocal()
             option_details = await self._resolve_option_contract(
-                symbol, signal.option_type, current_price, signal.fibonacci_level
+                symbol, signal.option_type, current_price, signal.fibonacci_level, db
             )
             
             if not option_details:
                 logger.warning(f"Could not resolve option contract for {symbol}")
                 return
+
+            # 2. Get Option Premium
+            option_instrument_key = option_details["instrument_key"]
+            option_premium = await self.data_service.get_current_price(option_instrument_key)
             
+            # Fallback/Validation for premium
+            if not option_premium or option_premium <= 0:
+                if trading_mode == TradingMode.PAPER:
+                    option_premium = current_price * 0.02 # Estimate 2% of spot for paper trading
+                    logger.warning(f"Using estimated premium {option_premium} for {symbol}")
+                else:
+                    logger.warning(f"Could not get real-time premium for {option_instrument_key}. Aborting trade.")
+                    return
+
+            # 3. Calculate position size using OPTION PREMIUM
+            position_size, lot_size = await self._calculate_position_size(session, signal, option_premium, symbol)
+            
+            if position_size <= 0:
+                logger.warning(f"Position size calculated as 0 for {symbol}, aborting trade.")
+                return
+
+            # Calculate Option SL/Target (approximate based on premium)
+            option_sl = option_premium * 0.7  # 30% SL
+            option_target = option_premium * 1.5 # 50% Target
+
             # Create unified trade signal
             unified_signal = UnifiedTradeSignal(
                 user_id=session.user_id,
@@ -467,12 +492,12 @@ class AutoTradingCoordinator:
                 option_type=signal.option_type,
                 strike_price=option_details["strike_price"],
                 signal_type="BUY",  # Always buying options
-                entry_price=current_price,
+                entry_price=option_premium,
                 quantity=position_size,
                 lot_size=lot_size,
-                invested_amount=position_size * current_price,
-                stop_loss=signal.stop_loss,
-                target=signal.target_1,  # Use first target
+                invested_amount=position_size * option_premium,
+                stop_loss=option_sl,
+                target=option_target,
                 confidence_score=signal.strength / 100.0,
                 strategy_name="fibonacci_ema",
                 trading_mode=trading_mode
@@ -511,6 +536,9 @@ class AutoTradingCoordinator:
         except Exception as e:
             logger.error(f"❌ Error executing Fibonacci signal for {symbol}: {e}")
             self.system_metrics['failed_trades'] += 1
+        finally:
+            if db:
+                db.close()
     
     async def _handle_fibonacci_signal(self, instrument_key: str, signal_data: Dict[str, Any]):
         """Handle Fibonacci signal from data service"""
@@ -703,28 +731,66 @@ class AutoTradingCoordinator:
             pass
     
     async def _calculate_position_size(self, session: TradingSession, signal: FibonacciSignal, 
-                                     current_price: float) -> tuple[int, int]:
-        """Calculate position size and lot size for the signal"""
+                                     option_premium: float, symbol: str) -> tuple[int, int]:
+        """Calculate position size and lot size based on premium and capital constraints"""
+        db = None
         try:
-            # Default lot size for F&O
-            lot_size = 50  # This should be retrieved from instrument master
+            # Retrieve lot size from instrument master
+            lot_size = 50  # Default fallback
             
-            # Calculate position size based on risk management
-            capital = session.risk_parameters.get('allocated_capital', 100000)  # Default ₹1L
-            risk_per_trade = session.risk_parameters.get('risk_per_trade', 2.0)  # 2%
+            try:
+                db = SessionLocal()
+                stock_metadata = db.query(FNOStockMetadata).filter(
+                    FNOStockMetadata.symbol == symbol
+                ).first()
+                
+                if stock_metadata and stock_metadata.lot_size:
+                    lot_size = stock_metadata.lot_size
+                else:
+                    logger.warning(f"Could not find lot size for {symbol}, using default: {lot_size}")
+            except Exception as e:
+                logger.error(f"Error fetching lot size from DB: {e}")
+            finally:
+                if db:
+                    db.close()
             
-            max_loss_per_trade = capital * (risk_per_trade / 100)
+            # Risk parameters
+            capital = session.risk_parameters.get('allocated_capital', 100000)
+            risk_per_trade_pct = session.risk_parameters.get('risk_per_trade', 2.0)
+            max_lots_limit = session.strategy_config.get('max_lots_per_trade', 10)
             
-            # Assuming 30% stop loss on options
-            stop_loss_amount = current_price * 0.30
+            # 1. Risk-based sizing
+            max_loss_allowed = capital * (risk_per_trade_pct / 100.0)
+            
+            # Assume 30% stop loss on options for risk calculation
+            stop_loss_amount = option_premium * 0.30
             
             if stop_loss_amount > 0:
-                max_lots = int(max_loss_per_trade / (stop_loss_amount * lot_size))
-                lots = max(1, min(max_lots, 2))  # Minimum 1, maximum 2 lots
+                risk_based_lots = int(max_loss_allowed / (stop_loss_amount * lot_size))
             else:
-                lots = 1
+                risk_based_lots = 1
+
+            # 2. Capital-based sizing (Affordability)
+            cost_per_lot = option_premium * lot_size
+            
+            if cost_per_lot > 0:
+                capital_based_lots = int(capital / cost_per_lot)
+            else:
+                capital_based_lots = 0
+            
+            # Determine final lots
+            lots = max(1, min(risk_based_lots, capital_based_lots, max_lots_limit))
+            
+            # Ensure we can afford at least 1 lot
+            if capital_based_lots < 1:
+                logger.warning(f"Insufficient capital for {symbol}. Cost per lot: {cost_per_lot}, Capital: {capital}")
+                return 0, lot_size # Return 0 size to prevent trade
             
             position_size = lots * lot_size
+            
+            logger.info(f"Position Sizing {symbol}: Premium={option_premium}, Lot={lot_size}, "
+                        f"RiskLots={risk_based_lots}, CapLots={capital_based_lots}, FinalLots={lots}")
+            
             return position_size, lot_size
             
         except Exception as e:
@@ -732,22 +798,79 @@ class AutoTradingCoordinator:
             return 50, 50  # Default fallback
     
     async def _resolve_option_contract(self, symbol: str, option_type: str, 
-                                     current_price: float, fibonacci_level: str) -> Optional[Dict]:
-        """Resolve option contract details"""
+                                     current_price: float, fibonacci_level: str, db: Session) -> Optional[Dict]:
+        """
+        Resolve option contract details using UpstoxOptionService
+        """
         try:
-            # This would typically use option service to get ATM contract
-            # For now, return mock data structure
-            strike_price = int(current_price / 50) * 50  # Round to nearest 50
+            # 1. Get underlying instrument key
+            underlying_key = upstox_option_service._get_underlying_key(symbol, db)
+            if not underlying_key:
+                logger.error(f"Could not resolve underlying key for {symbol}")
+                return None
+
+            # 2. Determine expiry date (e.g., next Thursday)
+            from utils.timezone_utils import get_ist_now
+            today = get_ist_now()
+            days_ahead = 3 - today.weekday()  # 3 is Thursday
+            if days_ahead <= 0:
+                days_ahead += 7
+            expiry_date = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+
+            # 3. Get option chain
+            option_chain_data = upstox_option_service.get_option_chain(
+                instrument_key=underlying_key,
+                expiry_date=expiry_date,
+                db=db
+            )
+
+            if not option_chain_data or not option_chain_data.get("data"):
+                logger.error(f"Could not get option chain for {symbol} on {expiry_date}")
+                return None
+
+            # 4. Find the best strike price (ATM or nearest OTM)
+            spot_price = option_chain_data.get("spot_price")
+            if not spot_price:
+                spot_price = current_price # Fallback
+
+            strikes = [item['strike_price'] for item in option_chain_data['data']]
             
-            return {
-                "instrument_key": f"{symbol}_{option_type}_{strike_price}",
-                "strike_price": strike_price,
-                "expiry_date": "2024-01-25",  # Weekly expiry
-                "lot_size": 50
-            }
-            
+            if option_type == 'CE': # Call Option
+                # Find the first strike price greater than or equal to the spot price
+                best_strike = min([s for s in strikes if s >= spot_price], default=None, key=lambda s: abs(s - spot_price))
+            elif option_type == 'PE': # Put Option
+                # Find the first strike price less than or equal to the spot price
+                best_strike = min([s for s in strikes if s <= spot_price], default=None, key=lambda s: abs(s - spot_price))
+            else:
+                return None
+
+            if not best_strike:
+                # Fallback to ATM strike from analytics if available
+                best_strike = option_chain_data.get('atm_strike')
+                if not best_strike:
+                    logger.error(f"Could not determine a suitable strike for {symbol} at spot {spot_price}")
+                    return None
+
+            # 5. Find the contract details for the selected strike
+            for strike_data in option_chain_data['data']:
+                if strike_data['strike_price'] == best_strike:
+                    option_key = f"{option_type.lower()}_options"
+                    if option_key in strike_data and strike_data[option_key]:
+                        contract = strike_data[option_key]
+                        lot_size = contract.get('lot_size', 50) # default lot size
+                        
+                        return {
+                            "instrument_key": contract['instrument_key'],
+                            "strike_price": contract['strike_price'],
+                            "expiry_date": expiry_date,
+                            "lot_size": lot_size
+                        }
+
+            logger.error(f"Could not find contract for strike {best_strike} in option chain for {symbol}")
+            return None
+
         except Exception as e:
-            logger.error(f"Error resolving option contract: {e}")
+            logger.error(f"Error resolving option contract for {symbol}: {e}")
             return None
     
     async def _emit_execution_updates(self, session: TradingSession, signal: FibonacciSignal,

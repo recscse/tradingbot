@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from dataclasses import dataclass
 
+from utils.timezone_utils import get_ist_now
 from database.models import BrokerConfig, User, AutoTradeExecution, ActivePosition
 from services.trading_execution.multi_demat_capital_service import multi_demat_capital_service
 from services.trading_execution.capital_manager import TradingMode
@@ -149,7 +150,7 @@ class MultiDematTradeExecutor:
             )
 
             # Step 5: Generate parent trade ID for linking
-            parent_trade_id = f"MULTI_{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            parent_trade_id = f"MULTI_{user_id}_{get_ist_now().strftime('%Y%m%d%H%M%S')}"
 
             # Step 6: Execute trades in parallel across all demats
             execution_tasks = []
