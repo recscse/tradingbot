@@ -2,7 +2,7 @@ import { Box, Typography, Paper, Grid } from "@mui/material";
 import { motion } from "framer-motion";
 
 const stats = [
-  { label: "Net Profit", value: "$6,244" },
+  { label: "Net Profit", value: "₹6,244" },
   { label: "Trades", value: "128" },
   { label: "Win Rate", value: "79.25%" },
   { label: "Max Drawdown", value: "-12.1%" },
