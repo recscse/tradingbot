@@ -30,6 +30,7 @@ from services.centralized_ws_manager import CentralizedWebSocketManager
 from services.margin_aware_trading_service import MarginAwareTradingService
 from services.broker_funds_sync_service import broker_funds_sync_service
 from services.upstox_option_service import upstox_option_service
+from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import FNOStockMetadata
 
