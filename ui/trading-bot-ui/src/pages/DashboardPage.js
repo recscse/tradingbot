@@ -40,43 +40,43 @@ import useMarketStore from "../store/marketStore";
 const MemoizedStocksList = React.memo(StocksList);
 const MemoizedStocksListOptimized = React.memo(StocksListOptimized);
 const MemoizedStocksListWithLivePrices = React.memo(StocksListWithLivePrices);
-// MODERN THEME COLORS - Enhanced design system
+// MODERN THEME COLORS - Premium "Slate" Design System (Tailwind-inspired)
 const DASHBOARD_COLORS = {
-  // Dark theme
+  // Dark theme (Slate/Zinc optimized)
   dark: {
-    background: "#0a0e1a",
-    surface: "#1e293b",
-    surfaceHover: "#334155",
-    text: "#e2e8f0",
-    textSecondary: "#94a3b8",
-    positive: "#22c55e",
-    negative: "#ef4444",
-    neutral: "#f59e0b",
-    primary: "#3b82f6",
-    secondary: "#8b5cf6",
-    accent: "#06b6d4",
-    border: "#475569",
-    cardBackground: "#1e293b",
-    gradient: "linear-gradient(135deg, #1e293b 0%, #334155 100%)",
-    header: "#3b82f6", // Added for consistency
+    background: "#0f172a", // Slate 900 - Deeper, richer background
+    surface: "#1e293b", // Slate 800 - Subtle surface
+    surfaceHover: "#334155", // Slate 700
+    text: "#f1f5f9", // Slate 100 - Brighter text
+    textSecondary: "#94a3b8", // Slate 400
+    positive: "#10b981", // Emerald 500 - Modern Green
+    negative: "#ef4444", // Red 500 - Modern Red
+    neutral: "#f59e0b", // Amber 500
+    primary: "#3b82f6", // Blue 500
+    secondary: "#8b5cf6", // Violet 500
+    accent: "#06b6d4", // Cyan 500
+    border: "#334155", // Slate 700 - Slightly visible border
+    cardBackground: "#1e293b", // Keeping solid for now, or use #1e293b95 for glass
+    gradient: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+    header: "#60a5fa", // Lighter blue for dark mode header text
   },
-  // Light theme
+  // Light theme (Zinc optimized)
   light: {
-    background: "#f8fafc",
+    background: "#f8fafc", // Slate 50
     surface: "#ffffff",
-    surfaceHover: "#f1f5f9",
-    text: "#1e293b",
-    textSecondary: "#64748b",
-    positive: "#16a34a",
-    negative: "#dc2626",
-    neutral: "#d97706",
-    primary: "#2563eb",
-    secondary: "#7c3aed",
-    accent: "#0891b2",
-    border: "#e2e8f0",
+    surfaceHover: "#f1f5f9", // Slate 100
+    text: "#0f172a", // Slate 900
+    textSecondary: "#64748b", // Slate 500
+    positive: "#059669", // Emerald 600
+    negative: "#dc2626", // Red 600
+    neutral: "#d97706", // Amber 600
+    primary: "#2563eb", // Blue 600
+    secondary: "#7c3aed", // Violet 600
+    accent: "#0891b2", // Cyan 600
+    border: "#e2e8f0", // Slate 200
     cardBackground: "#ffffff",
-    gradient: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
-    header: "#2563eb", // Added for consistency
+    gradient: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
+    header: "#2563eb",
   },
 };
 // Section navigation - moved outside component
@@ -107,22 +107,21 @@ const SectionNavigation = ({
   isMobile,
 }) => {
   const theme = useTheme();
-  const isExtraSmall = useMediaQuery(theme.breakpoints.down("xs"));
   const [isScrolled, setIsScrolled] = React.useState(false);
   const scrollContainerRef = React.useRef(null);
 
   // Handle scroll effect for sticky header
   React.useEffect(() => {
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 100);
+      setIsScrolled(window.scrollY > 50);
     };
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Auto-scroll to active tab on mobile
+  // Auto-scroll to active tab
   React.useEffect(() => {
-    if (isMobile && scrollContainerRef.current) {
+    if (scrollContainerRef.current) {
       const activeButton = scrollContainerRef.current.querySelector(
         `[data-section="${activeSection}"]`
       );
@@ -134,211 +133,87 @@ const SectionNavigation = ({
         });
       }
     }
-  }, [activeSection, isMobile]);
+  }, [activeSection]);
 
   return (
     <Box
       sx={{
         position: "sticky",
         top: 0,
-        zIndex: 1000,
-        bgcolor: "background.paper",
-        borderBottom: `1px solid ${colors.border}`,
-        backdropFilter: "blur(10px)",
-        boxShadow: isScrolled ? theme.shadows[2] : "none",
-        transition: "all 0.2s ease",
+        zIndex: 999, // Below header z-index (usually 1100+)
+        bgcolor: colors.background + (isScrolled ? "dd" : "00"), // Transparent at top
+        backdropFilter: isScrolled ? "blur(12px)" : "none",
+        borderBottom: isScrolled ? `1px solid ${colors.border}` : "none",
+        transition: "all 0.3s ease",
+        pt: isScrolled ? 0 : 1,
       }}
     >
-      <Container maxWidth="xl">
+      <Container maxWidth="xl" sx={{ px: { xs: 0, sm: 2 } }}>
         <Box
           sx={{
-            py: { xs: 0.75, sm: 1 },
-            px: { xs: 1, sm: 2 },
+            py: 1,
+            px: { xs: 2, sm: 0 },
+            overflowX: "auto",
+            scrollbarWidth: "none", // Firefox
+            "&::-webkit-scrollbar": { display: "none" }, // Chrome/Safari
+            maskImage:
+              "linear-gradient(to right, transparent, black 20px, black 90%, transparent)",
+            WebkitMaskImage:
+              "linear-gradient(to right, transparent, black 20px, black 90%, transparent)",
           }}
+          ref={scrollContainerRef}
         >
-          {/* Mobile Horizontal Scroll Layout */}
-          {isMobile ? (
-            <Box
-              ref={scrollContainerRef}
-              sx={{
-                display: "flex",
-                overflowX: "auto",
-                overflowY: "hidden",
-                gap: 0.75,
-                pb: 0.5,
-                "&::-webkit-scrollbar": {
-                  height: 3,
-                },
-                "&::-webkit-scrollbar-track": {
-                  backgroundColor: colors.border,
-                  borderRadius: 2,
-                },
-                "&::-webkit-scrollbar-thumb": {
-                  backgroundColor: colors.primary,
-                  borderRadius: 2,
-                },
-              }}
-            >
-              {SECTIONS.map((section) => (
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{
+              width: "max-content",
+              mx: "auto", // Center on desktop
+              px: 2, // Padding for scroll mask
+            }}
+          >
+            {SECTIONS.map((section) => {
+              const isActive = activeSection === section.id;
+              return (
                 <Button
                   key={section.id}
                   onClick={() => handleSectionChange(section.id)}
                   data-section={section.id}
-                  variant={
-                    activeSection === section.id ? "contained" : "outlined"
-                  }
-                  size="small"
+                  variant={isActive ? "contained" : "text"}
                   sx={{
-                    minWidth: isExtraSmall ? 70 : 85,
-                    flexShrink: 0,
-                    px: 1.5,
+                    borderRadius: "50px", // Pill shape
+                    px: 2.5,
                     py: 0.75,
+                    minWidth: "auto",
                     height: 36,
-                    fontSize: "0.7rem",
-                    fontWeight: activeSection === section.id ? 600 : 500,
-                    borderRadius: 2,
+                    fontSize: "0.85rem",
+                    fontWeight: isActive ? 600 : 500,
                     textTransform: "none",
                     whiteSpace: "nowrap",
-                    transition: "all 0.2s ease",
-                    position: "relative",
-
-                    // Clean active state
-                    ...(activeSection === section.id && {
-                      bgcolor: colors.primary,
-                      borderColor: colors.primary,
-                      color: "white",
-                      boxShadow: `0 2px 8px ${colors.primary}40`,
-                      "&::after": {
-                        content: '""',
-                        position: "absolute",
-                        bottom: -1,
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        width: "60%",
-                        height: 2,
-                        bgcolor: colors.accent,
-                        borderRadius: 1,
-                      },
-                    }),
-
+                    color: isActive ? "white" : colors.textSecondary,
+                    bgcolor: isActive ? colors.primary : "transparent",
+                    boxShadow: isActive
+                      ? `0 4px 12px ${colors.primary}40`
+                      : "none",
+                    border: isActive
+                      ? "none"
+                      : `1px solid ${colors.border}`,
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                     "&:hover": {
+                      bgcolor: isActive
+                        ? colors.primary
+                        : colors.surfaceHover,
+                      color: isActive ? "white" : colors.text,
                       transform: "translateY(-1px)",
-                      ...(activeSection === section.id
-                        ? {
-                            boxShadow: `0 4px 12px ${colors.primary}50`,
-                          }
-                        : {
-                            bgcolor: colors.surfaceHover,
-                            borderColor: colors.primary,
-                          }),
                     },
-
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 0.5,
                   }}
                 >
-                  <span style={{ fontSize: "0.9rem" }}>{section.icon}</span>
-                  {!isExtraSmall && (
-                    <span>
-                      {section.label.length > 7
-                        ? section.label.substring(0, 5) + "..."
-                        : section.label}
-                    </span>
-                  )}
+                  <span style={{ marginRight: "6px" }}>{section.icon}</span>
+                  {section.label}
                 </Button>
-              ))}
-            </Box>
-          ) : (
-            /* Desktop/Tablet Clean Grid Layout */
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: {
-                  sm: "repeat(3, 1fr)",
-                  md: "repeat(4, 1fr)",
-                  lg: "repeat(5, 1fr)",
-                  xl: "repeat(9, 1fr)",
-                },
-                gap: { xs: 0.75, sm: 1 },
-                maxWidth: "100%",
-              }}
-            >
-              {SECTIONS.map((section) => (
-                <Button
-                  key={section.id}
-                  onClick={() => handleSectionChange(section.id)}
-                  data-section={section.id}
-                  variant={
-                    activeSection === section.id ? "contained" : "outlined"
-                  }
-                  size="small"
-                  sx={{
-                    minWidth: 0,
-                    px: { xs: 1, sm: 1.5 },
-                    py: { xs: 1, sm: 1.25 },
-                    height: { xs: 40, sm: 44 },
-                    fontSize: { xs: "0.7rem", sm: "0.75rem" },
-                    fontWeight: activeSection === section.id ? 600 : 500,
-                    borderRadius: 2,
-                    textTransform: "none",
-                    transition: "all 0.2s ease",
-                    position: "relative",
-
-                    // Clean active state
-                    ...(activeSection === section.id && {
-                      bgcolor: colors.primary,
-                      borderColor: colors.primary,
-                      color: "white",
-                      boxShadow: `0 3px 10px ${colors.primary}40`,
-                      "&::after": {
-                        content: '""',
-                        position: "absolute",
-                        bottom: -1,
-                        left: "50%",
-                        transform: "translateX(-50%)",
-                        width: "70%",
-                        height: 2,
-                        bgcolor: colors.accent,
-                        borderRadius: 1,
-                      },
-                    }),
-
-                    "&:hover": {
-                      transform: "translateY(-2px)",
-                      ...(activeSection === section.id
-                        ? {
-                            boxShadow: `0 6px 16px ${colors.primary}50`,
-                          }
-                        : {
-                            bgcolor: colors.surfaceHover,
-                            borderColor: colors.primary,
-                            boxShadow: `0 2px 8px ${colors.border}30`,
-                          }),
-                    },
-
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 0.5,
-                  }}
-                >
-                  <span style={{ fontSize: { xs: "1rem", sm: "1.1rem" } }}>
-                    {section.icon}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: "inherit",
-                      lineHeight: 1.1,
-                      textAlign: "center",
-                    }}
-                  >
-                    {section.label}
-                  </span>
-                </Button>
-              ))}
-            </Box>
-          )}
+              );
+            })}
+          </Stack>
         </Box>
       </Container>
     </Box>
@@ -1292,335 +1167,149 @@ const DashboardPage = () => {
     (e) => setSelectedSector(e.target.value),
     []
   );
-  // Render function for the header (RESPONSIVE MARKET LIVE TERMINAL)
+  // Render function for the header (MODERN CLEAN HEADER)
   const renderHeader = () => (
     <AppBar
       position="sticky"
       elevation={0}
       sx={{
-        bgcolor: "background.paper",
+        bgcolor: colors.background + "cc", // High transparency
         color: "text.primary",
         borderBottom: `1px solid ${colors.border}`,
-        backdropFilter: "blur(10px)",
-        background: `linear-gradient(135deg, ${colors.cardBackground}95 0%, ${colors.surface}95 100%)`,
+        backdropFilter: "blur(12px)",
+        transition: "all 0.3s ease",
       }}
     >
       <Container maxWidth="xl">
         <Toolbar
+          disableGutters
           sx={{
             display: "flex",
-            flexDirection: "column",
-            alignItems: "stretch",
-            py: { xs: 0.75, sm: 1 },
-            px: { xs: 1, sm: 2 },
-            minHeight: "auto",
+            justifyContent: "space-between",
+            alignItems: "center",
+            py: 1,
+            px: { xs: 2, sm: 3 },
+            minHeight: { xs: 56, sm: 64 },
           }}
         >
-          {/* Bloomberg-Style Terminal Header */}
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              minHeight: { xs: 40, sm: 48 },
-              flexWrap: "nowrap",
-              overflow: "hidden",
-            }}
-          >
-            {/* Terminal Title with Professional Styling */}
+          {/* Logo & Title */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 32,
+                height: 32,
+                borderRadius: "8px",
+                background: `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: `0 4px 12px ${colors.primary}40`,
+              }}
+            >
+              <span style={{ fontSize: "1.2rem" }}>📈</span>
+            </Box>
+            <Box>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 700,
+                  fontSize: { xs: "1rem", sm: "1.1rem" },
+                  letterSpacing: "-0.5px",
+                  color: colors.text,
+                  lineHeight: 1.2,
+                }}
+              >
+                TRADING<span style={{ color: colors.primary }}>BOT</span>
+              </Typography>
+              {isMobile ? null : (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: colors.textSecondary,
+                    fontSize: "0.7rem",
+                    fontWeight: 500,
+                    letterSpacing: "0.5px",
+                  }}
+                >
+                  LIVE TERMINAL
+                </Typography>
+              )}
+            </Box>
+          </Box>
+
+          {/* Right Side: Status & Actions */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1, sm: 2 } }}>
+            {/* Market Status Pill */}
             <Box
               sx={{
                 display: "flex",
                 alignItems: "center",
-                flex: 1,
-                minWidth: 0,
+                gap: 0.75,
+                px: 1.5,
+                py: 0.5,
+                borderRadius: "20px",
+                bgcolor: colors.surface,
+                border: `1px solid ${colors.border}`,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  bgcolor: marketStatusDisplay.color,
+                  boxShadow: `0 0 8px ${marketStatusDisplay.color}60`,
+                }}
+              />
+              <Typography
+                variant="caption"
+                sx={{
+                  fontWeight: 600,
+                  color: colors.text,
+                  fontSize: "0.75rem",
+                  display: { xs: "none", sm: "block" },
+                }}
+              >
+                {marketStatusDisplay.text}
+              </Typography>
+            </Box>
+
+            {/* Connection Status */}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
               }}
             >
               <Typography
-                variant={isMobile ? "h6" : "h5"}
-                component="div"
+                variant="caption"
                 sx={{
-                  fontWeight: 700,
-                  fontSize: { xs: "1rem", sm: "1.25rem", md: "1.5rem" },
-                  fontFamily: '"SF Pro Display", "Segoe UI", sans-serif',
-                  background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`,
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                  letterSpacing: { xs: "0.5px", sm: "1px" },
-                  textTransform: "uppercase",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.75,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  color: isConnected ? colors.positive : colors.negative,
+                  fontWeight: 600,
+                  fontSize: "0.75rem",
+                  bgcolor: isConnected ? colors.positive + "10" : colors.negative + "10",
+                  px: 1,
+                  py: 0.25,
+                  borderRadius: "6px",
                 }}
               >
-                <Box
-                  component="span"
-                  sx={{
-                    fontSize: { xs: "1.2rem", sm: "1.5rem" },
-                    filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.3))",
-                  }}
-                >
-                  📈
-                </Box>
-                {isMobile ? "TERMINAL" : "LIVE MARKET TERMINAL"}
+                {isConnected ? "CONNECTED" : "DISCONNECTED"}
               </Typography>
-
-              {/* Live Indicator */}
-              <Box
-                sx={{
-                  ml: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.5,
-                }}
-              >
-                <Box
-                  sx={{
-                    width: { xs: 6, sm: 8 },
-                    height: { xs: 6, sm: 8 },
-                    borderRadius: "50%",
-                    bgcolor: isConnected ? colors.positive : colors.negative,
-                    animation: isConnected ? "pulse 2s infinite" : "none",
-                    boxShadow: isConnected
-                      ? `0 0 10px ${colors.positive}50`
-                      : `0 0 10px ${colors.negative}50`,
-                    "@keyframes pulse": {
-                      "0%": { opacity: 1, transform: "scale(1)" },
-                      "50%": { opacity: 0.7, transform: "scale(1.1)" },
-                      "100%": { opacity: 1, transform: "scale(1)" },
-                    },
-                  }}
-                />
-              </Box>
-            </Box>
-
-            {/* Status Indicators - Professional Bloomberg Style */}
-            <Box
-              sx={{
-                display: "flex",
-                gap: { xs: 0.5, sm: 0.75, md: 1 },
-                flexShrink: 0,
-                alignItems: "center",
-              }}
-            >
-              {/* Market Status */}
-              <Chip
-                icon={
-                  <span style={{ fontSize: "0.8rem" }}>
-                    {marketStatusDisplay.icon}
-                  </span>
-                }
-                label={
-                  isMobile && marketStatusDisplay.text.length > 8
-                    ? marketStatusDisplay.text.substring(0, 6)
-                    : marketStatusDisplay.text
-                }
-                size="small"
-                sx={{
-                  bgcolor: marketStatusDisplay.color,
-                  color: "white",
-                  fontWeight: 600,
-                  fontSize: { xs: "0.65rem", sm: "0.7rem" },
-                  height: { xs: 22, sm: 26 },
-                  borderRadius: 1,
-                  boxShadow: `0 2px 8px ${marketStatusDisplay.color}30`,
-                  "& .MuiChip-icon": {
-                    color: "white",
-                    ml: 0.25,
-                    mr: -0.25,
-                  },
-                  "& .MuiChip-label": {
-                    px: { xs: 0.75, sm: 1 },
-                    fontFamily: '"SF Mono", "Consolas", monospace',
-                  },
-                }}
-              />
-
-              {/* Connection Status */}
-              <Chip
-                label={
-                  isMobile ? (isConnected ? "CONN" : "DISC") : connectionStatus
-                }
-                size="small"
-                sx={{
-                  bgcolor: isConnected ? colors.positive : colors.negative,
-                  color: "white",
-                  fontWeight: 600,
-                  fontSize: { xs: "0.65rem", sm: "0.7rem" },
-                  height: { xs: 22, sm: 26 },
-                  borderRadius: 1,
-                  boxShadow: isConnected
-                    ? `0 2px 8px ${colors.positive}30`
-                    : `0 2px 8px ${colors.negative}30`,
-                  cursor: !isConnected ? "pointer" : "default",
-                  transition: "all 0.2s ease",
-                  "&:hover": !isConnected
-                    ? {
-                        transform: "translateY(-1px)",
-                        boxShadow: isConnected
-                          ? `0 3px 12px ${colors.positive}40`
-                          : `0 3px 12px ${colors.negative}40`,
-                      }
-                    : {},
-                  "& .MuiChip-label": {
-                    px: { xs: 0.75, sm: 1 },
-                    fontFamily: '"SF Mono", "Consolas", monospace',
-                  },
-                }}
-                onClick={!isConnected ? reconnect : undefined}
-              />
-
-              {/* Refresh Button for Disconnected State */}
               {!isConnected && (
                 <IconButton
                   size="small"
                   onClick={reconnect}
                   sx={{
-                    width: { xs: 24, sm: 28 },
-                    height: { xs: 24, sm: 28 },
-                    bgcolor: colors.primary,
-                    color: "white",
-                    borderRadius: 1,
-                    "&:hover": {
-                      bgcolor: colors.accent,
-                      transform: "translateY(-1px)",
-                      boxShadow: `0 4px 12px ${colors.primary}40`,
-                    },
-                    transition: "all 0.2s ease",
+                    color: colors.text,
+                    bgcolor: colors.surfaceHover,
+                    width: 24,
+                    height: 24,
                   }}
                 >
-                  <RefreshIcon sx={{ fontSize: { xs: 14, sm: 16 } }} />
+                  <RefreshIcon sx={{ fontSize: 14 }} />
                 </IconButton>
               )}
-
-              {/* Data Staleness Indicator */}
-              {isStale && (
-                <Chip
-                  label="STALE"
-                  size="small"
-                  sx={{
-                    bgcolor: colors.neutral,
-                    color: "white",
-                    fontWeight: 600,
-                    fontSize: { xs: "0.6rem", sm: "0.65rem" },
-                    height: { xs: 20, sm: 24 },
-                    borderRadius: 1,
-                    "& .MuiChip-label": {
-                      px: 0.5,
-                      fontFamily: '"SF Mono", "Consolas", monospace',
-                    },
-                  }}
-                />
-              )}
-            </Box>
-          </Box>
-
-          {/* Market Statistics - Professional Terminal Style */}
-          <Box
-            sx={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: { xs: 0.5, sm: 0.75 },
-              justifyContent: "flex-start",
-              mt: { xs: 0.75, sm: 1 },
-              pt: { xs: 0.75, sm: 1 },
-              borderTop: `1px solid ${colors.border}30`,
-            }}
-          >
-            {[
-              {
-                icon: "📊",
-                value: totalStocks,
-                label: "STOCKS",
-                color: colors.primary,
-              },
-              {
-                icon: "🏢",
-                value: sectors.length,
-                label: "SECTORS",
-                color: colors.secondary,
-              },
-              {
-                icon: "📈",
-                value: totalIndices || indices.length,
-                label: "INDICES",
-                color: colors.accent,
-              },
-              ...(majorIndicesCount > 0
-                ? [
-                    {
-                      icon: "🏛️",
-                      value: majorIndicesCount,
-                      label: "MAJOR",
-                      color: colors.positive,
-                    },
-                  ]
-                : []),
-              ...(isConnected
-                ? [
-                    {
-                      icon: "⚡",
-                      value: "LIVE",
-                      label: "DATA",
-                      color: colors.positive,
-                    },
-                  ]
-                : []),
-            ].map((stat, index) => (
-              <Chip
-                key={index}
-                icon={<span style={{ fontSize: "0.75rem" }}>{stat.icon}</span>}
-                label={`${stat.value} ${stat.label}`}
-                size="small"
-                variant="outlined"
-                sx={{
-                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
-                  height: { xs: 20, sm: 24 },
-                  borderColor: stat.color,
-                  color: stat.color,
-                  bgcolor: `${stat.color}08`,
-                  fontWeight: 600,
-                  borderRadius: 1,
-                  "& .MuiChip-icon": {
-                    color: stat.color,
-                    ml: 0.25,
-                    mr: -0.25,
-                  },
-                  "& .MuiChip-label": {
-                    px: { xs: 0.5, sm: 0.75 },
-                    fontFamily: '"SF Mono", "Consolas", monospace',
-                  },
-                  transition: "all 0.2s ease",
-                  "&:hover": {
-                    bgcolor: `${stat.color}15`,
-                    borderColor: stat.color,
-                    transform: "translateY(-1px)",
-                  },
-                }}
-              />
-            ))}
-
-            {/* Current Time Display */}
-            <Box sx={{ ml: "auto", display: "flex", alignItems: "center" }}>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: colors.textSecondary,
-                  fontSize: { xs: "0.6rem", sm: "0.65rem" },
-                  fontFamily: '"SF Mono", "Consolas", monospace',
-                  px: 1,
-                  py: 0.25,
-                  bgcolor: colors.surface,
-                  borderRadius: 1,
-                  border: `1px solid ${colors.border}`,
-                }}
-              >
-                {new Date().toLocaleTimeString()}
-              </Typography>
             </Box>
           </Box>
         </Toolbar>
@@ -2003,7 +1692,7 @@ const DashboardPage = () => {
           title={`🏛️ INDICES (${indices.length})`}
           data={indices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-          showVolume={!isMobile} // Hide volume on mobile
+          showVolume={true} // Always show volume
           isLoading={!isConnected}
           maxItems={isMobile ? 8 : 12} // Show fewer items on mobile
           density="compact" // Use compact density
@@ -2032,7 +1721,7 @@ const DashboardPage = () => {
           <MemoizedStocksListOptimized
             title={`🚀 GAINERS (${getTopMoversData().gainers.length})`}
             symbols={getTopMoversData().gainers}
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={isMobile ? 5 : 8} // Show fewer items on mobile
             isLoading={getTopMoversData().gainers.length === 0}
@@ -2055,7 +1744,7 @@ const DashboardPage = () => {
           <MemoizedStocksListOptimized
             title={`📉 LOSERS (${getTopMoversData().losers.length})`}
             symbols={getTopMoversData().losers}
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={isMobile ? 5 : 8} // Show fewer items on mobile
             isLoading={getTopMoversData().losers.length === 0}
@@ -2083,7 +1772,7 @@ const DashboardPage = () => {
             title={`⚡ BOOSTERS (${intradayBoosters.length})`}
             data={intradayBoosters}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showOptionChain={true} // Enable option chain for boosters
             showSector={false} // Generally hide sector for these lists
             maxItems={isMobile ? 5 : 10} // Show fewer items on mobile
@@ -2110,7 +1799,7 @@ const DashboardPage = () => {
             title={`📊 VOLUME (${volumeLeaders.length})`}
             data={volumeLeaders}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showOptionChain={true} // Enable option chain for volume leaders
             showSector={false} // Generally hide sector for these lists
             maxItems={isMobile ? 5 : 10} // Show fewer items on mobile
@@ -2175,7 +1864,7 @@ const DashboardPage = () => {
             title={`📊 RESULTS (${searchResults.length})`}
             data={searchResults}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showOptionChain={true} // Enable option chain for search results
             showName={true}
             showSector={!isMobile} // Show sector on larger screens if table
@@ -2257,7 +1946,7 @@ const DashboardPage = () => {
           } (${sectorStocks.length})`}
           data={sectorStocks}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-          showVolume={!isMobile} // Hide volume on mobile
+          showVolume={true} // Always show volume
           showName={true}
           showSector={selectedSector === "ALL" && !isMobile} // Show sector on larger screens if table and showing all
           maxItems={50} // Keep maxItems for sector stocks
@@ -2470,7 +2159,7 @@ const DashboardPage = () => {
           title={`🏛️ ALL INDICES (${indices.length})`}
           data={indices}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-          showVolume={!isMobile} // Hide volume on mobile
+          showVolume={true} // Always show volume
           showName={true}
           showSector={false} // Hide sector for indices
           maxItems={isMobile ? 8 : 100} // Show fewer items on mobile, more on desktop
@@ -2532,7 +2221,7 @@ const DashboardPage = () => {
           <MemoizedStocksListOptimized
             title="" // Title already shown above
             symbols={getTopMoversData().gainers}
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={
               expandedSection === "gainers"
@@ -2593,7 +2282,7 @@ const DashboardPage = () => {
           <MemoizedStocksListOptimized
             title="" // Title already shown above
             symbols={getTopMoversData().losers}
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showSector={!isMobile} // Show sector on larger screens if table
             maxItems={
               expandedSection === "losers"
@@ -2624,7 +2313,7 @@ const DashboardPage = () => {
           title={`📊 VOLUME LEADERS (${volumeLeaders.length})`}
           data={volumeLeaders}
           layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-          showVolume={!isMobile} // Hide volume on mobile
+          showVolume={true} // Always show volume
           showSector={!isMobile} // Show sector on larger screens if table
           maxItems={isMobile ? 15 : 20} // Show fewer items on mobile
           isLoading={!isConnected}
@@ -2659,7 +2348,7 @@ const DashboardPage = () => {
             title={`📈 GAP UP (${gapUp.length})`}
             data={gapUp}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showSector={!isMobile} // Show sector on larger screens if table
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
@@ -2705,7 +2394,7 @@ const DashboardPage = () => {
             title={`📉 GAP DOWN (${gapDown.length})`}
             data={gapDown}
             layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-            showVolume={!isMobile} // Hide volume on mobile
+            showVolume={true} // Always show volume
             showSector={!isMobile} // Show sector on larger screens if table
             showTimestamp={true} // Show gap detection time (9:15 AM)
             maxItems={isMobile ? 15 : 25} // Show fewer items on mobile
@@ -3354,7 +3043,7 @@ const DashboardPage = () => {
               title={`📈 F&O STOCKS (${fnoStocks.length})`}
               data={fnoStocksWithLiveData}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-              showVolume={!isMobile} // Hide volume on mobile
+              showVolume={true} // Always show volume
               showName={true}
               showSector={!isMobile} // Show sector for F&O stocks on desktop
               maxItems={isMobile ? fnoStocks.length : fnoStocks.length} // Show all on mobile, limit on desktop if needed
@@ -3524,7 +3213,7 @@ const DashboardPage = () => {
               title={`🎯 NEW HIGHS (${newHighs.length})`}
               data={newHighs}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-              showVolume={!isMobile} // Hide volume on mobile
+              showVolume={true} // Always show volume
               showSector={!isMobile} // Show sector on larger screens if table
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
@@ -3563,7 +3252,7 @@ const DashboardPage = () => {
               title={`⬇️ NEW LOWS (${newLows.length})`}
               data={newLows}
               layoutType={isMobile ? "cards" : "table"} // Use cards on mobile
-              showVolume={!isMobile} // Hide volume on mobile
+              showVolume={true} // Always show volume
               showSector={!isMobile} // Show sector on larger screens if table
               maxItems={isMobile ? 15 : 15} // Show fewer items on mobile
               isLoading={!isConnected}
