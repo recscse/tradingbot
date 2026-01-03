@@ -401,19 +401,14 @@ class UpstoxOptionService:
             return {}
 
     def get_futures_contracts(
-        self, symbol: str, db: Session
+        self, instrument_key: str, db: Session
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Get futures contracts for symbol.
         NOTE: Placeholder – extend when Upstox futures API details are available.
         """
         try:
-            # For F&O-only app, construct instrument key
-            instrument_key = self._get_underlying_key(symbol, db)
-            if not instrument_key:
-                return None
-
-            cache_key = f"futures_{symbol}"
+            cache_key = f"futures_{instrument_key}"
 
             # Check cache
             if cache_key in self.cache:
@@ -432,28 +427,6 @@ class UpstoxOptionService:
         except Exception as e:
             logger.error(f"Error getting futures contracts: {e}")
             return None
-
-    def _get_underlying_key(self, symbol: str, db: Session) -> str:
-        """Get underlying instrument key for symbol"""
-        try:
-            symbol = symbol.upper()
-
-            # Common index mappings for F&O
-            index_mapping = {
-                "NIFTY": "NSE_INDEX|Nifty 50",
-                "BANKNIFTY": "NSE_INDEX|Nifty Bank",
-                "FINNIFTY": "NSE_INDEX|Nifty Fin Service",
-            }
-
-            if symbol in index_mapping:
-                return index_mapping[symbol]
-
-            # For stocks, assume NSE_EQ
-            return f"NSE_EQ|{symbol}"
-
-        except Exception as e:
-            logger.error(f"Error getting underlying key for {symbol}: {e}")
-            return f"NSE_EQ|{symbol}"
 
     def get_live_prices_batch(
         self, instrument_keys: List[str], db: Session
