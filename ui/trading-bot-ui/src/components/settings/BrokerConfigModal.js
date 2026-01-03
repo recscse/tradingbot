@@ -1,15 +1,10 @@
 import React, { useState, useEffect } from "react";
 import {
   Modal,
-  Box,
-  Typography,
-  TextField,
   Button,
-  Select,
-  MenuItem,
   CircularProgress,
-  IconButton,
-  useTheme,
+  Fade,
+  Backdrop,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
 import brokerAPI from "../../services/brokerAPI";
@@ -31,8 +26,8 @@ const BrokerConfigModal = ({
   refreshBrokers,
   existingBrokers,
 }) => {
-  const theme = useTheme();
-  const isDark = theme.palette.mode === "dark";
+  // const theme = useTheme(); // Unused
+  // const isDark = theme.palette.mode === "dark"; // Unused
   const [broker, setBroker] = useState({ broker_name: "", credentials: {} });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -42,6 +37,9 @@ const BrokerConfigModal = ({
 
   useEffect(() => {
     setError(""); // Clear errors when modal opens
+    if (!open) {
+      setBroker({ broker_name: "", credentials: {} }); // Reset form on close
+    }
   }, [open]);
 
   const handleChange = (field, value) => {
@@ -51,19 +49,11 @@ const BrokerConfigModal = ({
     }));
   };
 
-  //  Log existing brokers to check structure
-  console.log("Existing Brokers:", existingBrokers);
-
-  //  Improved duplicate check function
   const isDuplicate = () => {
     return existingBrokers.some((existing) => {
       if (existing.broker_name !== broker.broker_name) return false;
-
       const requiredFields = fields[broker.broker_name] || [];
-
-      //  Extract credentials correctly from the existing broker
       const existingCredentials = existing.config || existing.credentials || {};
-
       return requiredFields.every(
         (field) =>
           existingCredentials[field]?.trim() ===
@@ -105,21 +95,16 @@ const BrokerConfigModal = ({
         const response = await brokerAPI.initUpstoxAuth({
           api_key: broker.credentials.api_key,
           api_secret: broker.credentials.api_secret,
-          redirect_uri: `${BASE_URL}/api/broker/upstox/callback`, // Match with registered URI
+          redirect_uri: `${BASE_URL}/api/broker/upstox/callback`,
         });
 
         const authUrl = response?.auth_url;
         if (authUrl) {
-          // Reset token expired state on successful auth
-          resetTokenExpired();
-          console.log(
-            " Upstox authentication initiated, token expired state reset"
-          );
+          if (resetTokenExpired) resetTokenExpired();
           window.open(authUrl, "_blank");
           onClose();
           return;
         }
-
         setError("Failed to retrieve auth URL.");
       } catch (error) {
         console.error(error);
@@ -143,16 +128,11 @@ const BrokerConfigModal = ({
 
         const authUrl = response?.auth_url;
         if (authUrl) {
-          // Reset token expired state on successful auth
-          resetTokenExpired();
-          console.log(
-            " Fyers authentication initiated, token expired state reset"
-          );
+          if (resetTokenExpired) resetTokenExpired();
           window.open(authUrl, "_blank");
           onClose();
           return;
         }
-
         setError("Failed to retrieve Fyers auth URL.");
       } catch (error) {
         console.error(error);
@@ -181,16 +161,11 @@ const BrokerConfigModal = ({
 
         const authUrl = response?.auth_url;
         if (authUrl) {
-          // Reset token expired state on successful auth
-          resetTokenExpired();
-          console.log(
-            " Angel One authentication initiated, token expired state reset"
-          );
+          if (resetTokenExpired) resetTokenExpired();
           window.open(authUrl, "_blank");
           onClose();
           return;
         }
-
         setError("Failed to retrieve Angel One auth URL.");
       } catch (error) {
         console.error(error);
@@ -203,9 +178,7 @@ const BrokerConfigModal = ({
 
     try {
       await brokerAPI.addBroker(broker);
-      // Reset token expired state on successful broker addition
-      resetTokenExpired();
-      console.log(" Broker added successfully, token expired state reset");
+      if (resetTokenExpired) resetTokenExpired();
       refreshBrokers();
       onClose();
     } catch (error) {
@@ -216,95 +189,118 @@ const BrokerConfigModal = ({
   };
 
   return (
-    <Modal open={open} onClose={onClose}>
-      <Box
-        sx={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          bgcolor: isDark ? "#1e1e1e" : "#fff",
-          color: isDark ? "#fff" : "#000",
-          p: 4,
-          borderRadius: 2,
-          width: 400,
-          boxShadow: 24,
-        }}
-      >
-        <IconButton
-          onClick={onClose}
-          sx={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            color: isDark ? "#fff" : "#000",
-          }}
-        >
-          <Close />
-        </IconButton>
+    <Modal
+      open={open}
+      onClose={onClose}
+      closeAfterTransition
+      BackdropComponent={Backdrop}
+      BackdropProps={{
+        timeout: 500,
+        className: "!tw-bg-slate-900/80 !tw-backdrop-blur-sm",
+      }}
+    >
+      <Fade in={open}>
+        <div className="tw-absolute tw-top-1/2 tw-left-1/2 tw-transform tw--translate-x-1/2 tw--translate-y-1/2 tw-w-full tw-max-w-md tw-p-4 tw-outline-none">
+          <div className="tw-bg-slate-800 tw-border tw-border-slate-700 tw-rounded-2xl tw-shadow-2xl tw-overflow-hidden">
+            {/* Header */}
+            <div className="tw-flex tw-justify-between tw-items-center tw-p-5 tw-border-b tw-border-slate-700 tw-bg-slate-800/50">
+              <h2 className="tw-text-xl tw-font-bold tw-text-slate-100">
+                Connect Broker
+              </h2>
+              <button
+                onClick={onClose}
+                className="tw-text-slate-400 hover:tw-text-white tw-transition-colors tw-rounded-full tw-p-1 hover:tw-bg-slate-700"
+              >
+                <Close />
+              </button>
+            </div>
 
-        <Typography variant="h6" gutterBottom>
-          Add Broker
-        </Typography>
+            {/* Content */}
+            <div className="tw-p-6 tw-space-y-5">
+              <div className="tw-space-y-2">
+                <label className="tw-text-sm tw-font-medium tw-text-slate-300">
+                  Select Broker
+                </label>
+                <div className="tw-relative">
+                  <select
+                    value={broker.broker_name}
+                    onChange={(e) =>
+                      setBroker({
+                        broker_name: e.target.value,
+                        credentials: {},
+                      })
+                    }
+                    className="tw-w-full tw-bg-slate-900 tw-border tw-border-slate-700 tw-rounded-lg tw-px-4 tw-py-3 tw-text-slate-200 focus:tw-outline-none focus:tw-ring-2 focus:tw-ring-blue-500/50 focus:tw-border-blue-500 tw-transition-all tw-appearance-none tw-cursor-pointer"
+                  >
+                    <option value="" disabled>
+                      Choose a provider
+                    </option>
+                    {brokers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="tw-absolute tw-inset-y-0 tw-right-0 tw-flex tw-items-center tw-px-2 tw-pointer-events-none">
+                    <svg
+                      className="tw-w-4 tw-h-4 tw-text-slate-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M19 9l-7 7-7-7"
+                      ></path>
+                    </svg>
+                  </div>
+                </div>
+              </div>
 
-        <Select
-          fullWidth
-          value={broker.broker_name}
-          onChange={(e) =>
-            setBroker({ broker_name: e.target.value, credentials: {} })
-          }
-          sx={{
-            mt: 2,
-            backgroundColor: isDark ? "#2c2c2c" : "#fff",
-            color: isDark ? "#fff" : "#000",
-          }}
-        >
-          {brokers.map((name) => (
-            <MenuItem key={name} value={name}>
-              {name}
-            </MenuItem>
-          ))}
-        </Select>
+              {broker.broker_name && (
+                <div className="tw-space-y-4 tw-animate-in tw-fade-in tw-slide-in-from-top-2 tw-duration-300">
+                  {fields[broker.broker_name]?.map((field) => (
+                    <div key={field} className="tw-space-y-2">
+                      <label className="tw-text-sm tw-font-medium tw-text-slate-300 tw-capitalize">
+                        {field.replace(/_/g, " ")}
+                      </label>
+                      <input
+                        type="text"
+                        onChange={(e) => handleChange(field, e.target.value)}
+                        className="tw-w-full tw-bg-slate-900 tw-border tw-border-slate-700 tw-rounded-lg tw-px-4 tw-py-3 tw-text-slate-200 focus:tw-outline-none focus:tw-ring-2 focus:tw-ring-blue-500/50 focus:tw-border-blue-500 tw-transition-all placeholder:tw-text-slate-600"
+                        placeholder={`Enter ${field.replace(/_/g, " ")}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
 
-        {fields[broker.broker_name]?.map((field) => (
-          <TextField
-            key={field}
-            label={field}
-            fullWidth
-            onChange={(e) => handleChange(field, e.target.value)}
-            sx={{ mt: 2 }}
-            InputLabelProps={{
-              style: { color: isDark ? "#ccc" : "#000" },
-            }}
-            InputProps={{
-              sx: {
-                backgroundColor: isDark ? "#2c2c2c" : "#fff",
-                color: isDark ? "#fff" : "#000",
-              },
-            }}
-          />
-        ))}
+              {error && (
+                <div className="tw-bg-red-500/10 tw-border tw-border-red-500/20 tw-text-red-400 tw-text-sm tw-p-3 tw-rounded-lg tw-flex tw-items-center tw-gap-2">
+                  <span className="tw-w-1.5 tw-h-1.5 tw-rounded-full tw-bg-red-500" />
+                  {error}
+                </div>
+              )}
 
-        {error && (
-          <Typography color="error" sx={{ mt: 1 }}>
-            {error}
-          </Typography>
-        )}
-
-        <Button
-          variant="contained"
-          fullWidth
-          onClick={handleSubmit}
-          disabled={loading}
-          sx={{ mt: 3 }}
-        >
-          {loading ? (
-            <CircularProgress size={20} color="inherit" />
-          ) : (
-            "Add Broker"
-          )}
-        </Button>
-      </Box>
+              <Button
+                variant="contained"
+                fullWidth
+                onClick={handleSubmit}
+                disabled={loading}
+                className="!tw-bg-blue-600 hover:!tw-bg-blue-700 !tw-text-white !tw-py-3 !tw-rounded-lg !tw-font-bold !tw-shadow-lg !tw-shadow-blue-900/20 disabled:!tw-opacity-50 disabled:!tw-cursor-not-allowed !tw-mt-2 !tw-normal-case"
+              >
+                {loading ? (
+                  <CircularProgress size={24} className="!tw-text-white/80" />
+                ) : (
+                  "Connect Account"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Fade>
     </Modal>
   );
 };
