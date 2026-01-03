@@ -289,6 +289,20 @@ class AutoTradeLiveFeed:
                     logger.error(f"Invalid option_type for {stock.symbol}")
                     continue
 
+                # EXTRACT POSITION SIZE (LOTS) from enhanced metadata if available
+                target_lots = 1
+                try:
+                    if stock.score_breakdown:
+                        import json
+                        metadata = (
+                            json.loads(stock.score_breakdown)
+                            if isinstance(stock.score_breakdown, str)
+                            else stock.score_breakdown
+                        )
+                        target_lots = int(metadata.get("position_size_lots", 1))
+                except Exception:
+                    logger.warning(f"Could not extract target_lots for {stock.symbol}")
+
                 # REGISTER INSTRUMENT ONCE (shared across all users)
                 instrument = shared_registry.register_instrument(
                     stock_symbol=stock.symbol,
@@ -297,7 +311,8 @@ class AutoTradeLiveFeed:
                     option_type=option_type,
                     strike_price=Decimal(str(option_data.get("strike_price", 0))),
                     expiry_date=stock.option_expiry_date or option_data.get("expiry_date"),
-                    lot_size=option_data.get("lot_size", 1)
+                    lot_size=option_data.get("lot_size", 1),
+                    target_lots=target_lots
                 )
 
                 # SUBSCRIBE ALL USERS to this instrument
@@ -1131,7 +1146,8 @@ class AutoTradeLiveFeed:
                 open_interest=instrument.open_interest,
                 volume=instrument.volume,
                 bid_price=instrument.bid_price,
-                ask_price=instrument.ask_price
+                ask_price=instrument.ask_price,
+                target_lots=instrument.target_lots
             )
 
             prepared_status = getattr(prepared_trade, "status", None)
@@ -1413,8 +1429,10 @@ class AutoTradeLiveFeed:
                     return True, "TARGET_HIT"
 
             # SMART TIME-BASED EXIT with expiry day handling
-            now_t = datetime.now().time()
-            now_date = datetime.now().date()
+            from utils.timezone_utils import get_ist_now
+            now_ist = get_ist_now()
+            now_t = now_ist.time()
+            now_date = now_ist.date()
             entry_price_decimal = position_data.get("entry_price", Decimal("0"))
 
             # Parse expiry date
@@ -1528,6 +1546,29 @@ class AutoTradeLiveFeed:
             del self.active_user_positions[user_id][instrument.option_instrument_key]
 
             self.stats["positions_closed"] += 1
+
+            # UPDATE PAPER TRADING ACCOUNT BALANCE
+            if trade.trading_mode == "paper":
+                try:
+                    from services.paper_trading_account import PaperAccount
+                    
+                    paper_account = db.query(PaperAccount).filter(PaperAccount.user_id == user_id).first()
+                    if paper_account:
+                        # Calculate amount to return to balance (Invested + PnL)
+                        release_amount = float(trade.total_investment) + float(pnl)
+                        
+                        paper_account.available_margin += release_amount
+                        paper_account.current_balance += release_amount
+                        paper_account.used_margin -= float(trade.total_investment)
+                        paper_account.total_pnl += float(pnl)
+                        paper_account.daily_pnl += float(pnl)
+                        paper_account.positions_count = max(0, paper_account.positions_count - 1)
+                        paper_account.updated_at = get_ist_now_naive()
+                        
+                        logger.info(f"Updated paper account for user {user_id}: Balance={paper_account.current_balance:.2f}")
+                except Exception as e:
+                    logger.error(f"Error updating paper account balance: {e}")
+
             db.commit()
 
             logger.info(

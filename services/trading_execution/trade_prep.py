@@ -11,6 +11,7 @@ from enum import Enum
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
+from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from services.trading_execution.capital_manager import (
     capital_manager,
     TradingMode,
@@ -184,9 +185,10 @@ class TradePrepService:
             if lot_size <= 1:
                 try:
                     from services.upstox_option_service import upstox_option_service
+                    from services.optimized_instrument_service import get_primary_instrument_key
                     # Fetch contract details to get authoritative lot size
-                    # Use public get_underlying_key to get correct key for symbol/index
-                    underlying_key = upstox_option_service.get_underlying_key(stock_symbol, db)
+                    # Use optimized service to get correct key for symbol/index
+                    underlying_key = get_primary_instrument_key(stock_symbol)
                     contracts = upstox_option_service.get_option_contracts(underlying_key, db)
                     if contracts and len(contracts) > 0:
                         fetched_lot_size = int(contracts[0].get("lot_size", 0))
@@ -497,9 +499,9 @@ class TradePrepService:
                 trading_mode=trading_mode.value,
                 broker_name=broker_name,
                 user_id=user_id,
-                prepared_at=datetime.now().isoformat(),
+                prepared_at=get_ist_isoformat(),
                 valid_until=(
-                    datetime.now() + timedelta(minutes=self.signal_validity_minutes)
+                    get_ist_now_naive() + timedelta(minutes=self.signal_validity_minutes)
                 ).isoformat(),
                 metadata={
                     "signal_confidence": float(premium_signal.confidence),
@@ -589,8 +591,9 @@ class TradePrepService:
             if lot_size <= 1:
                 try:
                     from services.upstox_option_service import upstox_option_service
+                    from services.optimized_instrument_service import get_primary_instrument_key
                     # Fetch contract details to get authoritative lot size
-                    underlying_key = upstox_option_service.get_underlying_key(stock_symbol, db)
+                    underlying_key = get_primary_instrument_key(stock_symbol)
                     contracts = upstox_option_service.get_option_contracts(underlying_key, db)
                     if contracts and len(contracts) > 0:
                         fetched_lot_size = int(contracts[0].get("lot_size", 0))
@@ -788,9 +791,9 @@ class TradePrepService:
                 trading_mode=trading_mode.value,
                 broker_name=broker_name,
                 user_id=user_id,
-                prepared_at=datetime.now().isoformat(),
+                prepared_at=get_ist_isoformat(),
                 valid_until=(
-                    datetime.now() + timedelta(minutes=self.signal_validity_minutes)
+                    get_ist_now_naive() + timedelta(minutes=self.signal_validity_minutes)
                 ).isoformat(),
                 metadata={
                     "signal_confidence": float(signal.confidence),
@@ -990,7 +993,7 @@ class TradePrepService:
             broker = UpstoxBroker(broker_config)
 
             # Fetch 1-minute candles for last 1 day
-            to_date = datetime.now()
+            to_date = get_ist_now_naive()
             from_date = to_date - timedelta(days=1)
 
             historical_data = broker.get_historical_data(
@@ -1125,9 +1128,9 @@ class TradePrepService:
             trading_mode=trading_mode.value,
             broker_name=broker_name,
             user_id=user_id,
-            prepared_at=datetime.now().isoformat(),
+            prepared_at=get_ist_isoformat(),
             valid_until=(
-                datetime.now() + timedelta(minutes=self.signal_validity_minutes)
+                get_ist_now_naive() + timedelta(minutes=self.signal_validity_minutes)
             ).isoformat(),
             metadata={"reason": signal.reason},
         )
@@ -1168,8 +1171,8 @@ class TradePrepService:
             trading_mode=trading_mode.value,
             broker_name=None,
             user_id=user_id,
-            prepared_at=datetime.now().isoformat(),
-            valid_until=datetime.now().isoformat(),
+            prepared_at=get_ist_isoformat(),
+            valid_until=get_ist_isoformat(),
             metadata={"error": error_message},
         )
 

@@ -709,7 +709,8 @@ class RealTimePnLTracker:
     def get_user_positions_summary(
         self,
         user_id: int,
-        db: Session
+        db: Session,
+        trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get summary of all positions for a user
@@ -717,17 +718,28 @@ class RealTimePnLTracker:
         Args:
             user_id: User identifier
             db: Database session
+            trading_mode: Trading mode filter (paper/live)
 
         Returns:
             Summary dict with aggregate PnL and positions
         """
         try:
-            active_positions = db.query(ActivePosition).filter(
+            query = db.query(ActivePosition).filter(
                 and_(
                     ActivePosition.user_id == user_id,
                     ActivePosition.is_active == True
                 )
-            ).all()
+            )
+
+            if trading_mode:
+                query = query.join(
+                    AutoTradeExecution,
+                    ActivePosition.trade_execution_id == AutoTradeExecution.id
+                ).filter(
+                    AutoTradeExecution.trading_mode == trading_mode
+                )
+
+            active_positions = query.all()
 
             total_pnl = sum(
                 Decimal(str(pos.current_pnl)) for pos in active_positions

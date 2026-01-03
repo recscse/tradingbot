@@ -53,7 +53,7 @@ class ExecuteTradeRequest(BaseModel):
     option_type: str = Field(..., description="CE or PE")
     strike_price: Decimal = Field(..., description="Strike price")
     expiry_date: str = Field(..., description="Expiry date (YYYY-MM-DD)")
-    lot_size: int = Field(..., description="Lot size")
+    lot_size: Optional[int] = Field(None, description="Lot size (optional, will be fetched if not provided)")
     trading_mode: str = Field("paper", description="Trading mode: paper or live")
 
 
@@ -87,8 +87,18 @@ async def prepare_trade(
     **Returns:** PreparedTrade with complete execution details
     """
     try:
+        # Get correct lot size
+        lot_size = request.lot_size
+        if not lot_size:
+            # Fetch from database
+            from services.upstox_option_service import upstox_option_service
+            instrument_details = upstox_option_service.get_instrument_details(request.option_instrument_key, db)
+            if instrument_details and instrument_details.get("lot_size"):
+                lot_size = instrument_details["lot_size"]
+            else:
+                raise HTTPException(status_code=400, detail="Lot size not provided and could not be fetched.")
+        
         trading_mode = TradingMode(request.trading_mode)
-
         prepared_trade = await trade_prep_service.prepare_trade(
             user_id=current_user.id,
             stock_symbol=request.stock_symbol,
@@ -96,7 +106,7 @@ async def prepare_trade(
             option_type=request.option_type,
             strike_price=request.strike_price,
             expiry_date=request.expiry_date,
-            lot_size=request.lot_size,
+            lot_size=lot_size,
             db=db,
             trading_mode=trading_mode,
         )
@@ -152,6 +162,17 @@ async def execute_trade(
     try:
         # Prepare trade
         trading_mode = TradingMode(request.trading_mode)
+        # Get correct lot size
+        lot_size = request.lot_size
+        if not lot_size:
+            # Fetch from database
+            from services.upstox_option_service import upstox_option_service
+            instrument_details = upstox_option_service.get_instrument_details(request.option_instrument_key, db)
+            if instrument_details and instrument_details.get("lot_size"):
+                lot_size = instrument_details["lot_size"]
+            else:
+                raise HTTPException(status_code=400, detail="Lot size not provided and could not be fetched.")
+
         prepared_trade = await trade_prep_service.prepare_trade(
             user_id=current_user.id,
             stock_symbol=request.stock_symbol,
@@ -159,7 +180,7 @@ async def execute_trade(
             option_type=request.option_type,
             strike_price=request.strike_price,
             expiry_date=request.expiry_date,
-            lot_size=request.lot_size,
+            lot_size=lot_size,
             db=db,
             trading_mode=trading_mode,
         )
@@ -498,20 +519,56 @@ async def get_active_positions(
 
 
 @router.get("/pnl-summary")
+
+
 async def get_pnl_summary(
-    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+
+
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
+
+
+    current_user: User = Depends(get_current_user),
+
+
+    db: Session = Depends(get_db)
+
+
 ):
+
+
     """
+
+
     Get aggregate PnL summary for user
 
+
+
+
+
     **Returns:** Total PnL, investment, win rate, and position counts
+
+
     """
+
+
     try:
-        summary = pnl_tracker.get_user_positions_summary(current_user.id, db)
+
+
+        summary = pnl_tracker.get_user_positions_summary(current_user.id, db, trading_mode)
+
+
         return {"success": True, "summary": summary}
 
+
+
+
+
     except Exception as e:
+
+
         logger.error(f"Error getting PnL summary: {e}")
+
+
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -946,6 +1003,7 @@ async def get_selected_stocks_live_prices(
 @router.get("/trade-history")
 async def get_trade_history(
     limit: int = Query(50, description="Number of trades to fetch"),
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -955,16 +1013,15 @@ async def get_trade_history(
     **Returns:** List of closed trades with PnL details
     """
     try:
-        trades = (
-            db.query(AutoTradeExecution)
-            .filter(
-                AutoTradeExecution.user_id == current_user.id,
-                AutoTradeExecution.status == "CLOSED",
-            )
-            .order_by(AutoTradeExecution.exit_time.desc())
-            .limit(limit)
-            .all()
+        query = db.query(AutoTradeExecution).filter(
+            AutoTradeExecution.user_id == current_user.id,
+            AutoTradeExecution.status == "CLOSED",
         )
+
+        if trading_mode:
+            query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
+
+        trades = query.order_by(AutoTradeExecution.exit_time.desc()).limit(limit).all()
 
         trade_history = []
 
@@ -1252,7 +1309,7 @@ async def get_user_capital_overview(
     **Use Case:** Display capital dashboard in UI before trade execution
     """
     try:
-        capital_overview = multi_demat_capital_service.get_user_total_capital(
+        capital_overview = await multi_demat_capital_service.get_user_total_capital(
             user_id=current_user.id, db=db, trading_mode=trading_mode
         )
 
@@ -1433,6 +1490,7 @@ async def get_portfolio_summary(
 @router.get("/performance/daily")
 async def get_daily_performance(
     target_date: Optional[str] = Query(None, description="Target date (YYYY-MM-DD), default: today"),
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1463,7 +1521,8 @@ async def get_daily_performance(
         performance = trade_analytics_service.get_daily_performance(
             user_id=current_user.id,
             db=db,
-            target_date=target
+            target_date=target,
+            trading_mode=trading_mode
         )
 
         return performance
@@ -1477,6 +1536,7 @@ async def get_daily_performance(
 
 @router.get("/performance/weekly")
 async def get_weekly_performance(
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1495,7 +1555,8 @@ async def get_weekly_performance(
 
         performance = trade_analytics_service.get_weekly_performance(
             user_id=current_user.id,
-            db=db
+            db=db,
+            trading_mode=trading_mode
         )
 
         return performance
@@ -1507,6 +1568,7 @@ async def get_weekly_performance(
 
 @router.get("/performance/monthly")
 async def get_monthly_performance(
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1525,7 +1587,8 @@ async def get_monthly_performance(
 
         performance = trade_analytics_service.get_monthly_performance(
             user_id=current_user.id,
-            db=db
+            db=db,
+            trading_mode=trading_mode
         )
 
         return performance
@@ -1537,6 +1600,7 @@ async def get_monthly_performance(
 
 @router.get("/performance/six-month")
 async def get_six_month_performance(
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1544,7 +1608,7 @@ async def get_six_month_performance(
     Get 6-month trading performance metrics (last 180 days)
 
     **Returns:**
-    - All metrics aggregated for 6 months
+    - All daily metrics aggregated for 6 months
     - Weekly breakdown of performance
     - Trend analysis
 
@@ -1555,7 +1619,8 @@ async def get_six_month_performance(
 
         performance = trade_analytics_service.get_six_month_performance(
             user_id=current_user.id,
-            db=db
+            db=db,
+            trading_mode=trading_mode
         )
 
         return performance
@@ -1567,6 +1632,7 @@ async def get_six_month_performance(
 
 @router.get("/performance/yearly")
 async def get_yearly_performance(
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1574,7 +1640,7 @@ async def get_yearly_performance(
     Get 1-year trading performance metrics (last 365 days)
 
     **Returns:**
-    - All metrics aggregated for the year
+    - All daily metrics aggregated for the year
     - Monthly breakdown of performance
     - Year-over-year comparison (if available)
 
@@ -1585,7 +1651,8 @@ async def get_yearly_performance(
 
         performance = trade_analytics_service.get_yearly_performance(
             user_id=current_user.id,
-            db=db
+            db=db,
+            trading_mode=trading_mode
         )
 
         return performance
@@ -1597,6 +1664,7 @@ async def get_yearly_performance(
 
 @router.get("/performance/summary")
 async def get_performance_summary(
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1620,7 +1688,8 @@ async def get_performance_summary(
 
         performance = trade_analytics_service.get_overall_performance(
             user_id=current_user.id,
-            db=db
+            db=db,
+            trading_mode=trading_mode
         )
 
         return performance
@@ -1630,9 +1699,40 @@ async def get_performance_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/performance/system-health")
+async def get_system_health_performance(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get system health and operational analytics
+
+    **Returns:**
+    - Latency metrics (signal generation, execution)
+    - Hourly trade distribution
+    - Broker-wise performance breakdown
+
+    **Use Case:** Monitoring system efficiency and operational patterns
+    """
+    try:
+        from services.trading_execution.trade_analytics_service import trade_analytics_service
+
+        analytics = trade_analytics_service.get_system_health_analytics(
+            user_id=current_user.id,
+            db=db
+        )
+
+        return analytics
+
+    except Exception as e:
+        logger.error(f"Error getting system health performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/performance/detailed")
 async def get_detailed_performance(
     limit: int = Query(100, description="Number of trades to fetch (max 500)"),
+    trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1641,6 +1741,7 @@ async def get_detailed_performance(
 
     **Args:**
     - limit: Number of recent trades to return (default: 100, max: 500)
+    - trading_mode: Filter by paper or live mode
 
     **Returns:**
     - Detailed list of all closed trades
@@ -1662,7 +1763,8 @@ async def get_detailed_performance(
         performance = trade_analytics_service.get_detailed_performance(
             user_id=current_user.id,
             db=db,
-            limit=limit
+            limit=limit,
+            trading_mode=trading_mode
         )
 
         return performance

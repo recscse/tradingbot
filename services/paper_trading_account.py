@@ -236,6 +236,7 @@ class PaperTradingAccountService:
             # Update account
             account.used_margin += trade_data['invested_amount']
             account.available_margin -= trade_data['invested_amount']
+            account.current_balance -= trade_data['invested_amount']
             account.positions_count += 1
             account.updated_at = datetime.now(timezone.utc)
             
@@ -345,11 +346,10 @@ class PaperTradingAccountService:
             position.status = "CLOSED"
 
             # Update account - CRITICAL FIX: Properly reflect P&L in balance
-            # Formula: new_balance = old_balance - original_investment + exit_value
-            # Which is equivalent to: new_balance = old_balance + P&L
+            # Formula: new_balance = old_balance (Cash) + exit_value
             account.used_margin -= position.invested_amount
             account.available_margin += exit_value  # Add exit value to available margin
-            account.current_balance = account.current_balance - position.invested_amount + exit_value
+            account.current_balance += exit_value   # Add exit value to cash balance
 
             # Update total P&L (cumulative across all closed positions)
             account.total_pnl += final_pnl

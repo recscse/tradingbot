@@ -180,6 +180,7 @@ class EnhancedStockSelection(StockSelection):
 
     # Options strategy parameters
     capital_allocation: Decimal = Decimal("0.0")
+    position_size_lots: int = 1
     max_loss: Decimal = Decimal("0.0")
     target_profit: Decimal = Decimal("0.0")
     risk_reward_ratio: Decimal = Decimal("0.0")
@@ -349,8 +350,8 @@ class EnhancedIntelligentOptionsService:
             if not underlying_key:
                 underlying_key = f"NSE_EQ|{stock_selection.symbol}"
 
-            # Step 1: Get available expiry dates
-            expiry_dates = await self._get_available_expiry_dates(underlying_key, db)
+            # Step 1: Get available expiry dates and lot size
+            expiry_dates, lot_size = await self._get_available_expiry_and_lot_size(underlying_key, db)
             if not expiry_dates:
                 logger.warning(f"No expiry dates found for {stock_selection.symbol}")
                 return None
@@ -407,6 +408,7 @@ class EnhancedIntelligentOptionsService:
                 option_chain,
                 options_direction,
                 Decimal(str(underlying_price)),
+                lot_size=lot_size
             )
 
             if not optimal_contract:
@@ -424,7 +426,7 @@ class EnhancedIntelligentOptionsService:
                 name=getattr(stock_selection, "name", stock_selection.symbol),  # Fallback to symbol
                 instrument_key=stock_selection.instrument_key,
                 sector=getattr(stock_selection, "sector", "UNKNOWN"),
-                lot_size=getattr(stock_selection, "lot_size", None),
+                lot_size=lot_size,  # Use correctly fetched lot size
                 # Price fields (handle both ltp and price_at_selection)
                 ltp=getattr(stock_selection, "ltp", None) or getattr(stock_selection, "price_at_selection", 0.0),
                 change_percent=getattr(stock_selection, "change_percent", 0.0) or getattr(stock_selection, "change_percent_at_selection", 0.0),
@@ -445,7 +447,7 @@ class EnhancedIntelligentOptionsService:
                 selection_reason=getattr(stock_selection, "selection_reason", "options_enhancement") or getattr(stock_selection, "selection_reason", ""),
                 confidence_level=getattr(stock_selection, "confidence_level", 0.5),
                 risk_level=getattr(stock_selection, "risk_level", "MEDIUM"),
-                recommended_quantity=getattr(stock_selection, "recommended_quantity", 1),
+                recommended_quantity=lot_size,  # Set recommended quantity to one lot size by default
                 target_value=getattr(stock_selection, "target_value", 0.0),
                 stop_loss=getattr(stock_selection, "stop_loss", 0.0),
                 options_direction=getattr(stock_selection, "options_direction", None) or getattr(stock_selection, "option_type", "CE"),
@@ -474,18 +476,18 @@ class EnhancedIntelligentOptionsService:
             )
             return None
 
-    async def _get_available_expiry_dates(
+    async def _get_available_expiry_and_lot_size(
         self, underlying_key: str, db: Session
-    ) -> List[str]:
+    ) -> Tuple[List[str], int]:
         """
-        Get available expiry dates for the underlying
+        Get available expiry dates and lot size for the underlying
 
         Args:
             underlying_key: Instrument key for underlying asset
             db: Database session
 
         Returns:
-            List of expiry dates in YYYY-MM-DD format
+            Tuple of (List of expiry dates, lot_size)
 
         Raises:
             ValueError: If underlying_key is invalid
@@ -494,10 +496,10 @@ class EnhancedIntelligentOptionsService:
             raise ValueError("Underlying key cannot be empty")
 
         try:
-            # Get option contracts to find expiry dates
+            # Get option contracts to find expiry dates and lot size
             contracts = self.option_service.get_option_contracts(underlying_key, db)
             if not contracts:
-                return []
+                return [], 0
 
             # Extract unique expiry dates
             expiry_dates = list(
@@ -509,6 +511,9 @@ class EnhancedIntelligentOptionsService:
             )
             expiry_dates.sort()
 
+            # Extract lot size from the first contract
+            lot_size = int(contracts[0].get("lot_size", 0))
+
             # Filter only future expiry dates
             today = datetime.now().date()
             future_expiries = [
@@ -517,16 +522,16 @@ class EnhancedIntelligentOptionsService:
                 if datetime.strptime(expiry, "%Y-%m-%d").date() > today
             ]
 
-            return future_expiries[:10]
+            return future_expiries[:10], lot_size
 
         except ValueError as ve:
             logger.error(
                 f"Validation error getting expiry dates for {underlying_key}: {ve}"
             )
-            return []
+            return [], 0
         except Exception as e:
             logger.error(f"Error getting expiry dates for {underlying_key}: {e}")
-            return []
+            return [], 0
 
     async def _select_optimal_expiry(
         self, expiry_dates: List[str], underlying_key: str, db: Session
@@ -660,6 +665,7 @@ class EnhancedIntelligentOptionsService:
         option_chain: Dict[str, Any],
         option_direction: str,
         underlying_price: Decimal,
+        lot_size: int = 0
     ) -> Optional[OptionContract]:
         """
         Select optimal option contract based on direction and criteria
@@ -668,6 +674,7 @@ class EnhancedIntelligentOptionsService:
             option_chain: Option chain data from Upstox API
             option_direction: "CE" for calls or "PE" for puts
             underlying_price: Current underlying asset price
+            lot_size: Lot size for the option contract (if known)
 
         Returns:
             Selected OptionContract or None
@@ -738,7 +745,7 @@ class EnhancedIntelligentOptionsService:
                         <= self.options_config["max_premium_percentage"]
                     ):
                         selection_score = self._calculate_option_selection_score(
-                            distance_from_atm, premium, volume, oi, iv
+                            distance_from_atm, premium, volume, oi, iv, spot_price
                         )
 
                         eligible_contracts.append(
@@ -765,6 +772,12 @@ class EnhancedIntelligentOptionsService:
             # Select best contract based on selection score
             best_contract = max(eligible_contracts, key=lambda x: x["selection_score"])
 
+            # Determine lot size - use parameter if provided, else try to get from data, else default 0
+            # Defaulting to 0 allows trade_prep_service to fetch the correct lot size
+            final_lot_size = lot_size
+            if final_lot_size <= 0:
+                final_lot_size = int(best_contract["option_data"].get("lot_size", 0))
+
             # Create OptionContract object
             option_contract = OptionContract(
                 stock_symbol=option_chain.get("underlying_key", "").split("|")[-1],
@@ -789,7 +802,7 @@ class EnhancedIntelligentOptionsService:
                 theta=Decimal(str(best_contract["option_greeks"].get("theta", 0))),
                 vega=Decimal(str(best_contract["option_greeks"].get("vega", 0))),
                 implied_volatility=best_contract["iv"],
-                lot_size=int(best_contract["option_data"].get("lot_size", 25)),
+                lot_size=final_lot_size,
                 minimum_lot=int(best_contract["option_data"].get("minimum_lot", 1)),
                 freeze_quantity=int(
                     best_contract["option_data"].get("freeze_quantity", 500)
@@ -819,6 +832,7 @@ class EnhancedIntelligentOptionsService:
         volume: int,
         oi: int,
         iv: Decimal,
+        underlying_price: Decimal
     ) -> Decimal:
         """
         Calculate selection score for option contract
@@ -829,6 +843,7 @@ class EnhancedIntelligentOptionsService:
             volume: Trading volume
             oi: Open interest
             iv: Implied volatility
+            underlying_price: Current underlying price for normalization
 
         Returns:
             Selection score (0-100 scale)
@@ -837,9 +852,13 @@ class EnhancedIntelligentOptionsService:
             # Scoring factors (0-100 scale)
 
             # 1. Distance from ATM (prefer ATM or slightly OTM)
+            # Use dynamic threshold: 1% of underlying price or 50 points, whichever is larger
+            # This handles both low-priced stocks and high-priced indices
+            distance_threshold = max(Decimal("50"), underlying_price * Decimal("0.01"))
+            
             distance_score = max(
                 Decimal("0"),
-                Decimal("100") - (distance_from_atm / Decimal("50")) * Decimal("100"),
+                Decimal("100") - (distance_from_atm / distance_threshold) * Decimal("100"),
             )
 
             # 2. Liquidity (volume + OI)
@@ -944,14 +963,13 @@ class EnhancedIntelligentOptionsService:
                     max_loss_amount = total_capital * max_loss_per_position
                     max_lots_by_risk = int(max_loss_amount / (premium * lot_size))
 
-                    max_allowed_lots = min(adjusted_risk_config.max_positions, 10)
-                    recommended_lots = min(
-                        max_lots_by_capital, max_lots_by_risk, max_allowed_lots
-                    )
+                    # Use the more conservative of capital or risk limits
+                    recommended_lots = min(max_lots_by_capital, max_lots_by_risk)
                     recommended_lots = max(1, recommended_lots)
 
                     # Calculate capital allocation
                     selection.capital_allocation = premium * lot_size * recommended_lots
+                    selection.position_size_lots = int(recommended_lots)
                     selection.max_loss = selection.capital_allocation
 
                     target_multiplier = (
@@ -1223,6 +1241,7 @@ class EnhancedIntelligentOptionsService:
                         "theta": float(contract.theta),
                         "vega": float(contract.vega),
                         "capital_allocation": float(selection.capital_allocation),
+                        "position_size_lots": int(selection.position_size_lots),
                         "max_loss": float(selection.max_loss),
                         "target_profit": float(selection.target_profit),
                         "risk_reward_ratio": float(selection.risk_reward_ratio),
