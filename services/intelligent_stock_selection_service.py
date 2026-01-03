@@ -455,17 +455,21 @@ class IntelligentStockSelectionService:
     async def select_stocks_by_value(
         self, target_sectors: List[str], max_stocks: int = 5
     ) -> List[StockSelection]:
-        """Select stocks based on highest value in target sectors - UPDATED to use realtime_market_engine"""
+        """
+        Select stocks based on highest score in target sectors.
+        
+        IMPROVED LOGIC: 
+        1. Iterates through ALL eligible F&O stocks in the top sectors.
+        2. Calculates the full score for each (Sentiment + Technical + Sector + Volume + Value).
+        3. Sorts by Final Score to pick the absolute best candidates.
+        """
         try:
             if not self.market_engine:
                 await self.initialize_services()
 
-            selected_stocks = []
+            scored_candidates = []
 
             for sector in target_sectors:
-                if len(selected_stocks) >= max_stocks:
-                    break
-
                 # Get sector stocks from real-time market engine
                 sector_stocks = get_sector_stocks(sector)
                 stocks = sector_stocks.get(sector, [])
@@ -473,7 +477,7 @@ class IntelligentStockSelectionService:
                 if not stocks:
                     continue
 
-                # Filter eligible stocks (F&O stocks only, no value filter)
+                # Filter eligible stocks (F&O stocks only)
                 eligible_stocks = [
                     stock
                     for stock in stocks
@@ -485,32 +489,27 @@ class IntelligentStockSelectionService:
                     )
                 ]
 
-                # Sort by value (highest first)
-                eligible_stocks.sort(
-                    key=lambda x: x.get("value_crores", 0), reverse=True
-                )
-
-                # Select top stock from this sector
-                for stock in eligible_stocks[:2]:  # Max 2 per sector
-                    if len(selected_stocks) >= max_stocks:
-                        break
-
+                # Score ALL eligible stocks in this sector
+                for stock in eligible_stocks:
                     # Calculate selection scores
                     selection = await self._create_stock_selection(stock, sector)
+                    
                     if (
                         selection
-                        and selection.final_score
-                        > self.selection_config["min_score_threshold"]
+                        and selection.final_score > self.selection_config["min_score_threshold"]
                     ):
-                        selected_stocks.append(selection)
+                        scored_candidates.append(selection)
 
-            # Sort final selections by score
-            selected_stocks.sort(key=lambda x: x.final_score, reverse=True)
+            # Sort all candidates by Final Score (highest first)
+            scored_candidates.sort(key=lambda x: x.final_score, reverse=True)
+
+            # Select top N stocks
+            selected_stocks = scored_candidates[:max_stocks]
 
             logger.info(
-                f"📈 Selected {len(selected_stocks)} stocks: {[s.symbol for s in selected_stocks]}"
+                f"📈 Scored {len(scored_candidates)} candidates. Selected top {len(selected_stocks)}: {[s.symbol for s in selected_stocks]}"
             )
-            return selected_stocks[:max_stocks]
+            return selected_stocks
 
         except Exception as e:
             logger.error(f"❌ Error selecting stocks by value: {e}")
@@ -545,7 +544,7 @@ class IntelligentStockSelectionService:
             recommended_quantity = self._calculate_position_size(stock_data)
 
             # Options trading direction based on market sentiment
-            options_direction = self._get_options_direction()
+            options_direction = self._get_options_direction(stock_data)
 
             # Create selection
             selection = StockSelection(
@@ -715,8 +714,8 @@ class IntelligentStockSelectionService:
         }
         return recommendations.get(sentiment, "NEUTRAL - Monitor closely")
 
-    def _get_options_direction(self) -> str:
-        """Determine options trading direction based on market sentiment"""
+    def _get_options_direction(self, stock_data: Optional[Dict[str, Any]] = None) -> str:
+        """Determine options trading direction based on market sentiment and stock momentum"""
         # Use current sentiment (premarket or market open)
         current_sentiment = getattr(
             self, "market_open_sentiment", self.premarket_sentiment
@@ -730,7 +729,15 @@ class IntelligentStockSelectionService:
         ]:
             return "PE"  # PUT options for negative market
         else:
-            return "CE"  # Default to CALL for neutral market
+            # Neutral market - check stock specific momentum if available
+            if stock_data:
+                change_percent = stock_data.get("change_percent", 0)
+                if change_percent > 0.5:
+                    return "CE"
+                elif change_percent < -0.5:
+                    return "PE"
+            
+            return "CE"  # Default to CALL for neutral market/no data
 
     # Public API Methods
 
