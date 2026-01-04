@@ -309,7 +309,7 @@ class RealTimePnLTracker:
 
             # Calculate holding duration
             entry_time = trade_execution.entry_time
-            holding_duration = (datetime.now() - entry_time).total_seconds() / 60
+            holding_duration = (get_ist_now_naive() - entry_time).total_seconds() / 60
 
             return {
                 'pnl': pnl_amount,
@@ -688,9 +688,9 @@ class RealTimePnLTracker:
                     "pnl_points": float(pnl_points),
                     "exit_reason": exit_reason,
                     "entry_time": trade_execution.entry_time.isoformat(),
-                    "exit_time": datetime.now().isoformat(),
-                    "holding_duration_minutes": int((datetime.now() - trade_execution.entry_time).total_seconds() / 60),
-                    "timestamp": datetime.now().isoformat()
+                    "exit_time": get_ist_isoformat(),
+                    "holding_duration_minutes": int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60),
+                    "timestamp": get_ist_isoformat()
                 }
 
                 await broadcast_to_clients("position_closed", close_data)
@@ -728,7 +728,7 @@ class RealTimePnLTracker:
                     "trailing_sl_active": pnl_update.trailing_sl_active,
                     "highest_price": float(pnl_update.highest_price),
                     "last_updated": pnl_update.last_updated,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": get_ist_isoformat()
                 }
 
                 await broadcast_to_clients("pnl_update", update_data)
@@ -790,7 +790,7 @@ class RealTimePnLTracker:
                 "total_pnl": float(total_pnl),
                 "total_investment": float(total_investment),
                 "pnl_percent": float((total_pnl / total_investment * Decimal('100')) if total_investment > 0 else Decimal('0')),
-                "last_updated": datetime.now().isoformat()
+                "last_updated": get_ist_isoformat()
             }
 
         except Exception as e:
