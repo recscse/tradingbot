@@ -121,7 +121,7 @@ class TokenMonitorService:
 
             elif hours_remaining <= 2:
                 # Critical: expires in 2 hours
-                if not self.was_notification_sent(notification_key, "critical"):
+                if not self.was_notification_sent(notification_key, "critical", config.user_id, config.broker_name, db):
                     await notification_service.create_token_expiry_notification(
                         user_id=config.user_id,
                         broker_name=config.broker_name,
@@ -133,7 +133,7 @@ class TokenMonitorService:
 
             elif hours_remaining <= 12:
                 # High priority: expires in 12 hours
-                if not self.was_notification_sent(notification_key, "high"):
+                if not self.was_notification_sent(notification_key, "high", config.user_id, config.broker_name, db):
                     await notification_service.create_token_expiry_notification(
                         user_id=config.user_id,
                         broker_name=config.broker_name,
@@ -145,7 +145,7 @@ class TokenMonitorService:
 
             elif hours_remaining <= 48:
                 # Normal priority: expires in 48 hours
-                if not self.was_notification_sent(notification_key, "normal"):
+                if not self.was_notification_sent(notification_key, "normal", config.user_id, config.broker_name, db):
                     await notification_service.create_token_expiry_notification(
                         user_id=config.user_id,
                         broker_name=config.broker_name,
@@ -157,7 +157,7 @@ class TokenMonitorService:
 
             elif hours_remaining <= 168:  # 7 days
                 # Reminder: expires in 7 days
-                if not self.was_notification_sent(notification_key, "reminder"):
+                if not self.was_notification_sent(notification_key, "reminder", config.user_id, config.broker_name, db):
                     await notification_service.create_token_expiry_notification(
                         user_id=config.user_id,
                         broker_name=config.broker_name,
@@ -263,15 +263,46 @@ class TokenMonitorService:
             logger.error(f"❌ Failed to handle expired token: {e}")
             db.rollback()
 
-    def was_notification_sent(self, key: str, priority: str) -> bool:
-        """Check if notification was already sent for this key and priority."""
+    def was_notification_sent(self, key: str, priority: str, user_id: int, broker_name: str, db: Session) -> bool:
+        """
+        Check if notification was already sent for this key and priority.
+        Checks both in-memory cache and database for persistence across restarts.
+        """
         full_key = f"{key}_{priority}"
+        cutoff_time = datetime.utcnow() - timedelta(hours=24)
 
-        # Check if notification was sent in the last 24 hours
+        # 1. Check in-memory cache first (Fast)
         if full_key in self.notification_sent_flags:
             sent_time = self.notification_sent_flags[full_key]
-            if datetime.utcnow() - sent_time < timedelta(hours=24):
+            if sent_time > cutoff_time:
                 return True
+
+        # 2. Check Database (Persistent)
+        # Prevents duplicate notifications after service restart
+        try:
+            # Determine notification title pattern based on priority
+            # Matches titles in notification_service.create_token_expiry_notification
+            title_pattern = f"%{broker_name}%"
+            
+            recent_notification = db.query(Notification).filter(
+                and_(
+                    Notification.user_id == user_id,
+                    Notification.type.in_([
+                        NotificationTypes.TOKEN_EXPIRING_SOON,
+                        NotificationTypes.TOKEN_EXPIRED
+                    ]),
+                    Notification.title.ilike(title_pattern),
+                    Notification.created_at > cutoff_time
+                )
+            ).first()
+
+            if recent_notification:
+                # Update in-memory cache to avoid future DB hits
+                self.notification_sent_flags[full_key] = recent_notification.created_at
+                return True
+
+        except Exception as e:
+            logger.error(f"Error checking database for sent notifications: {e}")
 
         return False
 
