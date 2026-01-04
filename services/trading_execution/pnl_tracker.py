@@ -638,6 +638,37 @@ class RealTimePnLTracker:
 
             logger.info(f"✅ Position closed: PnL = Rs.{net_pnl:.2f} ({pnl_percent:.2f}%)")
 
+            # UPDATE PAPER TRADING BALANCE ON EXIT
+            if trade_execution.trading_mode == "paper":
+                try:
+                    from services.paper_trading_account import paper_trading_service
+                    from datetime import datetime, timezone
+                    
+                    account = paper_trading_service.accounts.get(position.user_id)
+                    if account:
+                        exit_val = float(exit_price) * float(quantity)
+                        invested = float(trade_execution.total_investment) if trade_execution.total_investment else (float(entry_price) * float(quantity))
+                        
+                        # Logic:
+                        # 1. Release used margin (invested amount)
+                        # 2. Add exit value to available cash
+                        
+                        account.used_margin -= invested
+                        if account.used_margin < 0: account.used_margin = 0.0
+                        
+                        account.available_margin += exit_val
+                        account.current_balance += exit_val
+                        
+                        account.total_pnl += float(net_pnl)
+                        account.daily_pnl += float(net_pnl)
+                        account.positions_count = max(0, account.positions_count - 1)
+                        account.updated_at = datetime.now(timezone.utc)
+                        
+                        logger.info(f"✅ Paper account updated after exit: New Balance=₹{account.current_balance:,.2f} (Returned ₹{exit_val:,.2f})")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to update paper account on exit: {e}")
+
             # Broadcast position close event to UI
             try:
                 from router.unified_websocket_routes import broadcast_to_clients
