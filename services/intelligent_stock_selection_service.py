@@ -715,12 +715,20 @@ class IntelligentStockSelectionService:
         return recommendations.get(sentiment, "NEUTRAL - Monitor closely")
 
     def _get_options_direction(self, stock_data: Optional[Dict[str, Any]] = None) -> str:
-        """Determine options trading direction based on market sentiment and stock momentum"""
+        """
+        Determine options trading direction based on market sentiment and stock momentum
+        
+        Refined Logic:
+        1. Market Sentiment (Primary Driver)
+        2. Stock Momentum (Secondary Driver in Neutral Markets)
+        3. Price Structure (Tie-breaker: Proximity to Day High/Low)
+        """
         # Use current sentiment (premarket or market open)
         current_sentiment = getattr(
             self, "market_open_sentiment", self.premarket_sentiment
         )
 
+        # 1. Market Sentiment Check
         if current_sentiment in [MarketSentiment.BULLISH, MarketSentiment.VERY_BULLISH]:
             return "CE"  # CALL options for positive market
         elif current_sentiment in [
@@ -728,16 +736,33 @@ class IntelligentStockSelectionService:
             MarketSentiment.VERY_BEARISH,
         ]:
             return "PE"  # PUT options for negative market
-        else:
-            # Neutral market - check stock specific momentum if available
-            if stock_data:
-                change_percent = stock_data.get("change_percent", 0)
-                if change_percent > 0.5:
-                    return "CE"
-                elif change_percent < -0.5:
-                    return "PE"
+        
+        # 2. Neutral Market - Check Stock Specific Momentum
+        if stock_data:
+            change_percent = float(stock_data.get("change_percent", 0))
             
-            return "CE"  # Default to CALL for neutral market/no data
+            # Momentum check (Threshold lowered to 0.25% to catch early trends)
+            if change_percent > 0.25:
+                return "CE"
+            elif change_percent < -0.25:
+                return "PE"
+            
+            # 3. Tie-breaker: Price Position (Closer to High or Low?)
+            try:
+                ltp = float(stock_data.get("ltp", 0))
+                high = float(stock_data.get("high", 0))
+                low = float(stock_data.get("low", 0))
+                
+                if high > low and ltp > 0:
+                    mid_point = (high + low) / 2
+                    if ltp > mid_point:
+                        return "CE"  # Trading in upper half
+                    else:
+                        return "PE"  # Trading in lower half
+            except Exception:
+                pass
+        
+        return "CE"  # Default to CALL if no clear signal
 
     # Public API Methods
 
