@@ -4,6 +4,27 @@ import { bloombergColors } from "../../themes/bloombergColors";
 import { Paper, Box, Grid } from "@mui/material";
 
 const RecordMoversWidget = ({ data, isLoading, compact = false }) => {
+  const { new_highs: rawHighs = [], new_lows: rawLows = [], summary = {} } = data || {};
+
+  // Deduplicate by symbol
+  const new_highs = React.useMemo(() => {
+    const seen = new Set();
+    return (rawHighs || []).filter((s) => {
+      if (!s?.symbol || seen.has(s.symbol)) return false;
+      seen.add(s.symbol);
+      return true;
+    });
+  }, [rawHighs]);
+
+  const new_lows = React.useMemo(() => {
+    const seen = new Set();
+    return (rawLows || []).filter((s) => {
+      if (!s?.symbol || seen.has(s.symbol)) return false;
+      seen.add(s.symbol);
+      return true;
+    });
+  }, [rawLows]);
+
   if (isLoading) {
     return (
       <Paper
@@ -24,8 +45,6 @@ const RecordMoversWidget = ({ data, isLoading, compact = false }) => {
       </Paper>
     );
   }
-
-  const { new_highs = [], new_lows = [], summary = {} } = data;
 
   const renderRecordStock = (stock, isHigh) => (
     <Box

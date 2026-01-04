@@ -2,8 +2,6 @@
 import React, { useRef, useState } from "react";
 import {
   Camera,
-  TrendingUp,
-  TrendingDown,
   Wallet,
   Activity,
   ShieldCheck,

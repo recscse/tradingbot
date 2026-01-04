@@ -5,6 +5,27 @@ import { bloombergColors } from "../../themes/bloombergColors";
 import { withErrorBoundary } from "../common/ErrorBoundary";
 
 const TopMoversWidget = ({ data, isLoading, compact = false }) => {
+  const { gainers: rawGainers = [], losers: rawLosers = [], summary = {} } = data || {};
+
+  // Deduplicate gainers and losers by symbol
+  const gainers = React.useMemo(() => {
+    const seen = new Set();
+    return (rawGainers || []).filter((s) => {
+      if (!s?.symbol || seen.has(s.symbol)) return false;
+      seen.add(s.symbol);
+      return true;
+    });
+  }, [rawGainers]);
+
+  const losers = React.useMemo(() => {
+    const seen = new Set();
+    return (rawLosers || []).filter((s) => {
+      if (!s?.symbol || seen.has(s.symbol)) return false;
+      seen.add(s.symbol);
+      return true;
+    });
+  }, [rawLosers]);
+
   if (isLoading) {
     return (
       <Paper
@@ -29,8 +50,6 @@ const TopMoversWidget = ({ data, isLoading, compact = false }) => {
       </Paper>
     );
   }
-
-  const { gainers = [], losers = [], summary = {} } = data;
 
   const formatVolume = (volume) => {
     if (!volume) return "N/A";

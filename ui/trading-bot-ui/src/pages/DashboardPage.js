@@ -750,8 +750,15 @@ const DashboardPage = () => {
         if (!Array.isArray(data)) {
           return [];
         }
+
+        const seenSymbols = new Set();
         const validData = data
-          .filter((item) => item && typeof item === "object" && item.symbol)
+          .filter((item) => {
+            if (!item || typeof item !== "object" || !item.symbol) return false;
+            if (seenSymbols.has(item.symbol)) return false;
+            seenSymbols.add(item.symbol);
+            return true;
+          })
           .map((item) => ({
             symbol: item.symbol || item.trading_symbol || "N/A",
             name: item.name || item.symbol || item.trading_symbol || "N/A",
@@ -799,8 +806,14 @@ const DashboardPage = () => {
           return [];
         }
 
+        const seenGapSymbols = new Set();
         const validData = data
-          .filter((item) => item && typeof item === "object" && item.symbol)
+          .filter((item) => {
+            if (!item || typeof item !== "object" || !item.symbol) return false;
+            if (seenGapSymbols.has(item.symbol)) return false;
+            seenGapSymbols.add(item.symbol);
+            return true;
+          })
           .map((item) => {
             // Use backend data directly (no marketData lookup)
             const currentPrice =
@@ -1080,8 +1093,8 @@ const DashboardPage = () => {
     }
 
     return {
-      gainers: (topGainers || []).map((stock) => stock.symbol).filter(Boolean),
-      losers: (topLosers || []).map((stock) => stock.symbol).filter(Boolean),
+      gainers: [...new Set((topGainers || []).map((stock) => stock.symbol).filter(Boolean))],
+      losers: [...new Set((topLosers || []).map((stock) => stock.symbol).filter(Boolean))],
     };
   }, [getRealTimeTopMovers, topGainers, topLosers]);
 

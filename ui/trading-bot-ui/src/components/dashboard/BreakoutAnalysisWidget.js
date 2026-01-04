@@ -8,6 +8,25 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
   const [selectedType, setSelectedType] = useState("all"); // "all", "breakout", "breakdown"
   const [selectedQuality, setSelectedQuality] = useState("all"); // "all", "weak", "moderate", "strong", "very_strong"
 
+  // FIXED: Backend sends breakouts and breakdowns arrays
+  const { breakouts = [], breakdowns = [], summary = {} } = data || {};
+
+  // Combine and filter breakout/breakdown signals
+  const allSignals = React.useMemo(() => {
+    const raw = [
+      ...(breakouts || []).map((b) => ({ ...b, breakout_type: "breakout" })),
+      ...(breakdowns || []).map((b) => ({ ...b, breakout_type: "breakdown" })),
+    ];
+    
+    const seen = new Set();
+    return raw.filter((signal) => {
+      const key = `${signal.symbol}-${signal.timestamp}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [breakouts, breakdowns]);
+
   if (isLoading) {
     return (
       <Paper
@@ -28,15 +47,6 @@ const BreakoutAnalysisWidget = ({ data, isLoading, compact = false }) => {
       </Paper>
     );
   }
-
-  // FIXED: Backend sends breakouts and breakdowns arrays
-  const { breakouts = [], breakdowns = [], summary = {} } = data;
-
-  // Combine and filter breakout/breakdown signals
-  const allSignals = [
-    ...breakouts.map((b) => ({ ...b, breakout_type: "breakout" })),
-    ...breakdowns.map((b) => ({ ...b, breakout_type: "breakdown" })),
-  ];
 
   // Apply filters
   const filteredSignals = allSignals
