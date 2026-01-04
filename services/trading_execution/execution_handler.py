@@ -177,6 +177,51 @@ class TradeExecutionHandler:
             logger.info(f"  Entry: Rs.{entry_price}, Qty: {quantity}, Lots: {lots_traded}")
             logger.info(f"  Total Investment: Rs.{total_investment:,.2f}")
 
+            # UPDATE PAPER TRADING ACCOUNT BALANCE (Sync with in-memory service)
+            try:
+                from services.paper_trading_account import paper_trading_service
+                
+                # Get or create account (in-memory)
+                account = paper_trading_service.accounts.get(prepared_trade.user_id)
+                if not account:
+                    # Initialize default account if not exists
+                    from services.paper_trading_account import PaperAccount
+                    from datetime import datetime, timezone
+                    default_cap = 100000.0
+                    account = PaperAccount(
+                        user_id=prepared_trade.user_id,
+                        initial_capital=default_cap,
+                        current_balance=default_cap,
+                        used_margin=0.0,
+                        available_margin=default_cap,
+                        total_pnl=0.0,
+                        daily_pnl=0.0,
+                        positions_count=0,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc)
+                    )
+                    paper_trading_service.accounts[prepared_trade.user_id] = account
+                
+                # Deduct capital
+                investment_float = float(total_investment)
+                if account.available_margin >= investment_float:
+                    account.available_margin -= investment_float
+                    account.current_balance -= investment_float  # Cash balance decreases
+                    account.used_margin += investment_float
+                    account.positions_count += 1
+                    account.updated_at = datetime.now(timezone.utc)
+                    logger.info(f"✅ Paper account updated: Balance={account.current_balance:,.2f}, Used={account.used_margin:,.2f}")
+                else:
+                    logger.warning(f"⚠️ Insufficient paper funds but allowing trade for testing. Avail={account.available_margin}, Req={investment_float}")
+                    # Allow it anyway or throw error? For safety in testing, let's update negative
+                    account.available_margin -= investment_float
+                    account.current_balance -= investment_float
+                    account.used_margin += investment_float
+                    account.positions_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to update paper trading account balance: {e}")
+
             # Create trade execution record
             trade_execution = AutoTradeExecution(
                 user_id=prepared_trade.user_id,

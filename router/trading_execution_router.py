@@ -1031,12 +1031,10 @@ async def get_trade_history(
             if trade.entry_time and trade.exit_time:
                 duration_minutes = int((trade.exit_time - trade.entry_time).total_seconds() / 60)
 
-            # Format dates and times in IST
-            from datetime import timezone, timedelta
-            ist = timezone(timedelta(hours=5, minutes=30))
-
+            # Format dates and times (Stored as Naive IST in DB)
             if trade.entry_time:
-                entry_time_ist = trade.entry_time.replace(tzinfo=timezone.utc).astimezone(ist)
+                # DB stores Naive IST, so no conversion needed
+                entry_time_ist = trade.entry_time
                 entry_date = entry_time_ist.strftime("%d-%b-%Y")  # e.g., 14-Nov-2025
                 entry_time_str = entry_time_ist.strftime("%I:%M:%S %p")  # e.g., 02:30:45 PM
             else:
@@ -1044,7 +1042,8 @@ async def get_trade_history(
                 entry_time_str = None
 
             if trade.exit_time:
-                exit_time_ist = trade.exit_time.replace(tzinfo=timezone.utc).astimezone(ist)
+                # DB stores Naive IST
+                exit_time_ist = trade.exit_time
                 exit_date = exit_time_ist.strftime("%d-%b-%Y")
                 exit_time_str = exit_time_ist.strftime("%I:%M:%S %p")
             else:

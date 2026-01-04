@@ -309,7 +309,7 @@ class RealTimePnLTracker:
 
             # Calculate holding duration
             entry_time = trade_execution.entry_time
-            holding_duration = (datetime.now() - entry_time).total_seconds() / 60
+            holding_duration = (get_ist_now_naive() - entry_time).total_seconds() / 60
 
             return {
                 'pnl': pnl_amount,
@@ -638,6 +638,37 @@ class RealTimePnLTracker:
 
             logger.info(f"✅ Position closed: PnL = Rs.{net_pnl:.2f} ({pnl_percent:.2f}%)")
 
+            # UPDATE PAPER TRADING BALANCE ON EXIT
+            if trade_execution.trading_mode == "paper":
+                try:
+                    from services.paper_trading_account import paper_trading_service
+                    from datetime import datetime, timezone
+                    
+                    account = paper_trading_service.accounts.get(position.user_id)
+                    if account:
+                        exit_val = float(exit_price) * float(quantity)
+                        invested = float(trade_execution.total_investment) if trade_execution.total_investment else (float(entry_price) * float(quantity))
+                        
+                        # Logic:
+                        # 1. Release used margin (invested amount)
+                        # 2. Add exit value to available cash
+                        
+                        account.used_margin -= invested
+                        if account.used_margin < 0: account.used_margin = 0.0
+                        
+                        account.available_margin += exit_val
+                        account.current_balance += exit_val
+                        
+                        account.total_pnl += float(net_pnl)
+                        account.daily_pnl += float(net_pnl)
+                        account.positions_count = max(0, account.positions_count - 1)
+                        account.updated_at = datetime.now(timezone.utc)
+                        
+                        logger.info(f"✅ Paper account updated after exit: New Balance=₹{account.current_balance:,.2f} (Returned ₹{exit_val:,.2f})")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to update paper account on exit: {e}")
+
             # Broadcast position close event to UI
             try:
                 from router.unified_websocket_routes import broadcast_to_clients
@@ -657,9 +688,9 @@ class RealTimePnLTracker:
                     "pnl_points": float(pnl_points),
                     "exit_reason": exit_reason,
                     "entry_time": trade_execution.entry_time.isoformat(),
-                    "exit_time": datetime.now().isoformat(),
-                    "holding_duration_minutes": int((datetime.now() - trade_execution.entry_time).total_seconds() / 60),
-                    "timestamp": datetime.now().isoformat()
+                    "exit_time": get_ist_isoformat(),
+                    "holding_duration_minutes": int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60),
+                    "timestamp": get_ist_isoformat()
                 }
 
                 await broadcast_to_clients("position_closed", close_data)
@@ -697,7 +728,7 @@ class RealTimePnLTracker:
                     "trailing_sl_active": pnl_update.trailing_sl_active,
                     "highest_price": float(pnl_update.highest_price),
                     "last_updated": pnl_update.last_updated,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": get_ist_isoformat()
                 }
 
                 await broadcast_to_clients("pnl_update", update_data)
@@ -759,7 +790,7 @@ class RealTimePnLTracker:
                 "total_pnl": float(total_pnl),
                 "total_investment": float(total_investment),
                 "pnl_percent": float((total_pnl / total_investment * Decimal('100')) if total_investment > 0 else Decimal('0')),
-                "last_updated": datetime.now().isoformat()
+                "last_updated": get_ist_isoformat()
             }
 
         except Exception as e:

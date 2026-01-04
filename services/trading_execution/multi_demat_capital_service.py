@@ -105,7 +105,7 @@ class MultiDematCapitalService:
         else:
             # Fallback if account doesn't exist yet (create it implicitly)
             await paper_trading_service.create_paper_account(user_id)
-            paper_capital = Decimal('1000000')
+            paper_capital = Decimal('100000')
             total_used_margin = Decimal('0')
             total_free_margin = paper_capital
 

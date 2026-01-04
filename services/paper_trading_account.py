@@ -64,13 +64,13 @@ class PaperTradingAccountService:
         self.positions: Dict[int, List[PaperPosition]] = {}  # user_id -> positions
         self.trade_history: Dict[int, List[Dict]] = {}  # user_id -> trade history
     
-    async def create_paper_account(self, user_id: int, initial_capital: float = 500000) -> PaperAccount:
+    async def create_paper_account(self, user_id: int, initial_capital: float = 100000) -> PaperAccount:
         """
         Create new paper trading account
         
         Args:
             user_id: User ID
-            initial_capital: Starting virtual capital (default ₹5 lakhs)
+            initial_capital: Starting virtual capital (default ₹1 lakh)
         """
         try:
             account = PaperAccount(

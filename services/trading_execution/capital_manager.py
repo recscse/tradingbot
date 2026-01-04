@@ -60,7 +60,7 @@ class TradingCapitalManager:
 
     def __init__(self):
         """Initialize capital manager with configuration"""
-        self.paper_trading_capital = Decimal('1000000')  # 10 Lakhs for paper trading
+        self.paper_trading_capital = Decimal('100000')  # 1 Lakh for paper trading
         self.max_capital_per_trade_percent = Decimal('0.20')  # 20% max per trade
         self.max_risk_per_trade_percent = Decimal('0.02')  # 2% max risk per trade
         self.min_capital_buffer = Decimal('0.10')  # Keep 10% buffer
@@ -148,7 +148,32 @@ class TradingCapitalManager:
         try:
             # Get total capital (from broker or paper trading)
             if trading_mode == TradingMode.PAPER:
-                total_capital = self.paper_trading_capital
+                # Dynamic paper trading capital
+                # Note: This is a synchronous method, but we need to access async paper service
+                # Using a safe way to run async code synchronously or better yet, accessing via database if possible
+                # For now, let's try to get the account from the service if initialized, or fall back to static
+                
+                from services.paper_trading_account import paper_trading_service
+                
+                # Try to access the in-memory account synchronously if possible
+                # Since paper_trading_service.accounts is a simple dict, we can access it directly
+                account = paper_trading_service.accounts.get(user_id)
+                
+                if account:
+                    # Logic from paper_trading_account.close_position:
+                    # available_margin += exit_value
+                    # used_margin -= invested
+                    # So current_balance (cash) + used_margin = Total Equity
+                    # Or available_margin + used_margin = Total Equity
+                    
+                    # paper_trading_service.py: 
+                    # account.available_margin = initial - used + pnl
+                    # account.used_margin = used
+                    # Total = available + used
+                    
+                    total_capital = Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
+                else:
+                    total_capital = self.paper_trading_capital
             else:
                 # Live trading - fetch from broker
                 broker_config = self.get_active_broker_config(user_id, db)
@@ -214,7 +239,12 @@ class TradingCapitalManager:
         try:
             # Get total capital
             if trading_mode == TradingMode.PAPER:
-                total_capital = self.paper_trading_capital
+                from services.paper_trading_account import paper_trading_service
+                account = paper_trading_service.accounts.get(user_id)
+                if account:
+                    total_capital = Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
+                else:
+                    total_capital = self.paper_trading_capital
             else:
                 broker_config = self.get_active_broker_config(user_id, db)
                 if not broker_config:
@@ -515,7 +545,12 @@ class TradingCapitalManager:
 
             # Get total capital
             if trading_mode == TradingMode.PAPER:
-                total_capital = self.paper_trading_capital
+                from services.paper_trading_account import paper_trading_service
+                account = paper_trading_service.accounts.get(user_id)
+                if account:
+                    total_capital = Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
+                else:
+                    total_capital = self.paper_trading_capital
             else:
                 broker_config = self.get_active_broker_config(user_id, db)
                 if broker_config:
