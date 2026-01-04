@@ -411,10 +411,25 @@ const StocksListOptimized = memo(
       setOptionChainOpen(true);
     }, []);
 
+    // Deduplicate symbols to prevent key collisions
+    const uniqueSymbols = useMemo(() => {
+      if (!Array.isArray(symbols)) return [];
+      const seen = new Set();
+      return symbols.filter((sym) => {
+        const key =
+          typeof sym === "string"
+            ? sym
+            : sym.instrument_key || sym.symbol || JSON.stringify(sym);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }, [symbols]);
+
     // Display slice
     const displaySymbols = useMemo(
-      () => (Array.isArray(symbols) ? symbols.slice(0, maxItems) : []),
-      [symbols, maxItems]
+      () => uniqueSymbols.slice(0, maxItems),
+      [uniqueSymbols, maxItems]
     );
 
     const tableHeader = useMemo(

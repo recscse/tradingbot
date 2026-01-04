@@ -182,6 +182,18 @@ const StocksList = memo(
 
     const optimalLayout = getOptimalLayout();
 
+    // Deduplicate data to prevent key collisions
+    const uniqueData = React.useMemo(() => {
+      if (!Array.isArray(data)) return [];
+      const seen = new Set();
+      return data.filter((item) => {
+        const key = item.instrument_key || item.symbol || JSON.stringify(item);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }, [data]);
+
     // Format price
     const formatPrice = (price) => {
       return typeof price === "number"
@@ -311,7 +323,7 @@ const StocksList = memo(
                 }}
               >
                 <Stack spacing={0.5}>
-                  {data.slice(0, maxItems).map((item, index) => {
+                  {uniqueData.slice(0, maxItems).map((item, index) => {
                     const isPositive = (item.change || 0) >= 0;
                     const changePercent = Math.abs(item.change_percent || 0);
                     const changeValue = item.change || 0;
@@ -909,7 +921,7 @@ const StocksList = memo(
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {data.slice(0, maxItems).map((stock, index) => {
+                      {uniqueData.slice(0, maxItems).map((stock, index) => {
                         const isPositive = (stock.change || 0) >= 0;
                         const changePercent = Math.abs(
                           stock.change_percent || 0
@@ -921,10 +933,11 @@ const StocksList = memo(
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.2, delay: index * 0.03 }}
-                            component={TableRow}
-                            hover
                             sx={{
                               cursor: "pointer",
+                              "&:hover": {
+                                bgcolor: colors.surfaceHover,
+                              },
                               "&:hover .stock-actions": {
                                 opacity: 1,
                               },

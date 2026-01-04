@@ -1,36 +1,24 @@
 // src/pages/ProfilePage.jsx
 import React, { useState, useEffect } from "react";
-import {
-  Box,
-  Container, // Reserved for loading states
-  /* CircularProgress, */ Typography, // Reserved for modal backgrounds // Reserved for card layouts
-  /* Backdrop, */ /* Card, */ Button,
-  useTheme,
-  alpha,
-  Paper,
-  Fade,
-  LinearProgress,
-} from "@mui/material";
-import {
-  Refresh as RefreshIcon,
-  Error as ErrorIcon,
-  TrendingUp as TrendingUpIcon,
-} from "@mui/icons-material";
 import { toast } from "react-hot-toast";
+import { motion, AnimatePresence } from "framer-motion";
+import { 
+  RefreshCcw, 
+  AlertCircle,
+  Layout
+} from "lucide-react";
+
 import ProfileHeader from "../components/profile/ProfileHeader";
 import ProfileTabs from "../components/profile/ProfileTabs";
 import ProfileOverview from "../components/profile/ProfileOverview";
 import ProfileSettings from "../components/profile/ProfileSettings";
 import ProfileSecurity from "../components/profile/ProfileSecurity";
 import ProfileNotifications from "../components/profile/ProfileNotifications";
-// import BrokerManagement from "../components/profile/BrokerManagement";
 import EnhancedBrokerManagement from "../components/profile/EnhancedBrokerManagement";
 import PerformanceTab from "../components/profile/PerformanceTab";
 import { profileService } from "../services/profileService";
 
 const ProfilePage = () => {
-  const theme = useTheme();
-
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -50,12 +38,11 @@ const ProfilePage = () => {
       setError(null);
       setLoadingProgress(0);
 
-      // Simulate loading progress for better UX
       const progressInterval = setInterval(() => {
         setLoadingProgress((prev) => Math.min(prev + 10, 90));
       }, 100);
 
-      const [profile, stats, notifications] = await Promise.all([
+      const [profile, stats, notificationsRes] = await Promise.all([
         profileService.getProfile(),
         profileService.getTradingStats(),
         profileService.getNotifications(),
@@ -67,9 +54,8 @@ const ProfilePage = () => {
       setProfileData(profile.data);
       setTradingStats(stats.data);
       setBrokerAccounts(profile.data.brokerAccounts || []);
-      setNotifications(notifications.data.notifications || []);
+      setNotifications(notificationsRes.data.notifications || []);
 
-      // Brief delay to show completion
       setTimeout(() => {
         setLoading(false);
       }, 300);
@@ -106,263 +92,143 @@ const ProfilePage = () => {
   };
 
   const renderTabContent = () => {
+    const contentVariants = {
+      hidden: { opacity: 0, x: 20 },
+      visible: { opacity: 1, x: 0, transition: { duration: 0.3 } },
+      exit: { opacity: 0, x: -20, transition: { duration: 0.2 } }
+    };
+
     switch (activeTab) {
       case "overview":
         return (
-          <ProfileOverview
-            profileData={profileData}
-            tradingStats={tradingStats}
-            brokerAccounts={brokerAccounts}
-            onRefresh={fetchProfileData}
-          />
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <ProfileOverview
+              profileData={profileData}
+              tradingStats={tradingStats}
+              brokerAccounts={brokerAccounts}
+              onRefresh={fetchProfileData}
+            />
+          </motion.div>
         );
       case "performance":
-        return <PerformanceTab profile={profileData} loading={loading} />;
+        return (
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <PerformanceTab profile={profileData} loading={loading} />
+          </motion.div>
+        );
       case "brokers":
-        return <EnhancedBrokerManagement />;
+        return (
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <EnhancedBrokerManagement />
+          </motion.div>
+        );
       case "settings":
         return (
-          <ProfileSettings
-            profileData={profileData}
-            onUpdate={handleProfileUpdate}
-            onAvatarUpload={handleAvatarUpload}
-          />
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <ProfileSettings
+              profileData={profileData}
+              onUpdate={handleProfileUpdate}
+              onAvatarUpload={handleAvatarUpload}
+            />
+          </motion.div>
         );
       case "security":
         return (
-          <ProfileSecurity
-            profileData={profileData}
-            onUpdate={handleProfileUpdate}
-          />
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <ProfileSecurity
+              profileData={profileData}
+              onUpdate={handleProfileUpdate}
+            />
+          </motion.div>
         );
       case "notifications":
         return (
-          <ProfileNotifications
-            notifications={notifications}
-            onUpdate={setNotifications}
-          />
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <ProfileNotifications
+              notifications={notifications}
+              onUpdate={setNotifications}
+            />
+          </motion.div>
         );
       default:
         return null;
     }
   };
 
-  // Enhanced Loading with progress
   if (loading) {
     return (
-      <Box
-        sx={{
-          minHeight: "100vh",
-          bgcolor: "background.default",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Paper
-          elevation={0}
-          sx={{
-            p: 6,
-            borderRadius: 4,
-            textAlign: "center",
-            bgcolor: alpha(theme.palette.background.paper, 0.9),
-            backdropFilter: "blur(20px)",
-            border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
-            minWidth: 300,
-          }}
-        >
-          <TrendingUpIcon
-            sx={{
-              fontSize: 48,
-              color: "primary.main",
-              mb: 2,
-              animation: "pulse 2s infinite",
-            }}
-          />
-          <Typography
-            variant="h6"
-            sx={{
-              mb: 3,
-              color: "text.primary",
-              fontWeight: 600,
-            }}
+      <div className="tw-min-h-screen tw-bg-slate-50 tw-dark:bg-slate-900 tw-flex tw-items-center tw-justify-center tw-p-4">
+        <div className="tw-bg-white tw-dark:bg-slate-800 tw-p-8 tw-rounded-2xl tw-border tw-border-slate-200 tw-dark:border-slate-700 tw-shadow-xl tw-w-full tw-max-w-md tw-text-center">
+          <motion.div 
+            animate={{ scale: [1, 1.1, 1], rotate: 360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            className="tw-inline-block tw-mb-6"
           >
-            Loading Your Trading Profile
-          </Typography>
-          <Box sx={{ width: "100%", mb: 2 }}>
-            <LinearProgress
-              variant="determinate"
-              value={loadingProgress}
-              sx={{
-                height: 8,
-                borderRadius: 4,
-                bgcolor: alpha(theme.palette.primary.main, 0.1),
-                "& .MuiLinearProgress-bar": {
-                  borderRadius: 4,
-                  background: `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                },
-              }}
+            <Layout className="tw-w-16 tw-h-16 tw-text-indigo-600 tw-dark:text-indigo-400" />
+          </motion.div>
+          <h2 className="tw-text-xl tw-font-bold tw-text-slate-800 tw-dark:text-slate-100 tw-mb-4">
+            Loading Command Center
+          </h2>
+          <div className="tw-w-full tw-h-2 tw-bg-slate-100 tw-dark:bg-slate-700 tw-rounded-full tw-overflow-hidden tw-mb-3">
+            <motion.div 
+              className="tw-h-full tw-bg-indigo-600"
+              initial={{ width: "0%" }}
+              animate={{ width: `${loadingProgress}%` }}
             />
-          </Box>
-          <Typography
-            variant="body2"
-            color="text.secondary"
-            sx={{ fontSize: "0.875rem" }}
-          >
-            {loadingProgress < 30
-              ? "Connecting to servers..."
-              : loadingProgress < 60
-              ? "Fetching account data..."
-              : loadingProgress < 90
-              ? "Loading trading statistics..."
-              : "Almost ready..."}
-          </Typography>
-        </Paper>
-        <style jsx global>{`
-          @keyframes pulse {
-            0% {
-              transform: scale(1);
-              opacity: 1;
-            }
-            50% {
-              transform: scale(1.1);
-              opacity: 0.7;
-            }
-            100% {
-              transform: scale(1);
-              opacity: 1;
-            }
-          }
-        `}</style>
-      </Box>
+          </div>
+        </div>
+      </div>
     );
   }
 
-  // Enhanced Error State
   if (error) {
     return (
-      <Box
-        sx={{
-          minHeight: "100vh",
-          bgcolor: "background.default",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Paper
-          elevation={0}
-          sx={{
-            p: 6,
-            borderRadius: 4,
-            textAlign: "center",
-            bgcolor: alpha(theme.palette.background.paper, 0.9),
-            backdropFilter: "blur(20px)",
-            border: `1px solid ${alpha(theme.palette.error.main, 0.2)}`,
-            maxWidth: 400,
-            mx: 2,
-          }}
-        >
-          <ErrorIcon
-            sx={{
-              fontSize: 64,
-              color: "error.main",
-              mb: 2,
-              opacity: 0.8,
-            }}
-          />
-          <Typography
-            variant="h5"
-            gutterBottom
-            sx={{
-              fontWeight: 600,
-              color: "text.primary",
-            }}
-          >
-            Oops! Something went wrong
-          </Typography>
-          <Typography
-            color="text.secondary"
-            sx={{
-              mb: 4,
-              fontSize: "1rem",
-              lineHeight: 1.6,
-            }}
-          >
-            {error}
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<RefreshIcon />}
+      <div className="tw-min-h-screen tw-bg-slate-50 tw-dark:bg-slate-900 tw-flex tw-items-center tw-justify-center tw-p-4">
+        <div className="tw-bg-white tw-dark:bg-slate-800 tw-p-8 tw-rounded-2xl tw-border tw-border-red-200 tw-dark:border-red-900/30 tw-shadow-xl tw-text-center">
+          <AlertCircle className="tw-w-12 tw-h-12 tw-text-red-500 tw-mx-auto tw-mb-4" />
+          <h2 className="tw-text-xl tw-font-bold tw-text-slate-800 tw-dark:text-slate-100 tw-mb-2">
+            Connection Error
+          </h2>
+          <p className="tw-text-slate-500 tw-mb-6">{error}</p>
+          <button
             onClick={fetchProfileData}
-            size="large"
-            sx={{
-              px: 4,
-              py: 1.5,
-              borderRadius: 3,
-              textTransform: "none",
-              fontWeight: 600,
-              boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.3)}`,
-              "&:hover": {
-                transform: "translateY(-2px)",
-                boxShadow: `0 6px 16px ${alpha(
-                  theme.palette.primary.main,
-                  0.4
-                )}`,
-              },
-            }}
+            className="tw-inline-flex tw-items-center tw-gap-2 tw-px-6 tw-py-2.5 tw-bg-indigo-600 tw-text-white tw-rounded-lg tw-font-medium tw-transition-colors tw-hover:bg-indigo-700"
           >
-            Try Again
-          </Button>
-        </Paper>
-      </Box>
+            <RefreshCcw className="tw-w-4 tw-h-4" />
+            Retry
+          </button>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Fade in={true} timeout={600}>
-      <Box
-        sx={{
-          minHeight: "100vh",
-          bgcolor: "background.default",
-          backgroundImage: `radial-gradient(circle at 20% 80%, ${alpha(
-            theme.palette.primary.main,
-            0.05
-          )} 0%, transparent 50%),
-                           radial-gradient(circle at 80% 20%, ${alpha(
-                             theme.palette.secondary.main,
-                             0.05
-                           )} 0%, transparent 50%)`,
-        }}
-      >
-        <Container
-          maxWidth="xl"
-          sx={{
-            py: { xs: 3, sm: 4 },
-            px: { xs: 2, sm: 3 },
-          }}
+    <div className="tw-min-h-screen tw-bg-slate-50 tw-dark:bg-slate-950 tw-pb-12">
+      <div className="tw-max-w-[1600px] tw-mx-auto tw-px-4 tw-sm:px-6 tw-lg:px-8 tw-py-6">
+        
+        {/* Header Section */}
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="tw-mb-6"
         >
-          {/* Profile Header */}
-          <Box sx={{ mb: { xs: 3, sm: 4 } }}>
-            <ProfileHeader
-              profileData={profileData}
-              onAvatarUpload={handleAvatarUpload}
-            />
-          </Box>
+          <ProfileHeader
+            profileData={profileData}
+            onAvatarUpload={handleAvatarUpload}
+          />
+        </motion.div>
 
-          {/* Main Content with enhanced styling */}
-          <Paper
-            elevation={0}
-            sx={{
-              borderRadius: { xs: 2, sm: 3 },
-              overflow: "hidden",
-              bgcolor: alpha(theme.palette.background.paper, 0.8),
-              backdropFilter: "blur(20px)",
-              border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-              boxShadow: `0 8px 32px ${alpha(theme.palette.common.black, 0.1)}`,
-            }}
+        {/* Dashboard Grid Layout */}
+        <div className="tw-grid tw-grid-cols-1 tw-lg:grid-cols-12 tw-gap-6 tw-items-start">
+          
+          {/* Sidebar Navigation (Desktop) / Tabs (Mobile) */}
+          <motion.div 
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+            className="tw-lg:col-span-3 tw-sticky tw-top-6"
           >
-            <Box sx={{ p: { xs: 3, sm: 4 } }}>
+            <div className="tw-bg-white tw-dark:bg-slate-900 tw-rounded-2xl tw-border tw-border-slate-200 tw-dark:border-slate-800 tw-shadow-sm tw-p-2">
               <ProfileTabs
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
@@ -372,17 +238,41 @@ const ProfilePage = () => {
                 }}
                 securityAlerts={profileData?.securityAlerts || 0}
               />
+            </div>
+          </motion.div>
 
-              <Box sx={{ mt: { xs: 3, sm: 4 } }}>
-                <Fade in={true} key={activeTab} timeout={300}>
-                  <Box>{renderTabContent()}</Box>
-                </Fade>
-              </Box>
-            </Box>
-          </Paper>
-        </Container>
-      </Box>
-    </Fade>
+          {/* Main Content Area */}
+          <motion.div 
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+            className="tw-lg:col-span-9"
+          >
+            {/* Dynamic Content Header */}
+            <div className="tw-mb-6">
+              <h2 className="tw-text-2xl tw-font-bold tw-text-slate-900 tw-dark:text-white tw-capitalize">
+                {activeTab}
+              </h2>
+              <p className="tw-text-slate-500 tw-dark:text-slate-400">
+                {activeTab === "overview" && "Comprehensive view of your trading performance and account status."}
+                {activeTab === "performance" && "Detailed analytics, P&L reports, and trade history."}
+                {activeTab === "brokers" && "Manage your connected brokerage accounts and API keys."}
+                {activeTab === "settings" && "Update your personal information and preferences."}
+                {activeTab === "security" && "Manage password, 2FA, and security logs."}
+                {activeTab === "notifications" && "View system alerts and activity logs."}
+              </p>
+            </div>
+
+            <div className="tw-min-h-[600px]">
+              <AnimatePresence mode="wait">
+                {renderTabContent()}
+              </AnimatePresence>
+            </div>
+          </motion.div>
+          
+        </div>
+      </div>
+    </div>
   );
 };
 

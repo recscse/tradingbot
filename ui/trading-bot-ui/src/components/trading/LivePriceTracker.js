@@ -22,8 +22,6 @@ import {
 } from "@mui/material";
 import {
   Refresh,
-  TrendingUp,
-  TrendingDown,
   CallMade,
   CallReceived,
   Timeline,
