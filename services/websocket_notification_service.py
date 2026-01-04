@@ -27,6 +27,37 @@ class WebSocketNotificationService:
             'error': 'Error',
             'success': 'Success'
         }
+        # Cache for deduplication: key -> timestamp
+        self._sent_cache = {}
+        self._dedup_window = 5.0  # 5 seconds deduplication window
+        self._cleanup_counter = 0
+
+    def _is_duplicate(self, unique_key: str) -> bool:
+        """
+        Check if a notification is a duplicate within the time window.
+        Also handles cache cleanup periodically.
+        """
+        import time
+        current_time = time.time()
+        
+        # Periodic cleanup (every 100 checks)
+        self._cleanup_counter += 1
+        if self._cleanup_counter > 100:
+            self._cleanup_counter = 0
+            # Remove expired entries
+            expired_keys = [k for k, ts in self._sent_cache.items() if current_time - ts > self._dedup_window]
+            for k in expired_keys:
+                del self._sent_cache[k]
+        
+        # Check for duplicate
+        if unique_key in self._sent_cache:
+            last_sent = self._sent_cache[unique_key]
+            if current_time - last_sent < self._dedup_window:
+                return True
+        
+        # Update cache
+        self._sent_cache[unique_key] = current_time
+        return False
     
     def send_notification_to_user(
         self, 
@@ -50,6 +81,12 @@ class WebSocketNotificationService:
             bool: True if sent successfully to at least one client
         """
         try:
+            # Deduplication check
+            unique_key = f"{user_id}:{notification_type}:{title}:{message}"
+            if self._is_duplicate(unique_key):
+                logger.debug(f"🔇 Suppressed duplicate notification for user {user_id}: {title}")
+                return False
+
             notification_payload = {
                 'id': f"notif_{datetime.now().timestamp()}_{user_id}",
                 'type': notification_type,
@@ -175,6 +212,12 @@ class WebSocketNotificationService:
             int: Number of clients notified
         """
         try:
+            # Deduplication check
+            unique_key = f"broadcast:{notification_type}:{title}:{message}"
+            if self._is_duplicate(unique_key):
+                logger.debug(f"🔇 Suppressed duplicate broadcast: {title}")
+                return 0
+
             notification_payload = {
                 'id': f"broadcast_{datetime.now().timestamp()}",
                 'type': notification_type,
