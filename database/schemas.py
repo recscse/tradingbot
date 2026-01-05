@@ -109,6 +109,19 @@ class BrokerAccountResponse(BaseModel):
         from_attributes = True
 
 
+class BrokerConfigResponse(BaseModel):
+    id: int
+    broker_name: str
+    client_id: Optional[str] = None
+    is_active: bool
+    access_token_expiry: Optional[datetime] = None
+    access_token: Optional[str] = None  # Included as frontend checks for its presence
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class UserProfileResponse(BaseModel):
     id: int
     full_name: str
