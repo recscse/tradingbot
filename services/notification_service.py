@@ -128,6 +128,20 @@ class NotificationService:
             db = next(get_db())
             
         try:
+            # Deduplication: Check for identical unread notification in last 5 minutes
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            existing = db.query(Notification).filter(
+                Notification.user_id == user_id,
+                Notification.type == notification_type,
+                Notification.title == title,
+                Notification.is_read == False,
+                Notification.created_at > cutoff
+            ).first()
+            
+            if existing:
+                logger.debug(f"Skipping duplicate DB notification for user {user_id}: {title}")
+                return existing
+
             notification = Notification(
                 user_id=user_id,
                 title=title,
