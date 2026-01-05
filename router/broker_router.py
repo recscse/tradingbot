@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Header
 import pyotp
 from sqlalchemy.orm import Session
 from database.connection import get_db
 from database.models import BrokerConfig, Trade, User
+from database.schemas import BrokerConfigResponse
 from pydantic import BaseModel
 import jwt
 import os
@@ -203,7 +204,7 @@ def add_broker(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@broker_router.get("/list")
+@broker_router.get("/list", response_model=Dict[str, List[BrokerConfigResponse]])
 def get_brokers(
     user_id: int = Depends(get_current_user), db: Session = Depends(get_db)
 ):
