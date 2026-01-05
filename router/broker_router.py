@@ -14,12 +14,11 @@ import logging
 from database.models import BrokerConfig
 from services.angel_service import generate_angel_auth_url
 from services.upstox_service import generate_upstox_auth_url, exchange_upstox_token
+from core.config import JWT_SECRET as SECRET_KEY
 
 # ✅ Configure Logging
 logger = logging.getLogger(__name__)
 
-# Load JWT Secret Key
-SECRET_KEY = os.getenv("JWT_SECRET")
 # API Router
 broker_router = APIRouter()
 
