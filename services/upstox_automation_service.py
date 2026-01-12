@@ -80,6 +80,11 @@ class UpstoxAutomationService:
         if not self.pin or self.pin == "your_6_digit_pin":
             missing_vars.append("UPSTOX_PIN")
 
+        # Fix for Railway/Docker: Ensure Playwright looks in the correct location
+        if os.path.exists("/ms-playwright"):
+            logger.info("Found /ms-playwright directory, setting PLAYWRIGHT_BROWSERS_PATH")
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/ms-playwright"
+
         if missing_vars:
             error_msg = f"Missing or invalid environment variables: {', '.join(missing_vars)}. Please configure them in .env file."
             logger.error(error_msg)

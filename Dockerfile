@@ -23,12 +23,15 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV ENVIRONMENT=production
+ENV TZ=Asia/Kolkata
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     libpq5 \
-    curl && \
+    curl \
+    tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy wheels from builder
@@ -39,8 +42,11 @@ COPY --from=builder /app/requirements.txt .
 RUN pip install --no-cache /wheels/*
 
 # Install Playwright browsers and their system dependencies
-RUN python -m playwright install chromium && \
-    python -m playwright install-deps chromium
+# CRITICAL: Install to a shared location and fix permissions for non-root user
+RUN mkdir -p /ms-playwright && \
+    python -m playwright install chromium && \
+    python -m playwright install-deps chromium && \
+    chmod -R 777 /ms-playwright
 
 # Copy application code
 COPY . .
