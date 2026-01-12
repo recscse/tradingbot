@@ -22,6 +22,7 @@ import asyncio
 from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock
+from utils.timezone_utils import get_ist_now_naive
 
 # Import services at module level for better performance
 from services.realtime_market_engine import (
@@ -143,7 +144,7 @@ class IntelligentStockSelectionService:
         self.selection_config = {
             "max_stocks_per_selection": 5,
             "min_value_crores": 0.0,  # No minimum - pick highest value stocks from top sectors
-            "min_volume": 100000,
+            "min_volume": 0,
             "max_risk_per_stock": 2.0,  # % of portfolio
             "min_score_threshold": 0.15,  # Testing threshold - realistic for scoring algorithm
             "sentiment_weight": 0.3,
@@ -969,7 +970,7 @@ class IntelligentStockSelectionService:
                 db = SessionLocal()
                 try:
                     db_stocks = db.query(SelectedStock).filter(
-                        SelectedStock.selection_date == date.today(),
+                        SelectedStock.selection_date == get_ist_now_naive().date(),
                         SelectedStock.is_active == True,
                         SelectedStock.selection_phase.in_(['premarket', 'final_selection'])
                     ).all()
@@ -1237,7 +1238,7 @@ class IntelligentStockSelectionService:
         """
         try:
             db = SessionLocal()
-            today = date.today()
+            today = get_ist_now_naive().date()
 
             # Get current market sentiment for database storage
             sentiment_data = get_market_sentiment()
