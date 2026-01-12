@@ -23,6 +23,7 @@ from database.models import (
     UserTradingConfig,
 )
 from router.auth_router import get_current_user
+from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from services.trading_execution import (
     trade_prep_service,
     execution_handler,
@@ -810,7 +811,7 @@ async def get_selected_stock(
                 func.max(SelectedStock.id).label('max_id')
             )
             .filter(
-                SelectedStock.selection_date == date.today(),
+                SelectedStock.selection_date == get_ist_now_naive().date(),
                 SelectedStock.is_active == True,
             )
             .group_by(SelectedStock.symbol)
@@ -832,7 +833,7 @@ async def get_selected_stock(
                 "stocks": [],
                 "market_sentiment": {},
                 "debug_info": {
-                    "query_date": date.today().isoformat(),
+                    "query_date": get_ist_now_naive().date().isoformat(),
                     "total_records": 0
                 }
             }
@@ -947,7 +948,7 @@ async def get_selected_stock(
             "stocks": stocks,
             "market_sentiment": {},
             "debug_info": {
-                "query_date": date.today().isoformat(),
+                "query_date": get_ist_now_naive().date().isoformat(),
                 "total_records_found": len(selected_records),
                 "valid_records_parsed": len(valid_records),
                 "stocks_returned": len(stocks),
@@ -1407,7 +1408,7 @@ async def get_portfolio_summary(
                 })
 
         # Get realized P&L from closed trades
-        today = date.today()
+        today = get_ist_now_naive().date()
 
         # Today's closed trades
         todays_closed_trades = db.query(AutoTradeExecution).filter(

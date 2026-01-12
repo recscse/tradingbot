@@ -108,3 +108,85 @@ class UpstoxBroker(BaseBroker):
         except Exception as e:
             logger.error(f"❌ Error placing Upstox order: {e}")
             raise
+
+    def get_historical_data(
+        self,
+        instrument_key: str,
+        interval: str = "1minute",
+        from_date: str = None,
+        to_date: str = None
+    ) -> Dict[str, Any]:
+        """
+        Fetch historical candle data from Upstox API.
+        Uses intraday endpoint for current day data to ensure 'live' candles.
+        """
+        try:
+            # Check if we should use the intraday endpoint (for today's data)
+            from utils.timezone_utils import get_ist_now_naive
+            today_str = get_ist_now_naive().strftime("%Y-%m-%d")
+            
+            is_today = (to_date == today_str) or (to_date is None)
+            
+            if is_today:
+                # Use intraday endpoint for latest 'live' candles
+                url = f"{self.BASE_URL}/historical-candle/intraday/{instrument_key}/{interval}"
+            else:
+                # Use standard historical endpoint
+                url = f"{self.BASE_URL}/historical-candle/{instrument_key}/{interval}/{to_date}"
+                if from_date:
+                    url = f"{self.BASE_URL}/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}"
+
+            headers = {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.access_token}"
+            }
+
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status") == "success":
+                    candles = result.get("data", {}).get("candles", [])
+                    # Upstox returns candles in descending order (newest first), reverse to ascending
+                    return {"candles": candles[::-1]} if candles else {"candles": []}
+                else:
+                    logger.error(f"❌ Upstox historical data failed: {result.get('message')}")
+                    return {"candles": []}
+            else:
+                logger.error(f"❌ Upstox API error ({response.status_code}): {response.text}")
+                return {"candles": []}
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching Upstox historical data: {e}")
+            return {"candles": []}
+
+    def get_funds(self) -> Dict[str, Any]:
+        """
+        Get available funds and margin from Upstox API
+
+        Returns:
+            Dict containing funds data
+        """
+        try:
+            url = f"{self.BASE_URL}/user/get-funds-and-margin"
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Accept": "application/json"
+            }
+
+            response = requests.get(url, headers=headers)
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status") == "success":
+                    return result.get("data", {})
+                else:
+                    logger.error(f"❌ Upstox funds fetch failed: {result.get('message')}")
+                    return {}
+            else:
+                logger.error(f"❌ Upstox API error: {response.text}")
+                return {}
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching Upstox funds: {e}")
+            return {}

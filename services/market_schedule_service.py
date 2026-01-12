@@ -151,11 +151,12 @@ class MarketScheduleService:
         """Start the daily market scheduler"""
         self.is_running = True
         logger.info("🚀 Market scheduler started")
+        from utils.timezone_utils import get_ist_now_naive
 
         while self.is_running:
             try:
                 current_time = datetime.now(self.ist).time()
-                current_date = datetime.now(self.ist).date()
+                current_date = get_ist_now_naive().date()
 
                 # Reset daily tasks at midnight (new trading day)
                 self._reset_daily_tasks_if_new_day(current_date)
@@ -229,7 +230,10 @@ class MarketScheduleService:
                 # Post-market cleanup (after 3:30 PM OR before 8:00 AM)
                 else:
                     # Only run cleanup if it's actually after market close
-                    if current_time >= self.market_close or current_time < self.early_preparation:
+                    if (
+                        current_time >= self.market_close
+                        or current_time < self.early_preparation
+                    ):
                         await self._post_market_cleanup()
 
                 await asyncio.sleep(60)  # Check every minute
@@ -291,6 +295,7 @@ class MarketScheduleService:
                     )
                     # Quick check - don't call load_from_json as it might be slow
                     import os
+
                     fno_file_path = "data/fno_stock_list.json"
                     if os.path.exists(fno_file_path):
                         logger.info(
@@ -306,9 +311,7 @@ class MarketScheduleService:
                 # Don't return - continue with instrument service
 
             # STEP 2: Instrument service initialization - CHECK ONLY
-            logger.info(
-                "🔧 Background: Step 2 - Checking instrument service status..."
-            )
+            logger.info("🔧 Background: Step 2 - Checking instrument service status...")
             try:
                 from services.instrument_refresh_service import get_trading_service
 
@@ -316,18 +319,20 @@ class MarketScheduleService:
 
                 # Check if already initialized - don't re-initialize
                 if instrument_service.is_initialized():
-                    logger.info(
-                        "✅ Background: Instrument service already initialized"
-                    )
+                    logger.info("✅ Background: Instrument service already initialized")
                 else:
                     logger.info(
                         "💡 Background: Instrument service will be initialized on-demand"
                     )
 
             except Exception as inst_error:
-                logger.error(f"❌ Background: Instrument service check error: {inst_error}")
+                logger.error(
+                    f"❌ Background: Instrument service check error: {inst_error}"
+                )
 
-            logger.info("✅ Background: Early morning preparation complete (lightweight mode)")
+            logger.info(
+                "✅ Background: Early morning preparation complete (lightweight mode)"
+            )
 
         except Exception as e:
             logger.error(f"❌ Background: Early morning preparation failed: {e}")
@@ -376,7 +381,9 @@ class MarketScheduleService:
             retry_interval = 5
             data_ready = False
 
-            logger.info("🔍 Background: Checking centralized_ws_manager data availability...")
+            logger.info(
+                "🔍 Background: Checking centralized_ws_manager data availability..."
+            )
             for attempt in range(1, max_retries + 1):
                 if is_analytics_data_ready():
                     data_ready = True
@@ -402,7 +409,9 @@ class MarketScheduleService:
                 )
 
             # Run pre-open stock selection with LIVE data
-            logger.info("✅ Background: LIVE pre-open data available - running stock selection...")
+            logger.info(
+                "✅ Background: LIVE pre-open data available - running stock selection..."
+            )
             preopen_result = await intelligent_stock_selector.run_premarket_selection()
 
             if preopen_result and not preopen_result.get("error"):
@@ -438,7 +447,9 @@ class MarketScheduleService:
                     if preopen_result
                     else "No result returned"
                 )
-                logger.warning(f"⚠️ Background: Pre-open stock selection failed: {error_msg}")
+                logger.warning(
+                    f"⚠️ Background: Pre-open stock selection failed: {error_msg}"
+                )
                 self.selected_stocks = {}
 
         except Exception as e:
@@ -917,7 +928,7 @@ class MarketScheduleService:
             selected_instruments.append(
                 {
                     "symbol": "NIFTY",
-                    "instrument_key": "NSE_INDEX|99926000",
+                    "instrument_key": "NSE_INDEX|Nifty 50",
                     "priority": "HIGH",
                 }
             )

@@ -10,9 +10,10 @@ import logging
 import schedule
 import threading
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, date
 from typing import Dict, List
 
+from utils.timezone_utils import get_ist_now_naive
 from services.notification_service import notification_service, NotificationTypes, NotificationPriority
 from services.token_monitor_service import token_monitor_service
 
@@ -186,7 +187,7 @@ class NotificationScheduler:
             logger.info("📊 Generating daily P&L summaries...")
             
             db = next(get_db())
-            today = date.today()
+            today = get_ist_now_naive().date()
             
             # Get users with trades today
             users_with_trades = (

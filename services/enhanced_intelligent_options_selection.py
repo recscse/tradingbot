@@ -13,6 +13,7 @@ from enum import Enum
 from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock
+from utils.timezone_utils import get_ist_now_naive
 
 # Import existing services
 from services.intelligent_stock_selection_service import (
@@ -1201,7 +1202,7 @@ class EnhancedIntelligentOptionsService:
 
             db = SessionLocal()
             try:
-                today = date.today()
+                today = get_ist_now_naive().date()
 
                 # Clear existing selections
                 db.query(SelectedStock).filter(
@@ -1371,7 +1372,7 @@ class EnhancedIntelligentOptionsService:
                 selected_stocks = (
                     db.query(SelectedStock)
                     .filter(
-                        SelectedStock.selection_date == date.today(),
+                        SelectedStock.selection_date == get_ist_now_naive().date(),
                         SelectedStock.is_active == True,
                         SelectedStock.option_contract.isnot(None),
                     )

@@ -23,6 +23,7 @@ from database.connection import SessionLocal
 from database.models import SelectedStock, ActivePosition, BrokerConfig
 from services.trading_execution.auto_trade_live_feed import auto_trade_live_feed
 from services.trading_execution.capital_manager import TradingMode
+from utils.timezone_utils import get_ist_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,9 @@ class AutoTradeScheduler:
 
             # IMMEDIATE START: Check and start trading immediately on application startup
             # This allows auto-trading to work even outside market hours for testing/monitoring
-            logger.info("🚀 Checking for immediate auto-start on application startup...")
+            logger.info(
+                "🚀 Checking for immediate auto-start on application startup..."
+            )
             await self._check_and_start_trading_all_users()
 
             while self.is_running:
@@ -147,7 +150,7 @@ class AutoTradeScheduler:
             db = SessionLocal()
 
             try:
-                today = date.today()
+                today = get_ist_now_naive().date()
 
                 # STEP 1: Check if stocks are selected today (COMMON for all users)
                 stock_count = (
@@ -240,7 +243,9 @@ class AutoTradeScheduler:
         Check if auto-trading should stop based on positions for ANY active user
         """
         try:
-            from services.trading_execution.shared_instrument_registry import shared_registry
+            from services.trading_execution.shared_instrument_registry import (
+                shared_registry,
+            )
 
             db = SessionLocal()
 
