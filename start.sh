@@ -2,6 +2,9 @@
 
 set -e
 
+# Ensure Playwright knows where to look for browsers in Docker
+export PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 PORT=${PORT:-8000}
 
 echo "Running Alembic database migrations..."
