@@ -45,7 +45,7 @@ COMPLETED:
 
 # Key Features Implemented:
 ✅ Virtual Capital Management (₹5 lakh default, user configurable)
-✅ Risk Management Controls (2% max per trade, 5% daily loss limit)
+✅ Risk Management Controls (60% max per trade, 5% daily loss limit)
 ✅ Real-time Position Tracking with P&L calculation
 ✅ Performance Analytics (Win rate, Sharpe ratio, max drawdown)
 ✅ Circuit Breaker System for preventing catastrophic losses

@@ -30,7 +30,7 @@ class MultiDematCapitalService:
     def __init__(self):
         """Initialize multi-demat capital service"""
         self.max_capital_utilization_percent = Decimal('0.80')  # Use max 80% of total capital
-        self.max_per_trade_allocation_percent = Decimal('0.20')  # 20% max per trade
+        self.max_per_trade_allocation_percent = Decimal('0.60')  # 60% max per trade
         logger.info("Multi-Demat Capital Service initialized")
 
     async def get_user_total_capital(
@@ -415,7 +415,7 @@ class MultiDematCapitalService:
         if required > available:
             return f"Insufficient capital: Required ₹{required:,.2f}, Available ₹{available:,.2f}"
         elif required > max_allowed:
-            return f"Exceeds max allocation: Required ₹{required:,.2f}, Max allowed ₹{max_allowed:,.2f} (20% of total)"
+            return f"Exceeds max allocation: Required ₹{required:,.2f}, Max allowed ₹{max_allowed:,.2f} (60% of total)"
         else:
             return "Unknown rejection reason"
 

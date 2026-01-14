@@ -825,7 +825,7 @@ const AutoTradingPage = () => {
           <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
             <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Max Per Trade</p>
             <p className="tw-text-3xl tw-font-bold tw-text-cyan-400">{formatCurrency(capitalData.max_trade_allocation || 0)}</p>
-            <p className="tw-text-xs tw-text-slate-400 tw-mt-1">20% of total</p>
+            <p className="tw-text-xs tw-text-slate-400 tw-mt-1">60% of total</p>
           </div>
         </div>
       </div>

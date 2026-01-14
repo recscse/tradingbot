@@ -104,7 +104,7 @@ for broker in active_brokers:
    - Total Available Capital (aggregated)
    - Total Used Margin
    - Total Free Margin
-   - Max Per Trade Allocation (20% of total)
+   - Max Per Trade Allocation (60% of total)
    - Active Demats Count
 
 2. **Per-Demat Breakdown Table**

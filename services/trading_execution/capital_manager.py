@@ -61,7 +61,7 @@ class TradingCapitalManager:
     def __init__(self):
         """Initialize capital manager with configuration"""
         self.paper_trading_capital = Decimal('100000')  # 1 Lakh for paper trading
-        self.max_capital_per_trade_percent = Decimal('0.20')  # 20% max per trade
+        self.max_capital_per_trade_percent = Decimal('0.60')  # 60% max per trade
         self.max_risk_per_trade_percent = Decimal('0.02')  # 2% max risk per trade
         self.min_capital_buffer = Decimal('0.10')  # Keep 10% buffer
 
@@ -254,7 +254,7 @@ class TradingCapitalManager:
                 if total_capital <= 0:
                     return Decimal('0')
 
-            # Calculate per-trade max allocation (20% of total capital)
+            # Calculate per-trade max allocation (60% of total capital)
             max_per_trade = total_capital * self.max_capital_per_trade_percent
 
             # Check concurrent position limit
@@ -409,7 +409,7 @@ class TradingCapitalManager:
             if not max_loss_percent:
                 max_loss_percent = self.max_risk_per_trade_percent
 
-            # Calculate maximum capital to allocate (20% of total)
+            # Calculate maximum capital to allocate (60% of total)
             max_allocable_capital = available_capital * self.max_capital_per_trade_percent
 
             # Calculate maximum loss amount allowed
