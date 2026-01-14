@@ -1,0 +1,11 @@
+{
+    "title": "HFT Trading System Documentation",
+    "author": "Trading System Team",
+    "description": "Comprehensive documentation for the High-Frequency Trading System.",
+    "language": "en",
+    "gitbook": "3.x.x",
+    "structure": {
+        "readme": "README.md",
+        "summary": "SUMMARY.md"
+    }
+}

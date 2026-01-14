@@ -1,108 +1,78 @@
 # Table of Contents
 
-## 🏠 Introduction
-* [Welcome to HFT Trading System](README.md)
+* [Introduction](README.md)
 * [System Overview](overview/SYSTEM_OVERVIEW.md)
-* [Quick Start Guide](guides/QUICK_START.md)
-* [For Non-Technical Users](overview/NON_TECHNICAL_OVERVIEW.md)
-
-## 📚 Getting Started
-* [Installation Guide](guides/INSTALLATION.md)
-* [Environment Setup](guides/ENVIRONMENT_SETUP.md)
-* [First Trade Setup](guides/FIRST_TRADE_SETUP.md)
-* [Troubleshooting](guides/TROUBLESHOOTING.md)
+* [Non-Technical Overview](overview/NON_TECHNICAL_OVERVIEW.md)
 
 ## 🏗️ Architecture
-* [System Architecture Overview](architecture/TRADING_SYSTEM_ARCHITECTURE.md)
-* [HFT System Architecture](architecture/HFT_SYSTEM_ARCHITECTURE.md)
-* [Complete HFT Architecture](architecture/COMPLETE_HFT_SYSTEM_ARCHITECTURE.md)
+* [General Architecture](architecture/TRADING_SYSTEM_ARCHITECTURE.md)
+* [HFT Architecture](HFT_ARCHITECTURE.md)
 * [Real-time Data Flow](architecture/REALTIME_DATA_FLOW_ANALYSIS.md)
-* [WebSocket Architecture](architecture/PERSISTENT_WEBSOCKET_SOLUTION.md)
+* [Persistent WebSocket](architecture/PERSISTENT_WEBSOCKET_SOLUTION.md)
 * [Notification System](architecture/NOTIFICATION_SYSTEM_IMPLEMENTATION.md)
+* [UI Notifications](architecture/UI_NOTIFICATION_UPDATES.md)
 
-## ⚡ Kafka HFT System
-* [Kafka System Overview](kafka/KAFKA_OVERVIEW.md)
-* [Kafka Architecture](kafka/KAFKA_ARCHITECTURE.md)
-* [Setup & Installation](kafka/KAFKA_SETUP.md)
-* [Topic Management](kafka/KAFKA_TOPICS.md)
-* [Message Streaming](kafka/KAFKA_STREAMING.md)
-* [Performance Tuning](kafka/KAFKA_PERFORMANCE.md)
-* [Troubleshooting](kafka/KAFKA_TROUBLESHOOTING.md)
+## ⚡ Kafka System
+* [Overview](kafka/KAFKA_OVERVIEW.md)
+* [Setup Guide](kafka/setup/COMPLETE_SETUP.md)
+* [Architecture](kafka/architecture/SYSTEM_ARCHITECTURE.md)
+* [Integration](kafka/architecture/INTEGRATION.md)
+* [Troubleshooting](kafka/troubleshooting/COMMON_ISSUES.md)
 
-## 🔄 Data Flow & Integration
-* [Data Flow Analysis](data-flow/DATA_FLOW_ANALYSIS.md)
-* [Live Feed Data Format](data-flow/LIVE_FEED_DATA_FORMAT.md)
-* [Real-time Queue System](REALTIME_QUEUE_SYSTEM.md)
-* [Real-time Data Hub](REALTIME_DATA_HUB_IMPLEMENTATION.md)
+## 🤖 Auto Trading
+* [Overview](auto_trading/README.md)
+* [Complete Guide](auto_trading/guides/COMPLETE_TRADING_SYSTEM_GUIDE.md)
+* [Fully Automatic Trading](auto_trading/guides/FULLY_AUTOMATIC_TRADING_FINAL.md)
+* [Live Feed Guide](auto_trading/guides/AUTO_TRADING_LIVE_FEED_GUIDE.md)
+* [Start/Stop Guide](auto_trading/guides/AUTO_START_STOP_GUIDE.md)
+* [Architecture](auto_trading/architecture/TRADING_EXECUTION_ARCHITECTURE.md)
+    * [System Overview](auto_trading/architecture/SYSTEM_OVERVIEW.md)
+    * [Data Flow](auto_trading/architecture/DATA_FLOW.md)
+    * [Trade Execution](auto_trading/architecture/TRADE_EXECUTION_FLOW.md)
+* [Components](auto_trading/components/ORCHESTRATOR.md)
+    * [Risk Manager](auto_trading/components/RISK_MANAGER.md)
+    * [PnL Calculator](auto_trading/components/PNL_CALCULATOR.md)
+    * [Position Monitor](auto_trading/components/POSITION_MONITOR.md)
+* [Implementation](auto_trading/implementation/MULTI_DEMAT_CAPITAL_IMPLEMENTATION.md)
 
-## 🚀 Trading Strategies
-* [Breakout Strategy](strategies/BREAKOUT_STRATEGY.md)
-* [Gap Detection Strategy](strategies/GAP_DETECTION_STRATEGY.md)
+## 🧠 Intelligent Stock Selection
+* [Quick Start](intelligent_stock_selection/00_QUICK_START.md)
+* [Overview & Architecture](intelligent_stock_selection/01_overview_and_architecture.md)
+* [Execution Workflow](intelligent_stock_selection/02_execution_workflow.md)
+* [Database Schema](intelligent_stock_selection/03_database_schema.md)
+* [Market Sentiment](intelligent_stock_selection/04_market_sentiment_analysis.md)
+* [Options Direction](intelligent_stock_selection/05_options_trading_direction.md)
+* [Verification](intelligent_stock_selection/06_verification_checklist.md)
+* [API Endpoints](intelligent_stock_selection/07_api_endpoints.md)
+* [Troubleshooting](intelligent_stock_selection/09_troubleshooting.md)
+
+## 🚀 Strategies
 * [Stock Selection Process](strategies/STOCK_SELECTION_PROCESS.md)
-* [Strategy Performance](strategies/STRATEGY_PERFORMANCE.md)
+* [Breakout Strategy](strategies/BREAKOUT_STRATEGY.md)
+* [Gap Detection](strategies/GAP_DETECTION_STRATEGY.md)
+* [Breakout Implementation](breakout/BREAKOUT_COMPLETE_FLOW.md)
 
-## 🔧 Services & Components
-* [Auto Trading System](auto_trading/README.md)
-* [Position Monitor](auto_trading/components/POSITION_MONITOR.md)
-* [Risk Manager](auto_trading/components/RISK_MANAGER.md)
-* [PnL Calculator](auto_trading/components/PNL_CALCULATOR.md)
-* [Trading Orchestrator](auto_trading/components/ORCHESTRATOR.md)
-
-## 🔗 Broker Integration
-* [Broker Overview](brokers/BROKER_OVERVIEW.md)
-* [Upstox Integration](brokers/UPSTOX_INTEGRATION.md)
-* [Angel One Integration](brokers/ANGEL_ONE_INTEGRATION.md)
-* [Dhan Integration](brokers/DHAN_INTEGRATION.md)
-* [Zerodha Integration](brokers/ZERODHA_INTEGRATION.md)
-* [Funds Management](guides/BROKER_FUNDS_IMPLEMENTATION.md)
-* [Margin Integration](guides/MARGIN_INTEGRATION_SUMMARY.md)
-
-## 🖥️ User Interface
-* [Dashboard Overview](ui/DASHBOARD_OVERVIEW.md)
-* [Real-time Updates](ui/REALTIME_UPDATES.md)
-* [Trading Interface](ui/TRADING_INTERFACE.md)
-* [Analytics Dashboard](ui/ANALYTICS_DASHBOARD.md)
-
-## 🛠️ Development
-* [Development Standards](standards/README.md)
-* [Code Review Workflow](standards/CLAUDE_REVIEW_WORKFLOW.md)
-* [Coding Standards](standards/LINE_BY_LINE_STANDARDS.md)
-* [Code Templates](standards/CODE_TEMPLATES.md)
-* [Quality Checklist](standards/CODING_CHECKLIST.md)
-
-## 🚀 Deployment
+## 🛠️ Guides & Operations
 * [Deployment Guide](guides/DEPLOYMENT_GUIDE.md)
-* [Production Setup](auto_trading/deployment/PRODUCTION_DEPLOYMENT.md)
-* [Security Guidelines](guides/SECURITY.md)
-* [Performance Monitoring](deployment/MONITORING.md)
+* [Security](guides/SECURITY.md)
+* [Broker Funds](guides/BROKER_FUNDS_IMPLEMENTATION.md)
+* [Margin Integration](guides/MARGIN_INTEGRATION_SUMMARY.md)
+* [Upstox Order Management](UPSTOX_ORDER_MANAGEMENT_GUIDE.md)
 
-## 📊 Analytics & Reporting
-* [Performance Analytics](analytics/PERFORMANCE_ANALYTICS.md)
-* [Risk Analytics](analytics/RISK_ANALYTICS.md)
-* [Trading Reports](analytics/TRADING_REPORTS.md)
-* [System Metrics](analytics/SYSTEM_METRICS.md)
+## 💻 Development Standards
+* [Micro Standards](standards/IMPLEMENTATION_MICRO_STANDARDS.md)
+* [Code Review Criteria](standards/CODE_REVIEW_CRITERIA.md)
+* [Coding Checklist](standards/CODING_CHECKLIST.md)
+* [Code Templates](standards/CODE_TEMPLATES.md)
 
-## 🔒 Security & Compliance
-* [Security Overview](security/SECURITY_OVERVIEW.md)
-* [Authentication & Authorization](security/AUTH.md)
-* [Data Protection](security/DATA_PROTECTION.md)
-* [Compliance Requirements](security/COMPLIANCE.md)
+## 📅 Planning & Roadmap
+* [Business Roadmap](roadmap/BUSINESS_ROADMAP_SUMMARY.md)
+* [HFT Roadmap](roadmap/HFT_SYSTEM_ROADMAP.md)
+* [Implementation TODO](planning/AUTO_TRADING_IMPLEMENTATION_TODO.md)
 
-## 🆘 Support & Maintenance
-* [Common Issues](support/COMMON_ISSUES.md)
-* [Error Codes](support/ERROR_CODES.md)
-* [Maintenance Procedures](support/MAINTENANCE.md)
-* [Performance Tuning](support/PERFORMANCE_TUNING.md)
-
-## 📈 Business Overview
-* [Trading System Benefits](business/BENEFITS.md)
-* [ROI Analysis](business/ROI_ANALYSIS.md)
-* [Risk Management](business/RISK_MANAGEMENT.md)
-* [Regulatory Compliance](business/COMPLIANCE.md)
-
-## 📋 Appendices
-* [API Reference](api/API_REFERENCE.md)
-* [Configuration Reference](config/CONFIG_REFERENCE.md)
-* [Glossary](appendix/GLOSSARY.md)
-* [FAQ](appendix/FAQ.md)
-* [Change Log](appendix/CHANGELOG.md)
+## 🔌 Services & Data
+* [WebSocket Services](services/websocket/README.md)
+* [MCX Data Format](services/websocket/mcx/MCX_DATA_FORMAT.md)
+* [Gap Detection](services/gap-detector/GAP_DETECTOR_IMPLEMENTATION_SUMMARY.md)
+* [Real-time Queue](REALTIME_QUEUE_SYSTEM.md)
+* [Data Flow Analysis](data-flow/DATA_FLOW_ANALYSIS.md)
