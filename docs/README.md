@@ -10,23 +10,23 @@ This documentation is designed for **everyone** involved with the HFT trading sy
 
 **🏢 Business Users & Stakeholders**
 - [Non-Technical Overview](overview/NON_TECHNICAL_OVERVIEW.md) - Business benefits and system explanation
-- [Quick Start Guide](guides/QUICK_START.md) - Get up and running fast
-- [Performance Analytics](analytics/PERFORMANCE_ANALYTICS.md) - ROI and business metrics
+- [Quick Start Guide](intelligent_stock_selection/00_QUICK_START.md) - Get up and running fast
+- [Performance Analytics](auto_trading/components/PNL_CALCULATOR.md) - ROI and business metrics
 
 **👨‍💻 Developers & Technical Team**
 - [System Architecture](architecture/TRADING_SYSTEM_ARCHITECTURE.md) - Complete technical architecture
-- [Development Standards](standards/README.md) - Coding standards and best practices
-- [API Reference](api/API_REFERENCE.md) - Complete API documentation
+- [Development Standards](standards/IMPLEMENTATION_MICRO_STANDARDS.md) - Coding standards and best practices
+- [API Reference](intelligent_stock_selection/07_api_endpoints.md) - API documentation
 
 **🔍 QA & Testing Team**
-- [Quality Control Procedures](guides/QC_PROCEDURES.md) - Testing and validation processes
-- [Performance Testing](testing/PERFORMANCE_TESTING.md) - System performance validation
-- [Security Testing](testing/SECURITY_TESTING.md) - Security validation procedures
+- [Quality Control Procedures](standards/CODING_CHECKLIST.md) - Testing and validation processes
+- [Performance Testing](kafka/KAFKA_OVERVIEW.md) - System performance validation
+- [Security Testing](guides/SECURITY.md) - Security validation procedures
 
 **⚙️ Operations & DevOps**
 - [Deployment Guide](guides/DEPLOYMENT_GUIDE.md) - Production deployment procedures
-- [Monitoring & Alerts](deployment/MONITORING.md) - System monitoring setup
-- [Troubleshooting](guides/TROUBLESHOOTING.md) - Common issues and solutions
+- [Monitoring & Alerts](auto_trading/deployment/PRODUCTION_DEPLOYMENT.md) - System monitoring setup
+- [Troubleshooting](kafka/troubleshooting/COMMON_ISSUES.md) - Common issues and solutions
 
 ## 🎯 System Highlights
 
@@ -53,22 +53,22 @@ This documentation is designed for **everyone** involved with the HFT trading sy
 ### **New to the System?**
 1. **Start here**: [System Overview](overview/SYSTEM_OVERVIEW.md)
 2. **Business context**: [Non-Technical Overview](overview/NON_TECHNICAL_OVERVIEW.md)
-3. **Get started**: [Quick Start Guide](guides/QUICK_START.md)
+3. **Get started**: [Quick Start Guide](intelligent_stock_selection/00_QUICK_START.md)
 
 ### **Ready to Deploy?**
-1. **Setup**: [Installation Guide](guides/INSTALLATION.md)
-2. **Configure**: [Environment Setup](guides/ENVIRONMENT_SETUP.md)
-3. **Deploy**: [Deployment Guide](guides/DEPLOYMENT_GUIDE.md)
+1. **Setup**: [Installation Guide](kafka/setup/COMPLETE_SETUP.md)
+2. **Configure**: [Environment Setup](guides/DEPLOYMENT_GUIDE.md)
+3. **Deploy**: [Deployment Guide](auto_trading/deployment/PRODUCTION_DEPLOYMENT.md)
 
 ### **Want to Develop?**
 1. **Architecture**: [System Architecture](architecture/TRADING_SYSTEM_ARCHITECTURE.md)
-2. **Standards**: [Development Standards](standards/README.md)
-3. **API docs**: [API Reference](api/API_REFERENCE.md)
+2. **Standards**: [Development Standards](standards/IMPLEMENTATION_MICRO_STANDARDS.md)
+3. **API docs**: [API Reference](intelligent_stock_selection/07_api_endpoints.md)
 
 ### **Need to Test?**
-1. **QA procedures**: [Quality Control](guides/QC_PROCEDURES.md)
-2. **Test plans**: [Testing Strategy](testing/TESTING_STRATEGY.md)
-3. **Performance**: [Performance Testing](testing/PERFORMANCE_TESTING.md)
+1. **QA procedures**: [Quality Control](standards/CODING_CHECKLIST.md)
+2. **Test plans**: [Testing Strategy](standards/CODE_REVIEW_CRITERIA.md)
+3. **Performance**: [Performance Testing](kafka/KAFKA_OVERVIEW.md)
 
 ## ⚡ Kafka HFT System
 
@@ -106,7 +106,7 @@ Our system includes battle-tested trading strategies:
 - Volume-confirmed entries with trend filters
 - Success rate: 70-75% in volatile markets
 
-[Learn more about strategies →](strategies/README.md)
+[Learn more about strategies →](strategies/STOCK_SELECTION_PROCESS.md)
 
 ## 🔒 Risk Management
 
@@ -128,7 +128,7 @@ Our system protects your capital at every level:
 - Connection monitoring and automatic reconnection
 - Market hours and holiday detection
 
-[Learn more about risk management →](guides/RISK_MANAGEMENT.md)
+[Learn more about risk management →](auto_trading/components/RISK_MANAGER.md)
 
 ## 📊 Performance & Analytics
 
@@ -146,7 +146,7 @@ Monitor your trading performance in real-time:
 - **Monthly reviews**: Comprehensive performance evaluation
 - **Custom reports**: Flexible reporting for specific needs
 
-[Explore analytics features →](analytics/README.md)
+[Explore analytics features →](auto_trading/components/PNL_CALCULATOR.md)
 
 ## 🛠️ Technical Architecture
 
