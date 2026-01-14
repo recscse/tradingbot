@@ -254,6 +254,17 @@ class AutoTradeLiveFeed:
         try:
             stocks, broker_configs = await asyncio.to_thread(db_job)
 
+            if not stocks:
+                logger.warning(
+                    f"No selected stocks found for today ({get_ist_now_naive().date()})"
+                )
+                logger.info(
+                    "HINT: Has the 'Intelligent Stock Selection' service run for today? Check 'selected_stocks' table."
+                )
+                # Don't return yet, we might want to see broker configs or retry?
+                # Actually if no stocks, we can't do anything.
+                return
+
             if not broker_configs:
                 logger.warning("No active broker configurations found")
                 return
@@ -295,8 +306,6 @@ class AutoTradeLiveFeed:
                 target_lots = 1
                 try:
                     if stock.score_breakdown:
-                        import json
-
                         metadata = (
                             json.loads(stock.score_breakdown)
                             if isinstance(stock.score_breakdown, str)
