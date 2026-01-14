@@ -35,7 +35,7 @@ Validates signal:
    ↓ (Automatic - if valid signal)
 Prepares trade:
   - Calculates quantity based on lot size
-  - Allocates capital (20% max per trade, 2% max risk)
+  - Allocates capital (60% max per trade, 2% max risk)
   - Determines entry price from live premium
   - Sets stop loss and target based on strategy
    ↓ (Automatic - based on trading_mode setting)
