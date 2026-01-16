@@ -1,14 +1,14 @@
 import asyncio
 import json
 import logging
+import os
+import re
 from datetime import datetime, time as dt_time
 from pathlib import Path
 from typing import List, Dict, Optional, Any
-import requests
-from bs4 import BeautifulSoup
-import re
-import time
 import pytz
+import pandas as pd
+from playwright.async_api import async_playwright
 
 # Import sector mapping
 try:
@@ -24,12 +24,11 @@ logger = logging.getLogger(__name__)
 
 class FnoStockListService:
     """
-    Simple F&O stock list fetcher using the working scraper logic.
-    Based on the proven SimpleDhanScraper code.
+    F&O stock list fetcher using Playwright to scrape Dhan website.
     """
 
     def __init__(self):
-        self.base_url = "https://dhan.co"
+        self.base_url = "https://dhan.co/nse-fno-lot-size/"
         
         # Market schedule integration
         self.ist = pytz.timezone("Asia/Kolkata")
@@ -42,16 +41,8 @@ class FnoStockListService:
 
         # File path for saving JSON
         self.json_file_path = Path("data/fno_stock_list.json")
-
-        # Setup session like the working scraper
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Connection": "keep-alive",
-            }
-        )
+        self.downloads_dir = Path("./downloads")
+        self.downloads_dir.mkdir(exist_ok=True)
 
         # Manual symbol mapping for missing symbols - ENHANCED
         self.missing_symbols_map = {
@@ -83,9 +74,6 @@ class FnoStockListService:
         self.actual_indices = {
             "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTY-NEXT50"
         }
-        
-        # Path to extracted data file
-        self.extracted_data_path = Path("dhan_nse_fno_extracted.json")
         
         # Last update tracking for market schedule compliance
         self.last_update_time = None
@@ -154,10 +142,10 @@ class FnoStockListService:
                 "reason": "error_fallback", 
                 "message": f"Compliance check error: {str(e)}"
             }
-    
-    def get_fno_stocks(self) -> List[Dict[str, str]]:
+
+    async def get_fno_stocks(self) -> List[Dict[str, str]]:
         """
-        Get F&O stocks with name and symbol - with market schedule compliance
+        Get F&O stocks using Playwright
         """
         # Check market schedule compliance first
         compliance_check = self.is_market_schedule_compliant()
@@ -175,43 +163,35 @@ class FnoStockListService:
         else:
             logger.info(f"✅ Market schedule compliant: {compliance_check['message']}")
         
-        logger.info("🎯 Starting F&O stocks collection...")
+        logger.info("🎯 Starting F&O stocks collection using Playwright...")
         
         # Record update time
         self.last_update_time = datetime.now(self.ist)
 
+        raw_data = await self._fetch_dhan_data()
+        if not raw_data:
+            logger.error("❌ Failed to fetch data from Dhan")
+            return []
+
+        # Process and clean the data
         all_stocks = []
-        methods_used = []
+        for item in raw_data:
+            # Handle different possible key names from scraping
+            name = item.get("All Companies") or item.get("Company Name") or item.get("NAME") or item.get("Underlying") or ""
+            raw_symbol = item.get("Symbol") or item.get("SYMBOL") or ""
+            
+            if not name and not raw_symbol:
+                continue
 
-        # Method 0: Try extracted data first (most reliable)
-        extracted_stocks = self._get_extracted_dhan_data()
-        if extracted_stocks:
-            all_stocks.extend(extracted_stocks)
-            methods_used.append(f"ExtractedData({len(extracted_stocks)})")
-            logger.info(f"✅ Using extracted data as primary source: {len(extracted_stocks)} stocks")
-        else:
-            logger.info("⚠️ No extracted data found, falling back to scraping methods")
+            cleaned_name = self._clean_name(name)
+            cleaned_symbol = self._clean_symbol(raw_symbol)
 
-        # Method 1: Futures pagination - ALWAYS scrape to ensure completeness
-        futures_stocks = self._get_futures_pagination()
-        if futures_stocks:
-            all_stocks.extend(futures_stocks)
-            methods_used.append(f"Futures({len(futures_stocks)})")
-            logger.info(f"✅ Futures pagination: {len(futures_stocks)} stocks")
-
-        # Method 2: F&O lot size - ALWAYS scrape for comprehensive data
-        lot_size_stocks = self._get_fno_lot_size()
-        if lot_size_stocks:
-            all_stocks.extend(lot_size_stocks)
-            methods_used.append(f"LotSize({len(lot_size_stocks)})")
-            logger.info(f"✅ F&O lot size: {len(lot_size_stocks)} stocks")
-
-        # Method 3: Options pagination - ALWAYS scrape for complete coverage
-        options_stocks = self._get_options_pagination()
-        if options_stocks:
-            all_stocks.extend(options_stocks)
-            methods_used.append(f"Options({len(options_stocks)})")
-            logger.info(f"✅ Options pagination: {len(options_stocks)} stocks")
+            stock = {
+                "name": cleaned_name,
+                "symbol": cleaned_symbol
+            }
+            if self._is_valid_stock(stock):
+                all_stocks.append(stock)
 
         # Deduplicate using the working logic
         unique_stocks = self._deduplicate_stocks(all_stocks)
@@ -225,7 +205,7 @@ class FnoStockListService:
             {"name": "Nifty Next 50", "symbol": "NIFTY-NEXT50", "exchange": "NSE"},
         ]
         
-        # FIXED: Always add indices (they're not scraped from dhan.co)
+        # FIXED: Always add indices
         for index_entry in index_entries:
             # Check if this index is already in the data
             already_exists = any(
@@ -299,334 +279,26 @@ class FnoStockListService:
         indices_count = len(indices)
         stocks_count = len(stocks)
         
-        logger.info(f"✅ F&O collection complete: {total_count} total ({indices_count} indices, {stocks_count} stocks) from {', '.join(methods_used)}, fixed {fixed_symbols} symbols")
-        
-        # Additional quality checks
-        expected_total = 214  # Total FNO stocks including indices (as of November 2025)
-        expected_min = 210  # Allow for slight variations
-        expected_max = 218
-        if total_count < expected_min:
-            logger.warning(f"⚠️ Count lower than expected: Got {total_count}, expected {expected_min}-{expected_max} (difference: {expected_total - total_count})")
-        elif total_count > expected_max:
-            logger.warning(f"⚠️ Count higher than expected: Got {total_count}, expected {expected_min}-{expected_max} (difference: {total_count - expected_total})")
-        else:
-            logger.info(f"✅ Stock count within expected range: {total_count} (expected {expected_min}-{expected_max})")
-        
-        # Log sample of collected data for verification
-        logger.info("📋 Sample of collected stocks:")
-        for i, stock in enumerate(result[:5]):
-            logger.info(f"   {i+1}. {stock.get('name', 'N/A')} -> {stock.get('symbol', 'N/A')}")
-        
-        if indices:
-            logger.info("🏛️ Indices included:")
-            for index in indices:
-                logger.info(f"   - {index.get('name', 'N/A')} ({index.get('symbol', 'N/A')})")
+        logger.info(f"✅ F&O collection complete: {total_count} total ({indices_count} indices, {stocks_count} stocks), fixed {fixed_symbols} symbols")
         
         # Return combined list but log the breakdown
         return result
 
-    def get_categorized_fno_data(self) -> Dict[str, any]:
-        """Get F&O data separated into indices and stocks with metadata and sector mapping"""
-        all_data = self.get_fno_stocks()
-        
-        # Enhance data with sector information
-        enhanced_data = []
-        for item in all_data:
-            enhanced_item = item.copy()
-            symbol = item.get('symbol')
-            
-            if symbol:
-                # Get sector from mapping
-                sector = get_sector_for_stock(symbol)
-                if sector:
-                    enhanced_item['sector'] = sector
-                else:
-                    # Determine sector based on symbol for indices
-                    if symbol in self.actual_indices:
-                        enhanced_item['sector'] = 'INDEX'
-                    else:
-                        enhanced_item['sector'] = 'F&O'  # Default for F&O stocks without mapping
-            else:
-                enhanced_item['sector'] = 'UNKNOWN'
-                
-            enhanced_data.append(enhanced_item)
-        
-        # Separate into indices and stocks
-        indices = []
-        stocks = []
-        
-        for item in enhanced_data:
-            if item["symbol"] in self.actual_indices:
-                indices.append(item)
-            else:
-                stocks.append(item)
-        
-        return {
-            "indices": indices,
-            "stocks": stocks,
-            "metadata": {
-                "total_count": len(enhanced_data),
-                "indices_count": len(indices),
-                "stocks_count": len(stocks),
-                "last_updated": datetime.now().isoformat(),
-                "data_quality": self._assess_data_quality(enhanced_data)
-            }
-        }
-
-    def _assess_data_quality(self, data: List[Dict[str, str]]) -> Dict[str, any]:
-        """ENHANCED: Assess data quality with updated expected counts"""
-        if not data:
-            return {"score": 0, "issues": ["No data"]}
-        
-        issues = []
-        score = 100  # Start with perfect score
-        
-        # Check for missing symbols
-        missing_symbols = [item for item in data if not item.get("symbol")]
-        if missing_symbols:
-            issues.append(f"{len(missing_symbols)} items with missing symbols")
-            score -= len(missing_symbols) * 2
-        
-        # Check for symbol format issues
-        invalid_symbols = []
-        for item in data:
-            symbol = item.get("symbol", "")
-            if symbol and not self._is_valid_symbol(symbol):
-                invalid_symbols.append(symbol)
-        
-        if invalid_symbols:
-            issues.append(f"{len(invalid_symbols)} invalid symbol formats")
-            score -= len(invalid_symbols) * 3
-        
-        # Check for name format issues
-        name_issues = 0
-        for item in data:
-            name = item.get("name", "")
-            if not name or len(name.strip()) < 3:
-                name_issues += 1
-            elif re.search(r'^[0-9]', name) and not name.startswith('360'):  # Allow 360 One WAM
-                name_issues += 1
-        
-        if name_issues:
-            issues.append(f"{name_issues} name format issues")
-            score -= name_issues * 2
-        
-        # UPDATED: Check expected count (should be around 214 total including indices as of Nov 2025)
-        expected_min = 210  # Allow slight variance
-        expected_max = 218
-        actual_count = len(data)
-
-        if actual_count < expected_min:
-            issues.append(f"Count too low: {actual_count} (expected {expected_min}-{expected_max})")
-            score -= 10
-        elif actual_count > expected_max:
-            issues.append(f"Count too high: {actual_count} (expected {expected_min}-{expected_max})")
-            score -= 5
-        
-        # Check indices presence
-        indices = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTY-NEXT50']
-        present_indices = [item.get('symbol') for item in data if item.get('symbol') in indices]
-        missing_indices = set(indices) - set(present_indices)
-        
-        if missing_indices:
-            issues.append(f"Missing indices: {list(missing_indices)}")
-            score -= len(missing_indices) * 5
-        
-        # Ensure score is not negative
-        score = max(0, score)
-        
-        return {
-            "score": score,
-            "issues": issues if issues else ["No major issues detected"],
-            "recommendations": self._get_quality_recommendations(issues),
-            "breakdown": {
-                "total_count": actual_count,
-                "indices_found": len(present_indices),
-                "stocks_found": actual_count - len(present_indices),
-                "expected_total": 214
-            }
-        }
-
-    def _get_quality_recommendations(self, issues: List[str]) -> List[str]:
-        """Get recommendations based on data quality issues"""
-        recommendations = []
-        
-        if any("missing symbols" in issue for issue in issues):
-            recommendations.append("Run symbol mapping fix to resolve missing symbols")
-        
-        if any("invalid symbol" in issue for issue in issues):
-            recommendations.append("Review and correct symbol formats")
-        
-        if any("name format" in issue for issue in issues):
-            recommendations.append("Clean and standardize company names")
-        
-        if any("Count too" in issue for issue in issues):
-            recommendations.append("Review data sources and filtering logic")
-        
-        if not recommendations:
-            recommendations.append("Data quality is good")
-        
-        return recommendations
-
-    def fix_existing_json_symbols(
-        self, input_file: Optional[str] = None
-    ) -> Dict[str, any]:
-        """
-        Fix missing symbols in existing JSON file
-        """
-        try:
-            # Load existing data
-            if input_file:
-                file_path = Path(input_file)
-            else:
-                file_path = self.json_file_path
-
-            if not file_path.exists():
-                logger.error(f"File {file_path} does not exist")
-                return {"status": "error", "error": "File not found"}
-
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            securities = data.get("securities", [])
-            updated_count = 0
-
-            # Fix missing symbols
-            for security in securities:
-                name = security.get("name", "").strip()
-                symbol = security.get("symbol", "").strip()
-
-                if not symbol and name in self.missing_symbols_map:
-                    security["symbol"] = self.missing_symbols_map[name]
-                    updated_count += 1
-                    logger.info(
-                        f"🔧 Fixed symbol for {name}: {self.missing_symbols_map[name]}"
-                    )
-
-            # Update metadata
-            data["last_updated"] = datetime.now().isoformat()
-            data["total_count"] = len(securities)
-
-            # Save updated data
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-
-            logger.info(f"✅ Updated {updated_count} missing symbols in {file_path}")
-
-            return {
-                "status": "success",
-                "updated_count": updated_count,
-                "total_securities": len(securities),
-                "file_path": str(file_path),
-                "timestamp": datetime.now().isoformat(),
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error fixing symbols: {e}")
-            return {
-                "status": "error",
-                "error": "An internal error occurred while fixing missing symbols.",
-                "timestamp": datetime.now().isoformat(),
-            }
-
-    def _get_extracted_dhan_data(self) -> list:
-        """
-        Load and process the extracted Dhan F&O data from JSON file
-        This method provides the most reliable data source using pre-extracted data
-        """
-        try:
-            if not self.extracted_data_path.exists():
-                logger.debug(f"Extracted data file not found: {self.extracted_data_path}")
-                return []
-            
-            logger.info(f"🔍 Loading extracted data from: {self.extracted_data_path}")
-            
-            with open(self.extracted_data_path, 'r', encoding='utf-8') as f:
-                raw_data = json.load(f)
-            
-            if not raw_data:
-                logger.warning("Extracted data file is empty")
-                return []
-            
-            logger.info(f"📊 Raw extracted data contains {len(raw_data)} records")
-            
-            # Process and clean the extracted data
-            processed_stocks = []
-            
-            for item in raw_data:
-                try:
-                    # Extract raw name and symbol
-                    raw_name = item.get("All Companies", "").strip()
-                    raw_symbol = item.get("Symbol", "").strip()
-                    
-                    if not raw_name or not raw_symbol:
-                        continue
-                    
-                    # Clean the name (fix duplicate first characters)
-                    cleaned_name = self._clean_extracted_name(raw_name)
-                    
-                    # Clean the symbol (remove BS suffix and other processing)
-                    cleaned_symbol = self._clean_extracted_symbol(raw_symbol)
-                    
-                    # Validate the cleaned data
-                    if cleaned_name and cleaned_symbol and len(cleaned_name) >= 3:
-                        processed_stocks.append({
-                            "name": cleaned_name,
-                            "symbol": cleaned_symbol,
-                            "exchange": "NSE"
-                        })
-                        
-                except Exception as e:
-                    logger.debug(f"Error processing extracted item {item}: {e}")
-                    continue
-            
-            logger.info(f"✅ Processed extracted data: {len(processed_stocks)} valid stocks from {len(raw_data)} raw records")
-            
-            # Log some samples for verification
-            if processed_stocks:
-                logger.info("📋 Sample processed stocks from extracted data:")
-                for i, stock in enumerate(processed_stocks[:5]):
-                    logger.info(f"   {i+1}. {stock['name']} -> {stock['symbol']}")
-            
-            return processed_stocks
-            
-        except Exception as e:
-            logger.error(f"❌ Error loading extracted data: {e}")
-            return []
-
-    def _clean_extracted_name(self, raw_name: str) -> str:
-        """
-        Clean extracted company name - fixes common issues in extracted data
-        """
-        if not raw_name:
-            return ""
-        
-        name = raw_name.strip()
-        
-        # Fix the specific issue with 3360 One WAM
-        if name == "3360 One WAM":
-            return "360 One WAM"
-        
-        # Fix duplicate first characters (NNifty -> Nifty, FFinnifty -> Finnifty, etc.)
-        if len(name) >= 2 and name[0] == name[1]:
-            # Check if it's a letter duplication at the start
-            if name[0].isalpha():
-                name = name[1:]  # Remove the first duplicate character
-        
-        # Additional name cleaning using existing method
-        return self._clean_name(name)
-
-    def _clean_extracted_symbol(self, raw_symbol: str) -> str:
+    def _clean_symbol(self, raw_symbol: str) -> str:
         """
         Clean extracted symbol - removes suffixes and fixes format
         """
         if not raw_symbol:
             return ""
         
-        symbol = raw_symbol.strip().upper()
+        symbol = str(raw_symbol).strip().upper()
         
         # Remove common suffixes from extracted data
-        suffixes_to_remove = ["BS", "FUT", "OPT", "CE", "PE"]
+        # Specifically remove 'BS' which is common in Dhan's lot size table
+        if symbol.endswith("BS"):
+            symbol = symbol[:-2]
+            
+        suffixes_to_remove = ["FUT", "OPT", "CE", "PE"]
         for suffix in suffixes_to_remove:
             if symbol.endswith(suffix):
                 symbol = symbol[:-len(suffix)]
@@ -634,305 +306,224 @@ class FnoStockListService:
         
         # Handle special cases and mappings
         symbol_mappings = {
-            "BANKNIFTY": "BANKNIFTY",
-            "FINNIFTY": "FINNIFTY", 
-            "MIDCPNIFTY": "MIDCPNIFTY",
-            "NIFTY": "NIFTY",
+            "NIFTY 50": "NIFTY",
+            "NIFTY BANK": "BANKNIFTY",
             "NIFTY NEXT 50": "NIFTY-NEXT50",
+            "NIFTYNXT50": "NIFTY-NEXT50",
             "360ONE": "360ONE"
         }
         
-        # Apply mappings
         if symbol in symbol_mappings:
             symbol = symbol_mappings[symbol]
         
-        # Validate and return
-        if self._is_valid_symbol(symbol):
-            return symbol
-        
-        return ""
+        return symbol
 
-    def _get_main_futures_list(self) -> list:
-        """NEW: Scrape the main futures stocks list page with enhanced extraction"""
-        try:
-            logger.info("🎯 Scraping main futures stocks list page...")
-            url = f"{self.base_url}/futures-stocks-list/"
-            
-            # Use a more comprehensive request approach
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Connection": "keep-alive", 
-                "Upgrade-Insecure-Requests": "1",
-                "Cache-Control": "max-age=0"
-            }
-            
-            response = self.session.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            
-            logger.info(f"📄 Main futures page response: {response.status_code}, content length: {len(response.text)}")
-            
-            # Parse with enhanced selectors
-            soup = BeautifulSoup(response.text, "html.parser")
-            stocks = []
-            
-            # Method 1: Look for data attributes (most reliable)
-            data_elements = soup.find_all(attrs={"data-sym": True})
-            for element in data_elements:
+    async def _fetch_dhan_data(self):
+        """
+        Download NSE F&O lot size data from Dhan website using Playwright
+        """
+        async with async_playwright() as p:
+            # Launch browser with anti-detection args
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox"
+                ],
+                slow_mo=100,
+            )
+
+            # Create context with realistic User-Agent
+            context = await browser.new_context(
+                accept_downloads=True, 
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+
+            page = await context.new_page()
+
+            # Add init script to hide webdriver property
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            try:
+                logger.info("🌐 Navigating to Dhan website...")
                 try:
-                    symbol = element.get("data-sym", "").strip()
-                    # Look for company name in nearby elements
-                    name = ""
-                    
-                    # Try to find name in parent or sibling elements
-                    parent = element.parent
-                    if parent:
-                        name_element = parent.find(string=lambda text: text and len(text.strip()) > 3)
-                        if name_element:
-                            name = name_element.strip()
-                    
-                    if symbol and len(symbol) > 1:
-                        stocks.append({"name": name or symbol, "symbol": symbol})
-                        
+                    await page.goto(
+                        self.base_url, wait_until="domcontentloaded", timeout=60000
+                    )
                 except Exception as e:
-                    logger.debug(f"Error parsing data element: {e}")
-                    continue
-            
-            # Method 2: Enhanced table parsing
-            if not stocks:  # Only if Method 1 didn't work
-                stocks.extend(self._parse_html_page(response.text))
-            
-            # Method 3: Look for specific CSS classes identified from the analysis
-            if len(stocks) < 100:  # If we didn't get enough stocks
-                try:
-                    # Look for table-like structures
-                    table_elements = soup.select(".css-p65e6u, [class*='table'], [class*='row']")
-                    for table in table_elements:
-                        table_stocks = self._extract_from_table_element(table)
-                        stocks.extend(table_stocks)
-                        
-                except Exception as e:
-                    logger.debug(f"Enhanced CSS parsing failed: {e}")
-            
-            # Remove duplicates
-            unique_stocks = []
-            seen_symbols = set()
-            for stock in stocks:
-                symbol = stock.get("symbol", "").strip().upper()
-                if symbol and symbol not in seen_symbols and len(symbol) > 1:
-                    seen_symbols.add(symbol)
-                    unique_stocks.append(stock)
-            
-            logger.info(f"🎯 Main futures list extracted: {len(unique_stocks)} stocks")
-            return unique_stocks
-            
-        except Exception as e:
-            logger.warning(f"Main futures list scraping failed: {e}")
-            return []
+                    logger.warning(f"⚠️ Navigation timeout/error (continuing as data might be loaded): {e}")
 
-    def _extract_from_table_element(self, table_element) -> list:
-        """Extract stocks from a table-like element"""
-        stocks = []
-        try:
-            # Look for rows within the table
-            rows = table_element.find_all(['tr', 'div'], class_=lambda x: x and ('row' in x.lower() or 'item' in x.lower()))
-            
-            for row in rows:
-                try:
-                    # Look for text that might be stock symbols (2-12 uppercase letters)
-                    text_content = row.get_text()
-                    
-                    # Find potential symbols using regex
-                    import re
-                    symbol_matches = re.findall(r'\b([A-Z]{2,12})\b', text_content)
-                    
-                    for symbol in symbol_matches:
-                        # Skip common words that aren't symbols
-                        if symbol not in ['THE', 'AND', 'FOR', 'LTD', 'LIMITED', 'INC', 'CORP']:
-                            # Try to find the corresponding company name
-                            name_text = text_content.replace(symbol, '').strip()
-                            name = self._clean_name(name_text) if name_text else symbol
-                            
-                            stocks.append({"name": name, "symbol": symbol})
-                            break  # Only take the first valid symbol per row
-                            
-                except Exception as e:
-                    continue
-                    
-        except Exception as e:
-            logger.debug(f"Table element extraction failed: {e}")
-            
-        return stocks
+                logger.info("⏳ Waiting for page to load completely...")
+                await page.wait_for_timeout(5000)
 
-    def _get_alternative_sources(self) -> list:
-        """Try alternative URLs and methods to get complete FNO stock list"""
-        all_alt_stocks = []
-        
-        # Alternative URLs to try
-        alt_urls = [
-            "/nse-equity-stocks/",
-            "/stock-market/",
-            "/equity-stocks-list/",
-            "/nse-stocks-list/"
-        ]
-        
-        for alt_url in alt_urls:
-            try:
-                url = f"{self.base_url}{alt_url}"
-                logger.debug(f"Trying alternative URL: {url}")
+                # Try extraction first as it's more reliable than download which often fails/times out
+                logger.info("🔍 Attempting direct data extraction...")
+                data = await self._extract_data_from_page(page)
                 
-                response = self.session.get(url, timeout=20)
-                if response.status_code == 200:
-                    # Look for FNO-specific content
-                    if any(keyword in response.text.lower() for keyword in ['f&o', 'fno', 'futures', 'derivatives']):
-                        alt_stocks = self._parse_html_page(response.text)
-                        if alt_stocks:
-                            all_alt_stocks.extend(alt_stocks)
-                            logger.debug(f"Alternative source {alt_url}: {len(alt_stocks)} stocks")
+                if data:
+                    return data
                 
-                time.sleep(0.5)  # Be respectful
+                # If extraction fails, try download
+                logger.info("⚠️ Extraction yielded no data, trying download button...")
                 
-            except Exception as e:
-                logger.debug(f"Alternative URL {alt_url} failed: {e}")
-                continue
-        
-        # Deduplicate alternative sources
-        unique_alt_stocks = []
-        seen_symbols = set()
-        for stock in all_alt_stocks:
-            symbol = stock.get("symbol", "").strip().upper()
-            if symbol and symbol not in seen_symbols:
-                seen_symbols.add(symbol)
-                unique_alt_stocks.append(stock)
-        
-        if unique_alt_stocks:
-            logger.info(f"🔍 Alternative sources found: {len(unique_alt_stocks)} additional stocks")
-        
-        return unique_alt_stocks
+                # Wait for download button and click it
+                download_selectors = [
+                    'button[aria-label*="download"]',
+                    'button:has-text("Download")',
+                    '[data-testid*="download"]',
+                    ".download-btn",
+                    'button:has-text("Export")',
+                    'a[href*="download"]',
+                    'button[title*="download"]',
+                    'a[class*="download"]'
+                ]
 
-    def _get_futures_pagination(self) -> list:
-        """ENHANCED: Get futures stocks via pagination with more thorough scraping"""
-        all_stocks = []
-        page = 1
-        max_pages = 20  # Increased from 10 to ensure we get all data
+                download_button = None
+                for selector in download_selectors:
+                    try:
+                        download_button = await page.wait_for_selector(
+                            selector, timeout=2000
+                        )
+                        if download_button:
+                            logger.info(f"✅ Found download button with selector: {selector}")
+                            break
+                    except:
+                        continue
 
-        while page <= max_pages:
-            try:
-                url = f"{self.base_url}/futures-stocks-list/?page={page}"
-                response = self.session.get(url, timeout=30)
+                if download_button:
+                    logger.info("📥 Starting download...")
+                    try:
+                        async with page.expect_download(timeout=10000) as download_info:
+                            await download_button.click()
 
-                if response.status_code != 200:
-                    logger.debug(f"Futures page {page} returned status {response.status_code}")
-                    break
+                        download = await download_info.value
+                        download_path = self.downloads_dir / download.suggested_filename
+                        await download.save_as(download_path)
 
-                page_stocks = self._parse_html_page(response.text)
-                if not page_stocks:
-                    logger.debug(f"No stocks found on futures page {page}")
-                    break
-
-                all_stocks.extend(page_stocks)
-                logger.debug(f"Futures page {page}: got {len(page_stocks)} stocks")
-                page += 1
-                time.sleep(0.5)
-
-            except Exception as e:
-                logger.debug(f"Futures page {page} failed: {e}")
-                break
-
-        logger.info(f"🔍 Futures pagination: collected {len(all_stocks)} stocks from {page-1} pages")
-        return all_stocks
-
-    def _get_fno_lot_size(self) -> list:
-        """Get F&O stocks from lot size page - exact copy from working code"""
-        try:
-            url = f"{self.base_url}/nse-fno-lot-size/"
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-
-            return self._parse_html_page(response.text)
-
-        except Exception as e:
-            logger.debug(f"F&O lot size failed: {e}")
-            return []
-
-    def _get_options_pagination(self) -> list:
-        """ENHANCED: Get options stocks via pagination with more thorough scraping"""
-        all_stocks = []
-        page = 1
-        max_pages = 20  # Increased from 10 to ensure we get all data
-
-        while page <= max_pages:
-            try:
-                url = f"{self.base_url}/options-stocks-list/?page={page}"
-                response = self.session.get(url, timeout=30)
-
-                if response.status_code != 200:
-                    logger.debug(f"Options page {page} returned status {response.status_code}")
-                    break
-
-                page_stocks = self._parse_html_page(response.text)
-                if not page_stocks:
-                    logger.debug(f"No stocks found on options page {page}")
-                    break
-
-                all_stocks.extend(page_stocks)
-                logger.debug(f"Options page {page}: got {len(page_stocks)} stocks")
-                page += 1
-                time.sleep(0.5)
-
-            except Exception as e:
-                logger.debug(f"Options page {page} failed: {e}")
-                break
-
-        logger.info(f"🔍 Options pagination: collected {len(all_stocks)} stocks from {page-1} pages")
-        return all_stocks
-
-    def _parse_html_page(self, html_content: str) -> list:
-        """Parse HTML page - exact copy from working code"""
-        soup = BeautifulSoup(html_content, "html.parser")
-        stocks = []
-
-        # Find table rows
-        rows = soup.select("table tbody tr")
-        if not rows:
-            rows = soup.select("tbody tr")
-        if not rows:
-            rows = soup.select("tr")
-
-        for row in rows:
-            try:
-                # Skip header rows
-                if self._is_header_row(row):
-                    continue
-
-                stock = self._extract_name_symbol(row)
-                if stock and self._is_valid_stock(stock):
-                    stocks.append(stock)
-
-            except:
-                continue
-
-        return stocks
-
-    def _extract_name_symbol(self, row) -> dict:
-        """Extract name and symbol - exact copy from working code"""
-        try:
-            cells = row.find_all(["td", "th"])
-            if len(cells) < 1:
+                        logger.info(f"✅ File downloaded successfully: {download_path}")
+                        return await self._process_downloaded_file(download_path)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Download failed: {e}")
+                
                 return None
 
-            # Extract and clean name
-            name_text = cells[0].get_text(strip=True)
-            name = self._clean_name(name_text)
+            except Exception as e:
+                logger.error(f"❌ Error during fetching: {e}")
+                return None
 
-            # Extract symbol
-            symbol = self._extract_symbol(row, cells[0])
+            finally:
+                await browser.close()
 
-            return {"name": name, "symbol": symbol if symbol else ""}
+    async def _extract_data_from_page(self, page):
+        """
+        Extract data directly from the page
+        """
+        try:
+            logger.info("🔍 Extracting data directly from page...")
 
-        except:
+            # Explicitly wait for table
+            try:
+                await page.wait_for_selector('table', timeout=10000)
+            except:
+                logger.warning("⚠️ Table element not found within timeout")
+
+            # Extract table data
+            data = await page.evaluate(
+                """
+                () => {
+                    const tables = document.querySelectorAll('table, .table, [role="table"]');
+                    let allData = [];
+                    
+                    tables.forEach(table => {
+                        const rows = table.querySelectorAll('tr');
+                        let headers = [];
+                        let tableData = [];
+                        
+                        rows.forEach((row, index) => {
+                            const cells = row.querySelectorAll('th, td');
+                            const rowData = Array.from(cells).map(cell => cell.textContent.trim());
+                            
+                            // Try to detect header row
+                            if (index === 0 && (row.querySelectorAll('th').length > 0 || rowData.some(t => t.toLowerCase().includes('symbol')))) {
+                                headers = rowData;
+                            } else if (rowData.length > 0) {
+                                if (headers.length > 0) {
+                                    const obj = {};
+                                    rowData.forEach((cell, i) => {
+                                        obj[headers[i] || `column_${i}`] = cell;
+                                    });
+                                    tableData.push(obj);
+                                } else {
+                                    // Fallback: create object with generic keys if no header
+                                    const obj = {};
+                                    rowData.forEach((cell, i) => {
+                                        obj[`col_${i}`] = cell;
+                                    });
+                                    // Try to map known columns if header missing
+                                    if (rowData.length >= 2) {
+                                        obj['All Companies'] = rowData[0]; // Assumption
+                                        obj['Symbol'] = rowData[1]; // Assumption
+                                    }
+                                    tableData.push(obj);
+                                }
+                            }
+                        });
+                        
+                        if (tableData.length > 0) {
+                            allData.push(...tableData);
+                        }
+                    });
+                    
+                    return allData;
+                }
+            """
+            )
+
+            if data and len(data) > 0:
+                logger.info(f"📊 Records extracted from page: {len(data)}")
+                return data
+            else:
+                logger.error("❌ No data found on the page")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Error extracting data from page: {e}")
+            return None
+
+    async def _process_downloaded_file(self, file_path):
+        """
+        Process the downloaded file and extract data
+        """
+        try:
+            file_extension = file_path.suffix.lower()
+
+            if file_extension == ".json":
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data
+
+            elif file_extension in [".csv", ".xlsx", ".xls"]:
+                if file_extension == ".csv":
+                    df = pd.read_csv(file_path)
+                else:
+                    df = pd.read_excel(file_path)
+
+                # Convert to list of dictionaries
+                data = df.to_dict("records")
+                return data
+
+            else:
+                logger.warning(f"⚠️ Unsupported file format: {file_extension}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Error processing downloaded file: {e}")
             return None
 
     def _clean_name(self, name_text: str) -> str:
@@ -940,7 +531,7 @@ class FnoStockListService:
         if not name_text:
             return ""
 
-        cleaned = name_text.strip()
+        cleaned = str(name_text).strip()
 
         # FIXED: Handle specific case of 360 One WAM being corrupted to 3360
         if cleaned == "3360 One WAM":
@@ -1006,45 +597,8 @@ class FnoStockListService:
         
         return normalized
 
-    def _extract_symbol(self, row, name_cell) -> str:
-        """Extract symbol - exact copy from working code"""
-        # Check image in name cell
-        img = name_cell.find("img")
-        if img:
-            # Check alt text
-            if img.get("alt"):
-                match = re.search(r"\b([A-Z]{2,12})\b", img["alt"])
-                if match:
-                    return match.group(1)
-
-            # Check src path
-            if img.get("src"):
-                match = re.search(r"/symbol/([A-Z]+)\.png", img["src"], re.IGNORECASE)
-                if match:
-                    return match.group(1).upper()
-
-        # Check data attributes
-        for attr in ["data-symbol", "data-stock"]:
-            if name_cell.get(attr):
-                symbol = name_cell[attr].strip().upper()
-                if re.match(r"^[A-Z]{2,12}$", symbol):
-                    return symbol
-
-        # Look for symbol in parentheses
-        text = name_cell.get_text()
-        match = re.search(r"\(([A-Z]{2,12})\)", text)
-        if match:
-            return match.group(1)
-
-        return ""
-
-    def _is_header_row(self, row) -> bool:
-        """Check if row is header - exact copy from working code"""
-        text = row.get_text().lower()
-        return any(term in text for term in ["name", "symbol", "ltp", "lot size"])
-
     def _is_valid_stock(self, stock: dict) -> bool:
-        """Validate stock data - exact copy from working code"""
+        """Validate stock data"""
         name = stock.get("name", "").strip()
 
         if not name or len(name) < 3:
@@ -1080,6 +634,10 @@ class FnoStockListService:
             if name == "3360 One WAM":
                 name = "360 One WAM"
                 stock["name"] = name
+            
+            # Clean name
+            name = self._clean_name(name)
+            stock["name"] = name
 
             # Normalize company name for grouping
             normalized_name = self._normalize_company_name(name)
@@ -1278,7 +836,7 @@ class FnoStockListService:
                 "securities": stocks,
                 "last_updated": datetime.now().isoformat(),
                 "total_count": len(stocks),
-                "data_source": "dhan_scraper",
+                "data_source": "dhan_playwright",
             }
 
             with open(self.json_file_path, "w", encoding="utf-8") as f:
@@ -1311,14 +869,14 @@ class FnoStockListService:
             logger.error(f"❌ Error loading from JSON: {e}")
             return []
 
-    def update_fno_list(self) -> Dict[str, any]:
+    async def update_fno_list(self) -> Dict[str, any]:
         """Main method to update F&O stock list"""
         start_time = datetime.now()
         logger.info("🚀 Starting F&O stock list update...")
 
         try:
-            # Fetch fresh data using working scraper logic
-            stocks = self.get_fno_stocks()
+            # Fetch fresh data using Playwright
+            stocks = await self.get_fno_stocks()
 
             if not stocks:
                 logger.warning("No stocks fetched, keeping existing data")
@@ -1354,12 +912,125 @@ class FnoStockListService:
                 "timestamp": datetime.now().isoformat(),
             }
 
+    def get_categorized_fno_data(self) -> Dict[str, any]:
+        """Get F&O data separated into indices and stocks with metadata and sector mapping"""
+        # Note: This loads from file, so no async needed
+        all_data = self.load_from_json()
+        if not all_data:
+             # Fallback if file not exists/empty
+             return {"indices": [], "stocks": [], "metadata": {}}
+
+        # Enhance data with sector information
+        enhanced_data = []
+        for item in all_data:
+            enhanced_item = item.copy()
+            symbol = item.get('symbol')
+            
+            if symbol:
+                # Get sector from mapping
+                sector = get_sector_for_stock(symbol)
+                if sector:
+                    enhanced_item['sector'] = sector
+                else:
+                    # Determine sector based on symbol for indices
+                    if symbol in self.actual_indices:
+                        enhanced_item['sector'] = 'INDEX'
+                    else:
+                        enhanced_item['sector'] = 'F&O'  # Default for F&O stocks without mapping
+            else:
+                enhanced_item['sector'] = 'UNKNOWN'
+                
+            enhanced_data.append(enhanced_item)
+        
+        # Separate into indices and stocks
+        indices = []
+        stocks = []
+        
+        for item in enhanced_data:
+            if item["symbol"] in self.actual_indices:
+                indices.append(item)
+            else:
+                stocks.append(item)
+        
+        return {
+            "indices": indices,
+            "stocks": stocks,
+            "metadata": {
+                "total_count": len(enhanced_data),
+                "indices_count": len(indices),
+                "stocks_count": len(stocks),
+                "last_updated": datetime.now().isoformat()
+            }
+        }
+    
+    def fix_existing_json_symbols(
+        self, input_file: Optional[str] = None
+    ) -> Dict[str, any]:
+        """
+        Fix missing symbols in existing JSON file
+        """
+        try:
+            # Load existing data
+            if input_file:
+                file_path = Path(input_file)
+            else:
+                file_path = self.json_file_path
+
+            if not file_path.exists():
+                logger.error(f"File {file_path} does not exist")
+                return {"status": "error", "error": "File not found"}
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            securities = data.get("securities", [])
+            updated_count = 0
+
+            # Fix missing symbols
+            for security in securities:
+                name = security.get("name", "").strip()
+                symbol = security.get("symbol", "").strip()
+
+                if not symbol and name in self.missing_symbols_map:
+                    security["symbol"] = self.missing_symbols_map[name]
+                    updated_count += 1
+                    logger.info(
+                        f"🔧 Fixed symbol for {name}: {self.missing_symbols_map[name]}"
+                    )
+
+            # Update metadata
+            data["last_updated"] = datetime.now().isoformat()
+            data["total_count"] = len(securities)
+
+            # Save updated data
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"✅ Updated {updated_count} missing symbols in {file_path}")
+
+            return {
+                "status": "success",
+                "updated_count": updated_count,
+                "total_securities": len(securities),
+                "file_path": str(file_path),
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error fixing symbols: {e}")
+            return {
+                "status": "error",
+                "error": "An internal error occurred while fixing missing symbols.",
+                "timestamp": datetime.now().isoformat(),
+            }
+
 
 # Standalone functions for easy integration
 def update_fno_stock_list() -> Dict[str, any]:
     """Standalone function to update F&O stock list"""
     service = FnoStockListService()
-    return service.update_fno_list()
+    # Since we are calling async method from sync function
+    return asyncio.run(service.update_fno_list())
 
 
 def get_fno_stocks_from_file() -> List[Dict[str, str]]:
@@ -1413,16 +1084,11 @@ def main():
     # print(f"Fix result: {fix_result}")
 
     # Or update from scratch
-    result = update_fno_stock_list()
-    print(f"Update result: {result}")
-
-    # stocks = get_fno_stocks_from_file()
-    # print(f"Loaded {len(stocks)} stocks from file")
-    # if stocks:
-    #     print("Sample stocks:")
-    #     for stock in stocks[:5]:
-    #         print(f"  {stock}")
-
+    try:
+        result = update_fno_stock_list()
+        print(f"Update result: {result}")
+    except Exception as e:
+        print(f"Update failed: {e}")
 
 if __name__ == "__main__":
     main()
