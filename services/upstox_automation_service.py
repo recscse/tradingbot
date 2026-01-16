@@ -28,6 +28,7 @@ from services.upstox_service import (
     exchange_code_for_token,
     generate_upstox_auth_url,
 )
+from utils.logging_utils import log_structured
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -180,10 +181,11 @@ class UpstoxAutomationService:
 
         logger.info(f"Starting login automation for auth URL: {auth_url}")
         logger.info(f"Callback will handle token exchange at: {redirect_uri}")
+        log_structured(event="LOGIN_AUTOMATION_START", message="Starting Playwright login automation", data={"auth_url": auth_url, "redirect_uri": redirect_uri})
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
-                headless=True,
+                headless=self.headless_mode,
                 args=[
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
@@ -232,6 +234,7 @@ class UpstoxAutomationService:
                     logger.info("✅ TOTP entered")
                 else:
                     logger.error("❌ TOTP key not configured")
+                    log_structured(event="LOGIN_AUTOMATION_FAILED", level="ERROR", message="TOTP key not configured")
                     return False
 
                 await page.get_by_role("button", name="Continue").click()
@@ -278,6 +281,7 @@ class UpstoxAutomationService:
                                         self._captured_auth_code = auth_code
                                         auth_code_found = True
                                         logger.info("✅ Login automation completed with auth code captured")
+                                        log_structured(event="LOGIN_AUTOMATION_COMPLETE", message="Login automation successful, auth code captured")
                                         return True
                                     else:
                                         logger.warning(f"Auth code format invalid: {len(auth_code)} chars")
@@ -289,11 +293,13 @@ class UpstoxAutomationService:
 
                     if not auth_code_found:
                         logger.warning("No valid authorization code found after 5 seconds - callback will handle token exchange")
+                        log_structured(event="LOGIN_AUTOMATION_WARNING", level="WARNING", message="Auth code not captured, fallback to callback")
                     return True
 
                 except Exception as redirect_error:
                     logger.warning(f"Redirect capture failed: {redirect_error}")
                     logger.info("✅ Login automation completed - fallback to callback")
+                    log_structured(event="LOGIN_AUTOMATION_WARNING", level="WARNING", message=f"Redirect capture failed: {str(redirect_error)}")
                     return True
 
             finally:
@@ -454,6 +460,12 @@ class UpstoxAutomationService:
             # ✅ CRITICAL FIX: Always allow refresh if emergency_bypass=True or token is expired
             now = datetime.now()
             should_proceed = emergency_bypass
+            
+            log_structured(
+                event="TOKEN_REFRESH_ATTEMPT", 
+                message="Starting admin token refresh attempt",
+                data={"emergency_bypass": emergency_bypass}
+            )
 
             # Check if token is actually expired - always allow refresh for expired tokens
             try:
@@ -494,6 +506,7 @@ class UpstoxAutomationService:
                     logger.warning(
                         "⏳ Token refresh attempted recently, skipping duplicate request"
                     )
+                    log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped due to cooldown")
                     return {
                         "success": False,
                         "error": "Token refresh attempted recently. Please wait before retrying.",
@@ -505,6 +518,7 @@ class UpstoxAutomationService:
                     logger.warning(
                         "⏳ Token refresh already in progress, skipping duplicate request"
                     )
+                    log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped - already in progress")
                     return {
                         "success": False,
                         "error": "Token refresh already in progress",
@@ -529,6 +543,7 @@ class UpstoxAutomationService:
             # Get admin broker configuration from database
             admin_broker = self.get_admin_broker_config(db)
             if not admin_broker:
+                log_structured(event="TOKEN_REFRESH_FAILED", level="ERROR", message="No admin broker config found")
                 return {
                     "success": False,
                     "error": "No admin Upstox broker configuration found in database",
@@ -560,6 +575,7 @@ class UpstoxAutomationService:
                     logger.info(
                         f"Admin token is valid and not yet expired. Expires at: {admin_broker.access_token_expiry}"
                     )
+                    log_structured(event="TOKEN_REFRESH_SKIPPED", message="Token is valid and not expired")
                     return {
                         "success": True,
                         "message": "Admin token is still valid, no refresh needed",
@@ -585,6 +601,7 @@ class UpstoxAutomationService:
                 error_msg = "Failed to complete automated login"
                 admin_broker.last_error_message = error_msg
                 db.commit()
+                log_structured(event="TOKEN_REFRESH_FAILED", level="ERROR", message=error_msg)
                 return {"success": False, "error": error_msg}
 
             # Step 2: Handle token exchange directly if we captured auth code
@@ -710,6 +727,9 @@ class UpstoxAutomationService:
                     datetime.now().isoformat()
                 )
                 db.commit()
+                log_structured(event="TOKEN_REFRESH_SUCCESS", message="Token refresh completed successfully")
+            else:
+                log_structured(event="TOKEN_REFRESH_FAILED", level="ERROR", message=result.get("error", "Unknown error"))
 
             result_dict = {
                 "success": result["success"],
@@ -728,6 +748,7 @@ class UpstoxAutomationService:
 
         except Exception as e:
             logger.error(f"Error in refresh_admin_upstox_token: {e}")
+            log_structured(event="TOKEN_REFRESH_ERROR", level="ERROR", message=str(e))
             return {"success": False, "error": str(e)}
         finally:
             db.close()
