@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock
 from utils.timezone_utils import get_ist_now_naive
+from utils.logging_utils import log_stock_selection, log_structured
 
 # Import services at module level for better performance
 from services.realtime_market_engine import (
@@ -289,6 +290,12 @@ class IntelligentStockSelectionService:
             sentiment_data = get_market_sentiment()
             total_stocks = sentiment_data.get("metrics", {}).get("total_stocks", 0)
 
+            log_structured(
+                event="STOCK_SELECTION_INIT",
+                message=f"Initialized stock selection services with {total_stocks} stocks",
+                data={"total_stocks": total_stocks, "engine_ready": True}
+            )
+
             if total_stocks == 0:
                 logger.warning(
                     "⚠️ Market engine initialized but no data available yet - waiting for WebSocket feed"
@@ -303,6 +310,7 @@ class IntelligentStockSelectionService:
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize stock selection services: {e}")
+            log_structured(event="STOCK_SELECTION_INIT_ERROR", level="ERROR", message=str(e))
             return False
 
     def get_current_trading_phase(self) -> TradingPhase:
@@ -383,10 +391,18 @@ class IntelligentStockSelectionService:
             logger.info(
                 f"📊 Market sentiment: {sentiment.value} (A/D ratio: {sentiment_analysis['advance_decline_ratio']:.2f})"
             )
+            
+            log_structured(
+                event="MARKET_SENTIMENT_ANALYSIS",
+                message=f"Analyzed market sentiment: {sentiment.value}",
+                data=sentiment_analysis
+            )
+            
             return sentiment, sentiment_analysis
 
         except Exception as e:
             logger.error(f"❌ Error getting market sentiment: {e}")
+            log_structured(event="MARKET_SENTIMENT_ERROR", level="ERROR", message=str(e))
             return MarketSentiment.NEUTRAL, {"error": str(e)}
 
     async def analyze_sector_strength(
@@ -447,10 +463,22 @@ class IntelligentStockSelectionService:
                 f"🏢 Analyzed {len(sector_scores)} sectors for {sentiment.value}"
             )
             logger.info(f"🏢 Top 3 sectors: {list(sorted_sectors.keys())[:3]}")
+            
+            log_structured(
+                event="SECTOR_STRENGTH_ANALYSIS",
+                message=f"Analyzed {len(sector_scores)} sectors",
+                data={
+                    "sentiment": sentiment.value,
+                    "top_sectors": list(sorted_sectors.keys())[:3],
+                    "sector_count": len(sector_scores)
+                }
+            )
+            
             return sorted_sectors
 
         except Exception as e:
             logger.error(f"❌ Error analyzing sector strength: {e}")
+            log_structured(event="SECTOR_ANALYSIS_ERROR", level="ERROR", message=str(e))
             return {}
 
     async def select_stocks_by_value(
@@ -546,6 +574,21 @@ class IntelligentStockSelectionService:
 
             # Options trading direction based on market sentiment
             options_direction = self._get_options_direction(stock_data)
+            
+            # Log structured selection data
+            log_stock_selection(
+                symbol=stock_data["symbol"],
+                score=final_score,
+                sentiment=self.current_sentiment.value if self.current_sentiment else "unknown",
+                status="SELECTED" if final_score >= 0.5 else "REJECTED",
+                reasons=[f"Sector: {sector} ({sector_score:.2f})", f"Value: {value_score:.2f}"],
+                meta={
+                    "sector_score": sector_score,
+                    "value_score": value_score,
+                    "technical_score": technical_score,
+                    "options_direction": options_direction
+                }
+            )
 
             # Create selection
             selection = StockSelection(
@@ -778,6 +821,8 @@ class IntelligentStockSelectionService:
             Dict containing selection results with success status
         """
         self.selection_in_progress = True
+        log_structured(event="PREMARKET_SELECTION_START", message="Starting premarket selection process")
+        
         try:
             # Check if premarket selection already done today
             if self.premarket_selections and not force:
@@ -926,10 +971,22 @@ class IntelligentStockSelectionService:
             logger.info(
                 f"✅ Premarket selection complete: {len(selected_stocks)} stocks selected with options data"
             )
+            
+            log_structured(
+                event="PREMARKET_SELECTION_COMPLETE",
+                message=f"Selected {len(selected_stocks)} stocks",
+                data={
+                    "count": len(selected_stocks),
+                    "sentiment": sentiment.value,
+                    "top_sectors": top_sectors
+                }
+            )
+            
             return result
 
         except Exception as e:
             logger.error(f"❌ Error in premarket selection: {e}")
+            log_structured(event="PREMARKET_SELECTION_ERROR", level="ERROR", message=str(e))
             return {"error": str(e), "phase": "premarket"}
         finally:
             self.selection_in_progress = False
@@ -937,6 +994,8 @@ class IntelligentStockSelectionService:
     async def validate_market_open_selection(self) -> Dict[str, Any]:
         """Market open validation - Check sentiment and finalize selections (9:15-9:25) - FINAL DECISION"""
         self.selection_in_progress = True
+        log_structured(event="MARKET_OPEN_VALIDATION_START", message="Starting market open validation")
+        
         try:
             logger.info(
                 "🔍 Market open validation - Making FINAL stock selection for the day..."
@@ -1159,10 +1218,22 @@ class IntelligentStockSelectionService:
                 )
 
             logger.info(f"✅ Market open validation complete: {validation_action}")
+            
+            log_structured(
+                event="MARKET_OPEN_VALIDATION_COMPLETE",
+                message=f"Validation complete: {validation_action}",
+                data={
+                    "action": validation_action,
+                    "final_count": len(self.final_selections),
+                    "sentiment_changed": self.sentiment_changed
+                }
+            )
+            
             return result
 
         except Exception as e:
             logger.error(f"❌ Error in market open validation: {e}")
+            log_structured(event="MARKET_OPEN_VALIDATION_ERROR", level="ERROR", message=str(e))
             return {"error": str(e), "phase": "market_open_validation"}
         finally:
             self.selection_in_progress = False
