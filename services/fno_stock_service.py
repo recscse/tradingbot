@@ -19,6 +19,12 @@ except ImportError:
     def get_sector_for_stock(symbol):
         return None
 
+try:
+    from utils.logging_utils import log_structured
+except ImportError:
+    def log_structured(event, level="INFO", message="", data=None):
+        pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -872,7 +878,8 @@ class FnoStockListService:
     async def update_fno_list(self) -> Dict[str, any]:
         """Main method to update F&O stock list"""
         start_time = datetime.now()
-        logger.info("🚀 Starting F&O stock list update...")
+        logger.info("≡ƒÜÇ Starting F&O stock list update...")
+        log_structured(event="FNO_LIST_UPDATE_START", message="Starting F&O stock list update process")
 
         try:
             # Fetch fresh data using Playwright
@@ -880,6 +887,7 @@ class FnoStockListService:
 
             if not stocks:
                 logger.warning("No stocks fetched, keeping existing data")
+                log_structured(event="FNO_LIST_UPDATE_FAILED", level="WARNING", message="No stocks fetched from source")
                 return {
                     "status": "failed",
                     "error": "No stocks fetched",
@@ -901,16 +909,23 @@ class FnoStockListService:
                 "last_updated": datetime.now().isoformat(),
             }
 
-            logger.info(f"✅ F&O stock list update completed in {processing_time:.2f}s")
+            logger.info(f"Γ£à F&O stock list update completed in {processing_time:.2f}s")
+            log_structured(
+                event="FNO_LIST_UPDATE_COMPLETE", 
+                message=f"F&O stock list update completed: {len(stocks)} stocks",
+                data=result
+            )
             return result
 
         except Exception as e:
-            logger.error(f"❌ F&O stock list update failed: {e}")
+            logger.error(f"Γ¥î F&O stock list update failed: {e}")
+            log_structured(event="FNO_LIST_UPDATE_ERROR", level="ERROR", message=str(e))
             return {
                 "status": "error",
                 "error": str(e),
                 "timestamp": datetime.now().isoformat(),
             }
+
 
     def get_categorized_fno_data(self) -> Dict[str, any]:
         """Get F&O data separated into indices and stocks with metadata and sector mapping"""

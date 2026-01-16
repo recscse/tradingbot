@@ -17,6 +17,7 @@ from services.trading_execution.multi_demat_capital_service import multi_demat_c
 from services.trading_execution.capital_manager import TradingMode
 from services.trading_execution.trade_prep import trade_prep_service, PreparedTrade, TradeStatus
 from services.trading_execution.execution_handler import execution_handler, ExecutionResult
+from utils.logging_utils import log_structured
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,17 @@ class MultiDematTradeExecutor:
             logger.info(
                 f"Allocation plan: {len(allocation_plan)} demats, "
                 f"Total lots: {sum(a['lots'] for a in allocation_plan)}"
+            )
+            
+            log_structured(
+                event="MULTI_DEMAT_ALLOCATION",
+                message=f"Allocated trades for {len(allocation_plan)} demats",
+                data={
+                    "stock_symbol": stock_symbol,
+                    "total_lots": sum(a['lots'] for a in allocation_plan),
+                    "allocation_plan": allocation_plan
+                },
+                user_id=str(user_id)
             )
 
             # Step 5: Generate parent trade ID for linking

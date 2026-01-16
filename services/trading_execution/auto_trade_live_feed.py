@@ -39,11 +39,16 @@ from services.trading_execution.shared_instrument_registry import (
 from router.unified_websocket_routes import broadcast_to_clients
 from utils.market_hours import is_market_open
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
+from utils.logging_utils import (
+    log_signal_generation, 
+    log_trade_attempt, 
+    log_trade_result, 
+    generate_trace_id, 
+    log_structured
+)
 
 logger = logging.getLogger("auto_trade_live_feed")
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Removed basicConfig to avoid overriding global settings
 
 
 class AutoTradeLiveFeed:
@@ -312,7 +317,8 @@ class AutoTradeLiveFeed:
                             else stock.score_breakdown
                         )
                         target_lots = int(metadata.get("position_size_lots", 1))
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Error extracting position_size_lots: {e}")
                     logger.warning(f"Could not extract target_lots for {stock.symbol}")
 
                 # REGISTER INSTRUMENT ONCE (shared across all users)
@@ -701,7 +707,18 @@ class AutoTradeLiveFeed:
             # Store PREMIUM signal (this is what we'll use for trading)
             instrument.last_signal = premium_signal
             self.stats["signals_generated"] += 1
+            
+            trace_id = generate_trace_id()
 
+            log_signal_generation(
+                symbol=instrument.stock_symbol,
+                signal_type=premium_signal.signal_type.value,
+                confidence=float(premium_signal.confidence),
+                strategy="SuperTrend+EMA",
+                price=float(premium_signal.price),
+                trace_id=trace_id
+            )
+            
             logger.info(
                 f"Signal for {instrument.stock_symbol}: "
                 f"Spot({spot_signal.signal_type.value}) → "
@@ -1279,11 +1296,25 @@ class AutoTradeLiveFeed:
                     try:
                         db.commit()
                         logger.info(f"Database commit successful for trade {trade_id}")
+                        
+                        log_trade_result(
+                            user_id=str(user_id),
+                            trade_id=str(trade_id),
+                            status="SUCCESS"
+                        )
                     except Exception as commit_error:
                         logger.error(
                             f"Database commit failed for trade {trade_id}: {commit_error}"
                         )
                         db.rollback()
+                        
+                        log_trade_result(
+                            user_id=str(user_id),
+                            trade_id=str(trade_id),
+                            status="FAILED",
+                            error=f"DB Commit Failed: {str(commit_error)}"
+                        )
+                        
                         # Don't broadcast if commit failed - data inconsistency
                         self.stats["errors"] += 1
                         await broadcast_to_clients(

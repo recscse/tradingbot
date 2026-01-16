@@ -15,6 +15,7 @@ from database.models import AutoTradeExecution, ActivePosition, User, BrokerConf
 from services.trading_execution.capital_manager import TradingMode
 from services.trading_execution.trade_prep import PreparedTrade, TradeStatus
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
+from utils.logging_utils import log_structured, log_trade_result
 
 logger = logging.getLogger(__name__)
 
@@ -169,13 +170,21 @@ class TradeExecutionHandler:
             lots_traded = prepared_trade.position_size_lots
             total_investment = entry_price * Decimal(str(quantity))
 
-            logger.info(f"Executing PAPER trade: {trade_id}")
-            logger.info(f"  Symbol: {prepared_trade.stock_symbol}")
-            logger.info(
-                f"  Option: {prepared_trade.option_type} {prepared_trade.strike_price}"
+            log_structured(
+                event="PAPER_TRADE_EXECUTION",
+                message=f"Executing PAPER trade {trade_id}",
+                data={
+                    "trade_id": trade_id,
+                    "symbol": prepared_trade.stock_symbol,
+                    "option_type": prepared_trade.option_type,
+                    "strike": float(prepared_trade.strike_price),
+                    "entry_price": float(entry_price),
+                    "quantity": quantity,
+                    "lots": lots_traded,
+                    "investment": float(total_investment)
+                },
+                user_id=str(prepared_trade.user_id)
             )
-            logger.info(f"  Entry: Rs.{entry_price}, Qty: {quantity}, Lots: {lots_traded}")
-            logger.info(f"  Total Investment: Rs.{total_investment:,.2f}")
 
             # UPDATE PAPER TRADING ACCOUNT BALANCE (Sync with in-memory service)
             try:
@@ -363,11 +372,21 @@ class TradeExecutionHandler:
             lots_traded = prepared_trade.position_size_lots
             total_investment = actual_entry_price * Decimal(str(actual_quantity))
 
-            logger.info(f"Executing LIVE trade: {trade_id}")
-            logger.info(f"  Symbol: {prepared_trade.stock_symbol}")
-            logger.info(f"  Broker Order ID: {broker_order_id}")
-            logger.info(f"  Entry: Rs.{actual_entry_price}, Qty: {actual_quantity}, Lots: {lots_traded}")
-            logger.info(f"  Total Investment: Rs.{total_investment:,.2f}")
+            log_structured(
+                event="LIVE_TRADE_EXECUTION",
+                message=f"Executing LIVE trade {trade_id}",
+                data={
+                    "trade_id": trade_id,
+                    "broker_order_id": broker_order_id,
+                    "symbol": prepared_trade.stock_symbol,
+                    "entry_price": float(actual_entry_price),
+                    "quantity": actual_quantity,
+                    "lots": lots_traded,
+                    "investment": float(total_investment),
+                    "broker": prepared_trade.broker_name
+                },
+                user_id=str(prepared_trade.user_id)
+            )
 
             # Create trade execution record
             signal_conf = prepared_trade.metadata.get("signal_confidence", 0.7)

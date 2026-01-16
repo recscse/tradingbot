@@ -19,6 +19,7 @@ from services.trading_execution.strategy_engine import (
     TrailingStopType
 )
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
+from utils.logging_utils import log_structured
 
 logger = logging.getLogger(__name__)
 
@@ -385,7 +386,8 @@ class RealTimePnLTracker:
                 trailing_type=TrailingStopType.SUPERTREND_1X,
                 supertrend_value=supertrend_value,
                 position_type=position_type,
-                target_price=target_price  # Pass target for lock profit calculation
+                target_price=target_price,  # Pass target for lock profit calculation
+                symbol=position.symbol
             )
 
             # Update trailing stop triggered flag
@@ -637,6 +639,21 @@ class RealTimePnLTracker:
             db.commit()
 
             logger.info(f"✅ Position closed: PnL = Rs.{net_pnl:.2f} ({pnl_percent:.2f}%)")
+            
+            log_structured(
+                event="POSITION_CLOSED",
+                message=f"Closed position {trade_execution.trade_id} ({exit_reason})",
+                data={
+                    "trade_id": trade_execution.trade_id,
+                    "symbol": position.symbol,
+                    "exit_price": float(exit_price),
+                    "exit_reason": exit_reason,
+                    "net_pnl": float(net_pnl),
+                    "pnl_percent": float(pnl_percent),
+                    "duration_min": int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60)
+                },
+                user_id=str(position.user_id)
+            )
 
             # UPDATE PAPER TRADING BALANCE ON EXIT
             if trade_execution.trading_mode == "paper":
