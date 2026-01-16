@@ -69,6 +69,7 @@ class PerformanceMetrics:
     average_trade_duration_minutes: int
     total_investment: float
     roi_percent: float
+    expectancy: float
 
 
 class TradeAnalyticsService:
@@ -635,12 +636,18 @@ class TradeAnalyticsService:
             profit_factor = float(gross_profit / gross_loss) if gross_loss > 0 else float(gross_profit) if gross_profit > 0 else 0
 
             # Average profit and loss
-            average_profit = float(gross_profit / len(winning_trades)) if winning_trades else 0
-            average_loss = float(gross_loss / len(losing_trades)) if losing_trades else 0
+            average_profit = float(gross_profit / len(winning_trades)) if winning_trades else 0.0
+            average_loss = float(gross_loss / len(losing_trades)) if losing_trades else 0.0
+
+            # Calculate Expectancy
+            # Expectancy = (Win Rate * Average Win) - (Loss Rate * Average Loss)
+            win_rate_decimal = win_rate / 100.0
+            loss_rate_decimal = 1.0 - win_rate_decimal
+            expectancy = (win_rate_decimal * average_profit) - (loss_rate_decimal * average_loss)
 
             # Largest win and loss
-            largest_win = max((float(t.net_pnl) for t in winning_trades), default=0)
-            largest_loss = abs(min((float(t.net_pnl) for t in losing_trades), default=0))
+            largest_win = max((float(t.net_pnl) for t in winning_trades), default=0.0)
+            largest_loss = abs(min((float(t.net_pnl) for t in losing_trades), default=0.0))
 
             # Calculate maximum drawdown
             max_drawdown = self._calculate_max_drawdown(trades)
@@ -686,7 +693,8 @@ class TradeAnalyticsService:
                 gross_loss=float(gross_loss),
                 average_trade_duration_minutes=average_duration,
                 total_investment=float(total_investment),
-                roi_percent=roi_percent
+                roi_percent=roi_percent,
+                expectancy=float(expectancy)
             )
 
         except Exception as e:
@@ -940,7 +948,8 @@ class TradeAnalyticsService:
             gross_loss=0.0,
             average_trade_duration_minutes=0,
             total_investment=0.0,
-            roi_percent=0.0
+            roi_percent=0.0,
+            expectancy=0.0
         )
 
 
