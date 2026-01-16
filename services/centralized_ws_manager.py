@@ -31,6 +31,7 @@ from typing import Dict, Set, List, Optional, Callable, Any, Union
 import aiohttp
 import sqlalchemy.exc
 from core.config import ADMIN_EMAIL
+from utils.logging_utils import log_structured
 
 # Configure logging first
 logging.basicConfig(
@@ -280,6 +281,7 @@ class CentralizedWebSocketManager:
         """
         try:
             logger.info("🔧 Initializing Centralized WebSocket manager...")
+            log_structured(event="WS_MANAGER_INIT_START", message="Initializing Centralized WebSocket Manager")
 
             # Reset connection event and shutdown flag
             self.connection_ready.clear()
@@ -288,6 +290,7 @@ class CentralizedWebSocketManager:
             # Load admin token
             if not await self._load_admin_token():
                 logger.error("❌ Failed to load admin token")
+                log_structured(event="WS_MANAGER_INIT_FAILED", level="ERROR", message="Failed to load admin token")
                 return False
 
             # Load instrument keys
@@ -298,6 +301,7 @@ class CentralizedWebSocketManager:
                 logger.error(
                     "❌ No instrument keys loaded - WebSocket initialization failed"
                 )
+                log_structured(event="WS_MANAGER_INIT_FAILED", level="ERROR", message="No instrument keys loaded")
                 return False
 
             logger.info(f"✅ Loaded {len(self.all_instrument_keys)} instrument keys")
@@ -325,6 +329,12 @@ class CentralizedWebSocketManager:
             self.is_running = True
             logger.info(
                 f"✅ Centralized WebSocket manager initialized with {len(self.all_instrument_keys)} instruments"
+            )
+            
+            log_structured(
+                event="WS_MANAGER_INIT_COMPLETE", 
+                message=f"Initialized with {len(self.all_instrument_keys)} instruments",
+                data={"instrument_count": len(self.all_instrument_keys), "market_open": market_should_be_open}
             )
 
             # Stop existing connection if any
@@ -357,6 +367,7 @@ class CentralizedWebSocketManager:
         except Exception as e:
             logger.error(f"❌ Failed to initialize centralized manager: {e}")
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            log_structured(event="WS_MANAGER_INIT_ERROR", level="ERROR", message=str(e))
             return False
 
     async def _validate_token_expiry(self, broker_config) -> dict:
@@ -1099,6 +1110,12 @@ class CentralizedWebSocketManager:
                 logger.info(log_message)
             else:
                 logger.debug(log_message)
+            
+            log_structured(
+                event="WS_CONNECTION_STATUS",
+                message=f"Connection status: {status}",
+                data=status_data
+            )
 
             # Execute registered callbacks for connection status
             await self._execute_callbacks("connection_status", status_data)
@@ -1352,6 +1369,16 @@ class CentralizedWebSocketManager:
             logger.info(
                 f"Market status updated: {self.market_status} (active segments: {active_segments})"
             )
+            
+            log_structured(
+                event="MARKET_STATUS_CHANGE",
+                message=f"Market status changed to {self.market_status}",
+                data={
+                    "status": self.market_status,
+                    "previous": prev_status,
+                    "active_segments": active_segments
+                }
+            )
 
             # Notify registered services via callbacks (NO UI broadcasting)
             await self._execute_callbacks(
@@ -1370,6 +1397,7 @@ class CentralizedWebSocketManager:
             # Check if markets closed and schedule shutdown
             if all_markets_closed and self.data_count > 0:
                 logger.info("🔔 Market closed - initiating cleanup process")
+                log_structured(event="MARKET_CLOSED", message="All markets closed, initiating cleanup")
                 await self._store_market_snapshot()
                 self._schedule_market_close_shutdown()
 
