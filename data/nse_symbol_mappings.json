@@ -19,10 +19,20 @@
     "name": "DALMIA BHARAT LIMITED",
     "trading_symbol": "DALBHARAT"
   },
+  "NSE_EQ|INE917I01010": {
+    "symbol": "BAJAJ-AUTO",
+    "name": "BAJAJ AUTO LIMITED",
+    "trading_symbol": "BAJAJ-AUTO"
+  },
   "NSE_EQ|INE267A01025": {
     "symbol": "HINDZINC",
     "name": "HINDUSTAN ZINC LIMITED",
     "trading_symbol": "HINDZINC"
+  },
+  "NSE_EQ|INE466L01038": {
+    "symbol": "360ONE",
+    "name": "360 ONE WAM LIMITED",
+    "trading_symbol": "360ONE"
   },
   "NSE_EQ|INE070A01015": {
     "symbol": "SHREECEM",
@@ -94,7 +104,7 @@
     "name": "ALKEM LABORATORIES LTD.",
     "trading_symbol": "ALKEM"
   },
-  "NSE_EQ|INE237A01028": {
+  "NSE_EQ|INE237A01036": {
     "symbol": "KOTAKBANK",
     "name": "KOTAK MAHINDRA BANK LTD",
     "trading_symbol": "KOTAKBANK"
@@ -163,6 +173,11 @@
     "symbol": "SYNGENE",
     "name": "SYNGENE INTERNATIONAL LTD",
     "trading_symbol": "SYNGENE"
+  },
+  "NSE_EQ|INE118A01012": {
+    "symbol": "BAJAJHLDNG",
+    "name": "BAJAJ HOLDINGS & INVS LTD",
+    "trading_symbol": "BAJAJHLDNG"
   },
   "NSE_EQ|INE674K01013": {
     "symbol": "ABCAPITAL",
@@ -249,6 +264,11 @@
     "name": "L&T FINANCE LIMITED",
     "trading_symbol": "LTF"
   },
+  "NSE_EQ|INE377N01017": {
+    "symbol": "WAAREEENER",
+    "name": "WAAREE ENERGIES LIMITED",
+    "trading_symbol": "WAAREEENER"
+  },
   "NSE_EQ|INE484J01027": {
     "symbol": "GODREJPROP",
     "name": "GODREJ PROPERTIES LTD",
@@ -304,11 +324,6 @@
     "name": "NMDC LTD.",
     "trading_symbol": "NMDC"
   },
-  "NSE_EQ|INE548A01028": {
-    "symbol": "HFCL",
-    "name": "HFCL LIMITED",
-    "trading_symbol": "HFCL"
-  },
   "NSE_EQ|INE414G01012": {
     "symbol": "MUTHOOTFIN",
     "name": "MUTHOOT FINANCE LIMITED",
@@ -333,11 +348,6 @@
     "symbol": "INOXWIND",
     "name": "INOX WIND LIMITED",
     "trading_symbol": "INOXWIND"
-  },
-  "NSE_EQ|INE868B01028": {
-    "symbol": "NCC",
-    "name": "NCC LIMITED",
-    "trading_symbol": "NCC"
   },
   "NSE_EQ|INE213A01029": {
     "symbol": "ONGC",
@@ -439,11 +449,6 @@
     "name": "INDUS TOWERS LIMITED",
     "trading_symbol": "INDUSTOWER"
   },
-  "NSE_EQ|INE615H01020": {
-    "symbol": "TITAGARH",
-    "name": "TITAGARH RAIL SYSTEMS LTD",
-    "trading_symbol": "TITAGARH"
-  },
   "NSE_EQ|INE121E01018": {
     "symbol": "JSWENERGY",
     "name": "JSW ENERGY LIMITED",
@@ -459,11 +464,6 @@
     "name": "COAL INDIA LTD",
     "trading_symbol": "COALINDIA"
   },
-  "NSE_EQ|INE296A01032": {
-    "symbol": "BAJFINANCE",
-    "name": "BAJAJ FINANCE LIMITED",
-    "trading_symbol": "BAJFINANCE"
-  },
   "NSE_EQ|INE095N01031": {
     "symbol": "NBCC",
     "name": "NBCC (INDIA) LIMITED",
@@ -473,16 +473,6 @@
     "symbol": "HAL",
     "name": "HINDUSTAN AERONAUTICS LTD",
     "trading_symbol": "HAL"
-  },
-  "NSE_EQ|INE002A01018": {
-    "symbol": "RELIANCE",
-    "name": "RELIANCE INDUSTRIES LTD",
-    "trading_symbol": "RELIANCE"
-  },
-  "NSE_EQ|INE203G01027": {
-    "symbol": "IGL",
-    "name": "INDRAPRASTHA GAS LTD",
-    "trading_symbol": "IGL"
   },
   "NSE_EQ|INE467B01029": {
     "symbol": "TCS",
@@ -709,11 +699,6 @@
     "name": "SUPREME INDUSTRIES LTD",
     "trading_symbol": "SUPREMEIND"
   },
-  "NSE_EQ|INE136B01020": {
-    "symbol": "CYIENT",
-    "name": "CYIENT LIMITED",
-    "trading_symbol": "CYIENT"
-  },
   "NSE_EQ|INE118H01025": {
     "symbol": "BSE",
     "name": "BSE LIMITED",
@@ -798,6 +783,16 @@
     "symbol": "HCLTECH",
     "name": "HCL TECHNOLOGIES LTD",
     "trading_symbol": "HCLTECH"
+  },
+  "NSE_EQ|INE0BS701011": {
+    "symbol": "PREMIERENE",
+    "name": "PREMIER ENERGIES LIMITED",
+    "trading_symbol": "PREMIERENE"
+  },
+  "NSE_EQ|INE00H001014": {
+    "symbol": "SWIGGY",
+    "name": "SWIGGY LIMITED",
+    "trading_symbol": "SWIGGY"
   },
   "NSE_EQ|INE171A01029": {
     "symbol": "FEDERALBNK",
@@ -903,6 +898,11 @@
     "symbol": "AUROPHARMA",
     "name": "AUROBINDO PHARMA LTD",
     "trading_symbol": "AUROPHARMA"
+  },
+  "NSE_EQ|INE101A01026": {
+    "symbol": "M&M",
+    "name": "MAHINDRA & MAHINDRA LTD",
+    "trading_symbol": "M&M"
   },
   "NSE_EQ|INE208A01029": {
     "symbol": "ASHOKLEY",

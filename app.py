@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from utils.logging_utils import log_structured
 
 # Windows-specific fix: Set ProactorEventLoop policy BEFORE any asyncio operations
 # This is required for Playwright subprocess support on Windows
@@ -444,6 +445,7 @@ async def lifespan(app: FastAPI):
     logger.info(
         "🚀 Starting Enhanced Trading Application with NEW Centralized WebSocket System..."
     )
+    log_structured(event="APP_STARTUP_START", message="Starting Enhanced Trading Application")
 
     try:
         # 1. DB initialization
@@ -471,6 +473,7 @@ async def lifespan(app: FastAPI):
             logger.error(
                 f"❌ Instrument service initialization failed: {initialization_result.error}"
             )
+            log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Instrument service init failed: {initialization_result.error}")
 
         # 4. Initialize optimized market data service FIRST
         try:
@@ -484,6 +487,7 @@ async def lifespan(app: FastAPI):
             )
         except Exception as e:
             logger.error(f"❌ Optimized market service initialization failed: {e}")
+            log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Optimized market service init failed: {str(e)}")
 
         # 4.5. 🚀 NEW: Initialize Real-Time Market Analytics Engine
         try:
@@ -520,6 +524,7 @@ async def lifespan(app: FastAPI):
             import traceback
 
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Analytics engine init failed: {str(e)}")
 
         # 4.6. 🚀 NEW: Initialize Enhanced Breakout Detection Engine
         try:
@@ -632,6 +637,7 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ NEW: Centralized WebSocket system error: {e}")
                 logger.warning("⚠️ Application will continue without live market data")
+                log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Centralized WS system error: {str(e)}")
         else:
             logger.warning(
                 "⚠️ NEW: Centralized WebSocket system not available - using legacy only"
@@ -811,15 +817,19 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Failed to start Unified WebSocket broadcast: {e}")
 
         logger.info("🎯 Application is fully operational and ready for trading!")
+        
+        log_structured(event="APP_STARTUP_COMPLETE", message="Application startup completed successfully")
 
         yield
 
     except Exception as e:
         logger.exception("🔥 Enhanced lifespan startup failed - but app will continue")
+        log_structured(event="APP_STARTUP_CRITICAL_FAILURE", level="CRITICAL", message=str(e))
         yield
     finally:
         # Enhanced cleanup
         logger.info("🛑 Starting enhanced shutdown...")
+        log_structured(event="APP_SHUTDOWN_START", message="Starting application shutdown")
 
         # Unified WebSocket connections cleanup (handled automatically by FastAPI)
         logger.info("✅ Unified WebSocket connections will be cleaned up by FastAPI")
@@ -882,6 +892,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"Error stopping Upstox automation: {e}")
 
         logger.info("🛑 Enhanced lifespan shutdown complete.")
+        log_structured(event="APP_SHUTDOWN_COMPLETE", message="Application shutdown completed")
 
 
 # FIXED: Enhanced trading engine startup function
@@ -1546,6 +1557,7 @@ async def restart_trading_engine():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Global error on {request.url}: {str(exc)}")
+    log_structured(event="GLOBAL_EXCEPTION", level="ERROR", message=f"Unhandled exception on {request.url}", data={"error": str(exc), "url": str(request.url)})
 
     # Don't expose Redis connection errors
     if "redis" in str(exc).lower() or "connection" in str(exc).lower():

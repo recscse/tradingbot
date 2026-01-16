@@ -1,4 +1,4 @@
-"""Set role to admin if rating@gmail.com exists
+"""Set role to admin if rating@gmail.com or brijeshyadav30599@gmail.com exists
 
 Revision ID: a9efee0bc74f
 Revises: 8f6f7fa1dc49
@@ -26,14 +26,16 @@ def upgrade() -> None:
         DO $$
         BEGIN
             IF EXISTS (
-                SELECT 1 FROM users WHERE email = 'rating@gmail.com'
+                SELECT 1
+                FROM users
+                WHERE email IN ('rating@gmail.com', 'brijeshyadav30599@gmail.com')
             ) THEN
                 UPDATE users
                 SET role = 'admin'
-                WHERE email = 'rating@gmail.com';
+                WHERE email IN ('rating@gmail.com', 'brijeshyadav30599@gmail.com');
             END IF;
         END $$;
-    """
+        """
     )
 
 
@@ -44,13 +46,14 @@ def downgrade() -> None:
         DO $$
         BEGIN
             IF EXISTS (
-                SELECT 1 FROM users WHERE email = 'rating@gmail.com'
+                SELECT 1
+                FROM users
+                WHERE email IN ('rating@gmail.com', 'brijeshyadav30599@gmail.com')
             ) THEN
                 UPDATE users
                 SET role = 'user'
-                WHERE email = 'rating@gmail.com';
+                WHERE email IN ('rating@gmail.com', 'brijeshyadav30599@gmail.com');
             END IF;
         END $$;
-    """
+        """
     )
-  

@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime, timedelta
+from utils.logging_utils import log_signal_generation, log_trailing_update, generate_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +511,16 @@ class StrategyEngine:
             logger.info(f"Signal generated: {signal_type.value} at {current_price}")
             logger.info(f"  Confidence: {confidence:.2f}")
             logger.info(f"  Entry: {entry_price}, SL: {stop_loss}, Target: {target_price}")
+            
+            # Structured logging
+            log_signal_generation(
+                symbol="Unknown",  # Strategy engine doesn't know symbol, passed in auto_trade
+                signal_type=signal_type.value,
+                confidence=float(confidence),
+                strategy="SuperTrend+EMA",
+                price=float(current_price),
+                trace_id=generate_trace_id()
+            )
 
             return signal
 
@@ -633,7 +644,8 @@ class StrategyEngine:
         trailing_type: TrailingStopType,
         supertrend_value: Optional[Decimal] = None,
         position_type: str = "LONG",
-        target_price: Optional[Decimal] = None
+        target_price: Optional[Decimal] = None,
+        symbol: str = "Unknown"
     ) -> Decimal:
         """
         Update trailing stop loss with LOCK PROFIT mechanism
@@ -654,6 +666,7 @@ class StrategyEngine:
             supertrend_value: Current SuperTrend value (for SuperTrend-based trailing)
             position_type: "LONG" or "SHORT"
             target_price: Target price (for lock profit calculation)
+            symbol: Stock symbol for logging
 
         Returns:
             Updated stop loss price
@@ -734,6 +747,14 @@ class StrategyEngine:
 
             if new_stop_loss != current_stop_loss:
                 logger.debug(f"Trailing SL updated: {current_stop_loss:.2f} -> {new_stop_loss:.2f}")
+                
+                log_trailing_update(
+                    symbol=symbol,
+                    old_sl=float(current_stop_loss),
+                    new_sl=float(new_stop_loss),
+                    reason="SuperTrend/Profit Lock",
+                    current_price=float(current_price)
+                )
 
             return new_stop_loss
 

@@ -23,6 +23,7 @@ from services.trading_execution.strategy_engine import (
     SignalType,
     TrailingStopType,
 )
+from utils.logging_utils import log_trade_prep
 
 logger = logging.getLogger(__name__)
 
