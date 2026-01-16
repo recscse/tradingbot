@@ -18,6 +18,7 @@ import aiofiles
 from functools import wraps
 from dataclasses import dataclass
 import pandas as pd
+from utils.logging_utils import log_structured
 
 # Redis import with fallback
 try:
@@ -286,6 +287,7 @@ class TradingInstrumentService:
         #     return total_count, total_count
 
         logger.info("⬇️ Downloading instruments from complete.json.gz...")
+        log_structured(event="INSTRUMENT_DOWNLOAD_START", message="Downloading instrument list from Upstox")
 
         top_stocks = await self._load_top_stocks()
         if not top_stocks:
@@ -297,9 +299,9 @@ class TradingInstrumentService:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(UPSTOX_COMPLETE_URL) as response:
                 if response.status != 200:
-                    raise Exception(
-                        f"Failed to download instruments: {response.status}"
-                    )
+                    error_msg = f"Failed to download instruments: {response.status}"
+                    log_structured(event="INSTRUMENT_DOWNLOAD_FAILED", level="ERROR", message=error_msg)
+                    raise Exception(error_msg)
 
                 content = await response.read()
                 logger.info(f"📦 Downloaded {len(content)} bytes")
@@ -336,6 +338,7 @@ class TradingInstrumentService:
 
         except Exception as e:
             logger.error(f"❌ Failed to decompress/parse data: {e}")
+            log_structured(event="INSTRUMENT_PARSE_ERROR", level="ERROR", message=str(e))
             raise
         finally:
             del content
@@ -349,6 +352,18 @@ class TradingInstrumentService:
         await self._mark_refresh_completed()
 
         logger.info(f"💾 Saved {len(filtered_instruments)} filtered instruments")
+        
+        log_structured(
+            event="INSTRUMENT_DOWNLOAD_COMPLETE", 
+            message=f"Downloaded and processed {total_count} instruments",
+            data={
+                "total_downloaded": total_count,
+                "filtered_count": len(filtered_instruments),
+                "nse_keys": len(nse_instrument_keys),
+                "mcx_instruments": len(mcx_instruments)
+            }
+        )
+        
         return total_count, len(filtered_instruments)
 
     def _extract_mcx_options_chain(self, all_instruments: List[Dict]) -> List[Dict]:
@@ -610,6 +625,7 @@ class TradingInstrumentService:
         """Complete service initialization"""
         start_time = time.time()
         logger.info("🚀 Initializing Trading Instrument Service...")
+        log_structured(event="INSTRUMENT_SERVICE_INIT_START", message="Starting Trading Instrument Service initialization")
 
         try:
             await self._ensure_cache_connection()
@@ -659,11 +675,23 @@ class TradingInstrumentService:
             )
 
             logger.info(f"✅ Service initialized in {processing_time:.2f}s")
+            
+            log_structured(
+                event="INSTRUMENT_SERVICE_INIT_COMPLETE",
+                message=f"Service initialized in {processing_time:.2f}s",
+                data={
+                    "total_stocks": result.total_stocks,
+                    "websocket_keys": result.websocket_instruments,
+                    "filtered_instruments": result.filtered_instruments
+                }
+            )
+            
             return result
 
         except Exception as e:
             error_msg = f"Service initialization failed: {e}"
             logger.error(f"❌ {error_msg}")
+            log_structured(event="INSTRUMENT_SERVICE_INIT_ERROR", level="ERROR", message=str(e))
             return InitializationResult(
                 status="error",
                 processing_time=time.time() - start_time,
