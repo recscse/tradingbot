@@ -109,6 +109,23 @@ class TradeExecutionHandler:
                 metadata={"error": "Trade not ready"},
             )
 
+        # CRITICAL SAFETY CHECK: Ensure Stop Loss is valid (> 0)
+        if prepared_trade.stop_loss <= 0:
+            logger.error(f"Safety Block: Attempted to execute trade with Stop Loss <= 0 for {prepared_trade.stock_symbol}")
+            return ExecutionResult(
+                success=False,
+                trade_id="",
+                order_id=None,
+                entry_price=Decimal("0"),
+                quantity=0,
+                status="FAILED",
+                message="Safety Block: Invalid Stop Loss (<= 0)",
+                trade_execution_id=None,
+                active_position_id=None,
+                timestamp=get_ist_isoformat(),
+                metadata={"error": "Invalid Stop Loss"},
+            )
+
         try:
             trading_mode = TradingMode(prepared_trade.trading_mode)
 
