@@ -179,7 +179,10 @@ class RealTimePnLTracker:
                         current_price
                     )
 
-                    # Check exit conditions
+                    # Update position object immediately so check_exit uses new SL
+                    position.current_stop_loss = float(updated_sl)
+
+                    # Check exit conditions (now uses updated SL)
                     should_exit, exit_reason = self._check_exit_conditions(
                         position,
                         trade_execution,
@@ -187,11 +190,10 @@ class RealTimePnLTracker:
                         pnl_data
                     )
 
-                    # Update position in database
+                    # Update remaining position fields
                     position.current_price = float(current_price)
                     position.current_pnl = float(pnl_data['pnl'])
                     position.current_pnl_percentage = float(pnl_data['pnl_percent'])
-                    position.current_stop_loss = float(updated_sl)
                     position.highest_price_reached = float(pnl_data['highest_price'])
                     position.mark_to_market_time = get_ist_now_naive()
                     position.last_updated = get_ist_now_naive()
@@ -363,27 +365,17 @@ class RealTimePnLTracker:
             # Determine position type (both CE and PE are long positions when buying options)
             position_type = "LONG"
 
-            # Get SuperTrend value from shared registry
+            # FIXED: Use PERCENTAGE trailing for options to avoid Spot vs Premium mismatch
+            # Spot SuperTrend (e.g. 24000) cannot be compared to Premium (e.g. 150)
+            trailing_type = TrailingStopType.PERCENTAGE
             supertrend_value = None
-            try:
-                from services.trading_execution.shared_instrument_registry import shared_registry
-
-                instrument = shared_registry.get_instrument(position.instrument_key)
-
-                if instrument and hasattr(instrument, 'last_signal') and instrument.last_signal:
-                    supertrend_raw = instrument.last_signal.indicators.get('supertrend_1x')
-                    if supertrend_raw and supertrend_raw > 0:
-                        supertrend_value = Decimal(str(supertrend_raw))
-
-            except Exception as e:
-                logger.debug(f"Could not fetch SuperTrend for trailing SL: {e}")
 
             # Use strategy engine's ENHANCED trailing stop with LOCK PROFIT
             new_sl = strategy_engine.update_trailing_stop(
                 current_price=current_price,
                 entry_price=entry_price,
                 current_stop_loss=current_sl,
-                trailing_type=TrailingStopType.SUPERTREND_1X,
+                trailing_type=trailing_type,
                 supertrend_value=supertrend_value,
                 position_type=position_type,
                 target_price=target_price,  # Pass target for lock profit calculation
