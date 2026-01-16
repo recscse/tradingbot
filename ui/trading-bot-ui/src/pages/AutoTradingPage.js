@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import api from "../services/api";
 import ActivePositionCard from "../components/ActivePositionCard";
 import SelectedStockCard from "../components/SelectedStockCard";
-import TradeHistoryItem from "../components/TradeHistoryItem";
 
 const AutoTradingPage = () => {
   const [tradingMode, setTradingMode] = useState("paper");
@@ -534,17 +533,6 @@ const AutoTradingPage = () => {
     return 'tw-bg-slate-500/10 tw-border-slate-500/30';
   }, []);
 
-  const groupedTradeHistory = useMemo(() => {
-    return Object.entries(
-      tradeHistory.reduce((groups, trade) => {
-        const date = trade.entry_date || 'Unknown Date';
-        if (!groups[date]) groups[date] = [];
-        groups[date].push(trade);
-        return groups;
-      }, {})
-    );
-  }, [tradeHistory]);
-
   if (isLoading) {
     return (
       <div className="tw-min-h-screen tw-bg-gradient-to-br tw-from-slate-950 tw-via-slate-900 tw-to-slate-950 tw-flex tw-items-center tw-justify-center">
@@ -910,23 +898,71 @@ const AutoTradingPage = () => {
 
           {/* Trade History Tab */}
           {activeTab === 2 && (
-            <div>
+            <div className="tw-overflow-x-auto">
               {tradeHistory.length > 0 ? (
-                <div className="tw-space-y-6">
-                  {/* Group trades by date */}
-                  {groupedTradeHistory.map(([date, trades]) => (
-                    <div key={date}>
-                      <h3 className="tw-text-slate-400 tw-text-sm tw-font-bold tw-uppercase tw-mb-3 tw-pl-1">
-                        {date}
-                      </h3>
-                      <div className="tw-space-y-3">
-                        {trades.map((trade, idx) => (
-                          <TradeHistoryItem key={idx} trade={trade} />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <table className="tw-w-full tw-text-xs md:tw-text-sm tw-text-left">
+                  <thead className="tw-text-xs tw-text-slate-400 tw-uppercase tw-bg-slate-800/80">
+                    <tr>
+                      <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Date</th>
+                      <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Instrument</th>
+                      <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Type</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Qty</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Buy Avg</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Sell Avg</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Gross P&L</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Charges</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Net P&L</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">% Chg</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tw-divide-y tw-divide-slate-800">
+                    {tradeHistory.map((trade, idx) => {
+                      const buyValue = trade.entry_price * trade.quantity;
+                      const grossPnl = trade.gross_pnl || (trade.exit_price - trade.entry_price) * trade.quantity;
+                      // Calculate charges if not provided (Gross - Net)
+                      const charges = trade.gross_pnl && trade.net_pnl 
+                        ? trade.gross_pnl - trade.net_pnl 
+                        : Math.abs(grossPnl * 0.005); // Fallback est. 0.5%
+                      const netPnl = trade.net_pnl || (grossPnl - charges);
+                      const isProfit = netPnl >= 0;
+
+                      return (
+                        <tr key={idx} className="tw-hover:bg-slate-800/30 tw-transition-colors">
+                          <td className="tw-px-4 tw-py-3 tw-text-slate-400 tw-whitespace-nowrap">
+                            <div>{trade.entry_date || 'N/A'}</div>
+                            <div className="tw-text-[10px] tw-text-slate-600">{trade.entry_time_str?.split(' ')[0]}</div>
+                          </td>
+                          <td className="tw-px-4 tw-py-3">
+                            <div className="tw-font-bold tw-text-white">{trade.symbol}</div>
+                            {/* <div className="tw-text-[10px] tw-text-slate-500">{trade.trade_id}</div> */}
+                          </td>
+                          <td className="tw-px-4 tw-py-3">
+                            <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold tw-uppercase ${
+                              trade.signal_type?.includes('BUY') ? 'tw-bg-emerald-500/10 tw-text-emerald-400' : 'tw-bg-rose-500/10 tw-text-rose-400'
+                            }`}>
+                              {trade.signal_type?.includes('BUY') ? 'INTRADAY' : 'DELIVERY'}
+                            </span>
+                          </td>
+                          <td className="tw-px-4 tw-py-3 tw-text-right tw-font-medium tw-text-slate-300">{trade.quantity}</td>
+                          <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{formatCurrency(trade.entry_price)}</td>
+                          <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{formatCurrency(trade.exit_price)}</td>
+                          <td className={`tw-px-4 tw-py-3 tw-text-right ${grossPnl >= 0 ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                            {formatCurrency(grossPnl)}
+                          </td>
+                          <td className="tw-px-4 tw-py-3 tw-text-right tw-text-rose-300 tw-text-xs">
+                            {formatCurrency(charges)}
+                          </td>
+                          <td className={`tw-px-4 tw-py-3 tw-text-right tw-font-bold ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                            {formatCurrency(netPnl)}
+                          </td>
+                          <td className={`tw-px-4 tw-py-3 tw-text-right ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                            {formatPercentage(trade.pnl_percentage)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               ) : (
                 <div className="tw-text-center tw-py-12">
                   <svg className="tw-w-16 tw-h-16 tw-text-slate-600 tw-mx-auto tw-mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
