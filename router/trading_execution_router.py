@@ -1055,6 +1055,21 @@ async def get_trade_history(
             total_investment = float(trade.total_investment) if trade.total_investment else (float(trade.entry_price) * trade.quantity)
             lots_traded = trade.lots_traded if trade.lots_traded else (trade.quantity // trade.lot_size if trade.lot_size > 0 else 1)
 
+            # Determine status tag
+            net_pnl = float(trade.net_pnl) if trade.net_pnl else 0
+            status_tag = "WIN" if net_pnl > 0 else "LOSS"
+
+            # Determine exit type (SL Hit / Target Hit / Manual)
+            exit_type = "MANUAL"
+            if trade.exit_reason:
+                reason = trade.exit_reason.upper()
+                if "STOP_LOSS" in reason or "SL" in reason:
+                    exit_type = "SL_HIT"
+                elif "TARGET" in reason or "PROFIT" in reason:
+                    exit_type = "TARGET_HIT"
+                elif "TIME" in reason:
+                    exit_type = "TIME_EXIT"
+
             trade_history.append(
                 {
                     "trade_id": trade.trade_id,
@@ -1072,16 +1087,20 @@ async def get_trade_history(
                     "exit_time_str": exit_time_str,
                     "entry_price": float(trade.entry_price),
                     "exit_price": float(trade.exit_price) if trade.exit_price else 0,
+                    "stop_loss": float(trade.initial_stop_loss) if trade.initial_stop_loss else 0,
+                    "target": float(trade.target_1) if trade.target_1 else 0,
                     "quantity": trade.quantity,
                     "lot_size": trade.lot_size,
                     "lots_traded": lots_traded,
                     "total_investment": total_investment,
                     "gross_pnl": float(trade.gross_pnl) if trade.gross_pnl else 0,
-                    "net_pnl": float(trade.net_pnl) if trade.net_pnl else 0,
+                    "net_pnl": net_pnl,
                     "pnl_percentage": (
                         float(trade.pnl_percentage) if trade.pnl_percentage else 0
                     ),
                     "exit_reason": trade.exit_reason,
+                    "exit_type": exit_type,
+                    "status_tag": status_tag,
                     "strategy_name": trade.strategy_name,
                     "duration_minutes": duration_minutes,
                     "broker_name": trade.broker_name or "N/A",

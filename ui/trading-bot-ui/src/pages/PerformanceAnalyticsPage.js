@@ -464,6 +464,15 @@ const PerformanceAnalyticsPage = () => {
               </div>
             )}
 
+            {/* PnL Chart */}
+            <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl tw-h-80">
+              <h2 className="tw-text-xl tw-font-bold tw-text-white tw-mb-4">Cumulative PnL</h2>
+              {/* Placeholder for Recharts - Chart would go here */}
+              <div className="tw-w-full tw-h-full tw-flex tw-items-center tw-justify-center tw-bg-slate-800/20 tw-rounded-xl tw-border tw-border-dashed tw-border-slate-700">
+                <p className="tw-text-slate-500">PnL Chart Visualization</p>
+              </div>
+            </div>
+
             {/* Trade Ledger - Real Demat Style */}
             <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-overflow-hidden tw-shadow-xl">
               <div className="tw-p-6 tw-border-b tw-border-slate-800 tw-flex tw-justify-between tw-items-center">
@@ -480,10 +489,12 @@ const PerformanceAnalyticsPage = () => {
                       <th className="tw-px-4 tw-py-3 tw-text-right">Qty</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Buy Avg</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Sell Avg</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">SL</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Target</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Gross P&L</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Charges</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Net P&L</th>
-                      <th className="tw-px-4 tw-py-3 tw-text-right">% Chg</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-center">Status</th>
                     </tr>
                   </thead>
                   <tbody className="tw-divide-y tw-divide-slate-800">
@@ -492,12 +503,12 @@ const PerformanceAnalyticsPage = () => {
                         const buyValue = trade.entry_price * trade.quantity;
                         const sellValue = trade.exit_price * trade.quantity;
                         const grossPnl = trade.gross_pnl || (trade.exit_price - trade.entry_price) * trade.quantity;
-                        // Calculate charges if not provided (Gross - Net)
                         const charges = trade.gross_pnl && trade.net_pnl 
                           ? trade.gross_pnl - trade.net_pnl 
-                          : Math.abs(grossPnl * 0.005); // Fallback est. 0.5%
+                          : Math.abs(grossPnl * 0.005); 
                         const netPnl = trade.net_pnl || (grossPnl - charges);
                         const isProfit = netPnl >= 0;
+                        const exitType = trade.exit_type || (netPnl > 0 ? 'TARGET' : 'SL');
 
                         return (
                           <tr key={idx} className="tw-hover:bg-slate-800/30 tw-transition-colors">
@@ -507,7 +518,6 @@ const PerformanceAnalyticsPage = () => {
                             </td>
                             <td className="tw-px-4 tw-py-3">
                               <div className="tw-font-bold tw-text-white">{trade.symbol}</div>
-                              {/* <div className="tw-text-[10px] tw-text-slate-500">{trade.instrument_key}</div> */}
                             </td>
                             <td className="tw-px-4 tw-py-3">
                               <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold tw-uppercase ${
@@ -519,6 +529,8 @@ const PerformanceAnalyticsPage = () => {
                             <td className="tw-px-4 tw-py-3 tw-text-right tw-font-medium tw-text-slate-300">{trade.quantity}</td>
                             <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{format_currency(trade.entry_price)}</td>
                             <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{format_currency(trade.exit_price)}</td>
+                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-rose-300">{format_currency(trade.stop_loss)}</td>
+                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-emerald-300">{format_currency(trade.target)}</td>
                             <td className={`tw-px-4 tw-py-3 tw-text-right ${grossPnl >= 0 ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
                               {format_currency(grossPnl)}
                             </td>
@@ -528,15 +540,20 @@ const PerformanceAnalyticsPage = () => {
                             <td className={`tw-px-4 tw-py-3 tw-text-right tw-font-bold ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
                               {format_currency(netPnl)}
                             </td>
-                            <td className={`tw-px-4 tw-py-3 tw-text-right ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
-                              {format_percentage(trade.pnl_percentage)}
+                            <td className="tw-px-4 tw-py-3 tw-text-center">
+                              <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold ${
+                                exitType === 'TARGET_HIT' ? 'tw-bg-emerald-500/20 tw-text-emerald-300' :
+                                exitType === 'SL_HIT' ? 'tw-bg-rose-500/20 tw-text-rose-300' : 'tw-bg-slate-500/20 tw-text-slate-300'
+                              }`}>
+                                {exitType}
+                              </span>
                             </td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan="10" className="tw-px-6 tw-py-12 tw-text-center tw-text-slate-500">
+                        <td colSpan="12" className="tw-px-6 tw-py-12 tw-text-center tw-text-slate-500">
                           <div className="tw-flex tw-flex-col tw-items-center tw-justify-center">
                             <svg className="tw-w-12 tw-h-12 tw-mb-3 tw-opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
