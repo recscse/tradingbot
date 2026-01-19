@@ -251,18 +251,24 @@ class UpstoxAutomationService:
                 logger.info("Waiting for redirect with authorization code...")
 
                 try:
-                    max_attempts = 10  # REDUCED: 10 attempts × 500ms = 5 seconds max wait (was 30 seconds)
+                    # INCREASED: 60 attempts × 500ms = 30 seconds max wait (was 5 seconds)
+                    # Cloud environments like Railway can be slower
+                    max_attempts = 60
                     attempt = 0
                     auth_code_found = False
                     last_url = ""
 
-                    logger.info("⏳ Waiting for authorization redirect (max 5 seconds)...")
+                    logger.info("⏳ Waiting for authorization redirect (max 30 seconds)...")
 
                     while attempt < max_attempts and not auth_code_found:
                         await page.wait_for_timeout(500)
                         current_url = page.url
 
-                        if current_url != last_url and "code=" in current_url:
+                        # Log URL changes to debug where it might be stuck
+                        if current_url != last_url:
+                            logger.info(f"🔗 Automation at URL: {current_url[:100]}...")
+
+                        if "code=" in current_url:
                             logger.info(f"✅ Auth redirect detected: {current_url[:100]}...")
                             await page.wait_for_timeout(1000)
 
@@ -292,7 +298,8 @@ class UpstoxAutomationService:
                         attempt += 1
 
                     if not auth_code_found:
-                        logger.warning("No valid authorization code found after 5 seconds - callback will handle token exchange")
+                        logger.warning(f"No valid authorization code found after {max_attempts * 0.5} seconds - callback will handle token exchange")
+                        logger.warning(f"Final URL was: {page.url[:200]}")
                         log_structured(event="LOGIN_AUTOMATION_WARNING", level="WARNING", message="Auth code not captured, fallback to callback")
                     return True
 
@@ -399,7 +406,7 @@ class UpstoxAutomationService:
             return False
 
     async def wait_for_token_refresh(
-        self, broker: BrokerConfig, db: Session, timeout_seconds: int = 15
+        self, broker: BrokerConfig, db: Session, timeout_seconds: int = 45
     ) -> Dict:
         """
         Wait for the callback endpoint to complete token refresh
