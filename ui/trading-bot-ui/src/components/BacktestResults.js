@@ -6,7 +6,7 @@ function BacktestResults({ userId }) {
     const [results, setResults] = useState([]);
 
     useEffect(() => {
-        fetch(`{BASE_URL}/api/backtest?user_id=${userId}`)
+        fetch(`${BASE_URL}/api/backtest?user_id=${userId}`)
             .then(response => response.json())
             .then(data => setResults(data))
             .catch(error => console.error("Error fetching backtest results:", error));

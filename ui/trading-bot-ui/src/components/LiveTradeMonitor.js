@@ -5,7 +5,7 @@ function LiveTradeMonitor({ userId }) {
     const [trades, setTrades] = useState([]);
 
     useEffect(() => {
-        const socket = new WebSocket(`ws://{WS_BASE_URL}/ws/live_trades?user_id=${userId}`);
+        const socket = new WebSocket(`ws://${WS_BASE_URL}/ws/live_trades?user_id=${userId}`);
 
         socket.onmessage = (event) => {
             setTrades(JSON.parse(event.data));

@@ -4,7 +4,7 @@ function LiveAI({ userId }) {
     const [aiDecisions, setAIDecisions] = useState([]);
 
     useEffect(() => {
-        const socket = new WebSocket(`ws://{WS_BASE_URL}/ws/ai_decisions?user_id=${userId}`);
+        const socket = new WebSocket(`ws://${WS_BASE_URL}/ws/ai_decisions?user_id=${userId}`);
 
         socket.onmessage = (event) => {
             setAIDecisions(JSON.parse(event.data));

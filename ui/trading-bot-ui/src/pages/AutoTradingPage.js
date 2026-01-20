@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import api from "../services/api";
 import ActivePositionCard from "../components/ActivePositionCard";
 import SelectedStockCard from "../components/SelectedStockCard";
@@ -917,7 +917,6 @@ const AutoTradingPage = () => {
                   </thead>
                   <tbody className="tw-divide-y tw-divide-slate-800">
                     {tradeHistory.map((trade, idx) => {
-                      const buyValue = trade.entry_price * trade.quantity;
                       const grossPnl = trade.gross_pnl || (trade.exit_price - trade.entry_price) * trade.quantity;
                       // Calculate charges if not provided (Gross - Net)
                       const charges = trade.gross_pnl && trade.net_pnl 

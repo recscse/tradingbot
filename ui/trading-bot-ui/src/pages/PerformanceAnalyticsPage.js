@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../services/api';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  Legend,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine
+} from 'recharts';
 
 /**
  * Performance Analytics Page - Premium Financial Dashboard
@@ -9,10 +22,22 @@ const PerformanceAnalyticsPage = () => {
   const [timeframe, setTimeframe] = useState('summary');
   const [tradingMode, setTradingMode] = useState('paper');
   const [performanceData, setPerformanceData] = useState(null);
+  const [systemHealth, setSystemHealth] = useState(null);
   const [tradeList, setTradeList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchingData, setFetchingData] = useState(false);
   const [error, setError] = useState(null);
+
+  const fetch_system_health = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/v1/trading/execution/performance/system-health');
+      if (response.data && response.data.success) {
+        setSystemHealth(response.data);
+      }
+    } catch (err) {
+      console.error('Error fetching system health:', err);
+    }
+  }, []);
 
   const fetch_trade_list = useCallback(async () => {
     try {
@@ -69,7 +94,8 @@ const PerformanceAnalyticsPage = () => {
 
   useEffect(() => {
     fetch_performance_data();
-  }, [fetch_performance_data]);
+    fetch_system_health();
+  }, [fetch_performance_data, fetch_system_health]);
 
   const handle_timeframe_change = useCallback((new_timeframe) => {
     if (new_timeframe !== timeframe && !fetchingData) {
@@ -464,13 +490,155 @@ const PerformanceAnalyticsPage = () => {
               </div>
             )}
 
-            {/* PnL Chart */}
-            <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl tw-h-80">
-              <h2 className="tw-text-xl tw-font-bold tw-text-white tw-mb-4">Cumulative PnL</h2>
-              {/* Placeholder for Recharts - Chart would go here */}
-              <div className="tw-w-full tw-h-full tw-flex tw-items-center tw-justify-center tw-bg-slate-800/20 tw-rounded-xl tw-border tw-border-dashed tw-border-slate-700">
-                <p className="tw-text-slate-500">PnL Chart Visualization</p>
+            {/* System Health & Insights */}
+            {systemHealth && (
+              <div className="tw-grid tw-grid-cols-1 lg:tw-grid-cols-3 tw-gap-6">
+                {/* Latency & Broker Stats */}
+                <div className="tw-space-y-6">
+                  {/* Latency */}
+                  <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                    <h2 className="tw-text-lg tw-font-bold tw-text-white tw-mb-4">System Latency</h2>
+                    <div className="tw-space-y-4">
+                      <div className="tw-flex tw-justify-between tw-items-center">
+                        <span className="tw-text-slate-400 tw-text-sm">Signal Gen</span>
+                        <span className="tw-text-cyan-400 tw-font-mono tw-font-bold">
+                          {systemHealth.latency_metrics?.avg_signal_latency_ms || 0} ms
+                        </span>
+                      </div>
+                      <div className="tw-w-full tw-bg-slate-800 tw-rounded-full tw-h-2">
+                        <div 
+                          className="tw-bg-cyan-500 tw-h-2 tw-rounded-full" 
+                          style={{ width: `${Math.min((systemHealth.latency_metrics?.avg_signal_latency_ms || 0) / 5, 100)}%` }}
+                        ></div>
+                      </div>
+                      
+                      <div className="tw-flex tw-justify-between tw-items-center">
+                        <span className="tw-text-slate-400 tw-text-sm">Order Exec</span>
+                        <span className="tw-text-purple-400 tw-font-mono tw-font-bold">
+                          {systemHealth.latency_metrics?.avg_execution_latency_ms || 0} ms
+                        </span>
+                      </div>
+                      <div className="tw-w-full tw-bg-slate-800 tw-rounded-full tw-h-2">
+                        <div 
+                          className="tw-bg-purple-500 tw-h-2 tw-rounded-full" 
+                          style={{ width: `${Math.min((systemHealth.latency_metrics?.avg_execution_latency_ms || 0) / 5, 100)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Broker Performance */}
+                  <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                    <h2 className="tw-text-lg tw-font-bold tw-text-white tw-mb-4">Broker Analysis</h2>
+                    <div className="tw-space-y-3">
+                      {systemHealth.broker_performance?.map((broker, idx) => (
+                        <div key={idx} className="tw-flex tw-justify-between tw-items-center tw-p-3 tw-bg-slate-800/30 tw-rounded-lg">
+                          <div>
+                            <p className="tw-text-white tw-font-semibold tw-text-sm">{broker.broker}</p>
+                            <p className="tw-text-slate-500 tw-text-xs">{broker.trades} trades</p>
+                          </div>
+                          <span className={`tw-font-bold ${get_color_class(broker.pnl)}`}>
+                            {format_currency(broker.pnl)}
+                          </span>
+                        </div>
+                      ))}
+                      {(!systemHealth.broker_performance || systemHealth.broker_performance.length === 0) && (
+                        <p className="tw-text-slate-500 tw-text-sm tw-text-center">No broker data available</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hourly Distribution Chart */}
+                <div className="lg:tw-col-span-2 tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                  <h2 className="tw-text-lg tw-font-bold tw-text-white tw-mb-4">Hourly Performance</h2>
+                  <div className="tw-h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={systemHealth.hourly_distribution || []}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} vertical={false} />
+                        <XAxis dataKey="hour" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                        <YAxis yAxisId="left" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                        <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" tick={{ fontSize: 12 }} hide />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                          cursor={{ fill: '#334155', opacity: 0.2 }}
+                        />
+                        <Legend />
+                        <Bar yAxisId="left" dataKey="wins" name="Wins" fill="#10b981" radius={[4, 4, 0, 0]} stackId="a" />
+                        <Bar yAxisId="left" dataKey="trades" name="Total Trades" fill="#3b82f6" radius={[4, 4, 0, 0]} stackId="b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
+            )}
+
+            {/* PnL Chart */}
+            <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl tw-h-96">
+              <h2 className="tw-text-xl tw-font-bold tw-text-white tw-mb-4">Cumulative PnL</h2>
+              {performanceData.pnl_chart_data && performanceData.pnl_chart_data.length > 0 ? (
+                <div className="tw-w-full tw-h-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={performanceData.pnl_chart_data}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="colorPnl" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                        </linearGradient>
+                        <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} vertical={false} />
+                      <XAxis 
+                        dataKey="timestamp" 
+                        stroke="#94a3b8" 
+                        tick={{ fontSize: 12 }} 
+                        tickFormatter={(time) => {
+                          const date = new Date(time);
+                          if (timeframe === 'daily') {
+                            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          }
+                          return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                        }}
+                        minTickGap={30}
+                      />
+                      <YAxis 
+                        stroke="#94a3b8" 
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(value) => `₹${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
+                      />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                        itemStyle={{ color: '#f8fafc' }}
+                        formatter={(value) => [format_currency(value), 'Cumulative PnL']}
+                        labelFormatter={(label) => new Date(label).toLocaleString()}
+                      />
+                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
+                      <Area
+                        type="monotone"
+                        dataKey="cumulative_pnl"
+                        stroke={performanceData.total_pnl >= 0 ? "#10b981" : "#f43f5e"}
+                        fillOpacity={1}
+                        fill={`url(#${performanceData.total_pnl >= 0 ? 'colorPnl' : 'colorLoss'})`}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="tw-w-full tw-h-full tw-flex tw-items-center tw-justify-center tw-bg-slate-800/20 tw-rounded-xl tw-border tw-border-dashed tw-border-slate-700">
+                  <div className="tw-text-center">
+                    <svg className="tw-w-10 tw-h-10 tw-text-slate-600 tw-mx-auto tw-mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                    </svg>
+                    <p className="tw-text-slate-500">Not enough data to visualize chart</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Trade Ledger - Real Demat Style */}
@@ -500,8 +668,6 @@ const PerformanceAnalyticsPage = () => {
                   <tbody className="tw-divide-y tw-divide-slate-800">
                     {tradeList.length > 0 ? (
                       tradeList.map((trade, idx) => {
-                        const buyValue = trade.entry_price * trade.quantity;
-                        const sellValue = trade.exit_price * trade.quantity;
                         const grossPnl = trade.gross_pnl || (trade.exit_price - trade.entry_price) * trade.quantity;
                         const charges = trade.gross_pnl && trade.net_pnl 
                           ? trade.gross_pnl - trade.net_pnl 

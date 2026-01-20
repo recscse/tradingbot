@@ -1,5 +1,5 @@
 // components/trading/TradeExecutionLog.js
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Card,
   CardContent,
@@ -21,13 +21,11 @@ import {
   AccordionSummary,
   AccordionDetails,
   Grid,
-  Divider,
 } from "@mui/material";
 import {
   ExpandMore,
   TrendingUp,
   TrendingDown,
-  Speed,
   Target,
   Shield,
   Psychology,
@@ -35,8 +33,6 @@ import {
   Assessment,
   Info,
   CheckCircle,
-  Error,
-  Warning,
 } from "@mui/icons-material";
 
 const TradeExecutionLog = ({ trades, tradingMode, analytics }) => {

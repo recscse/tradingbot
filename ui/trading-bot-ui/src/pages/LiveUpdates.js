@@ -56,7 +56,7 @@ const LiveUpdates = () => {
     setCandleSeries(series);
 
     return () => chart.remove();
-  }, []);
+  }, [candleSeries]);
 
   // ✅ Live Market Updates Every 2 Seconds
   useEffect(() => {

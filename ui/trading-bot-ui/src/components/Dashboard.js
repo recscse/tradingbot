@@ -1,5 +1,60 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
+// Mock data for development/testing
+const mockData = {
+  indices: [
+    {
+      instrument_key: "NSE_INDEX|Nifty 50",
+      symbol: "NIFTY",
+      last_price: 24568.75,
+      change: 245.3,
+      change_percent: 1.01,
+    },
+    {
+      instrument_key: "NSE_INDEX|Nifty Bank",
+      symbol: "BANKNIFTY",
+      last_price: 49876.5,
+      change: -123.25,
+      change_percent: -0.25,
+    },
+  ],
+  top_stocks: [
+    {
+      instrument_key: "NSE_EQ|INE002A01018",
+      symbol: "RELIANCE",
+      last_price: 2875.45,
+      change: 37.5,
+      change_percent: 1.32,
+      volume: 3456789,
+    },
+    {
+      instrument_key: "NSE_EQ|INE009A01021",
+      symbol: "INFY",
+      last_price: 1765.3,
+      change: -25.7,
+      change_percent: -1.43,
+      volume: 2345678,
+    },
+    {
+      instrument_key: "NSE_EQ|INE238A01034",
+      symbol: "TCS",
+      last_price: 3987.6,
+      change: 42.3,
+      change_percent: 1.07,
+      volume: 1234567,
+    },
+    {
+      instrument_key: "NSE_EQ|INE155A01022",
+      symbol: "HDFCBANK",
+      last_price: 1678.9,
+      change: -12.4,
+      change_percent: -0.73,
+      volume: 3456789,
+    },
+  ],
+  updated_at: new Date().toISOString(),
+};
+
 function Dashboard() {
   // Use separate states for different data segments to minimize re-renders
   const [indices, setIndices] = useState([]);
@@ -12,61 +67,6 @@ function Dashboard() {
   // Use refs for data that doesn't need to trigger re-renders
   const socketRef = useRef(null);
   const lastUpdateRef = useRef(null);
-
-  // Mock data for development/testing
-  const mockData = {
-    indices: [
-      {
-        instrument_key: "NSE_INDEX|Nifty 50",
-        symbol: "NIFTY",
-        last_price: 24568.75,
-        change: 245.3,
-        change_percent: 1.01,
-      },
-      {
-        instrument_key: "NSE_INDEX|Nifty Bank",
-        symbol: "BANKNIFTY",
-        last_price: 49876.5,
-        change: -123.25,
-        change_percent: -0.25,
-      },
-    ],
-    top_stocks: [
-      {
-        instrument_key: "NSE_EQ|INE002A01018",
-        symbol: "RELIANCE",
-        last_price: 2875.45,
-        change: 37.5,
-        change_percent: 1.32,
-        volume: 3456789,
-      },
-      {
-        instrument_key: "NSE_EQ|INE009A01021",
-        symbol: "INFY",
-        last_price: 1765.3,
-        change: -25.7,
-        change_percent: -1.43,
-        volume: 2345678,
-      },
-      {
-        instrument_key: "NSE_EQ|INE238A01034",
-        symbol: "TCS",
-        last_price: 3987.6,
-        change: 42.3,
-        change_percent: 1.07,
-        volume: 1234567,
-      },
-      {
-        instrument_key: "NSE_EQ|INE155A01022",
-        symbol: "HDFCBANK",
-        last_price: 1678.9,
-        change: -12.4,
-        change_percent: -0.73,
-        volume: 3456789,
-      },
-    ],
-    updated_at: new Date().toISOString(),
-  };
 
   // Memoized transform function
   const transformDashboardData = useCallback((apiData) => {

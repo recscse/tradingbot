@@ -8,7 +8,6 @@ function TradingView({ symbol }) {
     updated_at: null,
   });
   const [loading, setLoading] = useState(true);
-  const [socket, setSocket] = useState(null);
   const [selectedExpiry, setSelectedExpiry] = useState(null);
 
   // Load initial data
@@ -154,8 +153,6 @@ function TradingView({ symbol }) {
           ws.close();
         };
 
-        setSocket(ws);
-
         return () => {
           if (ws) {
             ws.close();
@@ -167,12 +164,6 @@ function TradingView({ symbol }) {
     };
 
     setupWebSocket();
-
-    return () => {
-      if (socket) {
-        socket.close();
-      }
-    };
   }, [symbol]);
 
   // Handle expiry selection

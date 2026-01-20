@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Box, 
   Paper, 
@@ -17,13 +17,7 @@ const TradesList = ({ symbol }) => {
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (symbol) {
-      loadTrades();
-    }
-  }, [symbol]);
-
-  const loadTrades = async () => {
+  const loadTrades = useCallback(async () => {
     try {
       const data = await tradingAPI.getTrades(symbol);
       setTrades(data);
@@ -32,7 +26,13 @@ const TradesList = ({ symbol }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [symbol]);
+
+  useEffect(() => {
+    if (symbol) {
+      loadTrades();
+    }
+  }, [symbol, loadTrades]);
 
   if (loading) {
     return (

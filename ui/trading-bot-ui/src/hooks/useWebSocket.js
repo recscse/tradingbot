@@ -160,7 +160,23 @@ export const useScannerSignalWebSocket = () => {
   const [scannerData, setScannerData] = useState({});
   const [signalData, setSignalData] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [stats, setStats] = useState({});
+  const [stats] = useState({});
+
+  const addNotification = useCallback((message, type = "info") => {
+    const notification = {
+      id: Date.now() + Math.random(),
+      message,
+      type,
+      timestamp: new Date(),
+    };
+
+    setNotifications((prev) => [notification, ...prev.slice(0, 4)]);
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
+    }, 5000);
+  }, []);
 
   const handleMessage = useCallback((data) => {
     switch (data.type) {
@@ -211,23 +227,7 @@ export const useScannerSignalWebSocket = () => {
       default:
         console.log("Unknown message type:", data.type);
     }
-  }, []);
-
-  const addNotification = useCallback((message, type = "info") => {
-    const notification = {
-      id: Date.now() + Math.random(),
-      message,
-      type,
-      timestamp: new Date(),
-    };
-
-    setNotifications((prev) => [notification, ...prev.slice(0, 4)]);
-
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
-    }, 5000);
-  }, []);
+  }, [addNotification]);
 
   const wsUrl =
     process.env.NODE_ENV === "production"

@@ -5,7 +5,6 @@ import {
   Typography,
   Container,
   Paper,
-  Card,
   CardContent,
   Divider,
   Avatar,
@@ -20,7 +19,6 @@ import {
   ShowChart,
   TrendingUp,
   AutoGraph,
-  Speed,
   Insights,
   Psychology,
 } from "@mui/icons-material";
@@ -97,7 +95,6 @@ const features = [
 
 const FeaturesSection = () => {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const isMedium = useMediaQuery(theme.breakpoints.down("md"));
 
   // Filter to show only the original 3 on mobile, all on larger screens
