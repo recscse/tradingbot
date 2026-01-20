@@ -5,7 +5,7 @@ function AIPerformance({ userId }) {
 
     useEffect(() => {
          
-        fetch(`{BASE_URL}/api/ai_performance?user_id=${userId}`)
+        fetch(`${BASE_URL}/api/ai_performance?user_id=${userId}`)
             .then(response => response.json())
             .then(data => setPerformance(data))
             .catch(error => console.error("Error fetching AI performance:", error));

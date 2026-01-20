@@ -34,12 +34,17 @@ def log_structured(
     """
     if data is None:
         data = {}
+    
+    # Sanitize data to avoid LogRecord conflicts
+    safe_data = {k: v for k, v in data.items() if k not in ['message', 'asctime', 'levelname', 'levelno']}
+    if 'message' in data:
+        safe_data['original_message'] = data['message']
         
     extra = {
         'event_type': event,
         'trace_id': trace_id,
         'user_id': user_id,
-        **data
+        **safe_data
     }
     
     log_func = getattr(trading_logger, level.lower(), trading_logger.info)

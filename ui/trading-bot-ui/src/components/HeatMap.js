@@ -137,7 +137,7 @@ const EnhancedHeatmapComponent = () => {
   };
 
   // REST API fallback
-  const fetchHeatmapData = async () => {
+  const fetchHeatmapData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -168,7 +168,7 @@ const EnhancedHeatmapComponent = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [settings]);
 
   // Initialize connections
   useEffect(() => {
@@ -186,7 +186,7 @@ const EnhancedHeatmapComponent = () => {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [settings.autoRefresh, connectWebSocket]);
+  }, [settings.autoRefresh, connectWebSocket, fetchHeatmapData]);
 
   // Update WebSocket preferences when settings change
   useEffect(() => {

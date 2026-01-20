@@ -1,7 +1,6 @@
 // src/components/OptionChain/OptionChainPanel.jsx
 import {
   Box,
-  Grid,
   Typography,
   Button,
   Table,
@@ -9,8 +8,6 @@ import {
   TableCell,
   TableHead,
   TableRow,
-  ToggleButton,
-  ToggleButtonGroup,
   CircularProgress,
   Chip,
 } from "@mui/material";
@@ -20,30 +17,30 @@ import axios from "axios";
 const expiries = ["24 APR", "29 MAY", "26 JUN", "25 SEP"];
 
 const OptionChainPanel = () => {
-  const [symbol, setSymbol] = useState("BANKNIFTY"); // default
+  const [symbol] = useState("BANKNIFTY"); // default
   const [expiry, setExpiry] = useState(expiries[0]);
   const [chainData, setChainData] = useState([]);
   const [atmStrike, setAtmStrike] = useState(null);
   const [loading, setLoading] = useState(false);
   const lotSize = 30; // example
 
-  const fetchOptionChain = async () => {
-    setLoading(true);
-    try {
-      const res = await axios.get(
-        `/api/options/chain?symbol=${symbol}&expiry=${expiry}`
-      );
-      setChainData(res.data.chain || []);
-      setAtmStrike(res.data.atm || null);
-    } catch (err) {
-      console.error("Error fetching chain", err);
-    }
-    setLoading(false);
-  };
-
   useEffect(() => {
+    const fetchOptionChain = async () => {
+      setLoading(true);
+      try {
+        const res = await axios.get(
+          `/api/options/chain?symbol=${symbol}&expiry=${expiry}`
+        );
+        setChainData(res.data.chain || []);
+        setAtmStrike(res.data.atm || null);
+      } catch (err) {
+        console.error("Error fetching chain", err);
+      }
+      setLoading(false);
+    };
+
     fetchOptionChain();
-  }, [expiry]);
+  }, [expiry, symbol]);
 
   const isATM = (strike) => Number(strike) === Number(atmStrike);
 

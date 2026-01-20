@@ -22,6 +22,47 @@ export const useTradingWebSocket = (tradingMode = "PAPER", isTrading = false) =>
   const maxReconnectAttempts = 5;
   const reconnectTimeout = useRef(null);
 
+  const handleWebSocketMessage = useCallback((data) => {
+    switch (data.type) {
+      case "portfolio_update":
+        setPortfolioUpdate(data.data);
+        break;
+        
+      case "position_update":
+        setPositionUpdate(data.data);
+        break;
+        
+      case "trade_execution":
+        setTradeUpdate(data.data);
+        break;
+        
+      case "price_update":
+        setPriceUpdate(prev => ({
+          ...prev,
+          [data.data.symbol]: {
+            price: data.data.price,
+            change: data.data.change,
+            changePct: data.data.changePct,
+            timestamp: data.data.timestamp
+          }
+        }));
+        break;
+        
+      case "trading_status":
+        // Handle trading status updates
+        console.log("📊 Trading status update:", data.data);
+        break;
+        
+      case "error":
+        console.error("❌ Trading WebSocket error:", data.message);
+        setConnectionError(data.message);
+        break;
+        
+      default:
+        console.log("📡 Unknown trading WebSocket message type:", data.type);
+    }
+  }, []);
+
   const connect = useCallback(() => {
     try {
       // Clear any existing reconnect timeout
@@ -90,48 +131,7 @@ export const useTradingWebSocket = (tradingMode = "PAPER", isTrading = false) =>
       console.error("❌ Error creating trading WebSocket connection:", error);
       setConnectionError("Failed to create WebSocket connection");
     }
-  }, [tradingMode]);
-
-  const handleWebSocketMessage = useCallback((data) => {
-    switch (data.type) {
-      case "portfolio_update":
-        setPortfolioUpdate(data.data);
-        break;
-        
-      case "position_update":
-        setPositionUpdate(data.data);
-        break;
-        
-      case "trade_execution":
-        setTradeUpdate(data.data);
-        break;
-        
-      case "price_update":
-        setPriceUpdate(prev => ({
-          ...prev,
-          [data.data.symbol]: {
-            price: data.data.price,
-            change: data.data.change,
-            changePct: data.data.changePct,
-            timestamp: data.data.timestamp
-          }
-        }));
-        break;
-        
-      case "trading_status":
-        // Handle trading status updates
-        console.log("📊 Trading status update:", data.data);
-        break;
-        
-      case "error":
-        console.error("❌ Trading WebSocket error:", data.message);
-        setConnectionError(data.message);
-        break;
-        
-      default:
-        console.log("📡 Unknown trading WebSocket message type:", data.type);
-    }
-  }, []);
+  }, [tradingMode, handleWebSocketMessage]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeout.current) {

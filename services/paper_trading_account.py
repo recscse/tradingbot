@@ -234,9 +234,10 @@ class PaperTradingAccountService:
             )
             
             # Update account
+            # Logic: Cash balance decreases by invested amount. Used margin increases. Available margin decreases.
             account.used_margin += trade_data['invested_amount']
             account.available_margin -= trade_data['invested_amount']
-            account.current_balance -= trade_data['invested_amount']
+            account.current_balance -= trade_data['invested_amount']  # Cash is used to buy
             account.positions_count += 1
             account.updated_at = datetime.now(timezone.utc)
             
@@ -346,10 +347,16 @@ class PaperTradingAccountService:
             position.status = "CLOSED"
 
             # Update account - CRITICAL FIX: Properly reflect P&L in balance
-            # Formula: new_balance = old_balance (Cash) + exit_value
+            # Logic: When selling, you get back the Exit Value (Investment + PnL) as Cash.
+            # 1. Release Used Margin (Invested Amount)
             account.used_margin -= position.invested_amount
-            account.available_margin += exit_value  # Add exit value to available margin
-            account.current_balance += exit_value   # Add exit value to cash balance
+            # Ensure used_margin doesn't go below zero due to floating point errors
+            if account.used_margin < 0:
+                account.used_margin = 0.0
+
+            # 2. Credit Exit Value to Available Margin and Cash Balance
+            account.available_margin += exit_value
+            account.current_balance += exit_value
 
             # Update total P&L (cumulative across all closed positions)
             account.total_pnl += final_pnl
@@ -357,7 +364,7 @@ class PaperTradingAccountService:
             # Update daily P&L (should be reset daily at market open)
             account.daily_pnl += final_pnl
 
-            account.positions_count -= 1
+            account.positions_count = max(0, account.positions_count - 1)
             account.updated_at = datetime.now(timezone.utc)
             
             # Add to trade history

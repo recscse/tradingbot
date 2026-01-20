@@ -1,5 +1,5 @@
 // components/NewGoogleAuth.jsx - FIXED VERSION
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import GoogleAuthService from "../services/googleAuthService";
 
 const NewGoogleAuth = () => {
@@ -46,112 +46,8 @@ const NewGoogleAuth = () => {
     console.error("📝 Final error message:", message);
   };
 
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await GoogleAuthService.initializeGoogleAuth();
-        setIsInitialized(true);
-        setupGoogleButton();
-      } catch (err) {
-        handleError(err);
-      }
-    };
-    initAuth();
-  }, []);
-
-  // FIXED: Proper Google button setup with credential callback
-  const setupGoogleButton = () => {
-    if (!window.google?.accounts?.id || !buttonRef.current) return;
-
-    try {
-      // Clear any existing button
-      buttonRef.current.innerHTML = "";
-
-      // Initialize with proper callback
-      window.google.accounts.id.initialize({
-        client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
-        callback: handleCredentialResponse, // Use our local callback
-        auto_select: false,
-        cancel_on_tap_outside: true,
-      });
-
-      // Render the Google Sign-In button
-      window.google.accounts.id.renderButton(buttonRef.current, {
-        theme: "outline",
-        size: "large",
-        type: "standard",
-        text: "signin_with",
-        shape: "rectangular",
-        logo_alignment: "left",
-        width: 280,
-      });
-
-      console.log("✅ Google button setup complete");
-    } catch (err) {
-      console.error("❌ Error setting up button:", err);
-      handleError("Failed to setup Google button");
-    }
-  };
-
-  // FIXED: Proper credential response handler
-  const handleCredentialResponse = async (response) => {
-    setIsLoading(true);
-    setError("");
-
-    try {
-      console.log("🔐 Received Google credential response");
-
-      // Parse the JWT token
-      const userInfo = GoogleAuthService.parseJwt(response.credential);
-
-      const authResult = {
-        success: true,
-        idToken: response.credential,
-        tokenType: "id_token",
-        user: {
-          id: userInfo.sub,
-          name: userInfo.name,
-          email: userInfo.email,
-          imageUrl: userInfo.picture,
-          verified_email: userInfo.email_verified,
-        },
-      };
-
-      console.log("✅ Parsed user info:", authResult.user);
-
-      setUser(authResult.user);
-      await sendToBackend(authResult);
-    } catch (err) {
-      console.error("❌ Error handling credential:", err);
-      handleError(err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Alternative manual sign-in (using popup flow)
-  const handleManualSignIn = async () => {
-    setIsLoading(true);
-    setError("");
-
-    try {
-      const result = await GoogleAuthService.signInWithGoogle();
-
-      if (result?.success) {
-        setUser(result.user);
-        await sendToBackend(result);
-      } else {
-        handleError(result?.error || "Sign-in failed");
-      }
-    } catch (err) {
-      handleError(err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // FIXED: Enhanced backend communication with proper error handling
-  const sendToBackend = async (authResult) => {
+  const sendToBackend = useCallback(async (authResult) => {
     try {
       const apiUrl =
         process.env.REACT_APP_API_URL || "http://localhost:8000/api";
@@ -229,6 +125,108 @@ const NewGoogleAuth = () => {
     } catch (err) {
       console.error("❌ Backend error:", err);
       throw new Error(`Authentication failed: ${err.message}`);
+    }
+  }, []);
+
+  // FIXED: Proper credential response handler
+  const handleCredentialResponse = useCallback(async (response) => {
+    setIsLoading(true);
+    setError("");
+
+    try {
+      console.log("🔐 Received Google credential response");
+
+      // Parse the JWT token
+      const userInfo = GoogleAuthService.parseJwt(response.credential);
+
+      const authResult = {
+        success: true,
+        idToken: response.credential,
+        tokenType: "id_token",
+        user: {
+          id: userInfo.sub,
+          name: userInfo.name,
+          email: userInfo.email,
+          imageUrl: userInfo.picture,
+          verified_email: userInfo.email_verified,
+        },
+      };
+
+      console.log("✅ Parsed user info:", authResult.user);
+
+      setUser(authResult.user);
+      await sendToBackend(authResult);
+    } catch (err) {
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sendToBackend]);
+
+  // FIXED: Proper Google button setup with credential callback
+  const setupGoogleButton = useCallback(() => {
+    if (!window.google?.accounts?.id || !buttonRef.current) return;
+
+    try {
+      // Clear any existing button
+      buttonRef.current.innerHTML = "";
+
+      // Initialize with proper callback
+      window.google.accounts.id.initialize({
+        client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
+        callback: handleCredentialResponse, // Use our local callback
+        auto_select: false,
+        cancel_on_tap_outside: true,
+      });
+
+      // Render the Google Sign-In button
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        theme: "outline",
+        size: "large",
+        type: "standard",
+        text: "signin_with",
+        shape: "rectangular",
+        logo_alignment: "left",
+        width: 280,
+      });
+
+      console.log("✅ Google button setup complete");
+    } catch (err) {
+      console.error("❌ Error setting up button:", err);
+      handleError("Failed to setup Google button");
+    }
+  }, [handleCredentialResponse]);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await GoogleAuthService.initializeGoogleAuth();
+        setIsInitialized(true);
+        setupGoogleButton();
+      } catch (err) {
+        handleError(err);
+      }
+    };
+    initAuth();
+  }, [setupGoogleButton]);
+
+  // Alternative manual sign-in (using popup flow)
+  const handleManualSignIn = async () => {
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const result = await GoogleAuthService.signInWithGoogle();
+
+      if (result?.success) {
+        setUser(result.user);
+        await sendToBackend(result);
+      } else {
+        handleError(result?.error || "Sign-in failed");
+      }
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setIsLoading(false);
     }
   };
 

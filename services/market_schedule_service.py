@@ -182,7 +182,9 @@ class MarketScheduleService:
                     and current_time < self.preopen_start
                 ):
                     # Already completed early prep, just waiting for pre-open
-                    logger.debug("⏳ Waiting for pre-open session (9:00 AM)...")
+                    logger.info(f"⏳ Market Schedule: Early prep complete. Waiting for Pre-Open Stock Selection at {self.preopen_start.strftime('%H:%M')} (Current: {current_time.strftime('%H:%M')})")
+                    await asyncio.sleep(300) # Log every 5 minutes instead of 60s loop
+                    continue
 
                 # Pre-open stock selection (9:00-9:15 AM) - Uses LIVE pre-open data
                 elif (

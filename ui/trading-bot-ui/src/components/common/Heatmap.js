@@ -15,16 +15,13 @@ import {
   Collapse,
   IconButton,
   LinearProgress,
-  Badge,
 } from "@mui/material";
 import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
-  TrendingFlat as TrendingFlatIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   VolumeUp as VolumeIcon,
-  ShowChart as PerformanceIcon,
 } from "@mui/icons-material";
 
 const Heatmap = memo(
@@ -38,7 +35,6 @@ const Heatmap = memo(
   }) => {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-    const isTablet = useMediaQuery(theme.breakpoints.down("md"));
     
     const [expandedSectors, setExpandedSectors] = useState(new Set());
     const [sectorStocks, setSectorStocks] = useState({});
@@ -145,18 +141,6 @@ const Heatmap = memo(
       if (changePercent > 0) return colors.positive;
       if (changePercent < 0) return colors.negative;
       return colors.neutral;
-    };
-
-    // Get stock color based on its performance
-    const getStockColor = (changePercent) => {
-      const intensity = Math.min(0.8, Math.abs(changePercent) / 10); // Scale by 10% max
-      if (changePercent > 0) {
-        return `${colors.positive}${Math.floor(intensity * 255).toString(16).padStart(2, '0')}`;
-      } else if (changePercent < 0) {
-        return `${colors.negative}${Math.floor(intensity * 255).toString(16).padStart(2, '0')}`;
-      } else {
-        return `${colors.neutral}20`;
-      }
     };
 
     // Toggle sector expansion

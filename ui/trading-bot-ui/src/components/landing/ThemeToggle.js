@@ -1,4 +1,3 @@
-import { useTheme } from "@mui/material/styles";
 import { Switch } from "@mui/material";
 import { useEffect, useState } from "react";
 

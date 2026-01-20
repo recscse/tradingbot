@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Container, Grid, useTheme, useMediaQuery } from "@mui/material";
+import { Container, Grid, useTheme, useMediaQuery } from "@mui/material";
 
 const ResponsiveLayout = ({
   children,

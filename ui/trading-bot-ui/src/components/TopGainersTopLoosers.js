@@ -417,6 +417,7 @@ const TopMoversComponent = () => {
         wsRef.current.close(1000, "Component unmounting");
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load sectors from REST API

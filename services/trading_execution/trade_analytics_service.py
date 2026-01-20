@@ -69,6 +69,7 @@ class PerformanceMetrics:
     average_trade_duration_minutes: int
     total_investment: float
     roi_percent: float
+    expectancy: float
 
 
 class TradeAnalyticsService:
@@ -144,17 +145,73 @@ class TradeAnalyticsService:
 
             metrics = self._calculate_metrics(trades)
 
+            # Generate PnL chart data
+            pnl_chart_data = self._get_pnl_timeseries(trades)
+
             return {
                 "success": True,
                 "period": "daily",
                 "date": target_date.isoformat(),
                 "metrics": asdict(metrics),
+                "pnl_chart_data": pnl_chart_data,
                 "trades_detail": self._format_trades_detail(trades)
             }
 
         except Exception as e:
             logger.error(f"Error getting daily performance: {e}")
             return {"success": False, "error": str(e)}
+
+    def _get_pnl_timeseries(self, trades: List[AutoTradeExecution]) -> List[Dict[str, Any]]:
+        """
+        Generate cumulative PnL timeseries for charting
+
+        Args:
+            trades: List of closed trades
+
+        Returns:
+            List of data points for chart [{time, pnl, cumulative_pnl}]
+        """
+        try:
+            if not trades:
+                return []
+
+            # Sort trades by exit time
+            sorted_trades = sorted(trades, key=lambda t: t.exit_time if t.exit_time else datetime.min)
+
+            timeseries = []
+            cumulative_pnl = 0.0
+
+            # Add starting point (start of day/period)
+            if sorted_trades:
+                start_time = self._to_ist(sorted_trades[0].entry_time) if sorted_trades[0].entry_time else self._get_ist_now()
+                # Start at 0 before first trade
+                timeseries.append({
+                    "timestamp": (start_time - timedelta(minutes=5)).isoformat(),
+                    "pnl": 0.0,
+                    "cumulative_pnl": 0.0
+                })
+
+            for trade in sorted_trades:
+                if not trade.exit_time:
+                    continue
+                
+                exit_time = self._to_ist(trade.exit_time)
+                pnl = float(trade.net_pnl) if trade.net_pnl else 0.0
+                cumulative_pnl += pnl
+
+                timeseries.append({
+                    "timestamp": exit_time.isoformat(),
+                    "trade_id": trade.trade_id,
+                    "symbol": trade.symbol,
+                    "pnl": pnl,
+                    "cumulative_pnl": cumulative_pnl
+                })
+
+            return timeseries
+
+        except Exception as e:
+            logger.error(f"Error generating PnL timeseries: {e}")
+            return []
 
     def get_weekly_performance(
         self,
@@ -197,6 +254,9 @@ class TradeAnalyticsService:
 
             # Group by day
             daily_breakdown = self._get_daily_breakdown(trades, 7)
+            
+            # Generate PnL chart data
+            pnl_chart_data = self._get_pnl_timeseries(trades)
 
             return {
                 "success": True,
@@ -204,7 +264,8 @@ class TradeAnalyticsService:
                 "start_date": week_ago.date().isoformat(),
                 "end_date": now_ist.date().isoformat(),
                 "metrics": asdict(metrics),
-                "daily_breakdown": daily_breakdown
+                "daily_breakdown": daily_breakdown,
+                "pnl_chart_data": pnl_chart_data
             }
 
         except Exception as e:
@@ -252,6 +313,9 @@ class TradeAnalyticsService:
 
             # Group by day
             daily_breakdown = self._get_daily_breakdown(trades, 30)
+            
+            # Generate PnL chart data
+            pnl_chart_data = self._get_pnl_timeseries(trades)
 
             return {
                 "success": True,
@@ -259,7 +323,8 @@ class TradeAnalyticsService:
                 "start_date": month_ago.date().isoformat(),
                 "end_date": now_ist.date().isoformat(),
                 "metrics": asdict(metrics),
-                "daily_breakdown": daily_breakdown
+                "daily_breakdown": daily_breakdown,
+                "pnl_chart_data": pnl_chart_data
             }
 
         except Exception as e:
@@ -307,6 +372,12 @@ class TradeAnalyticsService:
 
             # Group by week
             weekly_breakdown = self._get_weekly_breakdown(trades)
+            
+            # Get daily breakdown for heatmap
+            daily_breakdown = self._get_daily_breakdown(trades, 180)
+
+            # Generate PnL chart data
+            pnl_chart_data = self._get_pnl_timeseries(trades)
 
             return {
                 "success": True,
@@ -314,7 +385,9 @@ class TradeAnalyticsService:
                 "start_date": six_months_ago.date().isoformat(),
                 "end_date": now_ist.date().isoformat(),
                 "metrics": asdict(metrics),
-                "weekly_breakdown": weekly_breakdown
+                "weekly_breakdown": weekly_breakdown,
+                "daily_breakdown": daily_breakdown,
+                "pnl_chart_data": pnl_chart_data
             }
 
         except Exception as e:
@@ -362,6 +435,12 @@ class TradeAnalyticsService:
 
             # Group by month
             monthly_breakdown = self._get_monthly_breakdown(trades)
+            
+            # Get daily breakdown for heatmap
+            daily_breakdown = self._get_daily_breakdown(trades, 365)
+
+            # Generate PnL chart data
+            pnl_chart_data = self._get_pnl_timeseries(trades)
 
             return {
                 "success": True,
@@ -369,7 +448,9 @@ class TradeAnalyticsService:
                 "start_date": year_ago.date().isoformat(),
                 "end_date": now_ist.date().isoformat(),
                 "metrics": asdict(metrics),
-                "monthly_breakdown": monthly_breakdown
+                "monthly_breakdown": monthly_breakdown,
+                "daily_breakdown": daily_breakdown,
+                "pnl_chart_data": pnl_chart_data
             }
 
         except Exception as e:
@@ -415,6 +496,9 @@ class TradeAnalyticsService:
             first_trade = min(trades, key=lambda t: t.entry_time)
             last_trade = max(trades, key=lambda t: t.exit_time)
 
+            # Generate PnL chart data
+            pnl_chart_data = self._get_pnl_timeseries(trades)
+
             return {
                 "success": True,
                 "period": "overall",
@@ -425,7 +509,8 @@ class TradeAnalyticsService:
                     "total_trades": len(trades),
                     "symbols_traded": list(set(t.symbol for t in trades)),
                     "strategies_used": list(set(t.strategy_name for t in trades))
-                }
+                },
+                "pnl_chart_data": pnl_chart_data
             }
 
         except Exception as e:
@@ -635,12 +720,18 @@ class TradeAnalyticsService:
             profit_factor = float(gross_profit / gross_loss) if gross_loss > 0 else float(gross_profit) if gross_profit > 0 else 0
 
             # Average profit and loss
-            average_profit = float(gross_profit / len(winning_trades)) if winning_trades else 0
-            average_loss = float(gross_loss / len(losing_trades)) if losing_trades else 0
+            average_profit = float(gross_profit / len(winning_trades)) if winning_trades else 0.0
+            average_loss = float(gross_loss / len(losing_trades)) if losing_trades else 0.0
+
+            # Calculate Expectancy
+            # Expectancy = (Win Rate * Average Win) - (Loss Rate * Average Loss)
+            win_rate_decimal = win_rate / 100.0
+            loss_rate_decimal = 1.0 - win_rate_decimal
+            expectancy = (win_rate_decimal * average_profit) - (loss_rate_decimal * average_loss)
 
             # Largest win and loss
-            largest_win = max((float(t.net_pnl) for t in winning_trades), default=0)
-            largest_loss = abs(min((float(t.net_pnl) for t in losing_trades), default=0))
+            largest_win = max((float(t.net_pnl) for t in winning_trades), default=0.0)
+            largest_loss = abs(min((float(t.net_pnl) for t in losing_trades), default=0.0))
 
             # Calculate maximum drawdown
             max_drawdown = self._calculate_max_drawdown(trades)
@@ -686,7 +777,8 @@ class TradeAnalyticsService:
                 gross_loss=float(gross_loss),
                 average_trade_duration_minutes=average_duration,
                 total_investment=float(total_investment),
-                roi_percent=roi_percent
+                roi_percent=roi_percent,
+                expectancy=float(expectancy)
             )
 
         except Exception as e:
@@ -940,7 +1032,8 @@ class TradeAnalyticsService:
             gross_loss=0.0,
             average_trade_duration_minutes=0,
             total_investment=0.0,
-            roi_percent=0.0
+            roi_percent=0.0,
+            expectancy=0.0
         )
 
 

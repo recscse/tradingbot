@@ -249,6 +249,8 @@ class CentralizedWebSocketManager:
             "reconnection_count": 0,
         }
 
+        self._is_refreshing = False  # Track refresh status
+
         # Initialize market data service
         self._initialized = True
         logger.info("Centralized WebSocket manager initialized")
@@ -583,7 +585,13 @@ class CentralizedWebSocketManager:
         CRITICAL FIX: This now runs in background WITHOUT blocking
         """
         try:
+            # Check if refresh is already in progress to prevent spamming
+            if getattr(self, "_is_refreshing", False):
+                logger.info("⚠️ Token refresh already in progress - skipping duplicate background request")
+                return False
+
             logger.info("🤖 Scheduling automated token refresh in background...")
+            self._is_refreshing = True
 
             # Import automation service dynamically to avoid circular imports
             from services.upstox_automation_service import UpstoxAutomationService
@@ -612,6 +620,9 @@ class CentralizedWebSocketManager:
                         logger.warning(f"⚠️ Background token refresh failed: {error_msg}")
                 except Exception as e:
                     logger.error(f"❌ Background token refresh error: {e}")
+                finally:
+                    # Reset refreshing flag
+                    self._is_refreshing = False
 
             # CRITICAL FIX: Create background task WITHOUT awaiting
             asyncio.create_task(background_refresh())
@@ -623,6 +634,7 @@ class CentralizedWebSocketManager:
 
         except Exception as e:
             logger.error(f"❌ Error scheduling token refresh: {e}")
+            self._is_refreshing = False
             return False
 
     async def _validate_and_refresh_token(self) -> bool:

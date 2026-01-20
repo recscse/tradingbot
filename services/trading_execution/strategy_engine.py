@@ -91,7 +91,8 @@ class StrategyEngine:
         self.min_hold_time_minutes = 5  # Minimum 5 minutes hold time
 
         # Lock Profit Configuration - Make position risk-free
-        self.breakeven_profit_threshold = Decimal('0.50')  # Trail to breakeven at 50% of target
+        self.breakeven_profit_threshold = Decimal('0.75')  # Trail to breakeven at 75% of target (was 50%)
+        self.min_roi_for_breakeven = Decimal('0.05')       # Minimum 5% ROI required to move to breakeven
         self.lock_profit_threshold = Decimal('1.00')  # Lock 80% profit when target hit
         self.lock_profit_percent = Decimal('0.80')  # Lock 80% of profit
 
@@ -103,7 +104,7 @@ class StrategyEngine:
         logger.info(f"  SuperTrend Period: {self.supertrend_period}")
         logger.info(f"  SuperTrend Multipliers: 1x={self.supertrend_multiplier_1x}, 2x={self.supertrend_multiplier_2x}")
         logger.info(f"  Exit Protection: Min profit {self.min_profit_before_exit_percent:.0%}, Min hold {self.min_hold_time_minutes}min")
-        logger.info(f"  Lock Profit: Breakeven at {self.breakeven_profit_threshold:.0%} target, Lock {self.lock_profit_percent:.0%} at target")
+        logger.info(f"  Lock Profit: Breakeven at {self.breakeven_profit_threshold:.0%} target (min {self.min_roi_for_breakeven:.0%} ROI), Lock {self.lock_profit_percent:.0%} at target")
 
     def calculate_ema(self, prices: List[float], period: int) -> np.ndarray:
         """
@@ -695,16 +696,20 @@ class StrategyEngine:
 
                 # Calculate profit percentage of target
                 profit_percent_of_target = (current_profit / target_profit) if target_profit > 0 else Decimal('0')
+                
+                # Calculate ROI percentage (Return on Investment)
+                roi_percent = (current_profit / entry_price) if entry_price > 0 else Decimal('0')
 
                 # LOCK PROFIT MECHANISM
-                # Level 1: >= 50% of target -> Trail to BREAKEVEN (risk-free)
-                if profit_percent_of_target >= self.breakeven_profit_threshold:
+                # Level 1: >= 75% of target AND Min 5% ROI -> Trail to BREAKEVEN (risk-free)
+                # Added ROI check to prevent moving to breakeven too early on small targets
+                if profit_percent_of_target >= self.breakeven_profit_threshold and roi_percent >= self.min_roi_for_breakeven:
                     breakeven_sl = entry_price
                     new_stop_loss = max(current_stop_loss, breakeven_sl)
 
                     if new_stop_loss > current_stop_loss:
                         logger.info(
-                            f"LOCK PROFIT (Breakeven): Profit {profit_percent_of_target:.1%} of target, "
+                            f"LOCK PROFIT (Breakeven): Profit {profit_percent_of_target:.1%} of target (ROI {roi_percent:.1%}), "
                             f"trailing SL to breakeven {breakeven_sl:.2f}"
                         )
 

@@ -32,7 +32,7 @@ const BacktestingPage = () => {
       setStockList(stocks);
     };
     loadStocks();
-  }, []);
+  }, [exchange, instrument]);
 
   const runBacktest = async () => {
     if (!selectedStock) return;

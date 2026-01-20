@@ -3,8 +3,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box,
   Typography,
-  Tabs,
-  Tab,
   AppBar,
   Toolbar,
   Container,
@@ -26,20 +24,14 @@ import {
   Avatar,
   Tooltip,
   Stack,
-  Skeleton,
   Chip,
   LinearProgress,
-  FormControl,
-  Select,
-  MenuItem,
   Breadcrumbs,
   Link,
 } from "@mui/material";
 import {
   Dashboard as DashboardIcon,
-  TrendingUp as TrendingUpIcon,
   Business as BuildingIcon,
-  Settings as SettingsIcon,
   Security as SecurityIcon,
   Notifications as NotificationsIcon,
   Edit as EditIcon,
@@ -50,11 +42,6 @@ import {
   Assessment as AnalyticsIcon,
   Home as HomeIcon,
   KeyboardArrowRight as ArrowIcon,
-  ExpandMore as ExpandMoreIcon,
-  Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon,
-  Info as InfoIcon,
-  Menu as MenuIcon,
 } from "@mui/icons-material";
 
 // Import improved components
@@ -68,7 +55,7 @@ import ProfileNotifications from "./ProfileNotifications";
 import ProfileTabs from "./ProfileTabs";
 
 import { profileService } from "../../services/profileService";
-import { useNotification } from "../../hooks/useNotification";
+
 import { toast } from "react-hot-toast";
 
 const TradingProfile = ({
@@ -77,9 +64,7 @@ const TradingProfile = ({
   userId = null,
 }) => {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const isSmallMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const isTablet = useMediaQuery(theme.breakpoints.down("lg"));
 
   // Enhanced state management
   const [profile, setProfile] = useState(null);
@@ -98,7 +83,25 @@ const TradingProfile = ({
     severity: "success",
   });
 
-  const { showNotification } = useNotification();
+  // Helper functions for dynamic data
+  const getUnreadNotificationCount = useCallback(() => {
+    return Array.isArray(notifications)
+      ? notifications.filter((n) => !n.read && !n.is_read).length
+      : 0;
+  }, [notifications]);
+
+  const getSecurityAlerts = useCallback(() => {
+    if (!profile) return 0;
+    let alerts = 0;
+
+    // Check for security issues
+    if (!profile.twoFactorEnabled && !profile.two_factor_enabled) alerts++;
+    if (profile.failed_login_attempts > 0) alerts++;
+    if (!profile.isVerified && !profile.is_verified && !profile.email_verified)
+      alerts++;
+
+    return alerts;
+  }, [profile]);
 
   // Tab configuration with dynamic data
   const tabsConfig = useMemo(
@@ -162,28 +165,8 @@ const TradingProfile = ({
         badge: getUnreadNotificationCount(),
       },
     ],
-    [brokers.length, profile]
+    [brokers.length, getSecurityAlerts, getUnreadNotificationCount]
   );
-
-  // Helper functions for dynamic data
-  function getUnreadNotificationCount() {
-    return Array.isArray(notifications)
-      ? notifications.filter((n) => !n.read && !n.is_read).length
-      : 0;
-  }
-
-  function getSecurityAlerts() {
-    if (!profile) return 0;
-    let alerts = 0;
-
-    // Check for security issues
-    if (!profile.twoFactorEnabled && !profile.two_factor_enabled) alerts++;
-    if (profile.failed_login_attempts > 0) alerts++;
-    if (!profile.isVerified && !profile.is_verified && !profile.email_verified)
-      alerts++;
-
-    return alerts;
-  }
 
   // Fetch data functions with better error handling
   const fetchProfile = useCallback(

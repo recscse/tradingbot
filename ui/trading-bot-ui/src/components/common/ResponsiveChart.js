@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { Box, Typography, useTheme, useMediaQuery, Paper } from "@mui/material";
 import { createChart } from "lightweight-charts";
 
@@ -8,9 +8,6 @@ const ResponsiveChart = ({ data, title, type = "candlestick" }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const isTablet = useMediaQuery(theme.breakpoints.between("sm", "md"));
-
-  // We use state to trigger re-render on window resize
-  const [containerWidth, setContainerWidth] = useState(0);
 
   // Handle initial chart creation
   useEffect(() => {
@@ -24,7 +21,6 @@ const ResponsiveChart = ({ data, title, type = "candlestick" }) => {
 
     // Set width based on container
     const width = chartContainerRef.current.clientWidth;
-    setContainerWidth(width);
 
     // Adjust height based on screen size
     const height = isMobile ? 250 : isTablet ? 300 : 400;
@@ -85,7 +81,6 @@ const ResponsiveChart = ({ data, title, type = "candlestick" }) => {
         const newWidth = chartContainerRef.current.clientWidth;
         const newHeight = isMobile ? 250 : isTablet ? 300 : 400;
         chartRef.current.resize(newWidth, newHeight);
-        setContainerWidth(newWidth);
       }
     };
 

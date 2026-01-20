@@ -5,7 +5,7 @@ function TradeSignals({ userId }) {
 
     useEffect(() => {
         const WS_BASE_URL = process.env.REACT_APP_WEBSOCKET_BASE_URL;
-        const socket = new WebSocket(`{WS_BASE_URL}/ws/trade_signals?user_id=${userId}`);
+        const socket = new WebSocket(`${WS_BASE_URL}/ws/trade_signals?user_id=${userId}`);
 
         socket.onmessage = (event) => {
             setSignals(JSON.parse(event.data));
