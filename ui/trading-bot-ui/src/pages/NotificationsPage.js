@@ -12,16 +12,14 @@ import {
   CardContent,
   Switch,
   FormControlLabel,
-  Divider,
   Chip,
-  Alert,
   CircularProgress,
+  Alert,
 } from "@mui/material";
 import {
   Notifications as NotificationsIcon,
   Settings as SettingsIcon,
   MarkEmailRead as MarkAllReadIcon,
-  FilterList as FilterIcon,
 } from "@mui/icons-material";
 import { useNotifications } from "../contexts/NotificationContext";
 import NotificationItem from "../components/notifications/NotificationItem";
@@ -40,7 +38,6 @@ const NotificationsPage = () => {
     markAsRead,
     markAllAsRead,
     deleteNotification,
-    fetchNotifications,
   } = useNotifications();
 
   const filterTypes = [

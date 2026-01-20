@@ -12,7 +12,6 @@ function TopGainersLosers() {
 
   // Use refs for data that doesn't need to trigger re-renders
   const socketRef = useRef(null);
-  const lastUpdateRef = useRef(null);
   const mountedRef = useRef(true);
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttempts = useRef(0);
@@ -307,6 +306,7 @@ function TopGainersLosers() {
         socketRef.current.close(1000, "Component unmounting");
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fallback to REST API if WebSocket fails

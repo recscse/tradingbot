@@ -251,9 +251,9 @@ class UpstoxAutomationService:
                 logger.info("Waiting for redirect with authorization code...")
 
                 try:
-                    # INCREASED: 60 attempts × 500ms = 30 seconds max wait (was 5 seconds)
+                    # INCREASED: 120 attempts × 500ms = 60 seconds max wait (was 30 seconds)
                     # Cloud environments like Railway can be slower
-                    max_attempts = 60
+                    max_attempts = 120
                     attempt = 0
                     auth_code_found = False
                     last_url = ""
@@ -283,7 +283,7 @@ class UpstoxAutomationService:
                                     auth_code = query_params["code"][0]
                                     logger.info(f"Authorization code captured: {auth_code[:10]}...")
 
-                                    if len(auth_code) >= 8 and auth_code.isalnum():
+                                    if len(auth_code) >= 6 and auth_code.isalnum():
                                         self._captured_auth_code = auth_code
                                         auth_code_found = True
                                         logger.info("✅ Login automation completed with auth code captured")
@@ -600,6 +600,7 @@ class UpstoxAutomationService:
 
             # Step 1: Automate login process and capture auth code
             logger.info("🤖 Starting automated login...")
+            self._captured_auth_code = None  # Clear any stale code
             login_success = await self.automate_login_only(
                 admin_broker.api_key, admin_broker.user_id
             )
