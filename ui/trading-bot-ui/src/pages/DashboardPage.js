@@ -39,6 +39,7 @@ import {
   BarChartRounded,
   VerifiedRounded,
   VerticalAlignBottomRounded,
+  SettingsSuggestRounded,
 } from "@mui/icons-material";
 import StocksList from "../components/common/StocksList";
 import StocksListOptimized from "../components/common/StocksListOptimized";
@@ -47,6 +48,7 @@ import TipRanksHeatmap from "../components/common/TipRanksHeatmap";
 import FinancialHeatmap from "../components/common/FinancialHeatmap";
 import BreakoutAnalysisWidget from "../components/dashboard/BreakoutAnalysisWidget";
 import EnhancedBreakoutWidget from "../components/dashboard/EnhancedBreakoutWidget";
+import SystemHealthDashboard from "../components/dashboard/SystemHealthDashboard";
 import { useMarket } from "../hooks/useUnifiedMarketData";
 import useMarketStore from "../store/marketStore";
 // PERFORMANCE FIX: Memoized components to prevent unnecessary re-renders
@@ -139,6 +141,11 @@ const SECTIONS = [
     id: "analytics",
     label: "ANALYTICS",
     icon: <AnalyticsRounded fontSize="small" />,
+  },
+  {
+    id: "system",
+    label: "SYSTEM",
+    icon: <SettingsSuggestRounded fontSize="small" />,
   },
 ];
 // FIXED: Helper function to safely extract numeric values
@@ -3472,6 +3479,11 @@ const DashboardPage = () => {
       </Paper>
     </Stack>
   );
+  const renderSystemSection = () => (
+    <Box sx={{ py: 2 }}>
+      <SystemHealthDashboard />
+    </Box>
+  );
   // Render function for the footer (RESPONSIVE)
   const renderFooter = () => (
     <Paper
@@ -3567,6 +3579,7 @@ const DashboardPage = () => {
             {activeSection === "mcx" && renderMcxSection()}
             {activeSection === "fno" && renderFnoSection()}
             {activeSection === "analytics" && renderAnalyticsSection()}
+            {activeSection === "system" && renderSystemSection()}
           </Container>
         </Box>
         {renderFooter()}

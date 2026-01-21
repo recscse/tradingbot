@@ -95,6 +95,9 @@ class FnoStockListService:
             8,
             9,
         ]  # Update during early preparation and premarket
+        
+        # Error tracking
+        self.last_error: Optional[str] = None
 
     def is_market_schedule_compliant(self) -> Dict[str, Any]:
         """
@@ -160,6 +163,7 @@ class FnoStockListService:
 
         except Exception as e:
             logger.error(f"Market schedule compliance check failed: {e}")
+            self.last_error = f"Schedule compliance check failed: {str(e)}"
             return {
                 "compliant": True,
                 "reason": "error_fallback",
@@ -1004,11 +1008,13 @@ class FnoStockListService:
                 message=f"F&O stock list update completed: {len(stocks)} stocks",
                 data=result,
             )
+            self.last_error = None  # Clear error on success
             return result
 
         except Exception as e:
             logger.error(f"Γ¥î F&O stock list update failed: {e}")
             log_structured(event="FNO_LIST_UPDATE_ERROR", level="ERROR", message=str(e))
+            self.last_error = f"FNO list update failed: {str(e)}"
             return {
                 "status": "error",
                 "error": str(e),

@@ -43,6 +43,7 @@ const NotificationsDashboard = () => {
   const [activeTab, setActiveTab] = useState(0);
   const [filterType, setFilterType] = useState("all");
   const [filterPriority, setFilterPriority] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [stats, setStats] = useState(null);
 
@@ -79,14 +80,18 @@ const NotificationsDashboard = () => {
         filterType === "all" || notification.type === filterType;
       const matchesPriority =
         filterPriority === "all" || notification.priority === filterPriority;
+      const matchesStatus =
+        filterStatus === "all" ||
+        (filterStatus === "unread" && !notification.is_read) ||
+        (filterStatus === "read" && notification.is_read);
       const matchesSearch =
         !searchQuery ||
         notification.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         notification.message.toLowerCase().includes(searchQuery.toLowerCase());
 
-      return matchesType && matchesPriority && matchesSearch;
+      return matchesType && matchesPriority && matchesSearch && matchesStatus;
     });
-  }, [notifications, filterType, filterPriority, searchQuery]);
+  }, [notifications, filterType, filterPriority, searchQuery, filterStatus]);
 
   const tabContent = [
     // All Notifications Tab
@@ -116,6 +121,19 @@ const NotificationsDashboard = () => {
               }}
               sx={{ minWidth: 200 }}
             />
+
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                label="Status"
+              >
+                <MenuItem value="all">All Status</MenuItem>
+                <MenuItem value="unread">Unread</MenuItem>
+                <MenuItem value="read">Read</MenuItem>
+              </Select>
+            </FormControl>
 
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>Type</InputLabel>

@@ -97,6 +97,16 @@ class NotificationService:
             NotificationPriority.LOW: ["database"]
         }
         
+        # Deduplication windows (in minutes) for specific notification types
+        self.deduplication_windows = {
+            NotificationTypes.TOKEN_EXPIRING_SOON: 360,  # 6 hours
+            NotificationTypes.TOKEN_EXPIRED: 60,         # 1 hour (more urgent)
+            "market_opening": 720,                       # 12 hours
+            "system_health_alert": 240,                  # 4 hours
+            NotificationTypes.DAILY_PNL_SUMMARY: 1200,   # 20 hours
+            NotificationTypes.MARGIN_CALL: 60,           # 1 hour
+        }
+        
     def create_notification(
         self,
         user_id: int,
@@ -128,8 +138,11 @@ class NotificationService:
             db = next(get_db())
             
         try:
-            # Deduplication: Check for identical unread notification in last 5 minutes
-            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            # Deduplication: Check for identical unread notification within dynamic window
+            # Default window is 30 minutes to prevent short-term spam
+            dedup_minutes = self.deduplication_windows.get(notification_type, 30)
+            cutoff = datetime.utcnow() - timedelta(minutes=dedup_minutes)
+            
             existing = db.query(Notification).filter(
                 Notification.user_id == user_id,
                 Notification.type == notification_type,
