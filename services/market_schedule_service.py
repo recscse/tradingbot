@@ -374,6 +374,9 @@ class MarketScheduleService:
 
         FIXED: NON-BLOCKING - runs in background task to prevent application freeze.
         """
+        # Update market status to pre-market
+        await self._update_market_status("pre_market")
+
         logger.info(
             "📊 Starting pre-open stock selection in BACKGROUND (9:00-9:15 AM)..."
         )
@@ -495,6 +498,9 @@ class MarketScheduleService:
         3. Finalize stock selections for the day
         4. Validate broker connections
         """
+        # Update market status to open
+        await self._update_market_status("open")
+
         logger.info("🔧 Market open validation (9:15-9:30 AM)...")
 
         try:
