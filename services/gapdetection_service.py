@@ -610,14 +610,17 @@ async def start_gap_detection_scheduler() -> None:
 
 async def get_todays_gap_analysis(
     gap_type: Optional[str] = None,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    fallback_to_previous: bool = True
 ) -> List[Dict[str, Any]]:
     """
-    Get today's gap analysis from database
+    Get today's gap analysis from database. 
+    If no data for today and fallback is enabled, returns latest available data.
 
     Args:
         gap_type: Filter by "GAP_UP" or "GAP_DOWN"
         limit: Max results (None for all)
+        fallback_to_previous: If True, return latest data if today's is missing
 
     Returns:
         List of gap results
@@ -626,10 +629,29 @@ async def get_todays_gap_analysis(
 
     try:
         db = next(get_db())
+        today = date.today()
 
+        # 1. Try to get data for today
         query = db.query(PremarketCandle).filter(
-            PremarketCandle.candle_date == date.today()
+            PremarketCandle.candle_date == today
         )
+        
+        # Check if data exists for today
+        count = query.count()
+        
+        target_date = today
+        is_fallback = False
+
+        # 2. If no data for today and fallback enabled, find latest date
+        if count == 0 and fallback_to_previous:
+            latest_date = db.query(func.max(PremarketCandle.candle_date)).scalar()
+            if latest_date:
+                target_date = latest_date
+                is_fallback = True
+                # Re-initialize query for latest date
+                query = db.query(PremarketCandle).filter(
+                    PremarketCandle.candle_date == target_date
+                )
 
         if gap_type:
             query = query.filter(PremarketCandle.gap_type == gap_type)
@@ -654,7 +676,9 @@ async def get_todays_gap_analysis(
                 "volume": candle.total_volume,
                 "sector": candle.sector,
                 "market_cap": candle.market_cap_category,
-                "timestamp": candle.created_at.isoformat() if candle.created_at else None
+                "timestamp": candle.created_at.isoformat() if candle.created_at else None,
+                "analysis_date": target_date.isoformat(),
+                "is_historical": is_fallback
             })
 
         return results

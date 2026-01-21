@@ -363,13 +363,17 @@ const DashboardPage = () => {
     summary: null,
   });
   const [gapLoading, setGapLoading] = useState(false);
+  const gapLoadingRef = React.useRef(false); // Ref to prevent race conditions/loops
 
   // REMOVED: Using Material-UI useMediaQuery for responsive detection
 
   // Fetch Gap Analysis data from API
   const fetchGapAnalysis = useCallback(async () => {
-    if (gapLoading) return;
+    if (gapLoadingRef.current) return;
+    
+    gapLoadingRef.current = true;
     setGapLoading(true);
+    
     try {
       const response = await fetch(
         `${process.env.REACT_APP_API_URL}/api/analytics/gap-analysis`
@@ -392,9 +396,10 @@ const DashboardPage = () => {
     } catch (error) {
       console.error("Failed to fetch gap analysis:", error);
     } finally {
+      gapLoadingRef.current = false;
       setGapLoading(false);
     }
-  }, [gapLoading]);
+  }, []);
 
   // Fetch FNO stocks from API
   const fetchFnoStocks = useCallback(async () => {
@@ -419,19 +424,15 @@ const DashboardPage = () => {
   }, [fnoLoading]);
   // Load Gap Analysis when gaps section is accessed
   useEffect(() => {
-    if (
-      activeSection === "gaps" &&
-      gapAnalysisData.gap_up.length === 0 &&
-      gapAnalysisData.gap_down.length === 0
-    ) {
-      fetchGapAnalysis();
+    if (activeSection === "gaps") {
+        // Only fetch if we haven't loaded data yet (or if it's empty)
+        // AND we aren't currently loading
+        if (gapAnalysisData.gap_up.length === 0 && !gapLoadingRef.current) {
+            fetchGapAnalysis();
+        }
     }
-  }, [
-    activeSection,
-    fetchGapAnalysis,
-    gapAnalysisData.gap_up.length,
-    gapAnalysisData.gap_down.length,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, fetchGapAnalysis]); // Removed data length dependencies to prevent loops
 
   // Load FNO stocks when component mounts or when FNO section is accessed
   useEffect(() => {
