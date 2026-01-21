@@ -46,6 +46,7 @@ import {
   SpeedRounded,
   AutoGraphRounded,
   AssessmentRounded,
+  DnsRounded,
 } from "@mui/icons-material";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toast } from "react-hot-toast";
@@ -147,6 +148,13 @@ const Navbar = () => {
       icon: <SmartToyRounded />,
       color: "#06b6d4", // Cyan
       shortName: "Auto",
+    },
+    {
+      name: "System Health",
+      path: "/system-health",
+      icon: <DnsRounded />,
+      color: "#6366f1", // Indigo
+      shortName: "Health",
     },
     {
       name: "Settings",

@@ -52,6 +52,25 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Custom Filter to suppress noisy Uvicorn access logs (Polling & OPTIONS)
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            # Uvicorn access logs put the request line in args[1] and status in args[2]
+            if record.args and len(record.args) >= 3:
+                req_line = str(record.args[1])
+                status_code = record.args[2]
+                
+                # Filter out successful polling and OPTIONS requests
+                if status_code == 200:
+                    if "GET /api/notifications" in req_line:
+                        return False
+                    if "OPTIONS" in req_line:
+                        return False
+            return True
+        except Exception:
+            return True
 try:
     from services.centralized_ws_manager import centralized_manager
     from router.market_ws import (
@@ -170,7 +189,7 @@ from router.heatmap_router import router as heatmap_router
 # from router.unified_websocket_routes import router as unified_ws_router
 from router.paper_trading_routes import router as paper_trading_router
 from router.option_routes import option_router
-
+from router.system_health_router import router as system_health_router
 
 try:
     from router.trading_execution_router import router as trading_execution_router
@@ -650,6 +669,10 @@ async def lifespan(app: FastAPI):
             async def start_upstox_in_background():
                 """Start Upstox automation in background to avoid blocking startup"""
                 try:
+                    # Wait for server to fully start
+                    logger.info("⏳ Waiting 15s for server startup before initializing Upstox automation...")
+                    await asyncio.sleep(15)
+                    
                     from services.upstox_automation_service import (
                         start_upstox_automation,
                     )
@@ -679,9 +702,9 @@ async def lifespan(app: FastAPI):
         # 7.2. Initialize MarketScheduleService - CRITICAL for FNO and Instrument automation
         logger.info("📅 Starting MarketScheduleService...")
         try:
-            from services.market_schedule_service import MarketScheduleService
+            from services.market_schedule_service import get_market_scheduler
 
-            market_scheduler = MarketScheduleService()
+            market_scheduler = get_market_scheduler()
             # Start as background task to avoid blocking startup
             market_scheduler_task = asyncio.create_task(
                 market_scheduler.start_daily_scheduler()
@@ -1011,6 +1034,7 @@ except ImportError as e:
 
 app.include_router(paper_trading_router, tags=["Paper Trading"])
 app.include_router(option_router, tags=["Options & Futures"])
+app.include_router(system_health_router, tags=["System Health"])
 # app.include_router(auto_trading_router, tags=["Auto Trading"])
 app.include_router(trading_execution_router, tags=["Trading Execution"])
 # app.include_router(trading_stock_selection_router, tags=["Trading Stock Selection"])
@@ -1641,6 +1665,9 @@ async def get_engine_status(sid, data):
 
 # Main runner
 if __name__ == "__main__":
+    # Apply filter to suppress noisy access logs
+    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
     logger.info(
         "🚀 Launching Enhanced Trading Platform with NEW Centralized WebSocket System..."
     )
