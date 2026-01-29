@@ -499,6 +499,9 @@ class TradeAnalyticsService:
             # Generate PnL chart data
             pnl_chart_data = self._get_pnl_timeseries(trades)
 
+            # Get daily breakdown for heatmap (all time)
+            daily_breakdown = self._get_daily_breakdown(trades, 3650) # Use large number for all time
+
             return {
                 "success": True,
                 "period": "overall",
@@ -510,7 +513,8 @@ class TradeAnalyticsService:
                     "symbols_traded": list(set(t.symbol for t in trades)),
                     "strategies_used": list(set(t.strategy_name for t in trades))
                 },
-                "pnl_chart_data": pnl_chart_data
+                "pnl_chart_data": pnl_chart_data,
+                "daily_breakdown": daily_breakdown
             }
 
         except Exception as e:

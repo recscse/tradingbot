@@ -1005,11 +1005,13 @@ async def get_selected_stocks_live_prices(
 async def get_trade_history(
     limit: int = Query(50, description="Number of trades to fetch"),
     trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
+    start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Filter by end date (YYYY-MM-DD)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Get trade execution history
+    Get trade execution history with optional date filtering
 
     **Returns:** List of closed trades with PnL details
     """
@@ -1022,6 +1024,15 @@ async def get_trade_history(
         if trading_mode:
             query = query.filter(AutoTradeExecution.trading_mode == trading_mode)
 
+        if start_date:
+            query = query.filter(func.date(AutoTradeExecution.entry_time) >= start_date)
+        
+        if end_date:
+            query = query.filter(func.date(AutoTradeExecution.entry_time) <= end_date)
+
+        # If date range is provided, we might want to ignore the limit or increase it
+        # But keeping limit is safer for pagination. 
+        # For export, the frontend might request a large limit.
         trades = query.order_by(AutoTradeExecution.exit_time.desc()).limit(limit).all()
 
         trade_history = []
@@ -1075,6 +1086,7 @@ async def get_trade_history(
                     "trade_id": trade.trade_id,
                     "symbol": trade.symbol,
                     "signal_type": trade.signal_type,
+                    "strike_price": float(trade.strike_price) if trade.strike_price else 0,
                     "entry_time": (
                         trade.entry_time.isoformat() if trade.entry_time else None
                     ),

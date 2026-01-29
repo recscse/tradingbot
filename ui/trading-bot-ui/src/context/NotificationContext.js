@@ -289,12 +289,20 @@ export const NotificationProvider = ({ children }) => {
     fetchPreferences();
     fetchTokenStatus();
 
-    const pollInterval = setInterval(() => {
+    // Poll notifications every 60 seconds
+    const notificationInterval = setInterval(() => {
       fetchNotifications();
-      fetchTokenStatus();
-    }, 30000);
+    }, 60000);
 
-    return () => clearInterval(pollInterval);
+    // Poll token status every 5 minutes (300 seconds)
+    const tokenInterval = setInterval(() => {
+      fetchTokenStatus();
+    }, 300000);
+
+    return () => {
+      clearInterval(notificationInterval);
+      clearInterval(tokenInterval);
+    };
   }, []);
 
   const value = {

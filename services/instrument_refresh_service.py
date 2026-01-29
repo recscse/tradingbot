@@ -194,6 +194,9 @@ class TradingInstrumentService:
         self._dashboard_keys = []
         self._websocket_keys = []
         self._mcx_keys = []
+        
+        # Error tracking
+        self.last_error: Optional[str] = None
 
         self._initialized_instance = True
         logger.info("🔧 TradingInstrumentService instance created")
@@ -339,6 +342,7 @@ class TradingInstrumentService:
         except Exception as e:
             logger.error(f"❌ Failed to decompress/parse data: {e}")
             log_structured(event="INSTRUMENT_PARSE_ERROR", level="ERROR", message=str(e))
+            self.last_error = f"Instrument download/parse failed: {str(e)}"
             raise
         finally:
             del content
@@ -686,12 +690,16 @@ class TradingInstrumentService:
                 }
             )
             
+            self.last_error = None  # Clear error on success
             return result
 
         except Exception as e:
             error_msg = f"Service initialization failed: {e}"
             logger.error(f"❌ {error_msg}")
             log_structured(event="INSTRUMENT_SERVICE_INIT_ERROR", level="ERROR", message=str(e))
+            
+            self.last_error = error_msg  # Capture error
+            
             return InitializationResult(
                 status="error",
                 processing_time=time.time() - start_time,

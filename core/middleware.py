@@ -45,13 +45,23 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("Origin", "")
-        logger.info(
-            f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
-        )
+        
+        # Determine log level based on request type
+        is_polling = request.url.path.startswith("/api/notifications") and request.method == "GET"
+        is_options = request.method == "OPTIONS"
+        
+        if is_polling or is_options:
+            logger.debug(
+                f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
+            )
+        else:
+            logger.info(
+                f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
+            )
 
         #  Handle CORS Preflight (OPTIONS Request)
         if request.method == "OPTIONS":
-            logger.info(f"🔍 Handling CORS Preflight request from {origin}")
+            logger.debug(f"🔍 Handling CORS Preflight request from {origin}")
             response = JSONResponse(status_code=200, content={})
             if origin in ALLOWED_ORIGINS:
                 response.headers["Access-Control-Allow-Origin"] = origin
@@ -70,9 +80,14 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
             access_token = access_token.split("Bearer ")[-1]
             try:
                 jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
-                logger.info(
-                    f" Token successfully validated for request: {request.url.path}"
-                )
+                if is_polling:
+                    logger.debug(
+                        f" Token successfully validated for request: {request.url.path}"
+                    )
+                else:
+                    logger.info(
+                        f" Token successfully validated for request: {request.url.path}"
+                    )
             except jwt.ExpiredSignatureError:
                 logger.warning(f"⚠️ Token expired for request: {request.url.path}")
                 response = JSONResponse(
@@ -104,9 +119,14 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         #  Log Response Status
-        logger.info(
-            f"📤 Response {response.status_code} for {request.method} {request.url.path}"
-        )
+        if is_polling or is_options:
+             logger.debug(
+                f"📤 Response {response.status_code} for {request.method} {request.url.path}"
+            )
+        else:
+            logger.info(
+                f"📤 Response {response.status_code} for {request.method} {request.url.path}"
+            )
 
         #  Set Correct CORS Headers on Response
         if origin in ALLOWED_ORIGINS:

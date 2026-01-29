@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, time, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import pytz
 import json
 
@@ -48,7 +48,11 @@ class MarketScheduleService:
             "early_preparation": None,  # Track by date
             "preopen_stock_selection": None,
             "market_open_validation": None,
+            "post_market_cleanup": None,
         }
+        
+        # Error tracking for tasks
+        self.task_errors: Dict[str, str] = {}
 
         # Initialize Redis client with proper error handling
         self.redis_enabled = os.getenv("REDIS_ENABLED", "true").lower() == "true"
@@ -73,6 +77,22 @@ class MarketScheduleService:
                 self.redis_enabled = False
         else:
             logger.info("🚫 Redis disabled via configuration")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get current scheduler status"""
+        try:
+            current_time = datetime.now(self.ist)
+            return {
+                "is_running": self.is_running,
+                "current_time": current_time.strftime("%H:%M:%S"),
+                "daily_tasks_completed": {k: v.isoformat() if v else None for k, v in self.daily_tasks_completed.items()},
+                "task_errors": self.task_errors,
+                "redis_connected": self.redis_client is not None,
+                "trading_sessions_active": self.trading_sessions_active,
+                "selected_stocks_count": len(self.selected_stocks) if self.selected_stocks else 0
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     def _safe_redis_set(self, key: str, value: str, ex: int = None) -> bool:
         """Safely set Redis value with fallback to memory cache"""
@@ -231,12 +251,13 @@ class MarketScheduleService:
 
                 # Post-market cleanup (after 3:30 PM OR before 8:00 AM)
                 else:
-                    # Only run cleanup if it's actually after market close
+                    # Only run cleanup if it's actually after market close AND hasn't run today
                     if (
-                        current_time >= self.market_close
-                        or current_time < self.early_preparation
+                        (current_time >= self.market_close or current_time < self.early_preparation)
+                        and self.daily_tasks_completed["post_market_cleanup"] != current_date
                     ):
                         await self._post_market_cleanup()
+                        self.daily_tasks_completed["post_market_cleanup"] = current_date
 
                 await asyncio.sleep(60)  # Check every minute
 
@@ -310,6 +331,7 @@ class MarketScheduleService:
 
             except Exception as fno_error:
                 logger.error(f"❌ Background: FNO service error: {fno_error}")
+                self.task_errors["fno_update"] = str(fno_error)
                 # Don't return - continue with instrument service
 
             # STEP 2: Instrument service initialization - CHECK ONLY
@@ -352,6 +374,9 @@ class MarketScheduleService:
 
         FIXED: NON-BLOCKING - runs in background task to prevent application freeze.
         """
+        # Update market status to pre-market
+        await self._update_market_status("pre_market")
+
         logger.info(
             "📊 Starting pre-open stock selection in BACKGROUND (9:00-9:15 AM)..."
         )
@@ -452,10 +477,12 @@ class MarketScheduleService:
                 logger.warning(
                     f"⚠️ Background: Pre-open stock selection failed: {error_msg}"
                 )
+                self.task_errors["preopen_selection"] = error_msg
                 self.selected_stocks = {}
 
         except Exception as e:
             logger.error(f"❌ Background: Pre-open stock selection failed: {e}")
+            self.task_errors["preopen_selection"] = str(e)
             import traceback
 
             traceback.print_exc()
@@ -471,6 +498,9 @@ class MarketScheduleService:
         3. Finalize stock selections for the day
         4. Validate broker connections
         """
+        # Update market status to open
+        await self._update_market_status("open")
+
         logger.info("🔧 Market open validation (9:15-9:30 AM)...")
 
         try:
@@ -814,6 +844,7 @@ class MarketScheduleService:
                         "early_preparation": None,
                         "preopen_stock_selection": None,
                         "market_open_validation": None,
+                        "post_market_cleanup": None,
                     }
                     logger.info(
                         f"🔄 Daily tasks reset for new trading day: {current_date}"
@@ -999,3 +1030,13 @@ class MarketScheduleService:
 
         except Exception as e:
             logger.error(f"❌ Performance report generation failed: {e}")
+
+# Global singleton instance
+_market_scheduler_instance = None
+
+def get_market_scheduler():
+    "Get singleton instance of MarketScheduleService"
+    global _market_scheduler_instance
+    if _market_scheduler_instance is None:
+        _market_scheduler_instance = MarketScheduleService()
+    return _market_scheduler_instance

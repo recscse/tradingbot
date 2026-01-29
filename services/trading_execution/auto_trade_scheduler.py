@@ -56,6 +56,9 @@ class AutoTradeScheduler:
             {}
         )  # Track which users have auto-started today: {user_id: True/False}
         self.default_trading_mode: TradingMode = TradingMode.PAPER
+        
+        # Error tracking
+        self.last_error: Optional[str] = None
 
         logger.info("Auto-Trade Scheduler initialized (multi-user mode)")
 
@@ -117,10 +120,12 @@ class AutoTradeScheduler:
 
                 except Exception as e:
                     logger.error(f"Error in scheduler loop: {e}")
+                    self.last_error = f"Scheduler loop error: {str(e)}"
                     await asyncio.sleep(self.check_interval)
 
         except Exception as e:
             logger.error(f"Error starting scheduler: {e}")
+            self.last_error = f"Scheduler startup error: {str(e)}"
             self.is_running = False
 
     async def _check_and_start_trading_all_users(self):
@@ -228,12 +233,15 @@ class AutoTradeScheduler:
                     # Note: Currently supports single user at a time due to singleton auto_trade_live_feed
                     # For multi-user support, would need separate feed instances per user
                     break
+            
+                self.last_error = None  # Clear error on success
 
             finally:
                 db.close()
 
         except Exception as e:
             logger.error(f"Error checking auto-start for users: {e}")
+            self.last_error = f"Auto-start check error: {str(e)}"
             import traceback
 
             logger.error(f"Traceback: {traceback.format_exc()}")

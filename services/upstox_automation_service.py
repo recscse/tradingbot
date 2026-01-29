@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import pyotp
+import pytz  # ✅ Added pytz import
 import requests
 from playwright.async_api import async_playwright
 from sqlalchemy.orm import Session
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 _automation_lock = None
 _last_refresh_attempt = None
 _refresh_in_progress = False
+_last_refresh_status: Optional[Dict] = None
 
 
 def _get_automation_lock():
@@ -283,11 +285,11 @@ class UpstoxAutomationService:
                                     auth_code = query_params["code"][0]
                                     logger.info(f"Authorization code captured: {auth_code[:10]}...")
 
-                                    if len(auth_code) >= 6 and auth_code.isalnum():
+                                    if len(auth_code) >= 1:
                                         self._captured_auth_code = auth_code
                                         auth_code_found = True
-                                        logger.info("✅ Login automation completed with auth code captured")
-                                        log_structured(event="LOGIN_AUTOMATION_COMPLETE", message="Login automation successful, auth code captured")
+                                        logger.info("✅ Login automation completed - redirect detected")
+                                        log_structured(event="LOGIN_AUTOMATION_COMPLETE", message="Login automation successful, redirect detected")
                                         return True
                                     else:
                                         logger.warning(f"Auth code format invalid: {len(auth_code)} chars")
@@ -543,6 +545,7 @@ class UpstoxAutomationService:
         """
         Internal method to perform the actual token refresh
         """
+        global _last_refresh_status
         db = SessionLocal()
         try:
             logger.info("Starting admin-only Upstox token refresh")
@@ -612,120 +615,10 @@ class UpstoxAutomationService:
                 log_structured(event="TOKEN_REFRESH_FAILED", level="ERROR", message=error_msg)
                 return {"success": False, "error": error_msg}
 
-            # Step 2: Handle token exchange directly if we captured auth code
-            if hasattr(self, "_captured_auth_code") and self._captured_auth_code:
-                logger.info(
-                    "🔄 Processing captured authorization code with proper timing..."
-                )
-                try:
-                    from services.upstox_service import (
-                        exchange_code_for_token,
-                        calculate_upstox_expiry,
-                    )
-                    import asyncio
-
-                    # ✅ CRITICAL FIX: Immediate token exchange but with proper error handling
-                    logger.info(
-                        "🚀 Processing auth code immediately while it's fresh..."
-                    )
-                    # Don't wait - auth codes expire quickly!
-
-                    # Clear the auth code to prevent reuse
-                    auth_code = self._captured_auth_code
-                    self._captured_auth_code = None
-
-                    logger.info(
-                        f"🚀 Exchanging auth code with proper timing: {auth_code[:10]}..."
-                    )
-
-                    # ✅ CRITICAL FIX: Single attempt for auth code exchange (codes expire quickly)
-                    logger.info(f"🚀 Exchanging auth code: {auth_code[:10]}...")
-
-                    try:
-                        # Single attempt - auth codes expire within seconds
-                        token_response = exchange_code_for_token(
-                            auth_code, admin_broker.api_key, admin_broker.api_secret
-                        )
-                        logger.info("✅ Token exchange successful!")
-
-                    except Exception as exchange_error:
-                        error_msg = str(exchange_error)
-                        logger.error(f"❌ Token exchange failed: {error_msg}")
-
-                        # Check if it's an auth code error - don't retry
-                        if (
-                            "Invalid Auth code" in error_msg
-                            or "UDAPI100057" in error_msg
-                        ):
-                            logger.error(
-                                "❌ Auth code expired or invalid - will try callback method"
-                            )
-                            raise Exception(
-                                "Auth code expired - falling back to callback method"
-                            )
-                        else:
-                            # Other errors might be retryable
-                            raise exchange_error
-
-                    # Update broker config with new token
-                    admin_broker.access_token = token_response["access_token"]
-                    admin_broker.access_token_expiry = calculate_upstox_expiry()
-                    admin_broker.additional_params = token_response
-                    admin_broker.last_error_message = None
-                    db.commit()
-
-                    # ✅ CRITICAL FIX: Minimal validation delay + don't fail on validation issues
-                    logger.info("⏳ Allowing 3 seconds for Upstox token activation...")
-                    await asyncio.sleep(3)
-
-                    # Try to validate but don't fail the entire process if validation fails
-                    try:
-                        if self._test_token_validity(admin_broker.access_token):
-                            logger.info(
-                                "✅ Token exchange completed and validated successfully"
-                            )
-                            result = {
-                                "success": True,
-                                "message": "Token exchange and validation successful",
-                            }
-                        else:
-                            logger.info(
-                                "⚠️ Token validation failed but proceeding (token may need more time)"
-                            )
-                            result = {
-                                "success": True,
-                                "message": "Token exchange completed (validation pending)",
-                            }
-                    except Exception as validation_error:
-                        logger.info(
-                            f"⚠️ Token validation error: {validation_error} - proceeding anyway"
-                        )
-                        result = {
-                            "success": True,
-                            "message": "Token exchange completed (validation skipped)",
-                        }
-
-                except Exception as exchange_error:
-                    logger.error(f"❌ Direct token exchange failed: {exchange_error}")
-                    # Clear the failed auth code
-                    self._captured_auth_code = None
-                    # Don't fallback to callback if direct exchange failed - the code is likely expired
-                    result = {
-                        "success": False,
-                        "error": f"Direct token exchange failed: {str(exchange_error)}",
-                    }
-            else:
-                # Step 2 (Fallback): Don't wait - let callback handle it asynchronously
-                logger.info(
-                    "⏳ No auth code captured - callback endpoint will handle token exchange when redirect occurs"
-                )
-                # CRITICAL FIX: Don't block waiting for callback - return immediately
-                # The callback endpoint will update the token when browser redirects
-                result = {
-                    "success": False,
-                    "error": "Auth code not captured - manual login required or callback will complete later",
-                    "note": "Token refresh initiated but not waited for - check callback endpoint logs"
-                }
+            # Step 2: WAIT for callback to handle token exchange (Verification)
+            logger.info("⏳ Login successful - waiting for callback to complete token exchange...")
+            
+            result = await self.wait_for_token_refresh(admin_broker, db)
 
             if result["success"]:
                 # Update config with automation timestamp
@@ -752,12 +645,19 @@ class UpstoxAutomationService:
             if result["success"]:
                 await self._notify_websocket_manager_about_token_refresh(admin_broker)
 
+            # Update global status
+            _last_refresh_status = result_dict
+
             return result_dict
 
         except Exception as e:
             logger.error(f"Error in refresh_admin_upstox_token: {e}")
             log_structured(event="TOKEN_REFRESH_ERROR", level="ERROR", message=str(e))
-            return {"success": False, "error": str(e)}
+            
+            error_result = {"success": False, "error": str(e), "timestamp": datetime.now().isoformat()}
+            _last_refresh_status = error_result
+            
+            return error_result
         finally:
             db.close()
 
@@ -851,19 +751,55 @@ class UpstoxTokenScheduler:
         self.is_running = False
         self.scheduler_thread = None
 
+    def _ist_to_system_time(self, ist_time_str: str) -> str:
+        """
+        Converts a time string (HH:MM) from IST to the system's local time.
+        Handles date rollovers implicitly by returning HH:MM.
+        """
+        try:
+            hours, minutes = map(int, ist_time_str.split(':'))
+            
+            # Current time in IST
+            ist_tz = pytz.timezone('Asia/Kolkata')
+            now_ist = datetime.now(ist_tz)
+            
+            # Target time today in IST
+            target_ist = now_ist.replace(hour=hours, minute=minutes, second=0, microsecond=0)
+            
+            # Convert to system's local timezone (naive datetime matching system clock)
+            # We use astimezone(None) to convert to local system time
+            target_system = target_ist.astimezone(None)
+            
+            system_time_str = target_system.strftime('%H:%M')
+            logger.info(f"🕒 Timezone Adj: {ist_time_str} IST -> {system_time_str} System Time")
+            return system_time_str
+        except Exception as e:
+            logger.error(f"Error converting timezone: {e}")
+            return ist_time_str  # Fallback to original
+
     def start_scheduler(self):
         if self.is_running:
             logger.warning("Scheduler already running")
             return
 
         logger.info("Starting Upstox token refresh scheduler...")
-        # Upstox tokens expire daily at 3:30 AM - schedule accordingly
-        schedule.every().day.at("03:45").do(self._run_refresh)  # 15 min after expiry
-        schedule.every().day.at("04:00").do(self._run_refresh)  # Backup refresh
-        schedule.every().day.at("06:00").do(self._run_refresh)  # Morning backup
-        schedule.every(1).hours.do(
-            self._check_and_refresh_expired
-        )  # More frequent checks
+        
+        # Convert IST schedule times to system time
+        t_0345 = self._ist_to_system_time("03:45")
+        t_0400 = self._ist_to_system_time("04:00")
+        t_0600 = self._ist_to_system_time("06:00")
+        t_0830 = self._ist_to_system_time("08:30")
+
+        # Upstox tokens expire daily at 3:30 AM IST
+        schedule.every().day.at(t_0345).do(self._run_refresh)  # 15 min after expiry
+        schedule.every().day.at(t_0400).do(self._run_refresh)  # Backup refresh
+        schedule.every().day.at(t_0600).do(self._run_refresh)  # Morning backup
+        
+        # ✅ NEW: Market open preparation check (Active Validation)
+        schedule.every().day.at(t_0830).do(self.validate_and_refresh_if_needed)
+        
+        # Regular monitoring
+        schedule.every(1).hours.do(self._check_and_refresh_expired)
 
         self.is_running = True
         self.scheduler_thread = threading.Thread(
@@ -930,8 +866,17 @@ class UpstoxTokenScheduler:
         except Exception as e:
             logger.error(f"❌ Scheduled admin refresh failed: {e}")
 
-    def _check_and_refresh_expired(self):
-        logger.info("🔍 Checking for expired admin tokens...")
+    def validate_and_refresh_if_needed(self):
+        """
+        Active check: tests if the token actually works against the API.
+        If invalid, triggers a refresh immediately.
+        Scheduled for market open preparation (08:30 AM).
+        """
+        logger.info("🔍 Performing Pre-Market Token Validation (08:30 AM Check)...")
+        self._check_and_refresh_expired(active_validation=True)
+
+    def _check_and_refresh_expired(self, active_validation: bool = False):
+        logger.info(f"🔍 Checking for expired admin tokens (Active Validation: {active_validation})...")
         try:
             from database.connection import SessionLocal
             from database.models import BrokerConfig, User
@@ -939,6 +884,7 @@ class UpstoxTokenScheduler:
             db = SessionLocal()
             try:
                 now = datetime.now()
+                # 1. Check for expired tokens (Time-based)
                 expired_admin_broker = (
                     db.query(BrokerConfig)
                     .join(User)
@@ -954,8 +900,35 @@ class UpstoxTokenScheduler:
                 )
 
                 if expired_admin_broker:
-                    logger.warning("🚨 Found expired admin token - triggering refresh")
+                    logger.warning("🚨 Found expired admin token (Time-based) - triggering refresh")
                     self._run_refresh()
+                    return
+
+                # 2. Active Validation (API-based) - If requested or if token seems valid but might be revoked
+                if active_validation:
+                    admin_broker = (
+                        db.query(BrokerConfig)
+                        .join(User)
+                        .filter(
+                            BrokerConfig.broker_name.ilike("upstox"),
+                            BrokerConfig.is_active == True,
+                            User.role.ilike("admin"),
+                        )
+                        .first()
+                    )
+                    
+                    if admin_broker and admin_broker.access_token:
+                        logger.info(f"🧪 Testing token validity for {admin_broker.broker_name}...")
+                        is_valid = self.automation_service._test_token_validity(admin_broker.access_token)
+                        
+                        if not is_valid:
+                            logger.warning("🚨 Token is invalid (API Rejected) despite valid expiry time - triggering refresh")
+                            self._run_refresh()
+                        else:
+                            logger.info("✅ Admin token is valid and active")
+                    else:
+                        logger.warning("⚠️ No active admin broker config found for validation")
+
                 else:
                     logger.info(
                         "✅ No expired admin tokens found during monitoring check"
@@ -1009,3 +982,11 @@ async def refresh_upstox_tokens_now() -> Dict:
     except Exception as e:
         logger.error(f"Manual admin refresh failed: {e}")
         return {"success": False, "error": str(e)}
+
+
+def get_automation_status() -> Dict:
+    """Get the status of the last automation run"""
+    global _last_refresh_status
+    if _last_refresh_status:
+        return _last_refresh_status
+    return {"status": "unknown", "message": "No automation run recorded yet"}

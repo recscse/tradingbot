@@ -137,6 +137,9 @@ class IntelligentStockSelectionService:
         self.final_selection_done: bool = (
             False  # Once true, NO MORE stock selection changes
         )
+        
+        # Error tracking
+        self.last_error: Optional[str] = None
 
         # Synchronization flag to prevent WebSocket start during selection
         self.selection_in_progress: bool = False
@@ -982,11 +985,14 @@ class IntelligentStockSelectionService:
                 }
             )
             
+            self.last_error = None  # Clear error on success
             return result
 
         except Exception as e:
-            logger.error(f"❌ Error in premarket selection: {e}")
+            error_msg = f"Error in premarket selection: {str(e)}"
+            logger.error(f"❌ {error_msg}")
             log_structured(event="PREMARKET_SELECTION_ERROR", level="ERROR", message=str(e))
+            self.last_error = error_msg
             return {"error": str(e), "phase": "premarket"}
         finally:
             self.selection_in_progress = False
@@ -1229,11 +1235,14 @@ class IntelligentStockSelectionService:
                 }
             )
             
+            self.last_error = None  # Clear error on success
             return result
 
         except Exception as e:
-            logger.error(f"❌ Error in market open validation: {e}")
+            error_msg = f"Error in market open validation: {str(e)}"
+            logger.error(f"❌ {error_msg}")
             log_structured(event="MARKET_OPEN_VALIDATION_ERROR", level="ERROR", message=str(e))
+            self.last_error = error_msg
             return {"error": str(e), "phase": "market_open_validation"}
         finally:
             self.selection_in_progress = False
@@ -1292,6 +1301,7 @@ class IntelligentStockSelectionService:
             ),
             "next_action": self._get_next_action_recommendation(current_phase),
             "workflow_complete": self.final_selection_done,
+            "last_error": self.last_error,
             "timestamp": datetime.now().isoformat(),
         }
 

@@ -35,6 +35,8 @@ import TermsModal from "./components/TermsModal";
 import { UnifiedMarketProvider } from "./hooks/useUnifiedMarketData";
 import LivePnLWidget from "./components/trading/LivePnLWidget";
 
+import SystemHealthPage from "./pages/SystemHealthPage";
+
 // 🎯 PROTECTED LAYOUT WRAPPER - This ensures all providers are available
 const ProtectedLayout = ({ children }) => (
   <PrivateRoute>
@@ -168,6 +170,14 @@ const App = () => {
               element={
                 <ProtectedLayout>
                   <PerformanceAnalyticsPage />
+                </ProtectedLayout>
+              }
+            />
+            <Route
+              path="/system-health"
+              element={
+                <ProtectedLayout>
+                  <SystemHealthPage />
                 </ProtectedLayout>
               }
             />
