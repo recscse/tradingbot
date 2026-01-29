@@ -121,6 +121,10 @@ class Instrument:
             self.unusual_volume = (
                 self.volume > self.avg_volume * 2 if self.avg_volume else False
             )
+            
+            # Update total traded value (approximate if not provided)
+            # This ensures value_crores is populated for stock selection
+            self.total_traded_value = int(self.current_price * self.volume)
 
         if self.close_price > 0:
             self.change = self.current_price - self.close_price
