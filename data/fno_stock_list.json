@@ -1,31 +1,6 @@
 {
   "securities": [
     {
-      "name": "Nifty Bank",
-      "symbol": "BANKNIFTY",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Finnifty",
-      "symbol": "FINNIFTY",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Nifty Midcap Select",
-      "symbol": "MIDCPNIFTY",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Nifty 50",
-      "symbol": "NIFTY",
-      "exchange": "NSE"
-    },
-    {
-      "name": "Nifty Next 50",
-      "symbol": "NIFTY-NEXT50",
-      "exchange": "NSE"
-    },
-    {
       "name": "360 One WAM",
       "symbol": "360ONE",
       "exchange": "NSE"
@@ -137,7 +112,7 @@
     },
     {
       "name": "Bajaj Finance",
-      "symbol": "BAJFINAN",
+      "symbol": "BAJFINANCE",
       "exchange": "NSE"
     },
     {
@@ -153,6 +128,11 @@
     {
       "name": "Bank of India",
       "symbol": "BANKINDIA",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Nifty Bank",
+      "symbol": "BANKNIFTY",
       "exchange": "NSE"
     },
     {
@@ -331,6 +311,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Finnifty",
+      "symbol": "FINNIFTY",
+      "exchange": "NSE"
+    },
+    {
       "name": "Fortis Healthcare",
       "symbol": "FORTIS",
       "exchange": "NSE"
@@ -453,11 +438,6 @@
     {
       "name": "Indian Energy Exchange",
       "symbol": "IEX",
-      "exchange": "NSE"
-    },
-    {
-      "name": "IFL Finance",
-      "symbol": "IIFL",
       "exchange": "NSE"
     },
     {
@@ -661,6 +641,11 @@
       "exchange": "NSE"
     },
     {
+      "name": "Nifty Midcap Select",
+      "symbol": "MIDCPNIFTY",
+      "exchange": "NSE"
+    },
+    {
       "name": "Samvardhana Motherson International",
       "symbol": "MOTHERSON",
       "exchange": "NSE"
@@ -698,6 +683,16 @@
     {
       "name": "NHPC",
       "symbol": "NHPC",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Nifty 50",
+      "symbol": "NIFTY",
+      "exchange": "NSE"
+    },
+    {
+      "name": "Nifty Next 50",
+      "symbol": "NIFTYNXT50",
       "exchange": "NSE"
     },
     {
@@ -847,7 +842,7 @@
     },
     {
       "name": "Reliance Industries",
-      "symbol": "RELIAN",
+      "symbol": "RELIANCE",
       "exchange": "NSE"
     },
     {
@@ -1066,7 +1061,7 @@
       "exchange": "NSE"
     }
   ],
-  "last_updated": "2026-01-16T05:55:59.779545",
-  "total_count": 213,
-  "data_source": "dhan_playwright"
+  "last_updated": "2026-01-29T22:42:44.333982",
+  "total_count": 212,
+  "data_source": "dhan_playwright_dynamic"
 }
