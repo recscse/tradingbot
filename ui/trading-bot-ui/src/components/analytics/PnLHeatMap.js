@@ -119,7 +119,7 @@ const PnLHeatMap = ({ dailyData, startDate }) => {
             
             {/* Month Label (at bottom) */}
             <div className="tw-h-4 tw-mt-1">
-              {week[0].day === 0 && week[0].date.endsWith('01') || (weekIdx === 0) || (week[0].month !== calendarData[weekIdx-1]?.[0]?.month) ? (
+              {(week[0].day === 0 && week[0].date.endsWith('01')) || (weekIdx === 0) || (week[0].month !== calendarData[weekIdx-1]?.[0]?.month) ? (
                 <span className="tw-text-[10px] tw-text-slate-400 tw-font-medium tw-uppercase">{week[0].month}</span>
               ) : null}
             </div>
