@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../services/api';
 import {
   ResponsiveContainer,
@@ -6,6 +6,7 @@ import {
   Area,
   BarChart,
   Bar,
+  Cell,
   Legend,
   XAxis,
   YAxis,
@@ -13,6 +14,8 @@ import {
   Tooltip,
   ReferenceLine
 } from 'recharts';
+
+import PnLHeatMap from '../components/analytics/PnLHeatMap';
 
 /**
  * Performance Analytics Page - Premium Financial Dashboard
@@ -27,6 +30,10 @@ const PerformanceAnalyticsPage = () => {
   const [loading, setLoading] = useState(true);
   const [fetchingData, setFetchingData] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Date filtering state
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const fetch_system_health = useCallback(async () => {
     try {
@@ -41,8 +48,12 @@ const PerformanceAnalyticsPage = () => {
 
   const fetch_trade_list = useCallback(async () => {
     try {
+      const params = { limit: 100, trading_mode: tradingMode };
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+
       const response = await apiClient.get('/v1/trading/execution/trade-history', {
-        params: { limit: 50, trading_mode: tradingMode }
+        params: params
       });
       if (response.data.success) {
         setTradeList(response.data.trades || []);
@@ -50,7 +61,58 @@ const PerformanceAnalyticsPage = () => {
     } catch (err) {
       console.error('Error fetching trade list:', err);
     }
-  }, [tradingMode]);
+  }, [tradingMode, startDate, endDate]);
+
+  const handleExport = useCallback(() => {
+    if (!tradeList || tradeList.length === 0) return;
+
+    // CSV Headers
+    const headers = [
+      'Date', 'Time', 'Symbol', 'Instrument Key', 'Type', 'Strike Price',
+      'Signal', 'Quantity', 'Entry Price', 'Exit Price', 
+      'Stop Loss', 'Target', 'Gross PnL', 'Net PnL', 'Status', 'Exit Reason'
+    ];
+
+    // CSV Rows
+    const rows = tradeList.map(trade => {
+      const grossPnl = trade.gross_pnl || (trade.exit_price - trade.entry_price) * trade.quantity;
+      const charges = trade.gross_pnl && trade.net_pnl 
+        ? trade.gross_pnl - trade.net_pnl 
+        : Math.abs(grossPnl * 0.005); 
+      const netPnl = trade.net_pnl || (grossPnl - charges);
+
+      return [
+        trade.entry_date || '',
+        trade.entry_time_str || '',
+        trade.symbol || '',
+        trade.instrument_key || '',
+        trade.signal_type?.includes('BUY') ? 'BUY' : 'SELL',
+        trade.strike_price || 0,
+        trade.signal_type || '',
+        trade.quantity || 0,
+        trade.entry_price || 0,
+        trade.exit_price || 0,
+        trade.stop_loss || 0,
+        trade.target || 0,
+        grossPnl.toFixed(2),
+        netPnl.toFixed(2),
+        netPnl >= 0 ? 'WIN' : 'LOSS',
+        trade.exit_reason || ''
+      ].join(',');
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + headers.join(',') + "\n" 
+      + rows.join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `trade_ledger_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [tradeList]);
 
   const fetch_performance_data = useCallback(async () => {
     setFetchingData(true);
@@ -72,10 +134,13 @@ const PerformanceAnalyticsPage = () => {
       });
       console.log('Backend response:', response.data);
 
-      if (response.data && response.data.metrics) {
-        setPerformanceData(response.data.metrics);
-      } else {
-        setPerformanceData(response.data);
+      if (response.data) {
+        // Merge metrics and other data (chart_data, breakdowns) into a single object
+        const mergedData = {
+          ...response.data,
+          ...(response.data.metrics || {})
+        };
+        setPerformanceData(mergedData);
       }
       
       // Fetch trade list as well
@@ -601,9 +666,9 @@ const PerformanceAnalyticsPage = () => {
                         tickFormatter={(time) => {
                           const date = new Date(time);
                           if (timeframe === 'daily') {
-                            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
                           }
-                          return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                          return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' });
                         }}
                         minTickGap={30}
                       />
@@ -616,7 +681,7 @@ const PerformanceAnalyticsPage = () => {
                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                         itemStyle={{ color: '#f8fafc' }}
                         formatter={(value) => [format_currency(value), 'Cumulative PnL']}
-                        labelFormatter={(label) => new Date(label).toLocaleString()}
+                        labelFormatter={(label) => new Date(label).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
                       />
                       <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
                       <Area
@@ -641,11 +706,109 @@ const PerformanceAnalyticsPage = () => {
               )}
             </div>
 
+            {/* Daily PnL Chart */}
+            {performanceData.daily_breakdown && performanceData.daily_breakdown.length > 0 && (
+              <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl tw-h-96">
+                <h2 className="tw-text-xl tw-font-bold tw-text-white tw-mb-4">Daily PnL Analysis</h2>
+                <div className="tw-w-full tw-h-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={performanceData.daily_breakdown}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} vertical={false} />
+                      <XAxis 
+                        dataKey="date" 
+                        stroke="#94a3b8" 
+                        tick={{ fontSize: 12 }} 
+                        tickFormatter={(time) => new Date(time).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata' })}
+                        minTickGap={30}
+                      />
+                      <YAxis 
+                        stroke="#94a3b8" 
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(value) => `₹${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
+                      />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                        itemStyle={{ color: '#f8fafc' }}
+                        formatter={(value) => [format_currency(value), 'Net PnL']}
+                        labelFormatter={(label) => new Date(label).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' })}
+                        cursor={{ fill: '#334155', opacity: 0.2 }}
+                      />
+                      <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
+                      <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                        {performanceData.daily_breakdown.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#10b981' : '#f43f5e'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* PnL Heat Map */}
+            {performanceData && (
+              <div className="tw-mb-6">
+                <PnLHeatMap dailyData={performanceData.daily_breakdown || []} startDate={performanceData.period_start} />
+              </div>
+            )}
+
+            {/* Segment Summary Cards */}
+            <div className="tw-grid tw-grid-cols-2 md:tw-grid-cols-4 tw-gap-4">
+               {['Equity', 'F&O', 'Currency', 'Commodity'].map((segment) => {
+                 // Mocking segment breakdown for now as backend mainly does Options (F&O)
+                 // In a real scenario, backend should return this breakdown
+                 const isFnO = segment === 'F&O';
+                 const pnl = isFnO ? performanceData.total_pnl : 0;
+                 return (
+                  <div key={segment} className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-sm">
+                    <p className="tw-text-slate-400 tw-text-sm tw-font-semibold tw-mb-2">{segment}</p>
+                    <p className={`tw-text-xl tw-font-bold ${get_color_class(pnl)}`}>
+                      {format_currency(pnl)}
+                    </p>
+                  </div>
+                 );
+               })}
+            </div>
+
             {/* Trade Ledger - Real Demat Style */}
             <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-overflow-hidden tw-shadow-xl">
-              <div className="tw-p-6 tw-border-b tw-border-slate-800 tw-flex tw-justify-between tw-items-center">
-                <h2 className="tw-text-xl tw-font-bold tw-text-white">Trade Ledger</h2>
-                <span className="tw-text-xs tw-text-slate-500 tw-uppercase tw-tracking-wider">Statement</span>
+              <div className="tw-p-6 tw-border-b tw-border-slate-800 tw-flex tw-flex-col sm:tw-flex-row tw-justify-between tw-items-center tw-gap-4">
+                <div>
+                  <h2 className="tw-text-xl tw-font-bold tw-text-white">Trade Ledger</h2>
+                  <span className="tw-text-xs tw-text-slate-500 tw-uppercase tw-tracking-wider">Statement</span>
+                </div>
+                
+                <div className="tw-flex tw-flex-wrap tw-items-center tw-gap-3">
+                  <div className="tw-flex tw-items-center tw-gap-2 tw-bg-slate-800/50 tw-p-1 tw-rounded-lg tw-border tw-border-slate-700">
+                    <input 
+                      type="date" 
+                      value={startDate} 
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="tw-bg-transparent tw-text-xs tw-text-white tw-border-none focus:tw-ring-0 tw-p-1"
+                    />
+                    <span className="tw-text-slate-500">-</span>
+                    <input 
+                      type="date" 
+                      value={endDate} 
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="tw-bg-transparent tw-text-xs tw-text-white tw-border-none focus:tw-ring-0 tw-p-1"
+                    />
+                  </div>
+                  
+                  <button 
+                    onClick={handleExport}
+                    disabled={tradeList.length === 0}
+                    className="tw-flex tw-items-center tw-gap-2 tw-px-3 tw-py-1.5 tw-bg-emerald-500/10 tw-text-emerald-400 tw-border tw-border-emerald-500/20 tw-rounded-lg hover:tw-bg-emerald-500/20 tw-transition-all disabled:tw-opacity-50 disabled:tw-cursor-not-allowed"
+                  >
+                    <svg className="tw-w-4 tw-h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span className="tw-text-xs tw-font-bold">Export CSV</span>
+                  </button>
+                </div>
               </div>
               <div className="tw-overflow-x-auto">
                 <table className="tw-w-full tw-text-xs md:tw-text-sm tw-text-left">
@@ -653,14 +816,13 @@ const PerformanceAnalyticsPage = () => {
                     <tr>
                       <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Date</th>
                       <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Instrument</th>
+                      <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Strike</th>
                       <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Type</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Qty</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Buy Avg</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Buy Value</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Sell Avg</th>
-                      <th className="tw-px-4 tw-py-3 tw-text-right">SL</th>
-                      <th className="tw-px-4 tw-py-3 tw-text-right">Target</th>
-                      <th className="tw-px-4 tw-py-3 tw-text-right">Gross P&L</th>
-                      <th className="tw-px-4 tw-py-3 tw-text-right">Charges</th>
+                      <th className="tw-px-4 tw-py-3 tw-text-right">Sell Value</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Net P&L</th>
                       <th className="tw-px-4 tw-py-3 tw-text-center">Status</th>
                     </tr>
@@ -675,15 +837,39 @@ const PerformanceAnalyticsPage = () => {
                         const netPnl = trade.net_pnl || (grossPnl - charges);
                         const isProfit = netPnl >= 0;
                         const exitType = trade.exit_type || (netPnl > 0 ? 'TARGET' : 'SL');
+                        
+                        const buyValue = trade.entry_price * trade.quantity;
+                        const sellValue = trade.exit_price * trade.quantity;
+                        const pnlPercent = trade.pnl_percentage || (buyValue > 0 ? (netPnl / buyValue) * 100 : 0);
+                        
+                        // Format Strike Price
+                        let strikeDisplay = '-';
+                        if (trade.strike_price && trade.strike_price > 0) {
+                          const optionType = trade.signal_type?.includes('CE') ? 'CE' : trade.signal_type?.includes('PE') ? 'PE' : '';
+                          strikeDisplay = `${trade.strike_price} ${optionType}`;
+                        }
+                        
+                        // Date grouping logic
+                        const showDateHeader = idx === 0 || trade.entry_date !== tradeList[idx - 1].entry_date;
 
                         return (
-                          <tr key={idx} className="tw-hover:bg-slate-800/30 tw-transition-colors">
+                          <React.Fragment key={idx}>
+                           {showDateHeader && (
+                             <tr key={`header-${idx}`} className="tw-bg-slate-800/50">
+                               <td colSpan="11" className="tw-px-4 tw-py-2 tw-text-xs tw-font-bold tw-text-cyan-400 tw-uppercase tw-tracking-wider">
+                                 {trade.entry_date}
+                               </td>
+                             </tr>
+                           )}
+                          <tr className="tw-hover:bg-slate-800/30 tw-transition-colors">
                             <td className="tw-px-4 tw-py-3 tw-text-slate-400 tw-whitespace-nowrap">
-                              <div>{trade.entry_date || 'N/A'}</div>
                               <div className="tw-text-[10px] tw-text-slate-600">{trade.entry_time_str?.split(' ')[0]}</div>
                             </td>
                             <td className="tw-px-4 tw-py-3">
                               <div className="tw-font-bold tw-text-white">{trade.symbol}</div>
+                            </td>
+                            <td className="tw-px-4 tw-py-3">
+                              <div className="tw-text-slate-300 tw-font-mono">{strikeDisplay}</div>
                             </td>
                             <td className="tw-px-4 tw-py-3">
                               <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold tw-uppercase ${
@@ -694,17 +880,12 @@ const PerformanceAnalyticsPage = () => {
                             </td>
                             <td className="tw-px-4 tw-py-3 tw-text-right tw-font-medium tw-text-slate-300">{trade.quantity}</td>
                             <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{format_currency(trade.entry_price)}</td>
+                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-400 tw-text-xs">{format_currency(buyValue)}</td>
                             <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{format_currency(trade.exit_price)}</td>
-                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-rose-300">{format_currency(trade.stop_loss)}</td>
-                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-emerald-300">{format_currency(trade.target)}</td>
-                            <td className={`tw-px-4 tw-py-3 tw-text-right ${grossPnl >= 0 ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
-                              {format_currency(grossPnl)}
-                            </td>
-                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-rose-300 tw-text-xs">
-                              {format_currency(charges)}
-                            </td>
+                            <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-400 tw-text-xs">{format_currency(sellValue)}</td>
                             <td className={`tw-px-4 tw-py-3 tw-text-right tw-font-bold ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
-                              {format_currency(netPnl)}
+                              <div>{format_currency(netPnl)}</div>
+                              <div className="tw-text-[10px] tw-opacity-80">{pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%</div>
                             </td>
                             <td className="tw-px-4 tw-py-3 tw-text-center">
                               <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold ${
@@ -715,11 +896,12 @@ const PerformanceAnalyticsPage = () => {
                               </span>
                             </td>
                           </tr>
+                          </React.Fragment>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan="12" className="tw-px-6 tw-py-12 tw-text-center tw-text-slate-500">
+                        <td colSpan="11" className="tw-px-6 tw-py-12 tw-text-center tw-text-slate-500">
                           <div className="tw-flex tw-flex-col tw-items-center tw-justify-center">
                             <svg className="tw-w-12 tw-h-12 tw-mb-3 tw-opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />

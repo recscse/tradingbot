@@ -80,13 +80,14 @@ const EnhancedBreakoutWidget = ({
 
     // Handle both legacy and enhanced data formats
     const breakouts = data.breakouts || [];
+    const breakdowns = data.breakdowns || []; // Include breakdowns
     const recentBreakouts = data.recent_breakouts || [];
     const topBreakouts = data.top_breakouts || [];
     const breakoutsByType = data.breakouts_by_type || {};
     const metrics = data.engine_metrics || data.scanner_stats || {};
 
-    // Combine all breakout data
-    const allBreakouts = [...breakouts, ...recentBreakouts, ...topBreakouts];
+    // Combine all breakout data including breakdowns
+    const allBreakouts = [...breakouts, ...breakdowns, ...recentBreakouts, ...topBreakouts];
 
     // Add breakouts from breakouts_by_type
     Object.entries(breakoutsByType).forEach(([type, typeBreakouts]) => {
