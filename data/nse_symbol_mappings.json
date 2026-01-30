@@ -1,13 +1,533 @@
 {
-  "NSE_EQ|INE585B01010": {
-    "symbol": "MARUTI",
-    "name": "MARUTI SUZUKI INDIA LTD.",
-    "trading_symbol": "MARUTI"
-  },
   "NSE_EQ|INE139A01034": {
     "symbol": "NATIONALUM",
     "name": "NATIONAL ALUMINIUM CO LTD",
     "trading_symbol": "NATIONALUM"
+  },
+  "NSE_EQ|INE070A01015": {
+    "symbol": "SHREECEM",
+    "name": "SHREE CEMENT LIMITED",
+    "trading_symbol": "SHREECEM"
+  },
+  "NSE_EQ|INE736A01011": {
+    "symbol": "CDSL",
+    "name": "CENTRAL DEPO SER (I) LTD",
+    "trading_symbol": "CDSL"
+  },
+  "NSE_EQ|INE102D01028": {
+    "symbol": "GODREJCP",
+    "name": "GODREJ CONSUMER PRODUCTS",
+    "trading_symbol": "GODREJCP"
+  },
+  "NSE_EQ|INE009A01021": {
+    "symbol": "INFY",
+    "name": "INFOSYS LIMITED",
+    "trading_symbol": "INFY"
+  },
+  "NSE_EQ|INE376G01013": {
+    "symbol": "BIOCON",
+    "name": "BIOCON LIMITED.",
+    "trading_symbol": "BIOCON"
+  },
+  "NSE_EQ|INE465A01025": {
+    "symbol": "BHARATFORG",
+    "name": "BHARAT FORGE LTD",
+    "trading_symbol": "BHARATFORG"
+  },
+  "NSE_EQ|INE540L01014": {
+    "symbol": "ALKEM",
+    "name": "ALKEM LABORATORIES LTD.",
+    "trading_symbol": "ALKEM"
+  },
+  "NSE_EQ|INE237A01036": {
+    "symbol": "KOTAKBANK",
+    "name": "KOTAK MAHINDRA BANK LTD",
+    "trading_symbol": "KOTAKBANK"
+  },
+  "NSE_EQ|INE361B01024": {
+    "symbol": "DIVISLAB",
+    "name": "DIVI S LABORATORIES LTD",
+    "trading_symbol": "DIVISLAB"
+  },
+  "NSE_EQ|INE476A01022": {
+    "symbol": "CANBK",
+    "name": "CANARA BANK",
+    "trading_symbol": "CANBK"
+  },
+  "NSE_EQ|INE745G01043": {
+    "symbol": "MCX",
+    "name": "MULTI COMMODITY EXCHANGE",
+    "trading_symbol": "MCX"
+  },
+  "NSE_EQ|INE721A01047": {
+    "symbol": "SHRIRAMFIN",
+    "name": "SHRIRAM FINANCE LIMITED",
+    "trading_symbol": "SHRIRAMFIN"
+  },
+  "NSE_EQ|INE118A01012": {
+    "symbol": "BAJAJHLDNG",
+    "name": "BAJAJ HOLDINGS & INVS LTD",
+    "trading_symbol": "BAJAJHLDNG"
+  },
+  "NSE_EQ|INE528G01035": {
+    "symbol": "YESBANK",
+    "name": "YES BANK LIMITED",
+    "trading_symbol": "YESBANK"
+  },
+  "NSE_EQ|INE531F01023": {
+    "symbol": "NUVAMA",
+    "name": "NUVAMA WEALTH MANAGE LTD",
+    "trading_symbol": "NUVAMA"
+  },
+  "NSE_EQ|INE142M01025": {
+    "symbol": "TATATECH",
+    "name": "TATA TECHNOLOGIES LIMITED",
+    "trading_symbol": "TATATECH"
+  },
+  "NSE_EQ|INE849A01020": {
+    "symbol": "TRENT",
+    "name": "TRENT LTD",
+    "trading_symbol": "TRENT"
+  },
+  "NSE_EQ|INE216A01030": {
+    "symbol": "BRITANNIA",
+    "name": "BRITANNIA INDUSTRIES LTD",
+    "trading_symbol": "BRITANNIA"
+  },
+  "NSE_EQ|INE081A01020": {
+    "symbol": "TATASTEEL",
+    "name": "TATA STEEL LIMITED",
+    "trading_symbol": "TATASTEEL"
+  },
+  "NSE_EQ|INE075A01022": {
+    "symbol": "WIPRO",
+    "name": "WIPRO LTD",
+    "trading_symbol": "WIPRO"
+  },
+  "NSE_EQ|INE377N01017": {
+    "symbol": "WAAREEENER",
+    "name": "WAAREE ENERGIES LIMITED",
+    "trading_symbol": "WAAREEENER"
+  },
+  "NSE_EQ|INE484J01027": {
+    "symbol": "GODREJPROP",
+    "name": "GODREJ PROPERTIES LTD",
+    "trading_symbol": "GODREJPROP"
+  },
+  "NSE_EQ|INE205A01025": {
+    "symbol": "VEDL",
+    "name": "VEDANTA LIMITED",
+    "trading_symbol": "VEDL"
+  },
+  "NSE_EQ|INE027H01010": {
+    "symbol": "MAXHEALTH",
+    "name": "MAX HEALTHCARE INS LTD",
+    "trading_symbol": "MAXHEALTH"
+  },
+  "NSE_EQ|INE974X01010": {
+    "symbol": "TIINDIA",
+    "name": "TUBE INVEST OF INDIA LTD",
+    "trading_symbol": "TIINDIA"
+  },
+  "NSE_EQ|INE854D01024": {
+    "symbol": "UNITDSPR",
+    "name": "UNITED SPIRITS LIMITED",
+    "trading_symbol": "UNITDSPR"
+  },
+  "NSE_EQ|INE742F01042": {
+    "symbol": "ADANIPORTS",
+    "name": "ADANI PORT & SEZ LTD",
+    "trading_symbol": "ADANIPORTS"
+  },
+  "NSE_EQ|INE226A01021": {
+    "symbol": "VOLTAS",
+    "name": "VOLTAS LTD",
+    "trading_symbol": "VOLTAS"
+  },
+  "NSE_EQ|INE047A01021": {
+    "symbol": "GRASIM",
+    "name": "GRASIM INDUSTRIES LTD",
+    "trading_symbol": "GRASIM"
+  },
+  "NSE_EQ|INE584A01023": {
+    "symbol": "NMDC",
+    "name": "NMDC LTD.",
+    "trading_symbol": "NMDC"
+  },
+  "NSE_EQ|INE414G01012": {
+    "symbol": "MUTHOOTFIN",
+    "name": "MUTHOOT FINANCE LIMITED",
+    "trading_symbol": "MUTHOOTFIN"
+  },
+  "NSE_EQ|INE813H01021": {
+    "symbol": "TORNTPOWER",
+    "name": "TORRENT POWER LTD",
+    "trading_symbol": "TORNTPOWER"
+  },
+  "NSE_EQ|INE931S01010": {
+    "symbol": "ADANIENSOL",
+    "name": "ADANI ENERGY SOLUTION LTD",
+    "trading_symbol": "ADANIENSOL"
+  },
+  "NSE_EQ|INE053F01010": {
+    "symbol": "IRFC",
+    "name": "INDIAN RAILWAY FIN CORP L",
+    "trading_symbol": "IRFC"
+  },
+  "NSE_EQ|INE127D01025": {
+    "symbol": "HDFCAMC",
+    "name": "HDFC AMC LIMITED",
+    "trading_symbol": "HDFCAMC"
+  },
+  "NSE_EQ|INE021A01026": {
+    "symbol": "ASIANPAINT",
+    "name": "ASIAN PAINTS LIMITED",
+    "trading_symbol": "ASIANPAINT"
+  },
+  "NSE_EQ|INE356A01018": {
+    "symbol": "MPHASIS",
+    "name": "MPHASIS LIMITED",
+    "trading_symbol": "MPHASIS"
+  },
+  "NSE_EQ|INE733E01010": {
+    "symbol": "NTPC",
+    "name": "NTPC LTD",
+    "trading_symbol": "NTPC"
+  },
+  "NSE_EQ|INE117A01022": {
+    "symbol": "ABB",
+    "name": "ABB INDIA LIMITED",
+    "trading_symbol": "ABB"
+  },
+  "NSE_EQ|INE437A01024": {
+    "symbol": "APOLLOHOSP",
+    "name": "APOLLO HOSPITALS ENTER. L",
+    "trading_symbol": "APOLLOHOSP"
+  },
+  "NSE_EQ|INE053A01029": {
+    "symbol": "INDHOTEL",
+    "name": "THE INDIAN HOTELS CO. LTD",
+    "trading_symbol": "INDHOTEL"
+  },
+  "NSE_EQ|INE121J01017": {
+    "symbol": "INDUSTOWER",
+    "name": "INDUS TOWERS LIMITED",
+    "trading_symbol": "INDUSTOWER"
+  },
+  "NSE_EQ|INE121E01018": {
+    "symbol": "JSWENERGY",
+    "name": "JSW ENERGY LIMITED",
+    "trading_symbol": "JSWENERGY"
+  },
+  "NSE_EQ|INE019A01038": {
+    "symbol": "JSWSTEEL",
+    "name": "JSW STEEL LIMITED",
+    "trading_symbol": "JSWSTEEL"
+  },
+  "NSE_EQ|INE296A01032": {
+    "symbol": "BAJFINANCE",
+    "name": "BAJAJ FINANCE LIMITED",
+    "trading_symbol": "BAJFINANCE"
+  },
+  "NSE_EQ|INE095N01031": {
+    "symbol": "NBCC",
+    "name": "NBCC (INDIA) LIMITED",
+    "trading_symbol": "NBCC"
+  },
+  "NSE_EQ|INE467B01029": {
+    "symbol": "TCS",
+    "name": "TATA CONSULTANCY SERV LT",
+    "trading_symbol": "TCS"
+  },
+  "NSE_EQ|INE079A01024": {
+    "symbol": "AMBUJACEM",
+    "name": "AMBUJA CEMENTS LTD",
+    "trading_symbol": "AMBUJACEM"
+  },
+  "NSE_EQ|INE457L01029": {
+    "symbol": "PGEL",
+    "name": "PG ELECTROPLAST LTD",
+    "trading_symbol": "PGEL"
+  },
+  "NSE_EQ|INE0J1Y01017": {
+    "symbol": "LICI",
+    "name": "LIFE INSURA CORP OF INDIA",
+    "trading_symbol": "LICI"
+  },
+  "NSE_EQ|INE603J01030": {
+    "symbol": "PIIND",
+    "name": "PI INDUSTRIES LTD",
+    "trading_symbol": "PIIND"
+  },
+  "NSE_EQ|INE202E01016": {
+    "symbol": "IREDA",
+    "name": "INDIAN RENEWABLE ENERGY",
+    "trading_symbol": "IREDA"
+  },
+  "NSE_EQ|INE271C01023": {
+    "symbol": "DLF",
+    "name": "DLF LIMITED",
+    "trading_symbol": "DLF"
+  },
+  "NSE_EQ|INE318A01026": {
+    "symbol": "PIDILITIND",
+    "name": "PIDILITE INDUSTRIES LTD",
+    "trading_symbol": "PIDILITIND"
+  },
+  "NSE_EQ|INE918I01026": {
+    "symbol": "BAJAJFINSV",
+    "name": "BAJAJ FINSERV LTD.",
+    "trading_symbol": "BAJAJFINSV"
+  },
+  "NSE_EQ|INE758E01017": {
+    "symbol": "JIOFIN",
+    "name": "JIO FIN SERVICES LTD",
+    "trading_symbol": "JIOFIN"
+  },
+  "NSE_EQ|INE089A01031": {
+    "symbol": "DRREDDY",
+    "name": "DR. REDDY S LABORATORIES",
+    "trading_symbol": "DRREDDY"
+  },
+  "NSE_EQ|INE982J01020": {
+    "symbol": "PAYTM",
+    "name": "ONE 97 COMMUNICATIONS LTD",
+    "trading_symbol": "PAYTM"
+  },
+  "NSE_EQ|INE494B01023": {
+    "symbol": "TVSMOTOR",
+    "name": "TVS MOTOR COMPANY  LTD",
+    "trading_symbol": "TVSMOTOR"
+  },
+  "NSE_EQ|INE646L01027": {
+    "symbol": "INDIGO",
+    "name": "INTERGLOBE AVIATION LTD",
+    "trading_symbol": "INDIGO"
+  },
+  "NSE_EQ|INE302A01020": {
+    "symbol": "EXIDEIND",
+    "name": "EXIDE INDUSTRIES LTD",
+    "trading_symbol": "EXIDEIND"
+  },
+  "NSE_EQ|INE397D01024": {
+    "symbol": "BHARTIARTL",
+    "name": "BHARTI AIRTEL LIMITED",
+    "trading_symbol": "BHARTIARTL"
+  },
+  "NSE_EQ|INE949L01017": {
+    "symbol": "AUBANK",
+    "name": "AU SMALL FINANCE BANK LTD",
+    "trading_symbol": "AUBANK"
+  },
+  "NSE_EQ|INE881D01027": {
+    "symbol": "OFSS",
+    "name": "ORACLE FIN SERV SOFT LTD.",
+    "trading_symbol": "OFSS"
+  },
+  "NSE_EQ|INE148I01020": {
+    "symbol": "SAMMAANCAP",
+    "name": "SAMMAAN CAPITAL LIMITED",
+    "trading_symbol": "SAMMAANCAP"
+  },
+  "NSE_EQ|INE280A01028": {
+    "symbol": "TITAN",
+    "name": "TITAN COMPANY LIMITED",
+    "trading_symbol": "TITAN"
+  },
+  "NSE_EQ|INE155A01022": {
+    "symbol": "TMPV",
+    "name": "TATA MOTORS PASS VEH LTD",
+    "trading_symbol": "TMPV"
+  },
+  "NSE_EQ|INE095A01012": {
+    "symbol": "INDUSINDBK",
+    "name": "INDUSIND BANK LIMITED",
+    "trading_symbol": "INDUSINDBK"
+  },
+  "NSE_EQ|INE562A01011": {
+    "symbol": "INDIANB",
+    "name": "INDIAN BANK",
+    "trading_symbol": "INDIANB"
+  },
+  "NSE_EQ|INE118H01025": {
+    "symbol": "BSE",
+    "name": "BSE LIMITED",
+    "trading_symbol": "BSE"
+  },
+  "NSE_EQ|INE935N01020": {
+    "symbol": "DIXON",
+    "name": "DIXON TECHNO (INDIA) LTD",
+    "trading_symbol": "DIXON"
+  },
+  "NSE_EQ|INE031A01017": {
+    "symbol": "HUDCO",
+    "name": "HSG & URBAN DEV CORPN LTD",
+    "trading_symbol": "HUDCO"
+  },
+  "NSE_EQ|INE242A01010": {
+    "symbol": "IOC",
+    "name": "INDIAN OIL CORP LTD",
+    "trading_symbol": "IOC"
+  },
+  "NSE_EQ|INE692A01016": {
+    "symbol": "UNIONBANK",
+    "name": "UNION BANK OF INDIA",
+    "trading_symbol": "UNIONBANK"
+  },
+  "NSE_EQ|INE04I401011": {
+    "symbol": "KPITTECH",
+    "name": "KPIT TECHNOLOGIES LIMITED",
+    "trading_symbol": "KPITTECH"
+  },
+  "NSE_EQ|INE263A01024": {
+    "symbol": "BEL",
+    "name": "BHARAT ELECTRONICS LTD",
+    "trading_symbol": "BEL"
+  },
+  "NSE_EQ|INE685A01028": {
+    "symbol": "TORNTPHARM",
+    "name": "TORRENT PHARMACEUTICALS L",
+    "trading_symbol": "TORNTPHARM"
+  },
+  "NSE_EQ|INE647A01010": {
+    "symbol": "SRF",
+    "name": "SRF LTD",
+    "trading_symbol": "SRF"
+  },
+  "NSE_EQ|INE860A01027": {
+    "symbol": "HCLTECH",
+    "name": "HCL TECHNOLOGIES LTD",
+    "trading_symbol": "HCLTECH"
+  },
+  "NSE_EQ|INE00H001014": {
+    "symbol": "SWIGGY",
+    "name": "SWIGGY LIMITED",
+    "trading_symbol": "SWIGGY"
+  },
+  "NSE_EQ|INE171A01029": {
+    "symbol": "FEDERALBNK",
+    "name": "FEDERAL BANK LTD",
+    "trading_symbol": "FEDERALBNK"
+  },
+  "NSE_EQ|INE976G01028": {
+    "symbol": "RBLBANK",
+    "name": "RBL BANK LIMITED",
+    "trading_symbol": "RBLBANK"
+  },
+  "NSE_EQ|INE084A01016": {
+    "symbol": "BANKINDIA",
+    "name": "BANK OF INDIA",
+    "trading_symbol": "BANKINDIA"
+  },
+  "NSE_EQ|INE878B01027": {
+    "symbol": "KEI",
+    "name": "KEI INDUSTRIES LTD.",
+    "trading_symbol": "KEI"
+  },
+  "NSE_EQ|INE417T01026": {
+    "symbol": "POLICYBZR",
+    "name": "PB FINTECH LIMITED",
+    "trading_symbol": "POLICYBZR"
+  },
+  "NSE_EQ|INE323A01026": {
+    "symbol": "BOSCHLTD",
+    "name": "BOSCH LIMITED",
+    "trading_symbol": "BOSCHLTD"
+  },
+  "NSE_EQ|INE545U01014": {
+    "symbol": "BANDHANBNK",
+    "name": "BANDHAN BANK LIMITED",
+    "trading_symbol": "BANDHANBNK"
+  },
+  "NSE_EQ|INE758T01015": {
+    "symbol": "ETERNAL",
+    "name": "ETERNAL LIMITED",
+    "trading_symbol": "ETERNAL"
+  },
+  "NSE_EQ|INE154A01025": {
+    "symbol": "ITC",
+    "name": "ITC LTD",
+    "trading_symbol": "ITC"
+  },
+  "NSE_EQ|INE101A01026": {
+    "symbol": "M&M",
+    "name": "MAHINDRA & MAHINDRA LTD",
+    "trading_symbol": "M&M"
+  },
+  "NSE_EQ|INE208A01029": {
+    "symbol": "ASHOKLEY",
+    "name": "ASHOK LEYLAND LTD",
+    "trading_symbol": "ASHOKLEY"
+  },
+  "NSE_EQ|INE303R01014": {
+    "symbol": "KALYANKJIL",
+    "name": "KALYAN JEWELLERS IND LTD",
+    "trading_symbol": "KALYANKJIL"
+  },
+  "NSE_EQ|INE090A01021": {
+    "symbol": "ICICIBANK",
+    "name": "ICICI BANK LTD.",
+    "trading_symbol": "ICICIBANK"
+  },
+  "NSE_EQ|INE018A01030": {
+    "symbol": "LT",
+    "name": "LARSEN & TOUBRO LTD.",
+    "trading_symbol": "LT"
+  },
+  "NSE_EQ|INE092T01019": {
+    "symbol": "IDFCFIRSTB",
+    "name": "IDFC FIRST BANK LIMITED",
+    "trading_symbol": "IDFCFIRSTB"
+  },
+  "NSE_EQ|INE347G01014": {
+    "symbol": "PETRONET",
+    "name": "PETRONET LNG LIMITED",
+    "trading_symbol": "PETRONET"
+  },
+  "NSE_EQ|INE067A01029": {
+    "symbol": "CGPOWER",
+    "name": "CG POWER AND IND SOL LTD",
+    "trading_symbol": "CGPOWER"
+  },
+  "NSE_EQ|INE765G01017": {
+    "symbol": "ICICIGI",
+    "name": "ICICI LOMBARD GIC LIMITED",
+    "trading_symbol": "ICICIGI"
+  },
+  "NSE_EQ|INE257A01026": {
+    "symbol": "BHEL",
+    "name": "BHEL",
+    "trading_symbol": "BHEL"
+  },
+  "NSE_EQ|INE935A01035": {
+    "symbol": "GLENMARK",
+    "name": "GLENMARK PHARMACEUTICALS",
+    "trading_symbol": "GLENMARK"
+  },
+  "NSE_EQ|INE003A01024": {
+    "symbol": "SIEMENS",
+    "name": "SIEMENS LTD",
+    "trading_symbol": "SIEMENS"
+  },
+  "NSE_EQ|INE029A01011": {
+    "symbol": "BPCL",
+    "name": "BHARAT PETROLEUM CORP  LT",
+    "trading_symbol": "BPCL"
+  },
+  "NSE_EQ|INE670A01012": {
+    "symbol": "TATAELXSI",
+    "name": "TATA ELXSI LIMITED",
+    "trading_symbol": "TATAELXSI"
+  },
+  "NSE_EQ|INE200M01039": {
+    "symbol": "VBL",
+    "name": "VARUN BEVERAGES LIMITED",
+    "trading_symbol": "VBL"
+  },
+  "NSE_EQ|INE585B01010": {
+    "symbol": "MARUTI",
+    "name": "MARUTI SUZUKI INDIA LTD.",
+    "trading_symbol": "MARUTI"
   },
   "NSE_EQ|INE522D01027": {
     "symbol": "MANAPPURAM",
@@ -34,11 +554,6 @@
     "name": "360 ONE WAM LIMITED",
     "trading_symbol": "360ONE"
   },
-  "NSE_EQ|INE070A01015": {
-    "symbol": "SHREECEM",
-    "name": "SHREE CEMENT LIMITED",
-    "trading_symbol": "SHREECEM"
-  },
   "NSE_EQ|INE749A01030": {
     "symbol": "JINDALSTEL",
     "name": "JINDAL STEEL LIMITED",
@@ -59,60 +574,20 @@
     "name": "PUNJAB NATIONAL BANK",
     "trading_symbol": "PNB"
   },
-  "NSE_EQ|INE736A01011": {
-    "symbol": "CDSL",
-    "name": "CENTRAL DEPO SER (I) LTD",
-    "trading_symbol": "CDSL"
-  },
-  "NSE_EQ|INE102D01028": {
-    "symbol": "GODREJCP",
-    "name": "GODREJ CONSUMER PRODUCTS",
-    "trading_symbol": "GODREJCP"
-  },
   "NSE_EQ|INE134E01011": {
     "symbol": "PFC",
     "name": "POWER FIN CORP LTD.",
     "trading_symbol": "PFC"
-  },
-  "NSE_EQ|INE009A01021": {
-    "symbol": "INFY",
-    "name": "INFOSYS LIMITED",
-    "trading_symbol": "INFY"
   },
   "NSE_EQ|INE918Z01012": {
     "symbol": "KAYNES",
     "name": "KAYNES TECHNOLOGY IND LTD",
     "trading_symbol": "KAYNES"
   },
-  "NSE_EQ|INE376G01013": {
-    "symbol": "BIOCON",
-    "name": "BIOCON LIMITED.",
-    "trading_symbol": "BIOCON"
-  },
   "NSE_EQ|INE619A01035": {
     "symbol": "PATANJALI",
     "name": "PATANJALI FOODS LIMITED",
     "trading_symbol": "PATANJALI"
-  },
-  "NSE_EQ|INE465A01025": {
-    "symbol": "BHARATFORG",
-    "name": "BHARAT FORGE LTD",
-    "trading_symbol": "BHARATFORG"
-  },
-  "NSE_EQ|INE540L01014": {
-    "symbol": "ALKEM",
-    "name": "ALKEM LABORATORIES LTD.",
-    "trading_symbol": "ALKEM"
-  },
-  "NSE_EQ|INE237A01036": {
-    "symbol": "KOTAKBANK",
-    "name": "KOTAK MAHINDRA BANK LTD",
-    "trading_symbol": "KOTAKBANK"
-  },
-  "NSE_EQ|INE361B01024": {
-    "symbol": "DIVISLAB",
-    "name": "DIVI S LABORATORIES LTD",
-    "trading_symbol": "DIVISLAB"
   },
   "NSE_EQ|INE811K01011": {
     "symbol": "PRESTIGE",
@@ -123,21 +598,6 @@
     "symbol": "HINDUNILVR",
     "name": "HINDUSTAN UNILEVER LTD.",
     "trading_symbol": "HINDUNILVR"
-  },
-  "NSE_EQ|INE476A01022": {
-    "symbol": "CANBK",
-    "name": "CANARA BANK",
-    "trading_symbol": "CANBK"
-  },
-  "NSE_EQ|INE745G01043": {
-    "symbol": "MCX",
-    "name": "MULTI COMMODITY EXCHANGE",
-    "trading_symbol": "MCX"
-  },
-  "NSE_EQ|INE721A01047": {
-    "symbol": "SHRIRAMFIN",
-    "name": "SHRIRAM FINANCE LIMITED",
-    "trading_symbol": "SHRIRAMFIN"
   },
   "NSE_EQ|INE028A01039": {
     "symbol": "BANKBARODA",
@@ -174,11 +634,6 @@
     "name": "SYNGENE INTERNATIONAL LTD",
     "trading_symbol": "SYNGENE"
   },
-  "NSE_EQ|INE118A01012": {
-    "symbol": "BAJAJHLDNG",
-    "name": "BAJAJ HOLDINGS & INVS LTD",
-    "trading_symbol": "BAJAJHLDNG"
-  },
   "NSE_EQ|INE674K01013": {
     "symbol": "ABCAPITAL",
     "name": "ADITYA BIRLA CAPITAL LTD.",
@@ -188,16 +643,6 @@
     "symbol": "HINDPETRO",
     "name": "HINDUSTAN PETROLEUM CORP",
     "trading_symbol": "HINDPETRO"
-  },
-  "NSE_EQ|INE528G01035": {
-    "symbol": "YESBANK",
-    "name": "YES BANK LIMITED",
-    "trading_symbol": "YESBANK"
-  },
-  "NSE_EQ|INE531F01023": {
-    "symbol": "NUVAMA",
-    "name": "NUVAMA WEALTH MANAGE LTD",
-    "trading_symbol": "NUVAMA"
   },
   "NSE_EQ|INE093I01010": {
     "symbol": "OBEROIRLTY",
@@ -219,25 +664,10 @@
     "name": "ASTRAL LIMITED",
     "trading_symbol": "ASTRAL"
   },
-  "NSE_EQ|INE142M01025": {
-    "symbol": "TATATECH",
-    "name": "TATA TECHNOLOGIES LIMITED",
-    "trading_symbol": "TATATECH"
-  },
-  "NSE_EQ|INE849A01020": {
-    "symbol": "TRENT",
-    "name": "TRENT LTD",
-    "trading_symbol": "TRENT"
-  },
   "NSE_EQ|INE669C01036": {
     "symbol": "TECHM",
     "name": "TECH MAHINDRA LIMITED",
     "trading_symbol": "TECHM"
-  },
-  "NSE_EQ|INE216A01030": {
-    "symbol": "BRITANNIA",
-    "name": "BRITANNIA INDUSTRIES LTD",
-    "trading_symbol": "BRITANNIA"
   },
   "NSE_EQ|INE111A01025": {
     "symbol": "CONCOR",
@@ -249,85 +679,20 @@
     "name": "STATE BANK OF INDIA",
     "trading_symbol": "SBIN"
   },
-  "NSE_EQ|INE081A01020": {
-    "symbol": "TATASTEEL",
-    "name": "TATA STEEL LIMITED",
-    "trading_symbol": "TATASTEEL"
-  },
-  "NSE_EQ|INE075A01022": {
-    "symbol": "WIPRO",
-    "name": "WIPRO LTD",
-    "trading_symbol": "WIPRO"
-  },
   "NSE_EQ|INE498L01015": {
     "symbol": "LTF",
     "name": "L&T FINANCE LIMITED",
     "trading_symbol": "LTF"
-  },
-  "NSE_EQ|INE377N01017": {
-    "symbol": "WAAREEENER",
-    "name": "WAAREE ENERGIES LIMITED",
-    "trading_symbol": "WAAREEENER"
-  },
-  "NSE_EQ|INE484J01027": {
-    "symbol": "GODREJPROP",
-    "name": "GODREJ PROPERTIES LTD",
-    "trading_symbol": "GODREJPROP"
-  },
-  "NSE_EQ|INE205A01025": {
-    "symbol": "VEDL",
-    "name": "VEDANTA LIMITED",
-    "trading_symbol": "VEDL"
-  },
-  "NSE_EQ|INE027H01010": {
-    "symbol": "MAXHEALTH",
-    "name": "MAX HEALTHCARE INS LTD",
-    "trading_symbol": "MAXHEALTH"
   },
   "NSE_EQ|INE121A01024": {
     "symbol": "CHOLAFIN",
     "name": "CHOLAMANDALAM IN & FIN CO",
     "trading_symbol": "CHOLAFIN"
   },
-  "NSE_EQ|INE974X01010": {
-    "symbol": "TIINDIA",
-    "name": "TUBE INVEST OF INDIA LTD",
-    "trading_symbol": "TIINDIA"
-  },
-  "NSE_EQ|INE854D01024": {
-    "symbol": "UNITDSPR",
-    "name": "UNITED SPIRITS LIMITED",
-    "trading_symbol": "UNITDSPR"
-  },
-  "NSE_EQ|INE742F01042": {
-    "symbol": "ADANIPORTS",
-    "name": "ADANI PORT & SEZ LTD",
-    "trading_symbol": "ADANIPORTS"
-  },
-  "NSE_EQ|INE226A01021": {
-    "symbol": "VOLTAS",
-    "name": "VOLTAS LTD",
-    "trading_symbol": "VOLTAS"
-  },
-  "NSE_EQ|INE047A01021": {
-    "symbol": "GRASIM",
-    "name": "GRASIM INDUSTRIES LTD",
-    "trading_symbol": "GRASIM"
-  },
   "NSE_EQ|INE326A01037": {
     "symbol": "LUPIN",
     "name": "LUPIN LIMITED",
     "trading_symbol": "LUPIN"
-  },
-  "NSE_EQ|INE584A01023": {
-    "symbol": "NMDC",
-    "name": "NMDC LTD.",
-    "trading_symbol": "NMDC"
-  },
-  "NSE_EQ|INE414G01012": {
-    "symbol": "MUTHOOTFIN",
-    "name": "MUTHOOT FINANCE LIMITED",
-    "trading_symbol": "MUTHOOTFIN"
   },
   "NSE_EQ|INE669E01016": {
     "symbol": "IDEA",
@@ -338,11 +703,6 @@
     "symbol": "PHOENIXLTD",
     "name": "THE PHOENIX MILLS LTD",
     "trading_symbol": "PHOENIXLTD"
-  },
-  "NSE_EQ|INE813H01021": {
-    "symbol": "TORNTPOWER",
-    "name": "TORRENT POWER LTD",
-    "trading_symbol": "TORNTPOWER"
   },
   "NSE_EQ|INE066P01011": {
     "symbol": "INOXWIND",
@@ -358,36 +718,6 @@
     "symbol": "IRCTC",
     "name": "INDIAN RAIL TOUR CORP LTD",
     "trading_symbol": "IRCTC"
-  },
-  "NSE_EQ|INE931S01010": {
-    "symbol": "ADANIENSOL",
-    "name": "ADANI ENERGY SOLUTION LTD",
-    "trading_symbol": "ADANIENSOL"
-  },
-  "NSE_EQ|INE053F01010": {
-    "symbol": "IRFC",
-    "name": "INDIAN RAILWAY FIN CORP L",
-    "trading_symbol": "IRFC"
-  },
-  "NSE_EQ|INE127D01025": {
-    "symbol": "HDFCAMC",
-    "name": "HDFC AMC LIMITED",
-    "trading_symbol": "HDFCAMC"
-  },
-  "NSE_EQ|INE021A01026": {
-    "symbol": "ASIANPAINT",
-    "name": "ASIAN PAINTS LIMITED",
-    "trading_symbol": "ASIANPAINT"
-  },
-  "NSE_EQ|INE356A01018": {
-    "symbol": "MPHASIS",
-    "name": "MPHASIS LIMITED",
-    "trading_symbol": "MPHASIS"
-  },
-  "NSE_EQ|INE733E01010": {
-    "symbol": "NTPC",
-    "name": "NTPC LTD",
-    "trading_symbol": "NTPC"
   },
   "NSE_EQ|INE022Q01020": {
     "symbol": "IEX",
@@ -414,85 +744,35 @@
     "name": "FSN E COMMERCE VENTURES",
     "trading_symbol": "NYKAA"
   },
-  "NSE_EQ|INE117A01022": {
-    "symbol": "ABB",
-    "name": "ABB INDIA LIMITED",
-    "trading_symbol": "ABB"
-  },
   "NSE_EQ|INE239A01024": {
     "symbol": "NESTLEIND",
     "name": "NESTLE INDIA LIMITED",
     "trading_symbol": "NESTLEIND"
-  },
-  "NSE_EQ|INE437A01024": {
-    "symbol": "APOLLOHOSP",
-    "name": "APOLLO HOSPITALS ENTER. L",
-    "trading_symbol": "APOLLOHOSP"
   },
   "NSE_EQ|INE245A01021": {
     "symbol": "TATAPOWER",
     "name": "TATA POWER CO LTD",
     "trading_symbol": "TATAPOWER"
   },
-  "NSE_EQ|INE053A01029": {
-    "symbol": "INDHOTEL",
-    "name": "THE INDIAN HOTELS CO. LTD",
-    "trading_symbol": "INDHOTEL"
-  },
   "NSE_EQ|INE196A01026": {
     "symbol": "MARICO",
     "name": "MARICO LIMITED",
     "trading_symbol": "MARICO"
-  },
-  "NSE_EQ|INE121J01017": {
-    "symbol": "INDUSTOWER",
-    "name": "INDUS TOWERS LIMITED",
-    "trading_symbol": "INDUSTOWER"
-  },
-  "NSE_EQ|INE121E01018": {
-    "symbol": "JSWENERGY",
-    "name": "JSW ENERGY LIMITED",
-    "trading_symbol": "JSWENERGY"
-  },
-  "NSE_EQ|INE019A01038": {
-    "symbol": "JSWSTEEL",
-    "name": "JSW STEEL LIMITED",
-    "trading_symbol": "JSWSTEEL"
   },
   "NSE_EQ|INE522F01014": {
     "symbol": "COALINDIA",
     "name": "COAL INDIA LTD",
     "trading_symbol": "COALINDIA"
   },
-  "NSE_EQ|INE095N01031": {
-    "symbol": "NBCC",
-    "name": "NBCC (INDIA) LIMITED",
-    "trading_symbol": "NBCC"
-  },
   "NSE_EQ|INE066F01020": {
     "symbol": "HAL",
     "name": "HINDUSTAN AERONAUTICS LTD",
     "trading_symbol": "HAL"
   },
-  "NSE_EQ|INE467B01029": {
-    "symbol": "TCS",
-    "name": "TATA CONSULTANCY SERV LT",
-    "trading_symbol": "TCS"
-  },
-  "NSE_EQ|INE079A01024": {
-    "symbol": "AMBUJACEM",
-    "name": "AMBUJA CEMENTS LTD",
-    "trading_symbol": "AMBUJACEM"
-  },
-  "NSE_EQ|INE457L01029": {
-    "symbol": "PGEL",
-    "name": "PG ELECTROPLAST LTD",
-    "trading_symbol": "PGEL"
-  },
-  "NSE_EQ|INE0J1Y01017": {
-    "symbol": "LICI",
-    "name": "LIFE INSURA CORP OF INDIA",
-    "trading_symbol": "LICI"
+  "NSE_EQ|INE002A01018": {
+    "symbol": "RELIANCE",
+    "name": "RELIANCE INDUSTRIES LTD",
+    "trading_symbol": "RELIANCE"
   },
   "NSE_EQ|INE299U01018": {
     "symbol": "CROMPTON",
@@ -509,16 +789,6 @@
     "name": "AMBER ENTERPRISES (I) LTD",
     "trading_symbol": "AMBER"
   },
-  "NSE_EQ|INE603J01030": {
-    "symbol": "PIIND",
-    "name": "PI INDUSTRIES LTD",
-    "trading_symbol": "PIIND"
-  },
-  "NSE_EQ|INE202E01016": {
-    "symbol": "IREDA",
-    "name": "INDIAN RENEWABLE ENERGY",
-    "trading_symbol": "IREDA"
-  },
   "NSE_EQ|INE663F01032": {
     "symbol": "NAUKRI",
     "name": "INFO EDGE (I) LTD",
@@ -534,95 +804,45 @@
     "name": "POWER GRID CORP. LTD.",
     "trading_symbol": "POWERGRID"
   },
-  "NSE_EQ|INE271C01023": {
-    "symbol": "DLF",
-    "name": "DLF LIMITED",
-    "trading_symbol": "DLF"
-  },
-  "NSE_EQ|INE318A01026": {
-    "symbol": "PIDILITIND",
-    "name": "PIDILITE INDUSTRIES LTD",
-    "trading_symbol": "PIDILITIND"
-  },
   "NSE_EQ|INE947Q01028": {
     "symbol": "LAURUSLABS",
     "name": "LAURUS LABS LIMITED",
     "trading_symbol": "LAURUSLABS"
-  },
-  "NSE_EQ|INE918I01026": {
-    "symbol": "BAJAJFINSV",
-    "name": "BAJAJ FINSERV LTD.",
-    "trading_symbol": "BAJAJFINSV"
-  },
-  "NSE_EQ|INE758E01017": {
-    "symbol": "JIOFIN",
-    "name": "JIO FIN SERVICES LTD",
-    "trading_symbol": "JIOFIN"
-  },
-  "NSE_EQ|INE089A01031": {
-    "symbol": "DRREDDY",
-    "name": "DR. REDDY S LABORATORIES",
-    "trading_symbol": "DRREDDY"
   },
   "NSE_EQ|INE848E01016": {
     "symbol": "NHPC",
     "name": "NHPC LTD",
     "trading_symbol": "NHPC"
   },
-  "NSE_EQ|INE982J01020": {
-    "symbol": "PAYTM",
-    "name": "ONE 97 COMMUNICATIONS LTD",
-    "trading_symbol": "PAYTM"
-  },
   "NSE_EQ|INE761H01022": {
     "symbol": "PAGEIND",
     "name": "PAGE INDUSTRIES LTD",
     "trading_symbol": "PAGEIND"
-  },
-  "NSE_EQ|INE494B01023": {
-    "symbol": "TVSMOTOR",
-    "name": "TVS MOTOR COMPANY  LTD",
-    "trading_symbol": "TVSMOTOR"
-  },
-  "NSE_EQ|INE646L01027": {
-    "symbol": "INDIGO",
-    "name": "INTERGLOBE AVIATION LTD",
-    "trading_symbol": "INDIGO"
   },
   "NSE_EQ|INE010B01027": {
     "symbol": "ZYDUSLIFE",
     "name": "ZYDUS LIFESCIENCES LTD",
     "trading_symbol": "ZYDUSLIFE"
   },
-  "NSE_EQ|INE302A01020": {
-    "symbol": "EXIDEIND",
-    "name": "EXIDE INDUSTRIES LTD",
-    "trading_symbol": "EXIDEIND"
-  },
   "NSE_EQ|INE634S01028": {
     "symbol": "MANKIND",
     "name": "MANKIND PHARMA LIMITED",
     "trading_symbol": "MANKIND"
-  },
-  "NSE_EQ|INE397D01024": {
-    "symbol": "BHARTIARTL",
-    "name": "BHARTI AIRTEL LIMITED",
-    "trading_symbol": "BHARTIARTL"
   },
   "NSE_EQ|INE192R01011": {
     "symbol": "DMART",
     "name": "AVENUE SUPERMARTS LIMITED",
     "trading_symbol": "DMART"
   },
-  "NSE_EQ|INE732I01013": {
-    "symbol": "ANGELONE",
-    "name": "ANGEL ONE LIMITED",
-    "trading_symbol": "ANGELONE"
-  },
   "NSE_EQ|INE059A01026": {
     "symbol": "CIPLA",
     "name": "CIPLA LTD",
     "trading_symbol": "CIPLA"
+  },
+  "NSE_EQ|INE732I01013": {
+    "symbol": "ANGELONE",
+    "name": "ANGEL ONE LIMITED",
+    "trading_symbol": "ANGELONE"
   },
   "NSE_EQ|INE138Y01010": {
     "symbol": "KFINTECH",
@@ -639,40 +859,15 @@
     "name": "MAX FINANCIAL SERV LTD",
     "trading_symbol": "MFSL"
   },
-  "NSE_EQ|INE949L01017": {
-    "symbol": "AUBANK",
-    "name": "AU SMALL FINANCE BANK LTD",
-    "trading_symbol": "AUBANK"
-  },
-  "NSE_EQ|INE881D01027": {
-    "symbol": "OFSS",
-    "name": "ORACLE FIN SERV SOFT LTD.",
-    "trading_symbol": "OFSS"
-  },
   "NSE_EQ|INE795G01014": {
     "symbol": "HDFCLIFE",
     "name": "HDFC LIFE INS CO LTD",
     "trading_symbol": "HDFCLIFE"
   },
-  "NSE_EQ|INE148I01020": {
-    "symbol": "SAMMAANCAP",
-    "name": "SAMMAAN CAPITAL LIMITED",
-    "trading_symbol": "SAMMAANCAP"
-  },
-  "NSE_EQ|INE280A01028": {
-    "symbol": "TITAN",
-    "name": "TITAN COMPANY LIMITED",
-    "trading_symbol": "TITAN"
-  },
   "NSE_EQ|INE298A01020": {
     "symbol": "CUMMINSIND",
     "name": "CUMMINS INDIA LTD",
     "trading_symbol": "CUMMINSIND"
-  },
-  "NSE_EQ|INE155A01022": {
-    "symbol": "TMPV",
-    "name": "TATA MOTORS PASS VEH LTD",
-    "trading_symbol": "TMPV"
   },
   "NSE_EQ|INE274J01014": {
     "symbol": "OIL",
@@ -684,25 +879,10 @@
     "name": "PNB HOUSING FIN LTD.",
     "trading_symbol": "PNBHOUSING"
   },
-  "NSE_EQ|INE095A01012": {
-    "symbol": "INDUSINDBK",
-    "name": "INDUSIND BANK LIMITED",
-    "trading_symbol": "INDUSINDBK"
-  },
-  "NSE_EQ|INE562A01011": {
-    "symbol": "INDIANB",
-    "name": "INDIAN BANK",
-    "trading_symbol": "INDIANB"
-  },
   "NSE_EQ|INE195A01028": {
     "symbol": "SUPREMEIND",
     "name": "SUPREME INDUSTRIES LTD",
     "trading_symbol": "SUPREMEIND"
-  },
-  "NSE_EQ|INE118H01025": {
-    "symbol": "BSE",
-    "name": "BSE LIMITED",
-    "trading_symbol": "BSE"
   },
   "NSE_EQ|INE364U01010": {
     "symbol": "ADANIGREEN",
@@ -719,110 +899,40 @@
     "name": "SUN PHARMACEUTICAL IND L",
     "trading_symbol": "SUNPHARMA"
   },
-  "NSE_EQ|INE935N01020": {
-    "symbol": "DIXON",
-    "name": "DIXON TECHNO (INDIA) LTD",
-    "trading_symbol": "DIXON"
-  },
   "NSE_EQ|INE038A01020": {
     "symbol": "HINDALCO",
     "name": "HINDALCO  INDUSTRIES  LTD",
     "trading_symbol": "HINDALCO"
-  },
-  "NSE_EQ|INE031A01017": {
-    "symbol": "HUDCO",
-    "name": "HSG & URBAN DEV CORPN LTD",
-    "trading_symbol": "HUDCO"
-  },
-  "NSE_EQ|INE242A01010": {
-    "symbol": "IOC",
-    "name": "INDIAN OIL CORP LTD",
-    "trading_symbol": "IOC"
   },
   "NSE_EQ|INE0DK501011": {
     "symbol": "PPLPHARMA",
     "name": "PIRAMAL PHARMA LIMITED",
     "trading_symbol": "PPLPHARMA"
   },
-  "NSE_EQ|INE692A01016": {
-    "symbol": "UNIONBANK",
-    "name": "UNION BANK OF INDIA",
-    "trading_symbol": "UNIONBANK"
-  },
-  "NSE_EQ|INE04I401011": {
-    "symbol": "KPITTECH",
-    "name": "KPIT TECHNOLOGIES LIMITED",
-    "trading_symbol": "KPITTECH"
-  },
   "NSE_EQ|INE061F01013": {
     "symbol": "FORTIS",
     "name": "FORTIS HEALTHCARE LTD",
     "trading_symbol": "FORTIS"
-  },
-  "NSE_EQ|INE263A01024": {
-    "symbol": "BEL",
-    "name": "BHARAT ELECTRONICS LTD",
-    "trading_symbol": "BEL"
   },
   "NSE_EQ|INE020B01018": {
     "symbol": "RECLTD",
     "name": "REC LIMITED",
     "trading_symbol": "RECLTD"
   },
-  "NSE_EQ|INE685A01028": {
-    "symbol": "TORNTPHARM",
-    "name": "TORRENT PHARMACEUTICALS L",
-    "trading_symbol": "TORNTPHARM"
-  },
-  "NSE_EQ|INE647A01010": {
-    "symbol": "SRF",
-    "name": "SRF LTD",
-    "trading_symbol": "SRF"
-  },
-  "NSE_EQ|INE860A01027": {
-    "symbol": "HCLTECH",
-    "name": "HCL TECHNOLOGIES LTD",
-    "trading_symbol": "HCLTECH"
-  },
   "NSE_EQ|INE0BS701011": {
     "symbol": "PREMIERENE",
     "name": "PREMIER ENERGIES LIMITED",
     "trading_symbol": "PREMIERENE"
-  },
-  "NSE_EQ|INE00H001014": {
-    "symbol": "SWIGGY",
-    "name": "SWIGGY LIMITED",
-    "trading_symbol": "SWIGGY"
-  },
-  "NSE_EQ|INE171A01029": {
-    "symbol": "FEDERALBNK",
-    "name": "FEDERAL BANK LTD",
-    "trading_symbol": "FEDERALBNK"
-  },
-  "NSE_EQ|INE976G01028": {
-    "symbol": "RBLBANK",
-    "name": "RBL BANK LIMITED",
-    "trading_symbol": "RBLBANK"
   },
   "NSE_EQ|INE262H01021": {
     "symbol": "PERSISTENT",
     "name": "PERSISTENT SYSTEMS LTD",
     "trading_symbol": "PERSISTENT"
   },
-  "NSE_EQ|INE084A01016": {
-    "symbol": "BANKINDIA",
-    "name": "BANK OF INDIA",
-    "trading_symbol": "BANKINDIA"
-  },
   "NSE_EQ|INE775A01035": {
     "symbol": "MOTHERSON",
     "name": "SAMVRDHNA MTHRSN INTL LTD",
     "trading_symbol": "MOTHERSON"
-  },
-  "NSE_EQ|INE878B01027": {
-    "symbol": "KEI",
-    "name": "KEI INDUSTRIES LTD.",
-    "trading_symbol": "KEI"
   },
   "NSE_EQ|INE018E01016": {
     "symbol": "SBICARD",
@@ -834,20 +944,10 @@
     "name": "GMR AIRPORTS LIMITED",
     "trading_symbol": "GMRAIRPORT"
   },
-  "NSE_EQ|INE417T01026": {
-    "symbol": "POLICYBZR",
-    "name": "PB FINTECH LIMITED",
-    "trading_symbol": "POLICYBZR"
-  },
   "NSE_EQ|INE415G01027": {
     "symbol": "RVNL",
     "name": "RAIL VIKAS NIGAM LIMITED",
     "trading_symbol": "RVNL"
-  },
-  "NSE_EQ|INE323A01026": {
-    "symbol": "BOSCHLTD",
-    "name": "BOSCH LIMITED",
-    "trading_symbol": "BOSCHLTD"
   },
   "NSE_EQ|INE214T01019": {
     "symbol": "LTIM",
@@ -859,11 +959,6 @@
     "name": "HAVELLS INDIA LIMITED",
     "trading_symbol": "HAVELLS"
   },
-  "NSE_EQ|INE545U01014": {
-    "symbol": "BANDHANBNK",
-    "name": "BANDHAN BANK LIMITED",
-    "trading_symbol": "BANDHANBNK"
-  },
   "NSE_EQ|INE249Z01020": {
     "symbol": "MAZDOCK",
     "name": "MAZAGON DOCK SHIPBUIL LTD",
@@ -873,21 +968,6 @@
     "symbol": "SOLARINDS",
     "name": "SOLAR INDUSTRIES (I) LTD",
     "trading_symbol": "SOLARINDS"
-  },
-  "NSE_EQ|INE530B01024": {
-    "symbol": "IIFL",
-    "name": "IIFL FINANCE LIMITED",
-    "trading_symbol": "IIFL"
-  },
-  "NSE_EQ|INE758T01015": {
-    "symbol": "ETERNAL",
-    "name": "ETERNAL LIMITED",
-    "trading_symbol": "ETERNAL"
-  },
-  "NSE_EQ|INE154A01025": {
-    "symbol": "ITC",
-    "name": "ITC LTD",
-    "trading_symbol": "ITC"
   },
   "NSE_EQ|INE455K01017": {
     "symbol": "POLYCAB",
@@ -899,30 +979,10 @@
     "name": "AUROBINDO PHARMA LTD",
     "trading_symbol": "AUROPHARMA"
   },
-  "NSE_EQ|INE101A01026": {
-    "symbol": "M&M",
-    "name": "MAHINDRA & MAHINDRA LTD",
-    "trading_symbol": "M&M"
-  },
-  "NSE_EQ|INE208A01029": {
-    "symbol": "ASHOKLEY",
-    "name": "ASHOK LEYLAND LTD",
-    "trading_symbol": "ASHOKLEY"
-  },
-  "NSE_EQ|INE303R01014": {
-    "symbol": "KALYANKJIL",
-    "name": "KALYAN JEWELLERS IND LTD",
-    "trading_symbol": "KALYANKJIL"
-  },
   "NSE_EQ|INE148O01028": {
     "symbol": "DELHIVERY",
     "name": "DELHIVERY LIMITED",
     "trading_symbol": "DELHIVERY"
-  },
-  "NSE_EQ|INE090A01021": {
-    "symbol": "ICICIBANK",
-    "name": "ICICI BANK LTD.",
-    "trading_symbol": "ICICIBANK"
   },
   "NSE_EQ|INE472A01039": {
     "symbol": "BLUESTARCO",
@@ -939,26 +999,6 @@
     "name": "SUZLON ENERGY LIMITED",
     "trading_symbol": "SUZLON"
   },
-  "NSE_EQ|INE018A01030": {
-    "symbol": "LT",
-    "name": "LARSEN & TOUBRO LTD.",
-    "trading_symbol": "LT"
-  },
-  "NSE_EQ|INE092T01019": {
-    "symbol": "IDFCFIRSTB",
-    "name": "IDFC FIRST BANK LIMITED",
-    "trading_symbol": "IDFCFIRSTB"
-  },
-  "NSE_EQ|INE347G01014": {
-    "symbol": "PETRONET",
-    "name": "PETRONET LNG LIMITED",
-    "trading_symbol": "PETRONET"
-  },
-  "NSE_EQ|INE067A01029": {
-    "symbol": "CGPOWER",
-    "name": "CG POWER AND IND SOL LTD",
-    "trading_symbol": "CGPOWER"
-  },
   "NSE_EQ|INE423A01024": {
     "symbol": "ADANIENT",
     "name": "ADANI ENTERPRISES LIMITED",
@@ -974,16 +1014,6 @@
     "name": "HITACHI ENERGY INDIA LTD",
     "trading_symbol": "POWERINDIA"
   },
-  "NSE_EQ|INE765G01017": {
-    "symbol": "ICICIGI",
-    "name": "ICICI LOMBARD GIC LIMITED",
-    "trading_symbol": "ICICIGI"
-  },
-  "NSE_EQ|INE257A01026": {
-    "symbol": "BHEL",
-    "name": "BHEL",
-    "trading_symbol": "BHEL"
-  },
   "NSE_EQ|INE129A01019": {
     "symbol": "GAIL",
     "name": "GAIL (INDIA) LTD",
@@ -998,31 +1028,6 @@
     "symbol": "SAIL",
     "name": "STEEL AUTHORITY OF INDIA",
     "trading_symbol": "SAIL"
-  },
-  "NSE_EQ|INE935A01035": {
-    "symbol": "GLENMARK",
-    "name": "GLENMARK PHARMACEUTICALS",
-    "trading_symbol": "GLENMARK"
-  },
-  "NSE_EQ|INE003A01024": {
-    "symbol": "SIEMENS",
-    "name": "SIEMENS LTD",
-    "trading_symbol": "SIEMENS"
-  },
-  "NSE_EQ|INE029A01011": {
-    "symbol": "BPCL",
-    "name": "BHARAT PETROLEUM CORP  LT",
-    "trading_symbol": "BPCL"
-  },
-  "NSE_EQ|INE670A01012": {
-    "symbol": "TATAELXSI",
-    "name": "TATA ELXSI LIMITED",
-    "trading_symbol": "TATAELXSI"
-  },
-  "NSE_EQ|INE200M01039": {
-    "symbol": "VBL",
-    "name": "VARUN BEVERAGES LIMITED",
-    "trading_symbol": "VBL"
   },
   "NSE_EQ|INE016A01026": {
     "symbol": "DABUR",

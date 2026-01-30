@@ -59,10 +59,17 @@ class WebSocketUserManager:
         self.client_to_user: Dict[str, str] = {}  # client_id -> user_id
         self.connection_metadata: Dict[str, Dict] = {}
         self.cleanup_task = None
-        self._lock = asyncio.Lock()
+        self._locks = {}
         
-        # Start background cleanup task
-        self.start_cleanup_task()
+    def _get_lock(self):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+            
+        if not hasattr(loop, '_websocket_user_manager_lock'):
+            loop._websocket_user_manager_lock = asyncio.Lock()
+        return loop._websocket_user_manager_lock
     
     async def register_user_connection(
         self, 
@@ -72,7 +79,15 @@ class WebSocketUserManager:
         websocket: WebSocket
     ) -> bool:
         """Register a new user connection, cleaning up duplicates"""
-        async with self._lock:
+        # Ensure cleanup task is running
+        self.start_cleanup_task()
+        
+        lock = self._get_lock()
+        if not lock:
+            logger.error("❌ No event loop running for registration")
+            return False
+
+        async with lock:
             try:
                 # Create user session if doesn't exist
                 if user_id not in self.users:
@@ -149,7 +164,9 @@ class WebSocketUserManager:
     
     async def unregister_connection(self, client_id: str):
         """Unregister a connection when it closes"""
-        async with self._lock:
+        lock = self._get_lock()
+        if not lock: return
+        async with lock:
             try:
                 if client_id not in self.client_to_user:
                     return
@@ -299,7 +316,9 @@ class WebSocketUserManager:
         now = datetime.now()
         stale_threshold = timedelta(minutes=10)
         
-        async with self._lock:
+        lock = self._get_lock()
+        if not lock: return
+        async with lock:
             for client_id, user_id in list(self.client_to_user.items()):
                 if user_id not in self.users:
                     stale_connections.append(client_id)
@@ -340,7 +359,9 @@ class WebSocketUserManager:
         now = datetime.now()
         inactive_threshold = timedelta(hours=1)
         
-        async with self._lock:
+        lock = self._get_lock()
+        if not lock: return
+        async with lock:
             for user_id, user_session in list(self.users.items()):
                 if now - user_session.last_activity > inactive_threshold:
                     # Only remove if no active connections
@@ -370,7 +391,9 @@ class WebSocketUserManager:
                 pass
         
         # Close all connections
-        async with self._lock:
+        lock = self._get_lock()
+        if not lock: return
+        async with lock:
             for user_session in self.users.values():
                 for connection in user_session.connections.values():
                     if connection.is_active and connection.websocket:

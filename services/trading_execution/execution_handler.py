@@ -181,15 +181,20 @@ class TradeExecutionHandler:
             # Generate mock order ID
             order_id = f"PT{get_ist_now_naive().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:6].upper()}"
 
-            # Simulate execution at prepared entry price
-            entry_price = prepared_trade.entry_price
+            # Simulate execution at prepared entry price with SLIPPAGE
+            # In paper trading, we usually get a slightly worse price than LTP
+            # Adding 0.05% slippage to simulate real market impact
+            raw_entry_price = prepared_trade.entry_price
+            slippage = raw_entry_price * Decimal("0.0005")  # 0.05% slippage
+            entry_price = raw_entry_price + slippage
+            
             quantity = prepared_trade.position_size_lots * prepared_trade.lot_size
             lots_traded = prepared_trade.position_size_lots
             total_investment = entry_price * Decimal(str(quantity))
 
             log_structured(
                 event="PAPER_TRADE_EXECUTION",
-                message=f"Executing PAPER trade {trade_id}",
+                message=f"Executing PAPER trade {trade_id} (Price: {raw_entry_price} -> {entry_price} with slippage)",
                 data={
                     "trade_id": trade_id,
                     "symbol": prepared_trade.stock_symbol,
@@ -203,47 +208,34 @@ class TradeExecutionHandler:
                 user_id=str(prepared_trade.user_id)
             )
 
-            # UPDATE PAPER TRADING ACCOUNT BALANCE (Sync with in-memory service)
+            # UPDATE PAPER TRADING ACCOUNT BALANCE (Sync with in-memory service and DB)
             try:
                 from services.paper_trading_account import paper_trading_service
                 
-                # Get or create account (in-memory)
-                account = paper_trading_service.accounts.get(prepared_trade.user_id)
-                if not account:
-                    # Initialize default account if not exists
-                    from services.paper_trading_account import PaperAccount
-                    from datetime import datetime, timezone
-                    default_cap = 100000.0
-                    account = PaperAccount(
-                        user_id=prepared_trade.user_id,
-                        initial_capital=default_cap,
-                        current_balance=default_cap,
-                        used_margin=0.0,
-                        available_margin=default_cap,
-                        total_pnl=0.0,
-                        daily_pnl=0.0,
-                        positions_count=0,
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc)
-                    )
-                    paper_trading_service.accounts[prepared_trade.user_id] = account
+                trade_data = {
+                    "symbol": prepared_trade.stock_symbol,
+                    "instrument_key": prepared_trade.option_instrument_key,
+                    "option_type": prepared_trade.option_type,
+                    "strike_price": float(prepared_trade.strike_price),
+                    "entry_price": float(entry_price),
+                    "quantity": quantity,
+                    "lot_size": prepared_trade.lot_size,
+                    "invested_amount": float(total_investment),
+                    "stop_loss": float(prepared_trade.stop_loss),
+                    "target": float(prepared_trade.target_price)
+                }
                 
-                # Deduct capital
-                investment_float = float(total_investment)
-                if account.available_margin >= investment_float:
-                    account.available_margin -= investment_float
-                    account.current_balance -= investment_float  # Cash balance decreases
-                    account.used_margin += investment_float
-                    account.positions_count += 1
-                    account.updated_at = datetime.now(timezone.utc)
+                # Use synchronous method as we are in a synchronous function
+                paper_trading_service.execute_paper_trade_sync(
+                    user_id=prepared_trade.user_id,
+                    trade_data=trade_data,
+                    db=db
+                )
+                
+                # Fetch updated account for logging (from in-memory)
+                account = paper_trading_service.accounts.get(prepared_trade.user_id)
+                if account:
                     logger.info(f"✅ Paper account updated: Balance={account.current_balance:,.2f}, Used={account.used_margin:,.2f}")
-                else:
-                    logger.warning(f"⚠️ Insufficient paper funds but allowing trade for testing. Avail={account.available_margin}, Req={investment_float}")
-                    # Allow it anyway or throw error? For safety in testing, let's update negative
-                    account.available_margin -= investment_float
-                    account.current_balance -= investment_float
-                    account.used_margin += investment_float
-                    account.positions_count += 1
 
             except Exception as e:
                 logger.error(f"Failed to update paper trading account balance: {e}")

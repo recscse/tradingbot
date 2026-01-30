@@ -1,27 +1,14 @@
-// src/components/profile/PortfolioHealthIndicator.jsx
 import React from "react";
-import {
-  Box,
-  Typography,
-  Paper,
-  Stack,
-  Avatar,
-  LinearProgress,
-  Chip,
-  Grid,
-  useTheme,
-  alpha,
-} from "@mui/material";
-import {
-  Security as SecurityIcon,
-  CheckCircle as CheckIcon,
-  Warning as WarningIcon,
-  Error as ErrorIcon,
-} from "@mui/icons-material";
+import { 
+  Activity, 
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Lightbulb
+} from "lucide-react";
+import { motion } from "framer-motion";
 
 const PortfolioHealthIndicator = ({ portfolioData, tradingStats }) => {
-  const theme = useTheme();
-
   // Calculate portfolio health metrics
   const calculateHealthScore = () => {
     let score = 0;
@@ -32,10 +19,10 @@ const PortfolioHealthIndicator = ({ portfolioData, tradingStats }) => {
     const diversificationScore = Math.min(brokerCount * 20, 30);
     score += diversificationScore;
     factors.push({
-      name: "Diversification",
+      name: "Broker Mix",
       score: diversificationScore,
       max: 30,
-      status: diversificationScore >= 20 ? "good" : diversificationScore >= 10 ? "warning" : "poor"
+      status: diversificationScore >= 20 ? "good" : "warning"
     });
 
     // Performance consistency (25%)
@@ -43,23 +30,23 @@ const PortfolioHealthIndicator = ({ portfolioData, tradingStats }) => {
     const consistencyScore = Math.min(winRate * 0.25, 25);
     score += consistencyScore;
     factors.push({
-      name: "Performance",
+      name: "Win Consistency",
       score: consistencyScore,
       max: 25,
-      status: consistencyScore >= 15 ? "good" : consistencyScore >= 10 ? "warning" : "poor"
+      status: consistencyScore >= 15 ? "good" : "warning"
     });
 
     // Risk management (25%)
     const avgTradeSize = tradingStats?.avg_trade_value || 0;
     const totalPortfolio = tradingStats?.total_portfolio_value || 1;
     const riskRatio = avgTradeSize / totalPortfolio;
-    const riskScore = riskRatio < 0.05 ? 25 : riskRatio < 0.1 ? 20 : riskRatio < 0.2 ? 15 : 10;
+    const riskScore = riskRatio < 0.05 ? 25 : riskRatio < 0.1 ? 20 : 15;
     score += riskScore;
     factors.push({
-      name: "Risk Management",
+      name: "Risk Control",
       score: riskScore,
       max: 25,
-      status: riskScore >= 20 ? "good" : riskScore >= 15 ? "warning" : "poor"
+      status: riskScore >= 20 ? "good" : "warning"
     });
 
     // Activity level (20%)
@@ -67,10 +54,10 @@ const PortfolioHealthIndicator = ({ portfolioData, tradingStats }) => {
     const activityScore = Math.min(totalTrades * 0.2, 20);
     score += activityScore;
     factors.push({
-      name: "Activity",
+      name: "Execution",
       score: activityScore,
       max: 20,
-      status: activityScore >= 15 ? "good" : activityScore >= 10 ? "warning" : "poor"
+      status: activityScore >= 15 ? "good" : "warning"
     });
 
     return { score: Math.round(score), factors };
@@ -78,197 +65,64 @@ const PortfolioHealthIndicator = ({ portfolioData, tradingStats }) => {
 
   const { score, factors } = calculateHealthScore();
 
-  const getHealthStatus = (score) => {
-    if (score >= 80) return { status: "excellent", color: "success", icon: CheckIcon };
-    if (score >= 60) return { status: "good", color: "primary", icon: CheckIcon };
-    if (score >= 40) return { status: "average", color: "warning", icon: WarningIcon };
-    return { status: "needs improvement", color: "error", icon: ErrorIcon };
+  const getHealthMeta = (score) => {
+    if (score >= 80) return { label: "EXCELLENT", color: "tw-text-emerald-600", bg: "tw-bg-emerald-50", icon: CheckCircle2 };
+    if (score >= 60) return { label: "STABLE", color: "tw-text-blue-600", bg: "tw-bg-blue-50", icon: Activity };
+    if (score >= 40) return { label: "AVERAGE", color: "tw-text-amber-600", bg: "tw-bg-amber-50", icon: AlertTriangle };
+    return { label: "CRITICAL", color: "tw-text-rose-600", bg: "tw-bg-rose-50", icon: XCircle };
   };
 
-  const healthStatus = getHealthStatus(score);
-
-  const getFactorColor = (status) => {
-    switch (status) {
-      case "good": return "success";
-      case "warning": return "warning";
-      case "poor": return "error";
-      default: return "primary";
-    }
-  };
+  const meta = getHealthMeta(score);
+  const Icon = meta.icon;
 
   return (
-    <Paper
-      elevation={0}
-      sx={{
-        p: 4,
-        bgcolor: alpha(theme.palette.background.paper, 0.8),
-        backdropFilter: "blur(10px)",
-        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-        borderRadius: 3,
-        position: "relative",
-        overflow: "hidden",
-        "&::before": {
-          content: '""',
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 3,
-          background: `linear-gradient(90deg, ${theme.palette[healthStatus.color].main}, ${theme.palette[healthStatus.color].light})`,
-        }
-      }}
-    >
-      <Stack direction="row" alignItems="center" justifyContent="space-between" mb={3}>
-        <Stack direction="row" alignItems="center" spacing={2}>
-          <Avatar
-            sx={{
-              bgcolor: alpha(theme.palette[healthStatus.color].main, 0.1),
-              color: `${healthStatus.color}.main`,
-              width: 56,
-              height: 56,
-            }}
-          >
-            <SecurityIcon sx={{ fontSize: 28 }} />
-          </Avatar>
-          <Box>
-            <Typography variant="h6" fontWeight={700}>
-              Portfolio Health Score
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Overall assessment of your trading portfolio
-            </Typography>
-          </Box>
-        </Stack>
+    <div className="tw-space-y-6">
+      <div className="tw-flex tw-items-center tw-justify-between">
+        <div className="tw-flex tw-items-center tw-gap-4">
+          <div className={`tw-p-3 tw-rounded-2xl ${meta.bg} ${meta.color} tw-shadow-sm`}>
+            <Icon className="tw-w-6 tw-h-6" />
+          </div>
+          <div>
+            <div className="tw-text-3xl tw-font-black tw-text-slate-900 tw-dark:text-white tw-tracking-tighter">
+              {score}<span className="tw-text-sm tw-text-slate-400 tw-ml-1">/100</span>
+            </div>
+            <div className={`tw-text-[10px] tw-font-black tw-uppercase tw-tracking-widest ${meta.color}`}>
+              {meta.label}
+            </div>
+          </div>
+        </div>
+      </div>
 
-        <Stack alignItems="center" spacing={1}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Typography variant="h3" fontWeight={800} color={`${healthStatus.color}.main`}>
-              {score}
-            </Typography>
-            <Typography variant="h6" color="text.secondary">
-              /100
-            </Typography>
-          </Stack>
-          <Chip
-            icon={<healthStatus.icon sx={{ fontSize: 16 }} />}
-            label={healthStatus.status.toUpperCase()}
-            color={healthStatus.color}
-            variant="outlined"
-            sx={{ fontWeight: 600, textTransform: "capitalize" }}
-          />
-        </Stack>
-      </Stack>
-
-      {/* Health Score Progress */}
-      <Box mb={4}>
-        <LinearProgress
-          variant="determinate"
-          value={score}
-          sx={{
-            height: 12,
-            borderRadius: 6,
-            bgcolor: alpha(theme.palette[healthStatus.color].main, 0.1),
-            "& .MuiLinearProgress-bar": {
-              borderRadius: 6,
-              background: `linear-gradient(90deg, ${theme.palette[healthStatus.color].main}, ${theme.palette[healthStatus.color].light})`,
-            }
-          }}
-        />
-        <Stack direction="row" justifyContent="space-between" mt={1}>
-          <Typography variant="caption" color="text.secondary">
-            Poor (0-39)
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Average (40-59)
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Good (60-79)
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Excellent (80-100)
-          </Typography>
-        </Stack>
-      </Box>
-
-      {/* Health Factors Breakdown */}
-      <Typography variant="h6" fontWeight={700} mb={3}>
-        Health Factors
-      </Typography>
-
-      <Grid container spacing={3}>
-        {factors.map((factor, index) => (
-          <Grid item xs={6} sm={3} key={index}>
-            <Box>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
-                <Typography variant="body2" fontWeight={600}>
-                  {factor.name}
-                </Typography>
-                <Chip
-                  size="small"
-                  label={`${factor.score}/${factor.max}`}
-                  color={getFactorColor(factor.status)}
-                  variant="outlined"
-                  sx={{ fontSize: "0.7rem", height: 20 }}
-                />
-              </Stack>
-              
-              <LinearProgress
-                variant="determinate"
-                value={(factor.score / factor.max) * 100}
-                sx={{
-                  height: 6,
-                  borderRadius: 3,
-                  bgcolor: alpha(theme.palette[getFactorColor(factor.status)].main, 0.1),
-                  "& .MuiLinearProgress-bar": {
-                    borderRadius: 3,
-                    bgcolor: `${getFactorColor(factor.status)}.main`,
-                  }
-                }}
+      <div className="tw-space-y-4">
+        {factors.map((factor, idx) => (
+          <div key={idx} className="tw-space-y-1.5">
+            <div className="tw-flex tw-justify-between tw-text-[10px] tw-font-bold tw-uppercase tw-tracking-tighter">
+              <span className="tw-text-slate-500">{factor.name}</span>
+              <span className={factor.status === 'good' ? 'tw-text-emerald-600' : 'tw-text-amber-600'}>
+                {factor.score}/{factor.max}
+              </span>
+            </div>
+            <div className="tw-h-1 tw-w-full tw-bg-slate-100 tw-dark:bg-slate-800 tw-rounded-full tw-overflow-hidden">
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${(factor.score / factor.max) * 100}%` }}
+                className={`tw-h-full ${factor.status === 'good' ? 'tw-bg-emerald-500' : 'tw-bg-amber-500'}`}
               />
-            </Box>
-          </Grid>
+            </div>
+          </div>
         ))}
-      </Grid>
+      </div>
 
-      {/* Recommendations */}
-      <Box mt={4} pt={3} borderTop={`1px solid ${alpha(theme.palette.divider, 0.1)}`}>
-        <Typography variant="body2" fontWeight={600} mb={2}>
-          💡 Recommendations
-        </Typography>
-        
-        <Stack spacing={1}>
-          {score < 80 && (
-            <>
-              {factors.find(f => f.name === "Diversification" && f.score < 20) && (
-                <Typography variant="body2" color="text.secondary">
-                  • Consider connecting more brokers to improve diversification
-                </Typography>
-              )}
-              {factors.find(f => f.name === "Performance" && f.score < 15) && (
-                <Typography variant="body2" color="text.secondary">
-                  • Review your trading strategy to improve win rate
-                </Typography>
-              )}
-              {factors.find(f => f.name === "Risk Management" && f.score < 20) && (
-                <Typography variant="body2" color="text.secondary">
-                  • Consider reducing position sizes to manage risk better
-                </Typography>
-              )}
-              {factors.find(f => f.name === "Activity" && f.score < 15) && (
-                <Typography variant="body2" color="text.secondary">
-                  • Increase trading activity with proper risk management
-                </Typography>
-              )}
-            </>
-          )}
-          {score >= 80 && (
-            <Typography variant="body2" color="success.main">
-              ✅ Excellent portfolio health! Keep up the great work!
-            </Typography>
-          )}
-        </Stack>
-      </Box>
-    </Paper>
+      <div className="tw-mt-6 tw-p-4 tw-rounded-2xl tw-bg-indigo-50/50 tw-dark:tw-bg-indigo-950/20 tw-border tw-border-indigo-100 tw-dark:tw-border-indigo-900/30">
+        <div className="tw-flex tw-items-center tw-gap-2 tw-mb-2">
+          <Lightbulb className="tw-w-4 tw-h-4 tw-text-indigo-600" />
+          <span className="tw-text-xs tw-font-black tw-text-indigo-900 tw-dark:text-indigo-300 tw-uppercase tw-tracking-tight">Strategy Tip</span>
+        </div>
+        <p className="tw-text-[11px] tw-font-medium tw-text-indigo-700 tw-dark:text-indigo-400 tw-leading-relaxed">
+          {score < 80 ? "Diversifying your broker accounts can reduce platform-specific risk and improve overall capital efficiency." : "Your portfolio health is in the top tier. Maintain current risk parameters for long-term consistency."}
+        </p>
+      </div>
+    </div>
   );
 };
 

@@ -108,18 +108,28 @@ class OptimizedCache:
     def __init__(self):
         self._data = {}
         self._expiry = {}
-        self._lock = asyncio.Lock()
+        self._locks = {}
+
+    def _get_lock(self):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+            
+        if not hasattr(loop, '_instrument_cache_lock'):
+            loop._instrument_cache_lock = asyncio.Lock()
+        return loop._instrument_cache_lock
 
     async def ping(self):
         return True
 
     async def setex(self, key: str, ttl: int, value: str):
-        async with self._lock:
+        async with self._get_lock():
             self._data[key] = value
             self._expiry[key] = time.time() + ttl
 
     async def get(self, key: str) -> Optional[str]:
-        async with self._lock:
+        async with self._get_lock():
             if key in self._data:
                 if key in self._expiry and time.time() > self._expiry[key]:
                     del self._data[key]
@@ -129,19 +139,19 @@ class OptimizedCache:
             return None
 
     async def mget(self, keys: List[str]) -> List[Optional[str]]:
-        async with self._lock:
+        async with self._get_lock():
             self._cleanup_expired()
             return [self._data.get(key) for key in keys]
 
     async def keys(self, pattern: str) -> List[str]:
         import fnmatch
 
-        async with self._lock:
+        async with self._get_lock():
             self._cleanup_expired()
             return [k for k in self._data.keys() if fnmatch.fnmatch(k, pattern)]
 
     async def delete(self, *keys):
-        async with self._lock:
+        async with self._get_lock():
             for key in keys:
                 self._data.pop(key, None)
                 self._expiry.pop(key, None)
@@ -160,7 +170,18 @@ class TradingInstrumentService:
     """Simplified Trading Instrument Service for NSE and MCX instruments"""
 
     _instance = None
-    _lock = asyncio.Lock()
+    _locks = {}
+
+    @classmethod
+    def _get_class_lock(cls):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+            
+        if not hasattr(loop, '_trading_instrument_service_class_lock'):
+            loop._trading_instrument_service_class_lock = asyncio.Lock()
+        return loop._trading_instrument_service_class_lock
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -719,6 +740,19 @@ class TradingInstrumentService:
     def is_initialized(self) -> bool:
         """Check if service is initialized"""
         return self._service_initialized
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get service status for system health monitoring"""
+        return {
+            "status": "healthy" if self._service_initialized and not self.last_error else "error" if self.last_error else "pending",
+            "initialized": self._service_initialized,
+            "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+            "total_instruments": len(self._websocket_keys) if self._service_initialized else 0,
+            "nse_keys": len(self._dashboard_keys) if self._service_initialized else 0,
+            "mcx_keys": len(self._mcx_keys) if self._service_initialized else 0,
+            "last_error": self.last_error,
+            "timestamp": datetime.now().isoformat()
+        }
 
     async def get_websocket_subscription_keys(
         self, max_keys: int = MAX_WEBSOCKET_INSTRUMENTS

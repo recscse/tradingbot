@@ -38,8 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 # Global automation lock to prevent multiple concurrent refresh attempts
-# Note: Lock is created lazily to avoid event loop binding issues
-_automation_lock = None
+_sync_lock = threading.Lock()
 _last_refresh_attempt = None
 _refresh_in_progress = False
 _last_refresh_status: Optional[Dict] = None
@@ -47,13 +46,18 @@ _last_refresh_status: Optional[Dict] = None
 
 def _get_automation_lock():
     """
-    Get or create the automation lock in the current event loop context.
-    This prevents event loop binding issues when module is imported.
+    Get or create the automation lock for the current event loop.
+    This uses a loop-attribute pattern to ensure the lock is bound to the correct loop.
     """
-    global _automation_lock
-    if _automation_lock is None:
-        _automation_lock = asyncio.Lock()
-    return _automation_lock
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+        
+    # Store the lock on the loop object itself to guarantee binding
+    if not hasattr(loop, '_upstox_automation_global_lock'):
+        loop._upstox_automation_global_lock = asyncio.Lock()
+    return loop._upstox_automation_global_lock
 
 
 class UpstoxAutomationService:
@@ -72,9 +76,6 @@ class UpstoxAutomationService:
 
         # Store captured authorization code
         self._captured_auth_code = None
-
-        # Instance lock for this service (lazy initialization to avoid event loop issues)
-        self._instance_lock = None
 
         # Validate critical configuration
         missing_vars = []
@@ -99,11 +100,18 @@ class UpstoxAutomationService:
 
     def _get_instance_lock(self):
         """
-        Get or create instance lock in the current event loop context.
+        Get or create instance lock for the current event loop.
         """
-        if self._instance_lock is None:
-            self._instance_lock = asyncio.Lock()
-        return self._instance_lock
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+        # Use a unique attribute name per instance
+        attr_name = f'_upstox_instance_lock_{id(self)}'
+        if not hasattr(loop, attr_name):
+            setattr(loop, attr_name, asyncio.Lock())
+        return getattr(loop, attr_name)
 
     def get_admin_broker_config(self, db: Session) -> Optional[BrokerConfig]:
         """
@@ -387,8 +395,13 @@ class UpstoxAutomationService:
         try:
             # Windows-specific: Set ProactorEventLoop policy for subprocess support
             if platform.system() == 'Windows':
-                loop = asyncio.get_event_loop()
-                if not isinstance(loop, asyncio.ProactorEventLoop):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    # Fallback if no loop is running (unlikely here)
+                    loop = None
+
+                if loop and not isinstance(loop, asyncio.ProactorEventLoop):
                     logger.info("Setting Windows ProactorEventLoop for Playwright subprocess support")
                     # We need to run Playwright in a new event loop with ProactorEventLoop
                     return await self._run_playwright_with_proactor_loop(api_key, admin_user_id)
@@ -463,8 +476,14 @@ class UpstoxAutomationService:
         """
         global _refresh_in_progress, _last_refresh_attempt
 
-        # Use global lock to prevent multiple concurrent refresh attempts
+        # Use loop-specific lock to prevent concurrent refresh attempts within the same loop
         automation_lock = _get_automation_lock()
+        
+        # Guard against calling outside a loop
+        if automation_lock is None:
+            logger.error("❌ Cannot refresh token: No active event loop found")
+            return {"success": False, "error": "No active event loop"}
+
         async with automation_lock:
             # ✅ CRITICAL FIX: Always allow refresh if emergency_bypass=True or token is expired
             now = datetime.now()
@@ -506,40 +525,43 @@ class UpstoxAutomationService:
                 logger.warning(f"Could not check token status: {e}")
                 should_proceed = True  # Proceed if we can't verify
 
-            # Only check cooldown if not in emergency/expired mode
-            if not should_proceed:
-                if (
-                    _last_refresh_attempt
-                    and (now - _last_refresh_attempt).seconds < 120
-                ):
-                    logger.warning(
-                        "⏳ Token refresh attempted recently, skipping duplicate request"
-                    )
-                    log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped due to cooldown")
-                    return {
-                        "success": False,
-                        "error": "Token refresh attempted recently. Please wait before retrying.",
-                        "retry_after_seconds": 120
-                        - (now - _last_refresh_attempt).seconds,
-                    }
+            # Use threading lock to protect global state check across loops/threads
+            with _sync_lock:
+                # Only check cooldown if not in emergency/expired mode
+                if not should_proceed:
+                    if (
+                        _last_refresh_attempt
+                        and (now - _last_refresh_attempt).seconds < 120
+                    ):
+                        logger.warning(
+                            "⏳ Token refresh attempted recently, skipping duplicate request"
+                        )
+                        log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped due to cooldown")
+                        return {
+                            "success": False,
+                            "error": "Token refresh attempted recently. Please wait before retrying.",
+                            "retry_after_seconds": 120
+                            - (now - _last_refresh_attempt).seconds,
+                        }
 
-                if _refresh_in_progress:
-                    logger.warning(
-                        "⏳ Token refresh already in progress, skipping duplicate request"
-                    )
-                    log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped - already in progress")
-                    return {
-                        "success": False,
-                        "error": "Token refresh already in progress",
-                    }
+                    if _refresh_in_progress:
+                        logger.warning(
+                            "⏳ Token refresh already in progress, skipping duplicate request"
+                        )
+                        log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped - already in progress")
+                        return {
+                            "success": False,
+                            "error": "Token refresh already in progress",
+                        }
 
-            _refresh_in_progress = True
-            _last_refresh_attempt = now
+                _refresh_in_progress = True
+                _last_refresh_attempt = now
 
             try:
                 return await self._perform_token_refresh()
             finally:
-                _refresh_in_progress = False
+                with _sync_lock:
+                    _refresh_in_progress = False
 
     async def _perform_token_refresh(self) -> Dict:
         """
