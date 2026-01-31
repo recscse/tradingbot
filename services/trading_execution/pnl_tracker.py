@@ -299,7 +299,17 @@ class RealTimePnLTracker:
 
             # Calculate PnL
             pnl_points = current_price - entry_price
-            pnl_amount = pnl_points * Decimal(str(quantity))
+            gross_pnl = pnl_points * Decimal(str(quantity))
+
+            # ESTIMATE CHARGES (for realistic live tracking)
+            # Buy + Sell turnover
+            buy_val = entry_price * Decimal(str(quantity))
+            sell_val = current_price * Decimal(str(quantity))
+            est_turnover = buy_val + sell_val
+            
+            # Brokerage (₹40) + Taxes (~0.1%)
+            est_charges = Decimal('40.0') + (est_turnover * Decimal('0.001'))
+            pnl_amount = gross_pnl - est_charges
 
             # CRITICAL FIX: Calculate percentage based on total_investment, not per-unit price
             pnl_percent = (pnl_amount / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
@@ -590,6 +600,14 @@ class RealTimePnLTracker:
         try:
             logger.info(f"🚪 Closing position {trade_execution.trade_id}: {exit_reason}")
 
+            # ACTUAL EXIT PRICE WITH SLIPPAGE FOR PAPER TRADING
+            if trade_execution.trading_mode == "paper":
+                # Subtract 0.05% slippage from exit price in paper trading
+                raw_exit_price = exit_price
+                slippage = raw_exit_price * Decimal("0.0005")
+                exit_price = raw_exit_price - slippage
+                logger.info(f"📝 Paper exit slippage applied: {raw_exit_price} -> {exit_price}")
+
             # Place exit order if live trading
             exit_order_id = None
             if trade_execution.trading_mode == "live":
@@ -604,15 +622,19 @@ class RealTimePnLTracker:
             quantity = trade_execution.quantity
             total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
 
-            pnl_points = exit_price - entry_price
-            gross_pnl = pnl_points * Decimal(str(quantity))
+            buy_value = entry_price * Decimal(str(quantity))
+            sell_value = exit_price * Decimal(str(quantity))
+            gross_pnl = sell_value - buy_value
+            turnover = buy_value + sell_value
 
-            # Assume 0.5% brokerage + taxes
-            brokerage = gross_pnl * Decimal('0.005')
-            net_pnl = gross_pnl - brokerage
-
-            # CRITICAL FIX: Calculate percentage based on total_investment
-            pnl_percent = (net_pnl / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
+            # REALISTIC BROKERAGE & TAX CALCULATION (Indian Options Market)
+            # Brokerage: ₹20 per order (Buy + Sell = ₹40)
+            # Taxes/Charges: ~0.1% of Turnover (STT + Trans + GST + SEBI)
+            brokerage_flat = Decimal('40.0')
+            taxes = turnover * Decimal('0.001')
+            total_charges = brokerage_flat + taxes
+            
+            net_pnl = gross_pnl - total_charges
 
             # Update trade execution
             trade_execution.exit_time = get_ist_now_naive()
@@ -621,7 +643,7 @@ class RealTimePnLTracker:
             trade_execution.exit_reason = exit_reason
             trade_execution.gross_pnl = float(gross_pnl)
             trade_execution.net_pnl = float(net_pnl)
-            trade_execution.pnl_percentage = float(pnl_percent)
+            trade_execution.pnl_percentage = float((net_pnl / total_investment) * Decimal('100')) if total_investment > 0 else 0.0
             trade_execution.status = "CLOSED"
 
             # Deactivate position
@@ -651,29 +673,31 @@ class RealTimePnLTracker:
             if trade_execution.trading_mode == "paper":
                 try:
                     from services.paper_trading_account import paper_trading_service
-                    from datetime import datetime, timezone
+                    from database.models import PaperTradingAccount
                     
-                    account = paper_trading_service.accounts.get(position.user_id)
-                    if account:
-                        exit_val = float(exit_price) * float(quantity)
-                        invested = float(trade_execution.total_investment) if trade_execution.total_investment else (float(entry_price) * float(quantity))
+                    paper_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == position.user_id).first()
+                    if paper_account:
+                        # Logic: Sell Value - Total Charges is returned to balance
+                        release_amount = float(sell_value - total_charges)
                         
-                        # Logic:
-                        # 1. Release used margin (invested amount)
-                        # 2. Add exit value to available cash
+                        paper_account.available_margin += release_amount
+                        paper_account.current_balance += release_amount
+                        paper_account.used_margin -= float(trade_execution.total_investment)
+                        paper_account.total_pnl += float(net_pnl)
+                        paper_account.daily_pnl += float(net_pnl)
+                        paper_account.positions_count = max(0, paper_account.positions_count - 1)
+                        paper_account.updated_at = get_ist_now_naive()
                         
-                        account.used_margin -= invested
-                        if account.used_margin < 0: account.used_margin = 0.0
+                        # Sync in-memory service
+                        mem_acc = paper_trading_service.accounts.get(position.user_id)
+                        if mem_acc:
+                            mem_acc.available_margin = float(paper_account.available_margin)
+                            mem_acc.current_balance = float(paper_account.current_balance)
+                            mem_acc.used_margin = float(paper_account.used_margin)
+                            mem_acc.total_pnl = float(paper_account.total_pnl)
+                            mem_acc.positions_count = paper_account.positions_count
                         
-                        account.available_margin += exit_val
-                        account.current_balance += exit_val
-                        
-                        account.total_pnl += float(net_pnl)
-                        account.daily_pnl += float(net_pnl)
-                        account.positions_count = max(0, account.positions_count - 1)
-                        account.updated_at = datetime.now(timezone.utc)
-                        
-                        logger.info(f"✅ Paper account updated after exit: New Balance=₹{account.current_balance:,.2f} (Returned ₹{exit_val:,.2f})")
+                        logger.info(f"✅ Paper account updated after exit: New Balance=₹{paper_account.current_balance:,.2f} (Returned ₹{release_amount:,.2f})")
                         
                 except Exception as e:
                     logger.error(f"Failed to update paper account on exit: {e}")

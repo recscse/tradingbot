@@ -363,6 +363,13 @@ class StrategyEngine:
             confidence = Decimal('0.5')
             reason = "No clear signal"
 
+            # DIAGNOSTIC LOGGING FOR CORRECTNESS
+            logger.info(
+                f"DEBUG [{option_type}]: Price: {current_price:.2f} | EMA: {current_ema:.2f} | "
+                f"ST_1x: {current_supertrend_1x:.2f} ({'UP' if current_trend_1x == 1 else 'DOWN'}) | "
+                f"Prev_ST: {'UP' if prev_trend_1x == 1 else 'DOWN'}"
+            )
+
             # LONG ENTRY LOGIC (for CE options)
             if option_type == "CE":
                 # Uptrend conditions

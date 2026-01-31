@@ -113,6 +113,26 @@ except ImportError:
 CallbackFunction = Callable[[Dict[str, Any]], Any]
 
 
+class _ConnectionReadyProxy:
+    """Proxy for asyncio.Event that works across different event loops"""
+    def __init__(self, manager):
+        self._manager = manager
+
+    def set(self):
+        self._manager._update_connection_ready(True)
+
+    def clear(self):
+        self._manager._update_connection_ready(False)
+
+    def is_set(self):
+        return self._manager._is_connection_ready
+
+    async def wait(self):
+        loop = asyncio.get_running_loop()
+        event = self._manager._get_event_for_loop(loop)
+        await event.wait()
+
+
 class CentralizedWebSocketManager:
     """
     Singleton WebSocket manager for centralized Upstox market data feed.
@@ -215,7 +235,8 @@ class CentralizedWebSocketManager:
         self.all_instrument_keys: Set[str] = set()
         self.active_instrument_keys: Set[str] = set()
         self.primary_instruments: Set[str] = set()
-        self.connection_ready = asyncio.Event()
+        self._is_connection_ready = False
+        self._connection_ready_events = {}
 
         # Auto-trading specific subscriptions
         self.fno_stocks_keys: Set[str] = set()
@@ -254,6 +275,40 @@ class CentralizedWebSocketManager:
         # Initialize market data service
         self._initialized = True
         logger.info("Centralized WebSocket manager initialized")
+
+    @property
+    def connection_ready(self):
+        """Returns a proxy for connection_ready that is loop-aware and cross-loop synced"""
+        return _ConnectionReadyProxy(self)
+
+    def _get_event_for_loop(self, loop):
+        """Get or create an asyncio.Event for a specific loop, synced with master flag"""
+        # Store the event directly on the loop object for absolute safety
+        if not hasattr(loop, '_centralized_ws_conn_ready_event'):
+            event = asyncio.Event()
+            if self._is_connection_ready:
+                event.set()
+            loop._centralized_ws_conn_ready_event = event
+            
+            # Also keep track of it for broadcasting updates
+            self._connection_ready_events[id(loop)] = event
+            
+        return loop._centralized_ws_conn_ready_event
+
+    def _update_connection_ready(self, value: bool):
+        """Update the connection ready status across all event loops"""
+        self._is_connection_ready = value
+        # Clean up closed loops and update active ones
+        for loop_id, event in list(self._connection_ready_events.items()):
+            try:
+                # We can't check loop.is_closed() easily from ID, 
+                # but the event itself will be garbage collected if the loop is
+                if value:
+                    event.set()
+                else:
+                    event.clear()
+            except Exception:
+                pass
 
     async def initialize(self) -> bool:
         """

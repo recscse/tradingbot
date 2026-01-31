@@ -115,7 +115,24 @@ class TradePrepService:
     def __init__(self):
         """Initialize trade preparation service"""
         self.signal_validity_minutes = 15  # Signals valid for 15 minutes
+        self.stats = {
+            "total_preparations": 0,
+            "successful_preparations": 0,
+            "failed_preparations": 0,
+            "insufficient_capital": 0,
+            "last_preparation_time": None
+        }
+        self.last_error = None
         logger.info("Trade Preparation Service initialized")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get service status for system health monitoring"""
+        return {
+            "status": "active",
+            "stats": self.stats,
+            "last_error": self.last_error,
+            "timestamp": get_ist_isoformat()
+        }
 
     async def prepare_trade_with_live_data(
         self,
@@ -178,6 +195,9 @@ class TradePrepService:
             raise ValueError("Insufficient historical data provided")
 
         try:
+            self.stats["total_preparations"] += 1
+            self.stats["last_preparation_time"] = get_ist_isoformat()
+            
             logger.info(
                 f"Preparing trade for user {user_id}: {stock_symbol} {option_type} {strike_price} (with live data)"
             )
@@ -490,8 +510,14 @@ class TradePrepService:
 
             # Step 8: Calculate risk-reward ratio (now in premium terms)
             risk = abs(premium_signal.entry_price - premium_signal.stop_loss)
-            reward = abs(premium_signal.target_price - premium_signal.entry_price)
-            risk_reward_ratio = reward / risk if risk > 0 else Decimal("0")
+            # CRITICAL FIX: For Option Buying (Long), Target is ALWAYS higher than Entry (Premium must rise)
+            # Previous logic incorrectly subtracted for PE, treating it as a short premium trade
+            target_price = premium_signal.entry_price + (risk * (premium_signal.trailing_stop_config.get('risk_reward_ratio') or 2.0))
+            
+            # Update signal with correct target
+            premium_signal.target_price = target_price
+            
+            risk_reward_ratio = Decimal(str(premium_signal.trailing_stop_config.get('risk_reward_ratio') or 2.0))
 
             # Step 9: Create prepared trade (with premium-based signal)
             prepared_trade = PreparedTrade(
@@ -542,9 +568,12 @@ class TradePrepService:
                 f"  Position: {capital_allocation.position_size_lots} lots, Investment: Rs.{capital_allocation.allocated_capital:,.2f}"
             )
 
+            self.stats["successful_preparations"] += 1
             return prepared_trade
 
         except Exception as e:
+            self.stats["failed_preparations"] += 1
+            self.last_error = str(e)
             logger.error(f"Error preparing trade with live data: {e}")
             return self._create_error_trade(
                 TradeStatus.ERROR,

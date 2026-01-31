@@ -26,6 +26,18 @@ class UpstoxOptionService:
         self.base_url = UPSTOX_BASE_URL
         self.cache: Dict[str, Any] = {}
         self.cache_timeout = 300  # 5 minutes
+        self.last_error = None
+        self.api_calls_count = 0
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get service status for system health monitoring"""
+        return {
+            "status": "healthy" if not self.last_error else "error",
+            "api_calls": self.api_calls_count,
+            "cache_size": len(self.cache),
+            "last_error": self.last_error,
+            "timestamp": datetime.now().isoformat()
+        }
 
     def _get_admin_token(self, db: Session) -> Optional[str]:
         """Get admin Upstox token for API calls"""
@@ -60,10 +72,13 @@ class UpstoxOptionService:
         self, endpoint: str, params: Dict = None, db: Session = None
     ) -> Optional[Any]:
         """Make authenticated request to Upstox API and return `data` on success"""
+        self.api_calls_count += 1
         try:
             token = self._get_admin_token(db)
             if not token:
-                logger.error("No valid Upstox token available")
+                error_msg = "No valid Upstox token available"
+                self.last_error = error_msg
+                logger.error(error_msg)
                 return None
 
             headers = {
@@ -79,20 +94,26 @@ class UpstoxOptionService:
             if response.status_code == 200:
                 payload = response.json()
                 if payload.get("status") == "success":
+                    self.last_error = None
                     return payload.get("data", {})
                 else:
-                    logger.error(f"Upstox API error payload: {payload}")
+                    error_msg = f"Upstox API error payload: {payload}"
+                    self.last_error = error_msg
+                    logger.error(error_msg)
                     return None
             elif response.status_code == 401:
-                logger.error("Upstox token expired or invalid (401)")
+                error_msg = "Upstox token expired or invalid (401)"
+                self.last_error = error_msg
+                logger.error(error_msg)
                 return None
             else:
-                logger.error(
-                    f"Upstox API error {response.status_code}: {response.text}"
-                )
+                error_msg = f"Upstox API error {response.status_code}: {response.text}"
+                self.last_error = error_msg
+                logger.error(error_msg)
                 return None
 
         except Exception as e:
+            self.last_error = str(e)
             logger.error(f"Error making Upstox request: {e}")
             return None
 

@@ -73,7 +73,7 @@ class MultiDematCapitalService:
         from services.paper_trading_account import paper_trading_service
         
         # Get actual paper account state
-        paper_account = await paper_trading_service.get_account(user_id)
+        paper_account = await paper_trading_service.get_account(user_id, db)
         
         if paper_account:
             # Calculate totals based on PaperAccount state

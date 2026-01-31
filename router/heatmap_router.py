@@ -21,11 +21,17 @@ class HeatmapWebSocketManager:
         self.active_connections: Dict[str, WebSocket] = {}
         self.client_preferences: Dict[str, Dict[str, Any]] = {}
         self.broadcast_task = None
-        self._connection_lock = asyncio.Lock()
+        self._locks = {}
+
+    def _get_lock(self):
+        loop = asyncio.get_running_loop()
+        if loop not in self._locks:
+            self._locks[loop] = asyncio.Lock()
+        return self._locks[loop]
 
     async def connect(self, websocket: WebSocket, client_id: str):
         """Connect a new WebSocket client"""
-        async with self._connection_lock:
+        async with self._get_lock():
             await websocket.accept()
             self.active_connections[client_id] = websocket
             self.client_preferences[client_id] = {
@@ -45,7 +51,7 @@ class HeatmapWebSocketManager:
 
     async def disconnect(self, client_id: str):
         """Disconnect a WebSocket client"""
-        async with self._connection_lock:
+        async with self._get_lock():
             if client_id in self.active_connections:
                 try:
                     websocket = self.active_connections[client_id]

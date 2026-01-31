@@ -226,24 +226,55 @@ class SystemCheckService:
     def check_live_feed_status(self) -> Dict[str, Any]:
         """Check live feed connection and subscription"""
         try:
+            # Check centralized manager
             manager = get_centralized_manager()
-            if not manager:
-                return {"status": "not_initialized"}
-                
-            status = manager.get_auto_trading_status()
+            manager_status = manager.get_auto_trading_status() if manager else {}
             
-            # Check for specific errors in the manager if exposed
-            # The get_auto_trading_status returns {websocket_connected, instruments_subscribed, etc}
+            # Check auto trade live feed service
+            try:
+                from services.trading_execution.auto_trade_live_feed import auto_trade_live_feed
+                feed_status = auto_trade_live_feed.get_status()
+            except (ImportError, AttributeError):
+                feed_status = {"status": "unknown", "message": "AutoTradeLiveFeed instance not found"}
+
             return {
-                "connected": status.get("websocket_connected", False),
-                "subscribed_count": status.get("subscribed_instrument_count", 0),
-                "connection_uptime": status.get("uptime_seconds", 0),
-                "last_data_time": status.get("last_data_received_time"),
-                "mode": "admin_feed", # Since it's centralized manager
-                "last_error": status.get("last_error")
+                "connected": manager_status.get("websocket_connected", False),
+                "subscribed_count": manager_status.get("subscribed_instrument_count", 0),
+                "connection_uptime": manager_status.get("uptime_seconds", 0),
+                "last_data_time": manager_status.get("last_data_received_time"),
+                "mode": "admin_feed",
+                "feed_service": feed_status,
+                "last_error": manager_status.get("last_error") or feed_status.get("last_error")
             }
         except Exception as e:
             logger.error(f"Live feed check failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def check_trade_prep_status(self) -> Dict[str, Any]:
+        """Check trade preparation service status"""
+        try:
+            from services.trading_execution.trade_prep import trade_prep_service
+            return trade_prep_service.get_status()
+        except Exception as e:
+            logger.error(f"Trade prep check failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def check_realtime_analytics_status(self) -> Dict[str, Any]:
+        """Check real-time market analytics engine status"""
+        try:
+            from services.realtime_market_engine import get_analytics_status
+            return get_analytics_status()
+        except Exception as e:
+            logger.error(f"Real-time analytics check failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def check_option_service_status(self) -> Dict[str, Any]:
+        """Check status of Upstox option service"""
+        try:
+            from services.upstox_option_service import upstox_option_service
+            return upstox_option_service.get_status()
+        except Exception as e:
+            logger.error(f"Option service check failed: {e}")
             return {"status": "error", "error": str(e)}
 
     def check_strategy_status(self) -> Dict[str, Any]:
@@ -256,11 +287,15 @@ class SystemCheckService:
             status = {
                 "status": "inactive",
                 "message": "Coordinator not initialized in scheduler",
-                "sessions_active": getattr(scheduler, "trading_sessions_active", False)
+                "sessions_active": getattr(scheduler, "trading_sessions_active", False),
+                "system_state": "STOPPED"
             }
             
             if coordinator:
                 status = coordinator.get_system_status()
+                # Ensure status string is consistent
+                status["status"] = "active" if status.get("is_running") else "inactive"
+                
                 # Check for critical errors
                 if status.get("system_health", {}).get("error_count_24h", 0) > 0:
                     status["status"] = "warning"
@@ -270,7 +305,7 @@ class SystemCheckService:
                     status["error"] = "Emergency Stop Active"
             
             # Check auto trade scheduler for top-level errors
-            if auto_trade_scheduler.last_error:
+            if hasattr(auto_trade_scheduler, "last_error") and auto_trade_scheduler.last_error:
                 status["auto_trade_scheduler_error"] = auto_trade_scheduler.last_error
                 status["status"] = "error"
                 status["error"] = f"Scheduler Error: {auto_trade_scheduler.last_error}"

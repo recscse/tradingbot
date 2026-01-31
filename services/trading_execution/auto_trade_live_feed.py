@@ -68,6 +68,7 @@ class AutoTradeLiveFeed:
         self.pnl_task: Optional[asyncio.Task] = None
         self.default_trading_mode: TradingMode = TradingMode.PAPER
         self.access_token: str = ""
+        self.last_error: Optional[str] = None
 
         # Statistics
         self.stats = {
@@ -82,6 +83,9 @@ class AutoTradeLiveFeed:
 
         # Active user positions tracking (user_id -> {option_key -> position_data})
         self.active_user_positions: Dict[int, Dict[str, Dict[str, Any]]] = {}
+        
+        # Cooldown tracking (user_id -> {stock_symbol -> last_exit_time})
+        self.user_last_exit_times: Dict[int, Dict[str, datetime]] = {}
 
         logger.info("Auto-Trading Live Feed Service (REFACTORED) initialized")
 
@@ -96,81 +100,91 @@ class AutoTradeLiveFeed:
         Args:
             trading_mode: Trading mode (PAPER or LIVE)
         """
-        # If already running, just reload instruments and user subscriptions
-        if self.is_running:
-            logger.info(
-                "AutoTradeLiveFeed already running - reloading instruments and subscriptions"
-            )
+        try:
+            # If already running, just reload instruments and user subscriptions
+            if self.is_running:
+                logger.info(
+                    "AutoTradeLiveFeed already running - reloading instruments and subscriptions"
+                )
+                await self._load_instruments_and_subscriptions()
+
+                # Update subscriptions in existing WebSocket client
+                if self.upstox_client and shared_registry.instruments:
+                    keys_to_subscribe = shared_registry.get_all_instrument_keys()
+                    logger.info(
+                        f"Updating WebSocket subscriptions: {len(keys_to_subscribe)} instrument keys"
+                    )
+                    # WebSocket client will handle re-subscription
+                return
+
+            self.is_running = True
+            self.default_trading_mode = trading_mode
+            self.last_error = None
+
+            # Load admin access token (common for all users)
+            self.access_token = await self.load_upstox_access_token()
+            if not self.access_token:
+                logger.error("No Upstox access token found - aborting start")
+                self.is_running = False
+                self.last_error = "No access token found"
+                return
+
+            # Load instruments and user subscriptions
             await self._load_instruments_and_subscriptions()
 
-            # Update subscriptions in existing WebSocket client
-            if self.upstox_client and shared_registry.instruments:
-                keys_to_subscribe = shared_registry.get_all_instrument_keys()
-                logger.info(
-                    f"Updating WebSocket subscriptions: {len(keys_to_subscribe)} instrument keys"
-                )
-                # WebSocket client will handle re-subscription
-            return
+            if not shared_registry.instruments:
+                logger.warning("No instruments to monitor - stopping")
+                self.is_running = False
+                self.last_error = "No instruments to monitor"
+                return
 
-        self.is_running = True
-        self.default_trading_mode = trading_mode
+            # Get all unique keys to subscribe
+            keys_to_subscribe = shared_registry.get_all_instrument_keys()
 
-        # Load admin access token (common for all users)
-        self.access_token = await self.load_upstox_access_token()
-        if not self.access_token:
-            logger.error("No Upstox access token found - aborting start")
+            logger.info(
+                f"Starting auto-trade: {len(shared_registry.instruments)} instruments, "
+                f"{len(shared_registry.user_subscriptions)} users, "
+                f"{len(keys_to_subscribe)} subscription keys"
+            )
+
+            # Create WebSocket client
+            self.upstox_client = UpstoxWebSocketClient(
+                access_token=self.access_token,
+                instrument_keys=keys_to_subscribe,
+                callback=self._incoming_feed_callback,
+                stop_callback=self._on_client_stopped,
+                on_auth_error=self._on_auth_error,
+                connection_type="centralized_admin",
+                subscription_mode="full",
+                max_retries=10,
+            )
+
+            # Start WebSocket client in background
+            loop = asyncio.get_event_loop()
+            self.ws_client_task = loop.create_task(self.upstox_client.connect_and_stream())
+
+            # Start monitoring loop
+            if not self.ws_task or self.ws_task.done():
+                self.ws_task = asyncio.create_task(self._ws_connection_loop())
+
+            # Start PnL tracking using singleton tracker from pnl_tracker module
+            if not self.pnl_task or self.pnl_task.done():
+                from services.trading_execution.pnl_tracker import pnl_tracker
+
+                self.pnl_task = asyncio.create_task(pnl_tracker.start_tracking())
+                logger.info("Started real-time PnL tracking (using singleton tracker)")
+
+            # Load active positions from database into memory for exit signal eligibility
+            await self._sync_active_positions_from_db()
+            logger.info(f"Synced active positions from database into memory")
+
+            logger.info(f"Auto-trading started in {trading_mode.value} mode")
+        except Exception as e:
             self.is_running = False
-            return
-
-        # Load instruments and user subscriptions
-        await self._load_instruments_and_subscriptions()
-
-        if not shared_registry.instruments:
-            logger.warning("No instruments to monitor - stopping")
-            self.is_running = False
-            return
-
-        # Get all unique keys to subscribe
-        keys_to_subscribe = shared_registry.get_all_instrument_keys()
-
-        logger.info(
-            f"Starting auto-trade: {len(shared_registry.instruments)} instruments, "
-            f"{len(shared_registry.user_subscriptions)} users, "
-            f"{len(keys_to_subscribe)} subscription keys"
-        )
-
-        # Create WebSocket client
-        self.upstox_client = UpstoxWebSocketClient(
-            access_token=self.access_token,
-            instrument_keys=keys_to_subscribe,
-            callback=self._incoming_feed_callback,
-            stop_callback=self._on_client_stopped,
-            on_auth_error=self._on_auth_error,
-            connection_type="centralized_admin",
-            subscription_mode="full",
-            max_retries=10,
-        )
-
-        # Start WebSocket client in background
-        loop = asyncio.get_event_loop()
-        self.ws_client_task = loop.create_task(self.upstox_client.connect_and_stream())
-
-        # Start monitoring loop
-        if not self.ws_task or self.ws_task.done():
-            self.ws_task = asyncio.create_task(self._ws_connection_loop())
-
-        # Start PnL tracking using singleton tracker from pnl_tracker module
-        if not self.pnl_task or self.pnl_task.done():
-            from services.trading_execution.pnl_tracker import pnl_tracker
-
-            self.pnl_task = asyncio.create_task(pnl_tracker.start_tracking())
-            logger.info("Started real-time PnL tracking (using singleton tracker)")
-
-        # Load active positions from database into memory for exit signal eligibility
-        await self._sync_active_positions_from_db()
-        logger.info(f"Synced active positions from database into memory")
-
-        logger.info(f"Auto-trading started in {trading_mode.value} mode")
+            self.last_error = str(e)
+            logger.error(f"Error starting auto-trading: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def stop(self):
         """Stop auto-trading service"""
@@ -216,6 +230,19 @@ class AutoTradeLiveFeed:
         shared_registry.clear()
         self.active_user_positions.clear()
         self.upstox_client = None
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get auto-trading service status for system health dashboard"""
+        return {
+            "is_running": self.is_running,
+            "websocket_connected": self.upstox_client.is_connected() if self.upstox_client else False,
+            "trading_mode": self.default_trading_mode.value if hasattr(self.default_trading_mode, 'value') else str(self.default_trading_mode),
+            "stats": self.stats,
+            "active_users": len(self.active_user_positions),
+            "instruments_tracked": len(shared_registry.instruments),
+            "last_error": getattr(self, "last_error", None),
+            "timestamp": get_ist_isoformat()
+        }
 
     # ============================================================================
     # INSTRUMENT LOADING (COMMON LAYER)
@@ -1177,9 +1204,14 @@ class AutoTradeLiveFeed:
                     )
                     return
 
-                logger.info(
-                    f"🎯 Processing ENTRY signal for {instrument.stock_symbol} - opening position for user {user_id}"
-                )
+            logger.info(
+                f"🎯 Processing ENTRY signal for {instrument.stock_symbol} - opening position for user {user_id}"
+            )
+            
+            # PERFORMANCE MEASURE: Calculate latency between signal and processing
+            signal_time = datetime.fromisoformat(signal.timestamp)
+            latency_ms = (get_ist_now_naive() - signal_time).total_seconds() * 1000
+            logger.info(f"⏱️ Signal Latency: {latency_ms:.2f}ms for {instrument.stock_symbol}")
 
             # Validate data availability
             current_candles = len(instrument.historical_spot_data.get("close", []))
@@ -1695,12 +1727,30 @@ class AutoTradeLiveFeed:
             if not trade:
                 return
 
-            entry_price = position_data["entry_price"]
+            # ACTUAL EXIT PRICE WITH SLIPPAGE FOR PAPER TRADING
+            if trade.trading_mode == "paper":
+                raw_exit_price = exit_price
+                slippage = raw_exit_price * Decimal("0.0005")  # 0.05% slippage
+                exit_price = raw_exit_price - slippage
+                logger.info(f"📝 Paper exit slippage applied: {raw_exit_price} -> {exit_price}")
+
+            entry_price = Decimal(str(position_data["entry_price"]))
             quantity = trade.quantity
-            pnl = (exit_price - entry_price) * Decimal(str(quantity))
+            
+            buy_value = entry_price * Decimal(str(quantity))
+            sell_value = exit_price * Decimal(str(quantity))
+            gross_pnl = sell_value - buy_value
+            turnover = buy_value + sell_value
+
+            # REALISTIC BROKERAGE & TAX CALCULATION
+            brokerage_flat = Decimal('40.0') # ₹20 per order
+            taxes = turnover * Decimal('0.001') # ~0.1% charges
+            total_charges = brokerage_flat + taxes
+            net_pnl = gross_pnl - total_charges
+
             pnl_percent = (
-                ((exit_price - entry_price) / entry_price * 100)
-                if entry_price > 0
+                (net_pnl / Decimal(str(trade.total_investment)) * 100)
+                if trade.total_investment and trade.total_investment > 0
                 else Decimal("0")
             )
 
@@ -1708,7 +1758,8 @@ class AutoTradeLiveFeed:
             trade.exit_time = get_ist_now_naive()
             trade.exit_price = float(exit_price)
             trade.exit_reason = exit_reason
-            trade.net_pnl = float(pnl)
+            trade.gross_pnl = float(gross_pnl)
+            trade.net_pnl = float(net_pnl)
             trade.pnl_percentage = float(pnl_percent)
             trade.status = "CLOSED"
 
@@ -1724,29 +1775,44 @@ class AutoTradeLiveFeed:
             # UPDATE PAPER TRADING ACCOUNT BALANCE
             if trade.trading_mode == "paper":
                 try:
-                    from services.paper_trading_account import PaperAccount
+                    from services.paper_trading_account import paper_trading_service
 
-                    paper_account = (
-                        db.query(PaperAccount)
-                        .filter(PaperAccount.user_id == user_id)
-                        .first()
-                    )
+                    # This will update both in-memory and DB (if db session passed)
+                    # We need to find the paper position_id first if we want to use that, 
+                    # but paper_trading_service needs a position_id. 
+                    # For simplicity, we've updated DB in auto_trade_live_feed directly before, 
+                    # let's use the service's logic but ensure it syncs with our db object.
+                    
+                    # Instead of calling close_position which needs a paper_position_id, 
+                    # we use the sync_with_db followed by manual update to ensure 100% accuracy 
+                    # with the trade object we just closed.
+                    
+                    from database.models import PaperTradingAccount
+                    paper_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
+                    
                     if paper_account:
-                        # Calculate amount to return to balance (Invested + PnL)
-                        release_amount = float(trade.total_investment) + float(pnl)
+                        # Logic: Sell Value - Total Charges is returned to balance
+                        release_amount = float(sell_value - total_charges)
 
                         paper_account.available_margin += release_amount
                         paper_account.current_balance += release_amount
                         paper_account.used_margin -= float(trade.total_investment)
-                        paper_account.total_pnl += float(pnl)
-                        paper_account.daily_pnl += float(pnl)
-                        paper_account.positions_count = max(
-                            0, paper_account.positions_count - 1
-                        )
+                        paper_account.total_pnl += float(net_pnl)
+                        paper_account.daily_pnl += float(net_pnl)
+                        paper_account.positions_count = max(0, paper_account.positions_count - 1)
                         paper_account.updated_at = get_ist_now_naive()
 
+                        # Also update in-memory service so it's aware
+                        mem_acc = paper_trading_service.accounts.get(user_id)
+                        if mem_acc:
+                            mem_acc.available_margin = float(paper_account.available_margin)
+                            mem_acc.current_balance = float(paper_account.current_balance)
+                            mem_acc.used_margin = float(paper_account.used_margin)
+                            mem_acc.total_pnl = float(paper_account.total_pnl)
+                            mem_acc.positions_count = paper_account.positions_count
+
                         logger.info(
-                            f"Updated paper account for user {user_id}: Balance={paper_account.current_balance:.2f}"
+                            f"Updated paper account for user {user_id}: Balance={paper_account.current_balance:.2f} (Returned ₹{release_amount:.2f})"
                         )
                 except Exception as e:
                     logger.error(f"Error updating paper account balance: {e}")
@@ -1754,7 +1820,7 @@ class AutoTradeLiveFeed:
             db.commit()
 
             logger.info(
-                f"Position closed for user {user_id}: PnL = Rs.{pnl:.2f} ({pnl_percent:.2f}%)"
+                f"Position closed for user {user_id}: Net PnL = Rs.{net_pnl:.2f} ({pnl_percent:.2f}%)"
             )
 
             # Broadcast to UI
@@ -1765,7 +1831,7 @@ class AutoTradeLiveFeed:
                     "symbol": instrument.stock_symbol,
                     "exit_price": float(exit_price),
                     "exit_reason": exit_reason,
-                    "pnl": float(pnl),
+                    "pnl": float(net_pnl),
                     "pnl_percent": float(pnl_percent),
                     "timestamp": get_ist_isoformat(),
                 },
@@ -1773,7 +1839,7 @@ class AutoTradeLiveFeed:
 
             return {
                 "success": True,
-                "pnl": float(pnl),
+                "pnl": float(net_pnl),
                 "pnl_percent": float(pnl_percent),
                 "exit_price": float(exit_price),
                 "position_id": position_id,

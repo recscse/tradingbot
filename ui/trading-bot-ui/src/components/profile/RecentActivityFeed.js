@@ -1,927 +1,126 @@
-// src/components/profile/RecentActivityFeed.jsx
-import React, { useState, useMemo } from "react";
-import {
-  Box,
-  Typography,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  Avatar,
-  Chip,
-  Divider,
-  useTheme,
-  alpha,
-  useMediaQuery,
-  Stack,
-  Card,
-  CardContent,
-  Tooltip,
-  Fade,
-  Skeleton,
-  Alert,
-  IconButton,
-  Button,
-  Paper,
-  Badge,
-} from "@mui/material";
-import {
-  ShowChart as ActivityIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Schedule as ClockIcon,
-  Timeline as TimelineIcon,
-  AccountBalance as BrokerIcon,
-  Security as SecurityIcon,
-  Notifications as NotificationIcon,
-  Settings as SettingsIcon,
-  Payment as PaymentIcon,
-  SwapHoriz as TransferIcon,
-  Login as LoginIcon,
-  Logout as LogoutIcon,
-  Person as PersonIcon,
-  CheckCircle as SuccessIcon,
-  Error as ErrorIcon,
-  Refresh as RefreshIcon,
-  FilterList as FilterIcon,
-} from "@mui/icons-material";
+import React, { useMemo } from "react";
+import { 
+  TrendingUp, 
+  TrendingDown, 
+  Clock, 
+  Wallet, 
+  Shield, 
+  LogIn, 
+  Activity
+} from "lucide-react";
 
 const RecentActivityFeed = ({
   activities = [],
   loading = false,
   error = null,
-  onRefresh = null,
   maxItems = 20,
-  showFilter = false,
-  realTime = false,
 }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  // const isTablet = useMediaQuery(theme.breakpoints.down("md"));
 
-  const [filterType, setFilterType] = useState("all");
-  // Removed unused expandedItem state
-
-  // Enhanced activity categorization with more types
   const getActivityData = (activity) => {
-    if (!activity || (!activity.type && !activity.description)) {
-      return { icon: ActivityIcon, color: "primary", category: "general" };
-    }
+    if (!activity) return { icon: Activity, color: "tw-text-slate-400", bg: "tw-bg-slate-50", label: "Event" };
 
     const type = activity.type?.toLowerCase() || "";
     const description = activity.description?.toLowerCase() || "";
     const action = activity.action?.toLowerCase() || "";
 
-    // Priority: explicit type > action > description content
-    if (
-      type === "trade" ||
-      action === "buy" ||
-      description.includes("buy") ||
-      description.includes("purchased")
-    ) {
-      return {
-        icon: TrendingUpIcon,
-        color: "success",
-        category: "trade",
-        label: "BUY",
-      };
+    if (description.includes("buy") || action === "buy") {
+      return { icon: TrendingUp, color: "tw-text-emerald-600", bg: "tw-bg-emerald-50", label: "BUY" };
     }
-    if (
-      type === "trade" ||
-      action === "sell" ||
-      description.includes("sell") ||
-      description.includes("sold")
-    ) {
-      return {
-        icon: TrendingDownIcon,
-        color: "error",
-        category: "trade",
-        label: "SELL",
-      };
+    if (description.includes("sell") || action === "sell") {
+      return { icon: TrendingDown, color: "tw-text-rose-600", bg: "tw-bg-rose-50", label: "SELL" };
     }
-    if (
-      type === "deposit" ||
-      action === "deposit" ||
-      description.includes("deposit") ||
-      description.includes("credited")
-    ) {
-      return {
-        icon: PaymentIcon,
-        color: "success",
-        category: "payment",
-        label: "DEPOSIT",
-      };
+    if (type === "security" || description.includes("password")) {
+      return { icon: Shield, color: "tw-text-amber-600", bg: "tw-bg-amber-50", label: "SECURITY" };
     }
-    if (
-      type === "withdrawal" ||
-      action === "withdrawal" ||
-      description.includes("withdrawal") ||
-      description.includes("withdraw")
-    ) {
-      return {
-        icon: PaymentIcon,
-        color: "warning",
-        category: "payment",
-        label: "WITHDRAWAL",
-      };
+    if (type === "broker" || description.includes("broker")) {
+      return { icon: Wallet, color: "tw-text-blue-600", bg: "tw-bg-blue-50", label: "BROKER" };
     }
-    if (
-      type === "transfer" ||
-      action === "transfer" ||
-      description.includes("transfer")
-    ) {
-      return {
-        icon: TransferIcon,
-        color: "info",
-        category: "payment",
-        label: "TRANSFER",
-      };
+    if (type === "login") {
+      return { icon: LogIn, color: "tw-text-indigo-600", bg: "tw-bg-indigo-50", label: "LOGIN" };
     }
-    if (
-      type === "login" ||
-      action === "login" ||
-      description.includes("login") ||
-      description.includes("signed in")
-    ) {
-      return {
-        icon: LoginIcon,
-        color: "info",
-        category: "security",
-        label: "LOGIN",
-      };
-    }
-    if (
-      type === "logout" ||
-      action === "logout" ||
-      description.includes("logout") ||
-      description.includes("signed out")
-    ) {
-      return {
-        icon: LogoutIcon,
-        color: "secondary",
-        category: "security",
-        label: "LOGOUT",
-      };
-    }
-    if (
-      type === "security" ||
-      description.includes("password") ||
-      description.includes("2fa") ||
-      description.includes("security")
-    ) {
-      return {
-        icon: SecurityIcon,
-        color: "error",
-        category: "security",
-        label: "SECURITY",
-      };
-    }
-    if (
-      type === "broker" ||
-      description.includes("broker") ||
-      description.includes("connection")
-    ) {
-      return {
-        icon: BrokerIcon,
-        color: "primary",
-        category: "broker",
-        label: "BROKER",
-      };
-    }
-    if (
-      type === "notification" ||
-      description.includes("notification") ||
-      description.includes("alert")
-    ) {
-      return {
-        icon: NotificationIcon,
-        color: "warning",
-        category: "notification",
-        label: "ALERT",
-      };
-    }
-    if (
-      type === "profile" ||
-      description.includes("profile") ||
-      description.includes("updated")
-    ) {
-      return {
-        icon: PersonIcon,
-        color: "secondary",
-        category: "profile",
-        label: "PROFILE",
-      };
-    }
-    if (
-      type === "settings" ||
-      description.includes("settings") ||
-      description.includes("preference")
-    ) {
-      return {
-        icon: SettingsIcon,
-        color: "secondary",
-        category: "settings",
-        label: "SETTINGS",
-      };
-    }
-    if (
-      type === "error" ||
-      description.includes("error") ||
-      description.includes("failed")
-    ) {
-      return {
-        icon: ErrorIcon,
-        color: "error",
-        category: "error",
-        label: "ERROR",
-      };
-    }
-    if (
-      type === "success" ||
-      description.includes("success") ||
-      description.includes("completed")
-    ) {
-      return {
-        icon: SuccessIcon,
-        color: "success",
-        category: "success",
-        label: "SUCCESS",
-      };
-    }
-
-    return {
-      icon: ActivityIcon,
-      color: "primary",
-      category: "general",
-      label: "ACTIVITY",
-    };
+    
+    return { icon: Activity, color: "tw-text-slate-600", bg: "tw-bg-slate-50", label: "SYSTEM" };
   };
 
-  // Safe time formatting with better relative time
   const formatTime = (timestamp) => {
-    if (!timestamp) return "Unknown time";
+    if (!timestamp) return "Recent";
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
 
-    try {
-      const date = new Date(timestamp);
-      const now = new Date();
-      const diffInSeconds = Math.floor((now - date) / 1000);
-      const diffInMinutes = Math.floor(diffInSeconds / 60);
-      const diffInHours = Math.floor(diffInMinutes / 60);
-      const diffInDays = Math.floor(diffInHours / 24);
-
-      if (diffInSeconds < 60) {
-        return diffInSeconds <= 5 ? "Just now" : `${diffInSeconds}s ago`;
-      } else if (diffInMinutes < 60) {
-        return `${diffInMinutes}m ago`;
-      } else if (diffInHours < 24) {
-        return `${diffInHours}h ago`;
-      } else if (diffInDays < 7) {
-        return `${diffInDays}d ago`;
-      } else if (diffInDays < 30) {
-        return `${Math.floor(diffInDays / 7)}w ago`;
-      } else {
-        return date.toLocaleDateString("en-IN", {
-          month: "short",
-          day: "numeric",
-          year:
-            date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-        });
-      }
-    } catch (error) {
-      return "Invalid date";
-    }
+    if (diff < 60) return "Just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return date.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
   };
 
-  const formatTimeDetailed = (timestamp) => {
-    if (!timestamp) return "Unknown time";
-    try {
-      return new Date(timestamp).toLocaleString("en-IN", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-    } catch (error) {
-      return "Invalid date";
-    }
-  };
-
-  // Filter activities based on selected filter
   const filteredActivities = useMemo(() => {
-    if (!Array.isArray(activities)) return [];
+    return (activities || []).slice(0, maxItems);
+  }, [activities, maxItems]);
 
-    let filtered = activities;
-
-    if (filterType !== "all") {
-      filtered = activities.filter((activity) => {
-        const activityData = getActivityData(activity);
-        return activityData.category === filterType;
-      });
-    }
-
-    return filtered.slice(0, maxItems);
-  }, [activities, filterType, maxItems]);
-
-  // Get unique categories for filter
-  const availableCategories = useMemo(() => {
-    if (!Array.isArray(activities)) return [];
-
-    const categories = new Set(["all"]);
-    activities.forEach((activity) => {
-      const activityData = getActivityData(activity);
-      categories.add(activityData.category);
-    });
-
-    return Array.from(categories);
-  }, [activities]);
-
-  // Removed unused getPriority function
-
-  // Loading skeleton component
-  const LoadingSkeleton = () => (
-    <Stack spacing={2}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <Card key={i} variant="outlined">
-          <CardContent sx={{ p: 2 }}>
-            <Stack direction="row" spacing={2} alignItems="flex-start">
-              <Skeleton variant="circular" width={40} height={40} />
-              <Box sx={{ flex: 1 }}>
-                <Skeleton variant="text" width="60%" height={20} />
-                <Skeleton variant="text" width="40%" height={16} />
-                <Skeleton variant="text" width="80%" height={16} />
-              </Box>
-            </Stack>
-          </CardContent>
-        </Card>
-      ))}
-    </Stack>
-  );
-
-  // Empty state component
-  const EmptyState = () => (
-    <Fade in={true} timeout={500}>
-      <Paper
-        elevation={0}
-        sx={{
-          textAlign: "center",
-          py: { xs: 4, sm: 6 },
-          px: 2,
-          borderRadius: 3,
-          bgcolor: alpha(theme.palette.primary.main, 0.02),
-          border: `2px dashed ${alpha(theme.palette.primary.main, 0.2)}`,
-        }}
-      >
-        <Avatar
-          sx={{
-            width: { xs: 60, sm: 80 },
-            height: { xs: 60, sm: 80 },
-            mx: "auto",
-            mb: 3,
-            bgcolor: alpha(theme.palette.primary.main, 0.1),
-            color: "primary.main",
-          }}
-        >
-          <TimelineIcon sx={{ fontSize: { xs: 30, sm: 40 } }} />
-        </Avatar>
-
-        <Typography
-          variant={isMobile ? "h6" : "h5"}
-          fontWeight={600}
-          gutterBottom
-          color="text.primary"
-        >
-          {filterType === "all"
-            ? "No recent activity"
-            : `No ${filterType} activities`}
-        </Typography>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          sx={{ maxWidth: 350, mx: "auto", lineHeight: 1.5 }}
-        >
-          {filterType === "all"
-            ? "Your activities will appear here once you start using the platform"
-            : `No ${filterType} activities found. Try selecting a different filter or check back later.`}
-        </Typography>
-
-        {onRefresh && (
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={onRefresh}
-            sx={{ mt: 2, borderRadius: 2 }}
-          >
-            Refresh
-          </Button>
-        )}
-      </Paper>
-    </Fade>
-  );
-
-  // Error state component
-  const ErrorState = () => (
-    <Alert
-      severity="error"
-      sx={{
-        borderRadius: 2,
-        "& .MuiAlert-icon": {
-          alignItems: "center",
-        },
-      }}
-      action={
-        onRefresh && (
-          <Button
-            color="inherit"
-            size="small"
-            onClick={onRefresh}
-            startIcon={<RefreshIcon />}
-          >
-            Retry
-          </Button>
-        )
-      }
-    >
-      {error || "Failed to load recent activities"}
-    </Alert>
-  );
-
-  // Mobile card layout for activities
-  const MobileActivityCard = ({ activity, index }) => {
-    const activityData = getActivityData(activity);
-    const ActivityIconComponent = activityData.icon;
-    // Removed unused isExpanded variable
-
-    return (
-      <Fade in={true} timeout={300 + index * 50} key={`mobile-${index}`}>
-        <Card
-          variant="outlined"
-          sx={{
-            mb: 2,
-            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-            "&:hover": {
-              boxShadow: `0 8px 24px ${alpha(
-                activityData.color === "primary"
-                  ? theme.palette.primary.main
-                  : theme.palette[activityData.color].main,
-                0.15
-              )}`,
-              transform: "translateY(-2px)",
-              borderColor: alpha(theme.palette[activityData.color].main, 0.3),
-            },
-          }}
-        >
-          <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
-            <Stack direction="row" alignItems="flex-start" spacing={2}>
-              <Avatar
-                sx={{
-                  bgcolor: alpha(theme.palette[activityData.color].main, 0.1),
-                  color: `${activityData.color}.main`,
-                  width: 40,
-                  height: 40,
-                  border: `2px solid ${alpha(
-                    theme.palette[activityData.color].main,
-                    0.2
-                  )}`,
-                }}
-              >
-                <ActivityIconComponent sx={{ fontSize: 20 }} />
-              </Avatar>
-
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  justifyContent="space-between"
-                  mb={1}
-                >
-                  <Stack direction="row" alignItems="center" spacing={1}>
-                    <Chip
-                      label={activityData.label}
-                      size="small"
-                      color={activityData.color}
-                      sx={{
-                        fontSize: "0.7rem",
-                        height: 20,
-                        fontWeight: 600,
-                      }}
-                    />
-                    {activity.amount && (
-                      <Chip
-                        label={`₹${Number(activity.amount).toLocaleString(
-                          "en-IN"
-                        )}`}
-                        size="small"
-                        variant="outlined"
-                        sx={{
-                          fontSize: "0.65rem",
-                          height: 18,
-                        }}
-                      />
-                    )}
-                  </Stack>
-
-                  <Typography variant="caption" color="text.secondary">
-                    {formatTime(activity.timestamp || activity.created_at)}
-                  </Typography>
-                </Stack>
-
-                <Typography
-                  variant="body2"
-                  color="text.primary"
-                  sx={{
-                    wordBreak: "break-word",
-                    lineHeight: 1.4,
-                    mb: 1,
-                  }}
-                >
-                  {activity.description ||
-                    activity.message ||
-                    "No description available"}
-                </Typography>
-
-                {(activity.status || activity.broker || activity.symbol) && (
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {activity.status && (
-                      <Chip
-                        label={activity.status}
-                        size="small"
-                        variant="outlined"
-                        color={
-                          activity.status === "completed"
-                            ? "success"
-                            : activity.status === "failed"
-                            ? "error"
-                            : "default"
-                        }
-                        sx={{ fontSize: "0.6rem", height: 16 }}
-                      />
-                    )}
-                    {activity.broker && (
-                      <Chip
-                        label={activity.broker}
-                        size="small"
-                        variant="outlined"
-                        sx={{ fontSize: "0.6rem", height: 16 }}
-                      />
-                    )}
-                    {activity.symbol && (
-                      <Chip
-                        label={activity.symbol}
-                        size="small"
-                        variant="outlined"
-                        sx={{ fontSize: "0.6rem", height: 16 }}
-                      />
-                    )}
-                  </Stack>
-                )}
-              </Box>
-            </Stack>
-          </CardContent>
-        </Card>
-      </Fade>
-    );
-  };
-
-  // Desktop list layout for activities
-  const DesktopActivityList = () => (
-    <List sx={{ p: 0 }}>
-      {filteredActivities.map((activity, index) => {
-        const activityData = getActivityData(activity);
-        const ActivityIconComponent = activityData.icon;
-
-        return (
-          <React.Fragment key={`desktop-${index}`}>
-            <Fade in={true} timeout={300 + index * 50}>
-              <ListItem
-                sx={{
-                  py: 2,
-                  px: 2,
-                  transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                  borderRadius: 2,
-                  mx: 1,
-                  "&:hover": {
-                    bgcolor: alpha(
-                      theme.palette[activityData.color].main,
-                      0.04
-                    ),
-                    transform: "translateX(8px)",
-                    boxShadow: `0 4px 12px ${alpha(
-                      theme.palette[activityData.color].main,
-                      0.1
-                    )}`,
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 48 }}>
-                  <Tooltip
-                    title={`${activityData.label} Activity`}
-                    placement="left"
-                  >
-                    <Avatar
-                      sx={{
-                        bgcolor: alpha(
-                          theme.palette[activityData.color].main,
-                          0.1
-                        ),
-                        color: `${activityData.color}.main`,
-                        width: 36,
-                        height: 36,
-                        border: `2px solid ${alpha(
-                          theme.palette[activityData.color].main,
-                          0.2
-                        )}`,
-                      }}
-                    >
-                      <ActivityIconComponent sx={{ fontSize: 18 }} />
-                    </Avatar>
-                  </Tooltip>
-                </ListItemIcon>
-
-                <ListItemText
-                  primary={
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      justifyContent="space-between"
-                      mb={0.5}
-                    >
-                      <Typography
-                        variant="body2"
-                        color="text.primary"
-                        sx={{
-                          fontWeight: 500,
-                          lineHeight: 1.3,
-                          flex: 1,
-                          mr: 2,
-                        }}
-                      >
-                        {activity.description ||
-                          activity.message ||
-                          "No description available"}
-                      </Typography>
-
-                      <Stack direction="row" alignItems="center" spacing={1}>
-                        <Chip
-                          label={activityData.label}
-                          size="small"
-                          color={activityData.color}
-                          sx={{
-                            fontSize: "0.7rem",
-                            height: 22,
-                            fontWeight: 600,
-                          }}
-                        />
-
-                        {activity.amount && (
-                          <Chip
-                            label={`₹${Number(activity.amount).toLocaleString(
-                              "en-IN"
-                            )}`}
-                            size="small"
-                            variant="outlined"
-                            sx={{
-                              fontSize: "0.65rem",
-                              height: 20,
-                              fontWeight: 500,
-                            }}
-                          />
-                        )}
-                      </Stack>
-                    </Stack>
-                  }
-                  secondary={
-                    <Stack
-                      direction="row"
-                      alignItems="center"
-                      justifyContent="space-between"
-                      mt={0.5}
-                    >
-                      <Tooltip
-                        title={formatTimeDetailed(
-                          activity.timestamp || activity.created_at
-                        )}
-                        placement="bottom-start"
-                      >
-                        <Stack
-                          direction="row"
-                          alignItems="center"
-                          spacing={0.5}
-                        >
-                          <ClockIcon
-                            sx={{ fontSize: 14, color: "text.disabled" }}
-                          />
-                          <Typography variant="caption" color="text.secondary">
-                            {formatTime(
-                              activity.timestamp || activity.created_at
-                            )}
-                          </Typography>
-                        </Stack>
-                      </Tooltip>
-
-                      <Stack direction="row" spacing={0.5}>
-                        {activity.status && (
-                          <Chip
-                            label={activity.status}
-                            size="small"
-                            variant="outlined"
-                            color={
-                              activity.status === "completed"
-                                ? "success"
-                                : activity.status === "failed"
-                                ? "error"
-                                : "default"
-                            }
-                            sx={{ fontSize: "0.6rem", height: 16 }}
-                          />
-                        )}
-                        {activity.broker && (
-                          <Chip
-                            label={activity.broker}
-                            size="small"
-                            variant="outlined"
-                            sx={{ fontSize: "0.6rem", height: 16 }}
-                          />
-                        )}
-                        {activity.symbol && (
-                          <Chip
-                            label={activity.symbol}
-                            size="small"
-                            variant="outlined"
-                            sx={{ fontSize: "0.6rem", height: 16 }}
-                          />
-                        )}
-                      </Stack>
-                    </Stack>
-                  }
-                />
-              </ListItem>
-            </Fade>
-            {index < filteredActivities.length - 1 && (
-              <Divider sx={{ ml: 8, mr: 2, opacity: 0.5 }} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </List>
-  );
-
-  // Header with filters and controls
-  const ActivityHeader = () => (
-    <Stack
-      direction="row"
-      alignItems="center"
-      justifyContent="space-between"
-      mb={2}
-      flexWrap="wrap"
-      gap={1}
-    >
-      <Stack direction="row" alignItems="center" spacing={2}>
-        <Typography variant="body2" color="text.secondary">
-          {filteredActivities.length} of {activities.length} activit
-          {activities.length === 1 ? "y" : "ies"}
-        </Typography>
-
-        {realTime && filteredActivities.length > 0 && (
-          <Badge
-            color="success"
-            variant="dot"
-            sx={{
-              "& .MuiBadge-badge": {
-                animation: "pulse 2s infinite",
-                "@keyframes pulse": {
-                  "0%": { transform: "scale(1)", opacity: 1 },
-                  "50%": { transform: "scale(1.2)", opacity: 0.7 },
-                  "100%": { transform: "scale(1)", opacity: 1 },
-                },
-              },
-            }}
-          >
-            <Chip
-              label="Live"
-              color="success"
-              size="small"
-              sx={{ fontSize: "0.65rem", height: 20, fontWeight: 600 }}
-            />
-          </Badge>
-        )}
-      </Stack>
-
-      <Stack direction="row" alignItems="center" spacing={1}>
-        {showFilter && availableCategories.length > 2 && (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <FilterIcon sx={{ fontSize: 16, color: "text.secondary" }} />
-            <Box sx={{ minWidth: 120 }}>
-              {availableCategories.map((category) => (
-                <Chip
-                  key={category}
-                  label={category.charAt(0).toUpperCase() + category.slice(1)}
-                  size="small"
-                  color={filterType === category ? "primary" : "default"}
-                  onClick={() => setFilterType(category)}
-                  sx={{
-                    mr: 0.5,
-                    mb: 0.5,
-                    fontSize: "0.7rem",
-                    cursor: "pointer",
-                  }}
-                />
-              ))}
-            </Box>
-          </Box>
-        )}
-
-        {onRefresh && (
-          <Tooltip title="Refresh activities">
-            <IconButton
-              size="small"
-              onClick={onRefresh}
-              sx={{
-                bgcolor: alpha(theme.palette.primary.main, 0.1),
-                "&:hover": {
-                  bgcolor: alpha(theme.palette.primary.main, 0.2),
-                },
-              }}
-            >
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        )}
-      </Stack>
-    </Stack>
-  );
-
-  // Main render logic
   if (loading) {
-    return <LoadingSkeleton />;
+    return (
+      <div className="tw-space-y-4 tw-p-4">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="tw-flex tw-gap-3 tw-animate-pulse">
+            <div className="tw-w-10 tw-h-10 tw-bg-slate-100 tw-rounded-full" />
+            <div className="tw-flex-1 tw-space-y-2">
+              <div className="tw-h-3 tw-bg-slate-100 tw-rounded tw-w-1/4" />
+              <div className="tw-h-4 tw-bg-slate-100 tw-rounded tw-w-3/4" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
-  if (error) {
-    return <ErrorState />;
-  }
-
-  if (!activities || activities.length === 0) {
-    return <EmptyState />;
-  }
-
-  if (filteredActivities.length === 0) {
-    return <EmptyState />;
+  if (!activities?.length) {
+    return (
+      <div className="tw-py-12 tw-text-center">
+        <Clock className="tw-w-10 tw-h-10 tw-text-slate-200 tw-mx-auto tw-mb-3" />
+        <p className="tw-text-sm tw-text-slate-400 tw-font-medium">No recent activity found</p>
+      </div>
+    );
   }
 
   return (
-    <Box sx={{ width: "100%" }}>
-      <ActivityHeader />
-
-      {/* Activity Feed */}
-      <Box
-        sx={{
-          maxHeight: { xs: 400, sm: 500, md: 600 },
-          overflowY: "auto",
-          overflowX: "hidden",
-          pr: { xs: 0, sm: 1 },
-          "&::-webkit-scrollbar": {
-            width: 6,
-          },
-          "&::-webkit-scrollbar-track": {
-            backgroundColor: alpha(theme.palette.divider, 0.1),
-            borderRadius: 3,
-          },
-          "&::-webkit-scrollbar-thumb": {
-            backgroundColor: alpha(theme.palette.primary.main, 0.3),
-            borderRadius: 3,
-            "&:hover": {
-              backgroundColor: alpha(theme.palette.primary.main, 0.5),
-            },
-          },
-        }}
-      >
-        {isMobile ? (
-          <Stack spacing={0}>
-            {filteredActivities.map((activity, index) => (
-              <MobileActivityCard
-                key={`mobile-${activity.id || index}`}
-                activity={activity}
-                index={index}
-              />
-            ))}
-          </Stack>
-        ) : (
-          <DesktopActivityList />
-        )}
-      </Box>
-
-      {/* Load more indicator if there are more activities */}
-      {activities.length > maxItems && (
-        <Box sx={{ textAlign: "center", mt: 2 }}>
-          <Typography variant="caption" color="text.secondary">
-            Showing {Math.min(filteredActivities.length, maxItems)} of{" "}
-            {activities.length} activities
-          </Typography>
-        </Box>
-      )}
-    </Box>
+    <div className="tw-divide-y tw-divide-slate-50 tw-dark:divide-slate-800">
+      {filteredActivities.map((activity, idx) => {
+        const data = getActivityData(activity);
+        const Icon = data.icon;
+        
+        return (
+          <div key={idx} className="tw-p-4 hover:tw-bg-slate-50/50 tw-dark:hover:tw-bg-slate-800/30 tw-transition-colors tw-group">
+            <div className="tw-flex tw-items-start tw-gap-4">
+              <div className={`tw-p-2 tw-rounded-xl ${data.bg} tw-dark:tw-bg-opacity-10 ${data.color} tw-flex-shrink-0`}>
+                <Icon className="tw-w-4 tw-h-4" />
+              </div>
+              <div className="tw-flex-1 tw-min-w-0">
+                <div className="tw-flex tw-items-center tw-justify-between tw-mb-1">
+                  <span className={`tw-text-[10px] tw-font-black tw-uppercase tw-tracking-widest ${data.color}`}>
+                    {data.label}
+                  </span>
+                  <span className="tw-text-[10px] tw-text-slate-400 tw-font-bold tw-flex tw-items-center tw-gap-1">
+                    <Clock className="tw-w-3 tw-h-3" />
+                    {formatTime(activity.timestamp || activity.created_at)}
+                  </span>
+                </div>
+                <p className="tw-text-xs tw-font-bold tw-text-slate-700 tw-dark:text-slate-300 tw-leading-relaxed tw-truncate">
+                  {activity.description || activity.message}
+                </p>
+                {activity.status && (
+                  <span className={`tw-inline-block tw-mt-2 tw-px-1.5 tw-py-0.5 tw-rounded tw-text-[9px] tw-font-black tw-uppercase tw-tracking-tighter ${
+                    activity.status === 'completed' ? 'tw-bg-green-100 tw-text-green-700' : 'tw-bg-slate-100 tw-text-slate-600'
+                  }`}>
+                    {activity.status}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 };
 

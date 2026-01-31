@@ -64,6 +64,15 @@ class PaperTradingAccountService:
         self.positions: Dict[int, List[PaperPosition]] = {}  # user_id -> positions
         self.trade_history: Dict[int, List[Dict]] = {}  # user_id -> trade history
     
+    async def get_account(self, user_id: int, db: Optional[Session] = None) -> Optional[PaperAccount]:
+        """
+        Get account from memory or DB
+        """
+        account = self.accounts.get(user_id)
+        if not account and db:
+            account = await self.sync_with_db(user_id, db)
+        return account
+
     async def create_paper_account(self, user_id: int, initial_capital: float = 100000) -> PaperAccount:
         """
         Create new paper trading account
@@ -97,122 +106,146 @@ class PaperTradingAccountService:
             logger.error(f"❌ Error creating paper account: {e}")
             raise
     
-    async def get_account(self, user_id: int) -> Optional[PaperAccount]:
-        """Get paper trading account for user"""
-        return self.accounts.get(user_id)
-    
-    async def update_account_settings(self, user_id: int, settings: Dict[str, Any]) -> bool:
+    async def sync_with_db(self, user_id: int, db: Session) -> Optional[PaperAccount]:
         """
-        Update account settings (capital, risk limits, etc.)
-        
-        Args:
-            user_id: User ID
-            settings: Dictionary with settings to update
+        Synchronize in-memory account with database
         """
         try:
-            account = self.accounts.get(user_id)
-            if not account:
-                return False
+            from database.models import PaperTradingAccount
             
-            # Update allowed settings
-            if 'initial_capital' in settings:
-                new_capital = float(settings['initial_capital'])
-                # Adjust current balance proportionally
-                ratio = new_capital / account.initial_capital
-                account.current_balance *= ratio
-                account.available_margin *= ratio
-                account.initial_capital = new_capital
-                
-            if 'max_positions' in settings:
-                account.max_positions = int(settings['max_positions'])
-                
-            if 'max_risk_per_trade' in settings:
-                account.max_risk_per_trade = float(settings['max_risk_per_trade'])
-                
-            if 'max_daily_loss' in settings:
-                account.max_daily_loss = float(settings['max_daily_loss'])
+            db_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
             
-            account.updated_at = datetime.now(timezone.utc)
+            if not db_account:
+                # Create default in DB if not exists
+                db_account = PaperTradingAccount(
+                    user_id=user_id,
+                    initial_capital=100000.0,
+                    current_balance=100000.0,
+                    available_margin=100000.0,
+                    used_margin=0.0,
+                    total_pnl=0.0
+                )
+                db.add(db_account)
+                db.commit()
+                db.refresh(db_account)
+
+            # Update in-memory
+            account = PaperAccount(
+                user_id=db_account.user_id,
+                initial_capital=float(db_account.initial_capital),
+                current_balance=float(db_account.current_balance),
+                used_margin=float(db_account.used_margin),
+                available_margin=float(db_account.available_margin),
+                total_pnl=float(db_account.total_pnl),
+                daily_pnl=float(db_account.daily_pnl),
+                positions_count=db_account.positions_count,
+                max_positions=db_account.max_positions,
+                max_risk_per_trade=float(db_account.max_risk_per_trade),
+                max_daily_loss=float(db_account.max_daily_loss),
+                created_at=db_account.created_at,
+                updated_at=db_account.updated_at
+            )
             
-            logger.info(f"✅ Account settings updated for user {user_id}")
-            return True
+            self.accounts[user_id] = account
+            return account
             
         except Exception as e:
-            logger.error(f"❌ Error updating account settings: {e}")
-            return False
-    
-    async def validate_trade(self, user_id: int, trade_amount: float) -> Dict[str, Any]:
+            logger.error(f"❌ Error syncing paper account: {e}")
+            return self.accounts.get(user_id)
+
+    def execute_paper_trade_sync(self, user_id: int, trade_data: Dict[str, Any], db: Session) -> Dict[str, Any]:
         """
-        Validate if trade can be executed
-        
-        Returns:
-            Dictionary with validation result and details
+        Synchronous version of execute_paper_trade for use in non-async contexts
         """
         try:
+            # Sync with DB first to ensure we have latest data
+            from database.models import PaperTradingAccount
+            db_acc = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
+            
+            if not db_acc:
+                db_acc = PaperTradingAccount(
+                    user_id=user_id,
+                    initial_capital=100000.0,
+                    current_balance=100000.0,
+                    available_margin=100000.0,
+                    used_margin=0.0,
+                    total_pnl=0.0
+                )
+                db.add(db_acc)
+                db.flush()
+
+            invested_amount = float(trade_data['invested_amount'])
+            entry_charges = 20.0
+            total_entry_cost = invested_amount + entry_charges
+            
+            # Update DB
+            db_acc.used_margin += invested_amount
+            db_acc.available_margin -= total_entry_cost
+            db_acc.current_balance -= total_entry_cost
+            db_acc.total_pnl -= entry_charges
+            db_acc.positions_count += 1
+            db_acc.updated_at = datetime.now(timezone.utc)
+            
+            # Update in-memory if it exists
             account = self.accounts.get(user_id)
-            if not account:
-                return {"valid": False, "reason": "Account not found"}
+            if account:
+                account.used_margin = float(db_acc.used_margin)
+                account.available_margin = float(db_acc.available_margin)
+                account.current_balance = float(db_acc.current_balance)
+                account.total_pnl = float(db_acc.total_pnl)
+                account.positions_count = db_acc.positions_count
             
-            # Check available margin
-            if trade_amount > account.available_margin:
-                return {
-                    "valid": False, 
-                    "reason": f"Insufficient margin. Available: ₹{account.available_margin:,.2f}, Required: ₹{trade_amount:,.2f}"
-                }
-            
-            # Check max positions limit
-            if account.positions_count >= account.max_positions:
-                return {
-                    "valid": False,
-                    "reason": f"Maximum positions limit reached ({account.max_positions})"
-                }
-            
-            # Check per-trade risk limit
-            risk_amount = account.initial_capital * account.max_risk_per_trade
-            if trade_amount > risk_amount:
-                return {
-                    "valid": False,
-                    "reason": f"Trade exceeds risk limit. Max allowed: ₹{risk_amount:,.2f}"
-                }
-            
-            # Check daily loss limit
-            daily_loss_limit = account.initial_capital * account.max_daily_loss
-            if abs(account.daily_pnl) > daily_loss_limit and account.daily_pnl < 0:
-                return {
-                    "valid": False,
-                    "reason": f"Daily loss limit reached. Limit: ₹{daily_loss_limit:,.2f}"
-                }
-            
-            return {
-                "valid": True,
-                "available_margin": account.available_margin,
-                "risk_amount": risk_amount,
-                "positions_used": account.positions_count,
-                "max_positions": account.max_positions
-            }
+            logger.info(f"✅ Paper trade executed (Sync): {trade_data['symbol']} (Invested: ₹{invested_amount})")
+            return {"success": True}
             
         except Exception as e:
-            logger.error(f"❌ Error validating trade: {e}")
-            return {"valid": False, "reason": "Validation error"}
-    
-    async def execute_paper_trade(self, user_id: int, trade_data: Dict[str, Any]) -> Dict[str, Any]:
+            logger.error(f"❌ Error executing paper trade sync: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def execute_paper_trade(self, user_id: int, trade_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
         """
-        Execute paper trade (virtual execution)
-        
-        Args:
-            trade_data: Complete trade information
+        Execute paper trade (virtual execution) with CHARGES
         """
         try:
             account = self.accounts.get(user_id)
+            if not account and db:
+                account = await self.sync_with_db(user_id, db)
+                
             if not account:
                 return {"success": False, "error": "Account not found"}
             
+            invested_amount = float(trade_data['invested_amount'])
+            
+            # Entry Charges: ₹20 brokerage
+            entry_charges = 20.0
+            total_entry_cost = invested_amount + entry_charges
+            
             # Validate trade
-            validation = await self.validate_trade(user_id, trade_data['invested_amount'])
+            validation = await self.validate_trade(user_id, total_entry_cost)
             if not validation['valid']:
                 return {"success": False, "error": validation['reason']}
             
-            # Create position
+            # Update account
+            account.used_margin += invested_amount
+            account.available_margin -= total_entry_cost
+            account.current_balance -= total_entry_cost
+            account.total_pnl -= entry_charges # Charges are an immediate loss
+            account.positions_count += 1
+            account.updated_at = datetime.now(timezone.utc)
+            
+            # Sync to DB if session provided
+            if db:
+                from database.models import PaperTradingAccount
+                db_acc = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
+                if db_acc:
+                    db_acc.used_margin = account.used_margin
+                    db_acc.available_margin = account.available_margin
+                    db_acc.current_balance = account.current_balance
+                    db_acc.total_pnl = account.total_pnl
+                    db_acc.positions_count = account.positions_count
+                    db_acc.updated_at = datetime.now(timezone.utc)
+            
+            # Create position object
             position = PaperPosition(
                 position_id=f"P_{user_id}_{int(datetime.now().timestamp())}",
                 user_id=user_id,
@@ -224,42 +257,20 @@ class PaperTradingAccountService:
                 current_price=trade_data['entry_price'],
                 quantity=trade_data['quantity'],
                 lot_size=trade_data['lot_size'],
-                invested_amount=trade_data['invested_amount'],
-                current_value=trade_data['invested_amount'],
-                pnl=0.0,
-                pnl_percentage=0.0,
+                invested_amount=invested_amount,
+                current_value=invested_amount,
+                pnl=-entry_charges, # Start with negative PnL due to charges
+                pnl_percentage=( -entry_charges / invested_amount * 100 ),
                 stop_loss=trade_data.get('stop_loss', 0.0),
                 target=trade_data.get('target', 0.0),
                 entry_time=datetime.now(timezone.utc)
             )
             
-            # Update account
-            # Logic: Cash balance decreases by invested amount. Used margin increases. Available margin decreases.
-            account.used_margin += trade_data['invested_amount']
-            account.available_margin -= trade_data['invested_amount']
-            account.current_balance -= trade_data['invested_amount']  # Cash is used to buy
-            account.positions_count += 1
-            account.updated_at = datetime.now(timezone.utc)
-            
-            # Add position
             if user_id not in self.positions:
                 self.positions[user_id] = []
             self.positions[user_id].append(position)
             
-            # Add to trade history
-            if user_id not in self.trade_history:
-                self.trade_history[user_id] = []
-            self.trade_history[user_id].append({
-                "action": "BUY",
-                "position_id": position.position_id,
-                "symbol": position.symbol,
-                "price": position.entry_price,
-                "quantity": position.quantity,
-                "amount": position.invested_amount,
-                "timestamp": position.entry_time.isoformat()
-            })
-            
-            logger.info(f"✅ Paper trade executed: {position.symbol} {position.option_type} @ ₹{position.entry_price}")
+            logger.info(f"✅ Paper trade executed: {position.symbol} (Invested: ₹{invested_amount}, Charges: ₹{entry_charges})")
             
             return {
                 "success": True,
@@ -271,62 +282,20 @@ class PaperTradingAccountService:
         except Exception as e:
             logger.error(f"❌ Error executing paper trade: {e}")
             return {"success": False, "error": str(e)}
-    
-    async def update_position_price(self, user_id: int, instrument_key: str, current_price: float):
-        """Update position with current market price"""
-        try:
-            if user_id not in self.positions:
-                return
-            
-            account = self.accounts.get(user_id)
-            if not account:
-                return
-            
-            for position in self.positions[user_id]:
-                if position.instrument_key == instrument_key and position.status == "ACTIVE":
-                    position.current_price = current_price
-                    position.current_value = current_price * position.quantity * position.lot_size
-                    position.pnl = position.current_value - position.invested_amount
-                    position.pnl_percentage = (position.pnl / position.invested_amount) * 100
-            
-            # Update account P&L
-            await self._recalculate_account_pnl(user_id)
-            
-        except Exception as e:
-            logger.error(f"❌ Error updating position price: {e}")
-    
-    async def _recalculate_account_pnl(self, user_id: int):
-        """Recalculate total account P&L"""
+
+    async def close_position(self, user_id: int, position_id: str, exit_price: float, db: Optional[Session] = None) -> Dict[str, Any]:
+        """Close a paper trading position with EXIT CHARGES"""
         try:
             account = self.accounts.get(user_id)
-            positions = self.positions.get(user_id, [])
-            
-            if not account:
-                return
-            
-            total_pnl = sum(pos.pnl for pos in positions if pos.status == "ACTIVE")
-            account.total_pnl = total_pnl
-            # For demo, assuming daily_pnl = total_pnl (reset daily at market open)
-            account.daily_pnl = total_pnl
-            
-            account.updated_at = datetime.now(timezone.utc)
-            
-        except Exception as e:
-            logger.error(f"❌ Error recalculating P&L: {e}")
-    
-    async def close_position(self, user_id: int, position_id: str, exit_price: float) -> Dict[str, Any]:
-        """Close a paper trading position"""
-        try:
-            if user_id not in self.positions:
-                return {"success": False, "error": "No positions found"}
-            
-            account = self.accounts.get(user_id)
+            if not account and db:
+                account = await self.sync_with_db(user_id, db)
+                
             if not account:
                 return {"success": False, "error": "Account not found"}
             
             # Find position
             position = None
-            for pos in self.positions[user_id]:
+            for pos in self.positions.get(user_id, []):
                 if pos.position_id == position_id and pos.status == "ACTIVE":
                     position = pos
                     break
@@ -335,66 +304,57 @@ class PaperTradingAccountService:
                 return {"success": False, "error": "Position not found"}
             
             # Calculate final P&L
-            exit_value = exit_price * position.quantity * position.lot_size
-            final_pnl = exit_value - position.invested_amount
-            final_pnl_percentage = (final_pnl / position.invested_amount) * 100
+            # Quantity is total units (lots * lot_size), so simple multiplication
+            exit_value = exit_price * position.quantity
+            gross_pnl = exit_value - position.invested_amount
+            
+            # Exit Charges: ₹20 brokerage + 0.1% taxes on turnover
+            turnover = position.invested_amount + exit_value
+            exit_charges = 20.0 + (turnover * 0.001)
+            
+            net_pnl = gross_pnl - exit_charges
 
             # Update position
-            position.current_price = exit_price
-            position.current_value = exit_value
-            position.pnl = final_pnl
-            position.pnl_percentage = final_pnl_percentage
             position.status = "CLOSED"
+            position.pnl = net_pnl
+            position.pnl_percentage = (net_pnl / position.invested_amount) * 100
 
-            # Update account - CRITICAL FIX: Properly reflect P&L in balance
-            # Logic: When selling, you get back the Exit Value (Investment + PnL) as Cash.
-            # 1. Release Used Margin (Invested Amount)
+            # Update account
+            # Release Invested amount and add (Exit Value - Exit Charges)
             account.used_margin -= position.invested_amount
-            # Ensure used_margin doesn't go below zero due to floating point errors
-            if account.used_margin < 0:
-                account.used_margin = 0.0
-
-            # 2. Credit Exit Value to Available Margin and Cash Balance
-            account.available_margin += exit_value
-            account.current_balance += exit_value
-
-            # Update total P&L (cumulative across all closed positions)
-            account.total_pnl += final_pnl
-
-            # Update daily P&L (should be reset daily at market open)
-            account.daily_pnl += final_pnl
-
+            release_amount = exit_value - exit_charges
+            account.available_margin += release_amount
+            account.current_balance += release_amount
+            account.total_pnl += net_pnl
+            account.daily_pnl += net_pnl
             account.positions_count = max(0, account.positions_count - 1)
             account.updated_at = datetime.now(timezone.utc)
             
-            # Add to trade history
-            self.trade_history[user_id].append({
-                "action": "SELL",
-                "position_id": position.position_id,
-                "symbol": position.symbol,
-                "price": exit_price,
-                "quantity": position.quantity,
-                "amount": exit_value,
-                "pnl": final_pnl,
-                "pnl_percentage": final_pnl_percentage,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            # Sync to DB
+            if db:
+                from database.models import PaperTradingAccount
+                db_acc = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
+                if db_acc:
+                    db_acc.used_margin = account.used_margin
+                    db_acc.available_margin = account.available_margin
+                    db_acc.current_balance = account.current_balance
+                    db_acc.total_pnl = account.total_pnl
+                    db_acc.daily_pnl = account.daily_pnl
+                    db_acc.positions_count = account.positions_count
+                    db_acc.updated_at = datetime.now(timezone.utc)
             
-            await self._recalculate_account_pnl(user_id)
-            
-            logger.info(f"✅ Position closed: {position.symbol} P&L: ₹{final_pnl:,.2f} ({final_pnl_percentage:.2f}%)")
+            logger.info(f"✅ Position closed: {position.symbol} Net PnL: ₹{net_pnl:,.2f} (Charges: ₹{exit_charges:.2f})")
             
             return {
                 "success": True,
-                "final_pnl": final_pnl,
-                "pnl_percentage": final_pnl_percentage,
-                "exit_value": exit_value,
-                "message": "Position closed successfully"
+                "net_pnl": net_pnl,
+                "release_amount": release_amount
             }
             
         except Exception as e:
             logger.error(f"❌ Error closing position: {e}")
             return {"success": False, "error": str(e)}
+
     
     async def get_account_summary(self, user_id: int) -> Dict[str, Any]:
         """Get complete account summary"""

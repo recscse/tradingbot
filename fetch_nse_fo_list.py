@@ -85,15 +85,121 @@ async def download_dhan_data():
             print(f"✅ File downloaded successfully: {download_path}")
 
             # Process the downloaded file
-            return await process_downloaded_file(download_path)
+            processed_data = await process_downloaded_file(download_path)
+            if processed_data:
+                await save_to_app_data(processed_data)
+            return processed_data
 
         except Exception as e:
             print(f"❌ Error during download: {e}")
             # Try alternative method - extract data directly from page
-            return await extract_data_from_page(page)
+            extracted_data = await extract_data_from_page(page)
+            if extracted_data:
+                await save_to_app_data(extracted_data)
+            return extracted_data
 
         finally:
             await browser.close()
+
+
+async def save_to_app_data(data):
+    """
+    Transform and save data to data/fno_stock_list.json
+    """
+    try:
+        print("🔄 Transforming data for application...")
+        
+        securities = []
+        
+        # Handle different data formats
+        # Format 1: List of lists (from page extraction)
+        # ["AAdani Enterprises", "ADANIENTBS", "300", ...]
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+            for row in data:
+                if len(row) >= 2:
+                    name = row[0].strip()
+                    symbol = row[1].strip()
+                    
+                    # Clean symbol (remove 'BS' suffix)
+                    if symbol.endswith("BS"):
+                        symbol = symbol[:-2]
+                    
+                    # Clean name (remove first char if it duplicates second char, common scraping artifact)
+                    if len(name) > 1 and name[0] == name[1]:
+                        name = name[1:]
+                        
+                    securities.append({
+                        "name": name,
+                        "symbol": symbol,
+                        "exchange": "NSE"
+                    })
+
+        # Format 2: List of dicts (from CSV/JSON download)
+        elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            for row in data:
+                # Try to find symbol and name columns
+                symbol = None
+                name = None
+                
+                # Check keys
+                for key, value in row.items():
+                    key_lower = key.lower()
+                    if "symbol" in key_lower:
+                        symbol = str(value).strip()
+                    elif "underlying" in key_lower or "company" in key_lower or "name" in key_lower:
+                        name = str(value).strip()
+                
+                if symbol:
+                    if not name:
+                        name = symbol
+                        
+                    # Clean symbol
+                    if symbol.endswith("BS"):
+                        symbol = symbol[:-2]
+                        
+                    securities.append({
+                        "name": name,
+                        "symbol": symbol,
+                        "exchange": "NSE"
+                    })
+
+        if securities:
+            # Sort by symbol
+            securities.sort(key=lambda x: x["symbol"])
+            
+            output_data = {
+                "securities": securities,
+                "last_updated": pd.Timestamp.now().isoformat(),
+                "total_count": len(securities),
+                "data_source": "dhan_playwright_dynamic"
+            }
+            
+            # Create data directory if not exists
+            data_dir = Path("data")
+            data_dir.mkdir(exist_ok=True)
+            
+            target_file = data_dir / "fno_stock_list.json"
+            
+            # Backup existing file
+            if target_file.exists():
+                backup_file = data_dir / f"fno_stock_list_backup_{int(pd.Timestamp.now().timestamp())}.json"
+                import shutil
+                shutil.copy(target_file, backup_file)
+                print(f"📦 Backed up existing file to: {backup_file}")
+            
+            # Save new file
+            with open(target_file, "w", encoding="utf-8") as f:
+                json.dump(output_data, f, indent=2)
+                
+            print(f"✅ Successfully updated {target_file}")
+            print(f"📊 Total securities: {len(securities)}")
+            
+        else:
+            print("⚠️ No valid securities found to save")
+
+    except Exception as e:
+        print(f"❌ Error saving to app data: {e}")
+
 
 
 async def extract_data_from_page(page):

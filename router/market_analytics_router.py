@@ -339,16 +339,22 @@ analytics_service = SimpleAnalyticsService()
 class SimpleAnalyticsManager:
     def __init__(self):
         self.active_connections = {}
-        self._connection_lock = asyncio.Lock()
+        self._locks = {}
+
+    def _get_lock(self):
+        loop = asyncio.get_running_loop()
+        if loop not in self._locks:
+            self._locks[loop] = asyncio.Lock()
+        return self._locks[loop]
 
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
-        async with self._connection_lock:
+        async with self._get_lock():
             self.active_connections[client_id] = websocket
         logger.info(f"Analytics client connected: {client_id}")
 
     async def disconnect(self, client_id: str):
-        async with self._connection_lock:
+        async with self._get_lock():
             if client_id in self.active_connections:
                 del self.active_connections[client_id]
         logger.info(f"Analytics client disconnected: {client_id}")

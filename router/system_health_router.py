@@ -1,26 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Dict, Any, List
 from datetime import datetime
 import logging
 import os
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from services.centralized_ws_manager import get_centralized_manager
 from services.market_schedule_service import get_market_scheduler
 from services.system_check_service import system_check_service
 from database.connection import get_db
+from database.models import TradingSystemLog
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 @router.get("/status")
 async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """
-    Get comprehensive system status including infrastructure, business logic, and live operations
-    """
+    # ... (existing code remains same)
     try:
         # 1. WebSocket Status
         ws_manager = get_centralized_manager()
+        # ... rest of the function ...
         ws_status = ws_manager.get_auto_trading_status() if ws_manager else {"error": "Manager not initialized"}
 
         # 2. Market Schedule Status
@@ -42,6 +43,9 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
         live_feed_status = system_check_service.check_live_feed_status()
         strategy_status = system_check_service.check_strategy_status()
         automation_status = system_check_service.check_automation_status()
+        trade_prep_status = system_check_service.check_trade_prep_status()
+        analytics_status = system_check_service.check_realtime_analytics_status()
+        option_status = system_check_service.check_option_service_status()
         
         # Aggregate Errors
         errors = []
@@ -50,7 +54,8 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
             ("stock_selection", stock_selection_status), ("tokens", token_status),
             ("instruments", instrument_status), ("live_feed", live_feed_status),
             ("strategy", strategy_status), ("scheduler", scheduler_status),
-            ("automation", automation_status)
+            ("automation", automation_status), ("trade_prep", trade_prep_status),
+            ("analytics", analytics_status), ("options", option_status)
         ]:
             if isinstance(status, dict):
                 # Standard error status
@@ -66,7 +71,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 if check_name == "strategy" and status.get("auto_trade_scheduler_error"):
                     errors.append({"component": "auto_trade_scheduler", "error": status["auto_trade_scheduler_error"]})
                 
-                # Check for last_error in other components (Instruments, Stock Selection)
+                # Check for last_error in other components
                 if status.get("last_error") and status.get("status") != "error":
                      errors.append({"component": f"{check_name}:last_error", "error": status["last_error"]})
 
@@ -93,11 +98,14 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 "market_schedule": scheduler_status,
                 "token_status": token_status,
                 "automation": automation_status,
+                "trade_prep": trade_prep_status,
+                "option_service": option_status,
             },
             "live_operations": {
                 "feed_status": live_feed_status,
                 "instrument_service": instrument_status,
                 "strategy_status": strategy_status,
+                "analytics_engine": analytics_status,
                 "websocket_manager": ws_status, # Legacy support
             },
             "infrastructure": {
@@ -118,3 +126,39 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "message": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+@router.get("/logs")
+async def get_system_logs(
+    limit: int = Query(50, ge=1, le=200),
+    level: str = Query(None),
+    component: str = Query(None),
+    db: Session = Depends(get_db)
+) -> List[Dict[str, Any]]:
+    """
+    Fetch recent system logs from the database
+    """
+    try:
+        query = db.query(TradingSystemLog)
+        
+        if level:
+            query = query.filter(TradingSystemLog.log_level == level.upper())
+        if component:
+            query = query.filter(TradingSystemLog.component == component)
+            
+        logs = query.order_by(desc(TradingSystemLog.timestamp)).limit(limit).all()
+        
+        return [
+            {
+                "id": log.id,
+                "timestamp": log.timestamp.isoformat(),
+                "level": log.log_level,
+                "component": log.component,
+                "message": log.message,
+                "latency_ms": log.latency_ms,
+                "additional_data": log.additional_data
+            }
+            for log in logs
+        ]
+    except Exception as e:
+        logger.error(f"Error fetching system logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
