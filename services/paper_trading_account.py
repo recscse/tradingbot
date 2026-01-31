@@ -64,6 +64,15 @@ class PaperTradingAccountService:
         self.positions: Dict[int, List[PaperPosition]] = {}  # user_id -> positions
         self.trade_history: Dict[int, List[Dict]] = {}  # user_id -> trade history
     
+    async def get_account(self, user_id: int, db: Optional[Session] = None) -> Optional[PaperAccount]:
+        """
+        Get account from memory or DB
+        """
+        account = self.accounts.get(user_id)
+        if not account and db:
+            account = await self.sync_with_db(user_id, db)
+        return account
+
     async def create_paper_account(self, user_id: int, initial_capital: float = 100000) -> PaperAccount:
         """
         Create new paper trading account
@@ -295,7 +304,8 @@ class PaperTradingAccountService:
                 return {"success": False, "error": "Position not found"}
             
             # Calculate final P&L
-            exit_value = exit_price * position.quantity * position.lot_size
+            # Quantity is total units (lots * lot_size), so simple multiplication
+            exit_value = exit_price * position.quantity
             gross_pnl = exit_value - position.invested_amount
             
             # Exit Charges: ₹20 brokerage + 0.1% taxes on turnover
