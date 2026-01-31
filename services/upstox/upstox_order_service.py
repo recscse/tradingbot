@@ -397,40 +397,27 @@ class UpstoxOrderService:
     def modify_order_v3(
         self,
         order_id: str,
-        quantity: Optional[int] = None,
-        order_type: str = "LIMIT",
+        order_type: str,
+        price: float,
+        trigger_price: float,
         validity: str = "DAY",
-        price: float = 0.0,
-        trigger_price: float = 0.0,
-        disclosed_quantity: Optional[int] = None
+        quantity: Optional[int] = None,
+        disclosed_quantity: int = 0
     ) -> Dict[str, Any]:
         """
         Modify an existing open or pending order using V3 API
 
         Args:
             order_id: Order ID to modify (required)
-            quantity: New quantity (optional, uses original if not provided)
-            order_type: New order type
-            validity: Order validity (DAY or IOC)
-            price: New limit price
-            trigger_price: New trigger price
-            disclosed_quantity: New disclosed quantity (optional)
+            order_type: Order type (required: MARKET, LIMIT, SL, SL-M)
+            price: Limit price (required, 0.0 if MARKET)
+            trigger_price: Trigger price (required, 0.0 if not SL)
+            validity: Order validity (default "DAY")
+            quantity: New quantity (optional)
+            disclosed_quantity: New disclosed quantity (default 0)
 
         Returns:
             Dict with success status, order_id, and latency metadata
-
-        Raises:
-            ValueError: If parameters invalid
-            Exception: If API call fails
-
-        Example:
-            >>> result = service.modify_order_v3(
-            ...     order_id="240108010918222",
-            ...     quantity=3,
-            ...     order_type="LIMIT",
-            ...     price=16.8,
-            ...     trigger_price=16.9
-            ... )
         """
         try:
             if not order_id:
@@ -438,21 +425,20 @@ class UpstoxOrderService:
 
             url = f"{self.base_url_v3}/order/modify"
 
+            # Based on V3 docs, these fields are mandatory in the payload
             payload = {
                 "order_id": order_id,
-                "validity": validity,
-                "price": float(price),
                 "order_type": order_type,
-                "trigger_price": float(trigger_price)
+                "price": float(price),
+                "trigger_price": float(trigger_price),
+                "validity": validity,
+                "disclosed_quantity": disclosed_quantity
             }
 
             if quantity is not None:
                 payload["quantity"] = quantity
 
-            if disclosed_quantity is not None:
-                payload["disclosed_quantity"] = disclosed_quantity
-
-            logger.info(f"Modifying order: {order_id} ({order_type}, price={price})")
+            logger.info(f"Modifying order V3: {order_id} ({order_type}, price={price})")
 
             response = requests.put(url, json=payload, headers=self._get_headers())
 
@@ -617,13 +603,18 @@ class UpstoxOrderService:
                 result = response.json()
                 status = result.get("status")
                 summary = result.get("summary", {})
-                order_ids = result.get("data", {}).get("order_ids", [])
+                data = result.get("data", {}) or {}
+                order_ids = data.get("order_ids", [])
+                errors = result.get("errors", [])
 
                 logger.info(
                     f"Multi cancel result - Status: {status}, "
                     f"Cancelled: {summary.get('success', 0)}/{summary.get('total', 0)}, "
                     f"Errors: {summary.get('error', 0)}"
                 )
+
+                if errors:
+                    logger.warning(f"Multi cancel errors: {errors}")
 
                 return {
                     "success": status in ["success", "partial_success"],
@@ -633,7 +624,8 @@ class UpstoxOrderService:
                         "total_cancelled": len(order_ids)
                     },
                     "summary": summary,
-                    "message": f"Cancelled {len(order_ids)} orders"
+                    "errors": errors,
+                    "message": f"Cancelled {len(order_ids)} orders. Failed: {summary.get('error', 0)}"
                 }
             else:
                 error_text = response.text
@@ -657,7 +649,7 @@ class UpstoxOrderService:
             tag: Position tag filter (applies to intraday positions only)
 
         Returns:
-            Dict with success status, exit order_ids, and summary
+            Dict with success status, exit order_ids, summary, and errors
 
         Raises:
             Exception: If API call fails
@@ -697,13 +689,18 @@ class UpstoxOrderService:
                 result = response.json()
                 status = result.get("status")
                 summary = result.get("summary", {})
-                order_ids = result.get("data", {}).get("order_ids", [])
+                data = result.get("data", {}) or {}
+                order_ids = data.get("order_ids", [])
+                errors = result.get("errors", [])
 
                 logger.info(
                     f"Exit positions result - Status: {status}, "
                     f"Exited: {summary.get('success', 0)}/{summary.get('total', 0)}, "
                     f"Errors: {summary.get('error', 0)}"
                 )
+
+                if errors:
+                    logger.warning(f"Exit positions errors: {errors}")
 
                 return {
                     "success": status in ["success", "partial_success"],
@@ -713,7 +710,8 @@ class UpstoxOrderService:
                         "total_positions_exited": len(order_ids)
                     },
                     "summary": summary,
-                    "message": f"Exited {len(order_ids)} positions"
+                    "errors": errors,
+                    "message": f"Exited {len(order_ids)} positions. Failed: {summary.get('error', 0)}"
                 }
             else:
                 error_text = response.text
@@ -865,6 +863,115 @@ class UpstoxOrderService:
         except Exception as e:
             logger.error(f"Error fetching order history: {e}")
             raise
+
+    def get_brokerage_charges(
+        self,
+        instrument_token: str,
+        quantity: int,
+        transaction_type: str,
+        price: float,
+        product: str = "D"
+    ) -> Dict[str, Any]:
+        """
+        Calculate brokerage charges for a specific trade order
+
+        Args:
+            instrument_token: Instrument key
+            quantity: Order quantity
+            transaction_type: BUY or SELL
+            price: Order price
+            product: Product type (I, D, etc.)
+
+        Returns:
+            Dict with detailed charges breakdown
+        """
+        try:
+            url = f"{self.base_url_v2}/charges/brokerage"
+            params = {
+                "instrument_token": instrument_token,
+                "quantity": quantity,
+                "product": product,
+                "transaction_type": transaction_type,
+                "price": float(price)
+            }
+
+            logger.debug(f"Fetching brokerage charges for {instrument_token}")
+
+            response = requests.get(url, params=params, headers=self._get_headers())
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status") == "success":
+                    return {
+                        "success": True,
+                        "data": result.get("data", {}),
+                        "charges": result.get("data", {}).get("charges", {})
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": result.get("message", "Unknown error")
+                    }
+            else:
+                logger.error(f"Brokerage API error: {response.text}")
+                return {"success": False, "message": f"API error: {response.status_code}"}
+
+        except Exception as e:
+            logger.error(f"Error fetching brokerage: {e}")
+            return {"success": False, "message": str(e)}
+
+    def fetch_margin_requirements(
+        self,
+        instruments: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Fetch margin requirements for a list of instruments
+
+        Args:
+            instruments: List of dicts, each containing:
+                - instrument_token (str)
+                - quantity (int)
+                - transaction_type (BUY/SELL)
+                - product (I/D/CO)
+                - price (float, optional)
+
+        Returns:
+            Dict with margin details (required_margin, final_margin, etc.)
+        """
+        try:
+            url = f"{self.base_url_v2}/charges/margin"
+            
+            # Upstox API expects body with "instruments": [...]
+            payload = {
+                "instruments": instruments
+            }
+
+            logger.debug(f"Fetching margin requirements for {len(instruments)} instruments")
+
+            response = requests.post(url, json=payload, headers=self._get_headers())
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("status") == "success":
+                    data = result.get("data", {})
+                    return {
+                        "success": True,
+                        "required_margin": data.get("required_margin", 0),
+                        "final_margin": data.get("final_margin", 0),
+                        "margins": data.get("margins", [])
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": result.get("message", "Unknown error")
+                    }
+            else:
+                logger.error(f"Margin API error: {response.text}")
+                return {"success": False, "message": f"API error: {response.status_code}"}
+
+        except Exception as e:
+            logger.error(f"Error fetching margin: {e}")
+            return {"success": False, "message": str(e)}
 
 
 # Singleton instance factory
