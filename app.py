@@ -663,16 +663,17 @@ async def lifespan(app: FastAPI):
             )
 
         # 7.1. Initialize Upstox Token Automation (IN BACKGROUND - NON-BLOCKING)
-        logger.info("🔄 Starting Upstox Token Automation in background...")
+        logger.info("🔄 Queueing Upstox Token Automation startup...")
         try:
 
             async def start_upstox_in_background():
                 """Start Upstox automation in background to avoid blocking startup"""
                 try:
-                    # Wait for server to fully start
-                    logger.info("⏳ Waiting 15s for server startup before initializing Upstox automation...")
-                    await asyncio.sleep(15)
+                    # Reduced wait time to ensure it starts reliably and visibly
+                    logger.info("⏳ Waiting 5s for server startup before initializing Upstox automation...")
+                    await asyncio.sleep(5)
                     
+                    logger.info("🚀 Triggering Upstox Automation Service start...")
                     from services.upstox_automation_service import (
                         start_upstox_automation,
                     )
@@ -680,23 +681,23 @@ async def lifespan(app: FastAPI):
                     upstox_automation = start_upstox_automation()
                     if upstox_automation:
                         logger.info(
-                            "✅ Upstox token automation started - will refresh tokens daily at 4:00 AM"
+                            "✅ Upstox token automation started successfully - Scheduler Active"
                         )
                     else:
-                        logger.warning("⚠️ Upstox token automation failed to start")
+                        logger.warning("⚠️ Upstox token automation failed to start (returned None)")
                 except Exception as e:
                     logger.warning(
-                        f"⚠️ Upstox automation error: {e} - continuing without automation"
+                        f"⚠️ Upstox automation background task error: {e}"
                     )
 
             # Start in background - DON'T WAIT FOR IT!
             asyncio.create_task(start_upstox_in_background())
             logger.info(
-                "✅ Upstox automation starting in background - application remains responsive"
+                "✅ Upstox automation queued in background"
             )
         except Exception as e:
             logger.warning(
-                f"⚠️ Upstox automation task creation failed: {e} - continuing without automation"
+                f"⚠️ Upstox automation task creation failed: {e}"
             )
 
         # 7.2. Initialize MarketScheduleService - CRITICAL for FNO and Instrument automation
