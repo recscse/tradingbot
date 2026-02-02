@@ -510,6 +510,10 @@ class RealTimePnLTracker:
                     access_token=broker_config.access_token,
                     use_sandbox=False
                 )
+                
+                # Determine product type (default to Intraday 'I' if not specified)
+                # Ideally this should be stored in AutoTradeExecution, but if not, assume Intraday for HFT
+                product_type = getattr(trade_execution, 'product', 'I')
 
                 # Place exit (SELL) order using V3 API
                 result = order_service.place_order_v3(
@@ -517,7 +521,7 @@ class RealTimePnLTracker:
                     instrument_token=trade_execution.instrument_key,
                     order_type="MARKET",
                     transaction_type="SELL",  # SELL to exit position
-                    product="I",  # Intraday
+                    product=product_type,
                     validity="DAY",
                     price=0.0,  # Market order
                     trigger_price=0.0,

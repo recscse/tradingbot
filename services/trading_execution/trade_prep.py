@@ -98,6 +98,7 @@ class PreparedTrade:
     valid_until: str
     metadata: Dict[str, Any]
     parent_trade_id: Optional[str] = None
+    product: str = "I"
 
 
 class TradePrepService:
@@ -155,6 +156,7 @@ class TradePrepService:
         bid_price: Optional[float] = None,
         ask_price: Optional[float] = None,
         target_lots: Optional[int] = None,
+        product: str = "I",
     ) -> PreparedTrade:
         """
         Prepare trade with live market data already provided (optimized for auto-trading)
@@ -600,6 +602,7 @@ class TradePrepService:
         db: Session,
         trading_mode: TradingMode = TradingMode.PAPER,
         broker_name: Optional[str] = None,
+        product: str = "I",
     ) -> PreparedTrade:
         """
         Prepare trade with complete validation and risk management
@@ -1150,6 +1153,7 @@ class TradePrepService:
         signal: TradingSignal,
         trading_mode: TradingMode,
         broker_name: str,
+        product: str = "I",
     ) -> PreparedTrade:
         """Create pending trade when no clear signal"""
         return PreparedTrade(
@@ -1179,6 +1183,7 @@ class TradePrepService:
                 get_ist_now_naive() + timedelta(minutes=self.signal_validity_minutes)
             ).isoformat(),
             metadata={"reason": signal.reason},
+            product=product,
         )
 
     def _create_error_trade(
@@ -1193,6 +1198,7 @@ class TradePrepService:
         lot_size: int,
         trading_mode: TradingMode,
         error_message: str,
+        product: str = "I",
     ) -> PreparedTrade:
         """Create error trade response"""
         return PreparedTrade(
@@ -1220,6 +1226,7 @@ class TradePrepService:
             prepared_at=get_ist_isoformat(),
             valid_until=get_ist_isoformat(),
             metadata={"error": error_message},
+            product=product,
         )
 
     def _calculate_atr_from_historical(

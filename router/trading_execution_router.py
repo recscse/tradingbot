@@ -68,6 +68,47 @@ class TradingModeConfig(BaseModel):
 # ==================== Endpoints ====================
 
 
+@router.post("/emergency-exit-all")
+async def emergency_exit_all(
+    confirm: bool = Query(..., description="Confirmation flag to proceed"),
+    trading_mode: str = Query("paper", description="Trading mode: paper or live"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Emergency Exit: Close ALL active positions immediately
+
+    **Process:**
+    - Live: Uses Broker's 'Exit All Positions' API for fastest execution.
+    - Paper: Closes all virtual positions.
+    - Updates database state.
+
+    **Requires:** confirm=True
+    """
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Confirmation required for emergency exit")
+
+    try:
+        from services.trading_execution.execution_handler import execution_handler
+        mode = TradingMode(trading_mode)
+
+        result = execution_handler.exit_all_positions(
+            user_id=current_user.id,
+            db=db,
+            trading_mode=mode
+        )
+
+        return {
+            "success": result.get("success", False),
+            "message": result.get("message", "Emergency exit initiated"),
+            "details": result
+        }
+
+    except Exception as e:
+        logger.error(f"Error in emergency exit: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/prepare-trade")
 async def prepare_trade(
     request: ExecuteTradeRequest,

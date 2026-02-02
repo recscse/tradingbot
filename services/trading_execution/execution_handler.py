@@ -481,6 +481,160 @@ class TradeExecutionHandler:
             logger.error(f"Error executing live trade: {e}")
             raise
 
+    def exit_all_positions(
+        self,
+        user_id: int,
+        db: Session,
+        trading_mode: TradingMode
+    ) -> Dict[str, Any]:
+        """
+        Emergency Exit: Close all active positions for a user
+
+        Args:
+            user_id: User identifier
+            db: Database session
+            trading_mode: Trading mode (Paper/Live)
+
+        Returns:
+            Dict with success status and summary
+        """
+        try:
+            # 1. Get all active positions
+            active_positions = db.query(ActivePosition).join(
+                AutoTradeExecution,
+                ActivePosition.trade_execution_id == AutoTradeExecution.id
+            ).filter(
+                ActivePosition.user_id == user_id,
+                ActivePosition.is_active == True,
+                AutoTradeExecution.trading_mode == trading_mode.value
+            ).all()
+
+            if not active_positions:
+                return {"success": True, "message": "No active positions to exit"}
+
+            logger.info(f"Emergency Exit: Found {len(active_positions)} active positions for user {user_id} ({trading_mode.value})")
+
+            if trading_mode == TradingMode.PAPER:
+                # Close all paper positions
+                count = 0
+                from services.paper_trading_account import paper_trading_service
+                
+                # Fetch paper account once
+                paper_account = paper_trading_service.accounts.get(user_id)
+                if not paper_account:
+                    # Try to load from DB synchronously if not in memory
+                    pass
+
+                for position in active_positions:
+                    try:
+                        trade = position.trade_execution
+                        current_price = float(position.current_price) if position.current_price else float(trade.entry_price)
+                        
+                        # Close logic
+                        self._close_paper_position(db, position, trade, Decimal(str(current_price)), "EMERGENCY_EXIT")
+                        count += 1
+                    except Exception as e:
+                        logger.error(f"Error closing paper position {position.id}: {e}")
+                
+                return {
+                    "success": True, 
+                    "message": f"Closed {count} paper positions", 
+                    "closed_count": count
+                }
+
+            elif trading_mode == TradingMode.LIVE:
+                # Close live positions via Upstox API
+                
+                broker_config = (
+                    db.query(BrokerConfig)
+                    .filter(
+                        BrokerConfig.user_id == user_id,
+                        BrokerConfig.is_active == True
+                    )
+                    .first()
+                )
+
+                if not broker_config:
+                    raise ValueError("No active broker configuration found for live exit")
+
+                if "upstox" in broker_config.broker_name.lower():
+                    from services.upstox.upstox_order_service import get_upstox_order_service
+                    
+                    order_service = get_upstox_order_service(
+                        access_token=broker_config.access_token,
+                        use_sandbox=False
+                    )
+                    
+                    # Call Exit All Positions API
+                    result = order_service.exit_all_positions(tag="auto_trading")
+                    
+                    # Mark local DB positions as closed
+                    for position in active_positions:
+                        position.is_active = False
+                        if position.trade_execution:
+                            position.trade_execution.status = "CLOSED"
+                            position.trade_execution.exit_reason = "EMERGENCY_EXIT"
+                            position.trade_execution.exit_time = get_ist_now_naive()
+                    
+                    db.commit()
+                    
+                    return {
+                        "success": result.get("success", False),
+                        "message": result.get("message", "Live exit triggered"),
+                        "details": result
+                    }
+                else:
+                    return {"success": False, "message": f"Emergency exit not implemented for broker: {broker_config.broker_name}"}
+
+            return {"success": False, "message": "Invalid trading mode"}
+
+        except Exception as e:
+            logger.error(f"Error in exit_all_positions: {e}")
+            return {"success": False, "message": str(e)}
+
+    def _close_paper_position(self, db: Session, position: ActivePosition, trade: AutoTradeExecution, exit_price: Decimal, reason: str):
+        """Helper to close a single paper position synchronously"""
+        # Calculate PnL
+        entry_price = Decimal(str(trade.entry_price))
+        quantity = trade.quantity
+        
+        buy_val = entry_price * Decimal(str(quantity))
+        sell_val = exit_price * Decimal(str(quantity))
+        gross_pnl = sell_val - buy_val
+        
+        # Charges
+        brokerage = Decimal('40.0')
+        taxes = (buy_val + sell_val) * Decimal('0.001')
+        net_pnl = gross_pnl - brokerage - taxes
+        
+        total_inv = Decimal(str(trade.total_investment)) if trade.total_investment else buy_val
+        pnl_pct = (net_pnl / total_inv * 100) if total_inv > 0 else 0
+
+        # Update DB
+        trade.exit_price = float(exit_price)
+        trade.exit_time = get_ist_now_naive()
+        trade.exit_reason = reason
+        trade.gross_pnl = float(gross_pnl)
+        trade.net_pnl = float(net_pnl)
+        trade.pnl_percentage = float(pnl_pct)
+        trade.status = "CLOSED"
+        
+        position.is_active = False
+        position.last_updated = get_ist_now_naive()
+        
+        # Update Paper Account (DB)
+        from database.models import PaperTradingAccount
+        paper_acc = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == position.user_id).first()
+        if paper_acc:
+            release = float(sell_val - brokerage - taxes)
+            paper_acc.available_margin += release
+            paper_acc.current_balance += release
+            paper_acc.used_margin -= float(total_inv)
+            paper_acc.total_pnl += float(net_pnl)
+            paper_acc.positions_count = max(0, paper_acc.positions_count - 1)
+        
+        db.commit()
+
     def _place_broker_order(
         self, broker_config: BrokerConfig, prepared_trade: PreparedTrade
     ) -> Dict[str, Any]:
@@ -516,7 +670,7 @@ class TradeExecutionHandler:
                     instrument_token=prepared_trade.option_instrument_key,
                     order_type="MARKET",
                     transaction_type=transaction_type,
-                    product="I",  # Intraday
+                    product=prepared_trade.product,  # I or D
                     validity="DAY",
                     price=0.0,  # Market order
                     trigger_price=0.0,
