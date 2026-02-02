@@ -846,13 +846,19 @@ class UpstoxTokenScheduler:
             logger.warning("Scheduler already running")
             return
 
-        logger.info("Starting Upstox token refresh scheduler...")
+        logger.info("🚀 Starting Upstox token refresh scheduler...")
         
         # Convert IST schedule times to system time
         t_0345 = self._ist_to_system_time("03:45")
         t_0400 = self._ist_to_system_time("04:00")
         t_0600 = self._ist_to_system_time("06:00")
         t_0830 = self._ist_to_system_time("08:30")
+
+        logger.info(f"📅 Schedule Configuration (System Time):")
+        logger.info(f"   - 03:45 IST -> {t_0345}")
+        logger.info(f"   - 04:00 IST -> {t_0400}")
+        logger.info(f"   - 06:00 IST -> {t_0600}")
+        logger.info(f"   - 08:30 IST -> {t_0830} (Active Validation)")
 
         # Upstox tokens expire daily at 3:30 AM IST
         schedule.every().day.at(t_0345).do(self._run_refresh)  # 15 min after expiry
@@ -871,7 +877,7 @@ class UpstoxTokenScheduler:
         )
         self.scheduler_thread.start()
 
-        logger.info("✅ Scheduler started")
+        logger.info("✅ Upstox Scheduler thread started")
 
     def stop_scheduler(self):
         if not self.is_running:
@@ -884,9 +890,17 @@ class UpstoxTokenScheduler:
         logger.info("✅ Scheduler stopped")
 
     def _scheduler_loop(self):
+        heartbeat_counter = 0
         while self.is_running:
             try:
                 schedule.run_pending()
+                
+                # Heartbeat every 30 minutes (30 * 60s)
+                heartbeat_counter += 1
+                if heartbeat_counter >= 30:
+                    logger.info("💓 Upstox Scheduler Heartbeat: Thread is active")
+                    heartbeat_counter = 0
+                    
                 time.sleep(60)
             except Exception as e:
                 logger.error(f"Scheduler error: {e}")
