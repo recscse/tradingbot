@@ -203,6 +203,7 @@ class UpstoxAutomationService:
                     "--disable-gpu",
                     "--disable-web-security",
                     "--disable-features=VizDisplayCompositor",
+                    "--disable-blink-features=AutomationControlled",  # ✅ STEALTH: Hide automation flag
                     "--no-first-run",
                     "--disable-default-apps",
                     "--disable-extensions",
@@ -217,45 +218,86 @@ class UpstoxAutomationService:
                     "--disable-backgrounding-occluded-windows",
                 ],
             )
-            context = await browser.new_context()
+            
+            # ✅ STEALTH: Use realistic User Agent and Viewport
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 720},
+                device_scale_factor=1,
+            )
+            
+            # ✅ STEALTH: Add init script to mask webdriver
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+            
             page = await context.new_page()
 
             try:
                 # Navigate to auth URL with timeout
                 logger.info(f"Navigating to: {auth_url}")
-                await page.goto(auth_url, timeout=30000)
+                try:
+                    await page.goto(auth_url, timeout=45000, wait_until="domcontentloaded") # Increased timeout
+                except Exception as nav_err:
+                     logger.error(f"Navigation timed out: {nav_err}")
+                     # Try to proceed anyway, maybe it loaded enough
+                
                 logger.info("✅ Navigated to Upstox auth page")
 
                 # Fill mobile number
                 logger.info("🔢 Filling mobile number...")
-                await page.wait_for_selector("#mobileNum", timeout=10000)
-                await page.locator("#mobileNum").click()
-                await page.locator("#mobileNum").fill(self.mobile_no)
-                await page.get_by_role("button", name="Get OTP").click()
-                logger.info("✅ Mobile number entered, OTP requested")
+                try:
+                    await page.wait_for_selector("#mobileNum", timeout=20000)
+                    await page.locator("#mobileNum").click()
+                    await page.locator("#mobileNum").fill(self.mobile_no)
+                    await page.get_by_role("button", name="Get OTP").click()
+                    logger.info("✅ Mobile number entered, OTP requested")
+                except Exception as e:
+                    title = await page.title()
+                    content = await page.content()
+                    logger.error(f"❌ Failed to find mobile field. Page Title: {title}")
+                    logger.error(f"❌ URL: {page.url}")
+                    if "Cloudflare" in title or "Just a moment" in title:
+                        logger.error("❌ BLOCKED BY CLOUDFLARE/CAPTCHA")
+                    raise e
 
                 # Wait for OTP field and fill TOTP
                 logger.info("🔐 Waiting for OTP field...")
-                await page.wait_for_selector("#otpNum", timeout=10000)
-                await page.locator("#otpNum").click()
-                if self.totp_key:
-                    otp = pyotp.TOTP(self.totp_key).now()
-                    await page.locator("#otpNum").fill(otp)
-                    logger.info("✅ TOTP entered")
-                else:
-                    logger.error("❌ TOTP key not configured")
-                    log_structured(event="LOGIN_AUTOMATION_FAILED", level="ERROR", message="TOTP key not configured")
-                    return False
+                try:
+                    await page.wait_for_selector("#otpNum", timeout=20000)
+                    await page.locator("#otpNum").click()
+                    if self.totp_key:
+                        otp = pyotp.TOTP(self.totp_key).now()
+                        await page.locator("#otpNum").fill(otp)
+                        logger.info("✅ TOTP entered")
+                    else:
+                        logger.error("❌ TOTP key not configured")
+                        log_structured(event="LOGIN_AUTOMATION_FAILED", level="ERROR", message="TOTP key not configured")
+                        return False
 
-                await page.get_by_role("button", name="Continue").click()
+                    await page.get_by_role("button", name="Continue").click()
+                except Exception as e:
+                    logger.error(f"❌ Failed during OTP step: {e}")
+                    raise e
 
                 # Fill PIN
-                await page.get_by_label("Enter 6-digit PIN").click()
-                await page.get_by_label("Enter 6-digit PIN").fill(self.pin)
-                logger.info("PIN entered")
+                try:
+                    # Try different selectors for PIN as they can vary
+                    logger.info("🔢 Waiting for PIN field...")
+                    await page.wait_for_selector("input[type='password']", timeout=20000)
+                    
+                    # Some flows might ask for 'Enter 6-digit PIN' label
+                    # We try a generic approach for the first password input found
+                    await page.locator("input[type='password']").first.fill(self.pin)
+                    logger.info("PIN entered")
 
-                # Click continue - this will trigger the redirect to callback
-                await page.get_by_role("button", name="Continue").click()
+                    # Click continue - this will trigger the redirect to callback
+                    await page.get_by_role("button", name="Continue").click()
+                except Exception as e:
+                    logger.error(f"❌ Failed during PIN step: {e}")
+                    raise e
 
                 # Wait for redirect to happen and capture the authorization code
                 logger.info("Waiting for redirect with authorization code...")
