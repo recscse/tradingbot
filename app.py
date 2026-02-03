@@ -476,74 +476,88 @@ async def lifespan(app: FastAPI):
         redis_status = trading_redis.health_check()
         logger.info(f"🔧 Redis status: {redis_status['message']}")
 
-        # 3. Initialize instrument service FIRST
-        logger.info("🔧 Initializing Instrument Service...")
-        from services.instrument_refresh_service import get_trading_service
+        # 🚀 BACKGROUND INITIALIZATION: Move heavy tasks to background to prevent startup blocking
+        async def initialize_services_background():
+            """Initialize heavy services in background"""
+            global instrument_service_instance
+            
+            try:
+                # 3. Initialize instrument service FIRST
+                logger.info("🔧 Initializing Instrument Service in background...")
+                from services.instrument_refresh_service import get_trading_service
 
-        instrument_service = get_trading_service()
-        initialization_result = await instrument_service.initialize_service()
+                instrument_service = get_trading_service()
+                # Await here in background task
+                initialization_result = await instrument_service.initialize_service()
 
-        if initialization_result.status == "success":
-            logger.info(
-                f"✅ Instrument service initialized with {initialization_result.mapped_stocks} stocks"
-            )
-            instrument_service_instance = instrument_service
-        else:
-            logger.error(
-                f"❌ Instrument service initialization failed: {initialization_result.error}"
-            )
-            log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Instrument service init failed: {initialization_result.error}")
+                if initialization_result.status == "success":
+                    logger.info(
+                        f"✅ Instrument service initialized with {initialization_result.mapped_stocks} stocks"
+                    )
+                    instrument_service_instance = instrument_service
+                else:
+                    logger.error(
+                        f"❌ Instrument service initialization failed: {initialization_result.error}"
+                    )
+                    log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Instrument service init failed: {initialization_result.error}")
 
-        # 4. Initialize optimized market data service FIRST
-        try:
-            logger.info("🚀 Initializing Optimized Market Data Service...")
-            from services.optimized_market_data_service import optimized_market_service
+                # 4. Initialize optimized market data service
+                try:
+                    logger.info("🚀 Initializing Optimized Market Data Service...")
+                    from services.optimized_market_data_service import optimized_market_service
 
-            await optimized_market_service.initialize_instruments()
-            stats = optimized_market_service.get_stats()
-            logger.info(
-                f"✅ Optimized Market Service initialized with {stats['total_instruments']} instruments, {stats['active_instruments']} active"
-            )
-        except Exception as e:
-            logger.error(f"❌ Optimized market service initialization failed: {e}")
-            log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Optimized market service init failed: {str(e)}")
+                    await optimized_market_service.initialize_instruments()
+                    stats = optimized_market_service.get_stats()
+                    logger.info(
+                        f"✅ Optimized Market Service initialized with {stats['total_instruments']} instruments, {stats['active_instruments']} active"
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Optimized market service initialization failed: {e}")
+                    log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Optimized market service init failed: {str(e)}")
 
-        # 4.5. 🚀 NEW: Initialize Real-Time Market Analytics Engine
-        try:
-            logger.info("📊 Initializing Real-Time Market Analytics Engine...")
-            from services.realtime_market_engine import initialize_market_engine
-            from services.instrument_refresh_service import get_analytics_metadata
+                # 4.5. Initialize Real-Time Market Analytics Engine
+                try:
+                    logger.info("📊 Initializing Real-Time Market Analytics Engine...")
+                    from services.realtime_market_engine import initialize_market_engine
+                    from services.instrument_refresh_service import get_analytics_metadata
 
-            # Get analytics metadata from instrument service
-            analytics_metadata = get_analytics_metadata()
+                    # Get analytics metadata from instrument service
+                    analytics_metadata = get_analytics_metadata()
 
-            if analytics_metadata:
-                # Initialize analytics engine with metadata
-                initialize_market_engine(analytics_metadata)
+                    if analytics_metadata:
+                        # Initialize analytics engine with metadata
+                        initialize_market_engine(analytics_metadata)
 
-                from services.realtime_market_engine import get_market_engine
+                        from services.realtime_market_engine import get_market_engine
 
-                engine = get_market_engine()
-                stats = engine.get_stats()
+                        engine = get_market_engine()
+                        stats = engine.get_stats()
 
-                logger.info(
-                    f"✅ Real-Time Analytics Engine initialized with {stats['total_instruments']} instruments "
-                    f"across {stats['sectors']} sectors"
-                )
-                logger.info(
-                    f"📈 Analytics latency: {stats['analytics_latency_ms']:.2f}ms"
-                )
-            else:
-                logger.warning(
-                    "⚠️ No analytics metadata available - analytics engine not initialized"
-                )
+                        logger.info(
+                            f"✅ Real-Time Analytics Engine initialized with {stats['total_instruments']} instruments "
+                            f"across {stats['sectors']} sectors"
+                        )
+                        logger.info(
+                            f"📈 Analytics latency: {stats['analytics_latency_ms']:.2f}ms"
+                        )
+                    else:
+                        logger.warning(
+                            "⚠️ No analytics metadata available - analytics engine not initialized"
+                        )
 
-        except Exception as e:
-            logger.error(f"❌ Real-Time Analytics Engine initialization failed: {e}")
-            import traceback
+                except Exception as e:
+                    logger.error(f"❌ Real-Time Analytics Engine initialization failed: {e}")
+                    import traceback
+                    logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                    log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Analytics engine init failed: {str(e)}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Background service initialization failed: {e}")
+                log_structured(event="APP_STARTUP_CRITICAL_FAILURE", level="CRITICAL", message=f"Background init failed: {str(e)}")
 
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            log_structured(event="APP_STARTUP_ERROR", level="ERROR", message=f"Analytics engine init failed: {str(e)}")
+        # Start the background initialization task
+        asyncio.create_task(initialize_services_background())
+        logger.info("✅ Core services initialization started in background")
 
         # 4.6. 🚀 NEW: Initialize Enhanced Breakout Detection Engine
         try:
