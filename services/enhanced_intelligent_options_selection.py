@@ -1182,16 +1182,7 @@ class EnhancedIntelligentOptionsService:
     ) -> bool:
         """
         Save enhanced selections with options data to database
-
-        Args:
-            selections: List of enhanced selections
-            selection_type: Type of selection (premarket_options/final_options)
-
-        Returns:
-            True if successful, False otherwise
-
-        Raises:
-            ValueError: If parameters are invalid
+        UPDATED: Now updates existing records to prevent duplicates and ensure data integrity.
         """
         if not selection_type:
             raise ValueError("Selection type cannot be empty")
@@ -1204,12 +1195,6 @@ class EnhancedIntelligentOptionsService:
             try:
                 today = get_ist_now_naive().date()
 
-                # Clear existing selections
-                db.query(SelectedStock).filter(
-                    SelectedStock.selection_date == today,
-                    SelectedStock.selection_reason.like(f"{selection_type}%"),
-                ).delete()
-
                 # Save new selections
                 for selection in selections:
                     if not selection.selected_option_contract:
@@ -1218,7 +1203,6 @@ class EnhancedIntelligentOptionsService:
                     contract = selection.selected_option_contract
 
                     # Prepare metadata
-                    # Handle both StockSelection dataclass (has options_direction) and database model (has option_type)
                     sentiment_direction = getattr(
                         selection, "options_direction", None
                     ) or getattr(selection, "option_type", contract.option_type)
@@ -1298,32 +1282,47 @@ class EnhancedIntelligentOptionsService:
                         }
                     })
 
-                    selected_stock = SelectedStock(
-                        symbol=selection.symbol,
-                        instrument_key=selection.instrument_key,
-                        selection_date=today,
-                        selection_score=float(selection.final_score),
-                        selection_reason=f"{selection_type}_options_{contract.option_type}_{contract.strike_price}",
-                        price_at_selection=float(selection.ltp),
-                        volume_at_selection=int(selection.volume),
-                        change_percent_at_selection=float(selection.change_percent),
-                        sector=selection.sector,
-                        score_breakdown=str(enhanced_metadata),
-                        is_active=True,
-                        # FIXED: Store option data in dedicated fields
-                        option_type=contract.option_type,
-                        option_contract=option_contract_json,
-                        option_expiry_date=contract.expiry_date,
-                        option_expiry_dates=option_expiry_dates_json,
-                        option_chain_data=option_chain_data_json,
-                    )
-                    db.add(selected_stock)
+                    # CHECK FOR EXISTING RECORD
+                    existing_stock = db.query(SelectedStock).filter(
+                        SelectedStock.symbol == selection.symbol,
+                        SelectedStock.selection_date == today,
+                        SelectedStock.is_active == True
+                    ).first()
 
-                    logger.debug(
-                        f"Stored option data for {selection.symbol}: "
-                        f"{contract.option_type} {contract.strike_price} "
-                        f"expiring {contract.expiry_date}"
-                    )
+                    if existing_stock:
+                        logger.info(f"Updating existing SelectedStock record for {selection.symbol}")
+                        # Update existing record
+                        existing_stock.option_type = contract.option_type
+                        existing_stock.option_contract = option_contract_json
+                        existing_stock.option_expiry_date = contract.expiry_date
+                        existing_stock.option_expiry_dates = option_expiry_dates_json
+                        existing_stock.option_chain_data = option_chain_data_json
+                        existing_stock.score_breakdown = str(enhanced_metadata)
+                        # Append selection reason to history
+                        if "options" not in existing_stock.selection_reason:
+                             existing_stock.selection_reason += f" | {contract.option_type} {contract.strike_price}"
+                    else:
+                        logger.info(f"Creating NEW SelectedStock record for {selection.symbol} (Fallback)")
+                        # Create new record (fallback)
+                        selected_stock = SelectedStock(
+                            symbol=selection.symbol,
+                            instrument_key=selection.instrument_key,
+                            selection_date=today,
+                            selection_score=float(selection.final_score),
+                            selection_reason=f"{selection_type}_options_{contract.option_type}_{contract.strike_price}",
+                            price_at_selection=float(selection.ltp),
+                            volume_at_selection=int(selection.volume),
+                            change_percent_at_selection=float(selection.change_percent),
+                            sector=selection.sector,
+                            score_breakdown=str(enhanced_metadata),
+                            is_active=True,
+                            option_type=contract.option_type,
+                            option_contract=option_contract_json,
+                            option_expiry_date=contract.expiry_date,
+                            option_expiry_dates=option_expiry_dates_json,
+                            option_chain_data=option_chain_data_json,
+                        )
+                        db.add(selected_stock)
 
                 db.commit()
                 logger.info(

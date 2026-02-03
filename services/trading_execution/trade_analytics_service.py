@@ -148,18 +148,86 @@ class TradeAnalyticsService:
             # Generate PnL chart data
             pnl_chart_data = self._get_pnl_timeseries(trades)
 
+            # Calculate strategy breakdown
+            strategy_breakdown = self._get_strategy_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "daily",
                 "date": target_date.isoformat(),
                 "metrics": asdict(metrics),
                 "pnl_chart_data": pnl_chart_data,
-                "trades_detail": self._format_trades_detail(trades)
+                "trades_detail": self._format_trades_detail(trades),
+                "strategy_breakdown": strategy_breakdown
             }
 
         except Exception as e:
             logger.error(f"Error getting daily performance: {e}")
             return {"success": False, "error": str(e)}
+
+    def _get_strategy_breakdown(self, trades: List[AutoTradeExecution]) -> List[Dict[str, Any]]:
+        """
+        Get performance breakdown by strategy
+
+        Args:
+            trades: List of closed trades
+
+        Returns:
+            List of strategy performance metrics sorted by PnL
+        """
+        try:
+            if not trades:
+                return []
+
+            strategy_stats = {}
+
+            for trade in trades:
+                strategy = trade.strategy_name or "Unknown"
+                
+                if strategy not in strategy_stats:
+                    strategy_stats[strategy] = {
+                        "strategy": strategy,
+                        "trades_count": 0,
+                        "wins": 0,
+                        "losses": 0,
+                        "total_pnl": Decimal('0'),
+                    }
+                
+                stats = strategy_stats[strategy]
+                stats["trades_count"] += 1
+                
+                pnl = Decimal(str(trade.net_pnl)) if trade.net_pnl else Decimal('0')
+                stats["total_pnl"] += pnl
+                
+                if pnl > 0:
+                    stats["wins"] += 1
+                elif pnl < 0:
+                    stats["losses"] += 1
+
+            # Calculate derived metrics
+            breakdown = []
+            for stats in strategy_stats.values():
+                trades_count = stats["trades_count"]
+                win_rate = (stats["wins"] / trades_count * 100) if trades_count > 0 else 0.0
+                total_pnl = float(stats["total_pnl"])
+                avg_pnl = total_pnl / trades_count if trades_count > 0 else 0.0
+
+                breakdown.append({
+                    "strategy": stats["strategy"],
+                    "trades_count": trades_count,
+                    "wins": stats["wins"],
+                    "losses": stats["losses"],
+                    "win_rate": round(win_rate, 2),
+                    "total_pnl": total_pnl,
+                    "avg_pnl": round(avg_pnl, 2)
+                })
+
+            # Sort by Total PnL descending
+            return sorted(breakdown, key=lambda x: x["total_pnl"], reverse=True)
+
+        except Exception as e:
+            logger.error(f"Error calculating strategy breakdown: {e}")
+            return []
 
     def _get_pnl_timeseries(self, trades: List[AutoTradeExecution]) -> List[Dict[str, Any]]:
         """
@@ -258,6 +326,9 @@ class TradeAnalyticsService:
             # Generate PnL chart data
             pnl_chart_data = self._get_pnl_timeseries(trades)
 
+            # Calculate strategy breakdown
+            strategy_breakdown = self._get_strategy_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "weekly",
@@ -265,7 +336,8 @@ class TradeAnalyticsService:
                 "end_date": now_ist.date().isoformat(),
                 "metrics": asdict(metrics),
                 "daily_breakdown": daily_breakdown,
-                "pnl_chart_data": pnl_chart_data
+                "pnl_chart_data": pnl_chart_data,
+                "strategy_breakdown": strategy_breakdown
             }
 
         except Exception as e:
@@ -317,6 +389,9 @@ class TradeAnalyticsService:
             # Generate PnL chart data
             pnl_chart_data = self._get_pnl_timeseries(trades)
 
+            # Calculate strategy breakdown
+            strategy_breakdown = self._get_strategy_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "monthly",
@@ -324,7 +399,8 @@ class TradeAnalyticsService:
                 "end_date": now_ist.date().isoformat(),
                 "metrics": asdict(metrics),
                 "daily_breakdown": daily_breakdown,
-                "pnl_chart_data": pnl_chart_data
+                "pnl_chart_data": pnl_chart_data,
+                "strategy_breakdown": strategy_breakdown
             }
 
         except Exception as e:
@@ -379,6 +455,9 @@ class TradeAnalyticsService:
             # Generate PnL chart data
             pnl_chart_data = self._get_pnl_timeseries(trades)
 
+            # Calculate strategy breakdown
+            strategy_breakdown = self._get_strategy_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "6-month",
@@ -387,7 +466,8 @@ class TradeAnalyticsService:
                 "metrics": asdict(metrics),
                 "weekly_breakdown": weekly_breakdown,
                 "daily_breakdown": daily_breakdown,
-                "pnl_chart_data": pnl_chart_data
+                "pnl_chart_data": pnl_chart_data,
+                "strategy_breakdown": strategy_breakdown
             }
 
         except Exception as e:
@@ -442,6 +522,9 @@ class TradeAnalyticsService:
             # Generate PnL chart data
             pnl_chart_data = self._get_pnl_timeseries(trades)
 
+            # Calculate strategy breakdown
+            strategy_breakdown = self._get_strategy_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "yearly",
@@ -450,7 +533,8 @@ class TradeAnalyticsService:
                 "metrics": asdict(metrics),
                 "monthly_breakdown": monthly_breakdown,
                 "daily_breakdown": daily_breakdown,
-                "pnl_chart_data": pnl_chart_data
+                "pnl_chart_data": pnl_chart_data,
+                "strategy_breakdown": strategy_breakdown
             }
 
         except Exception as e:
@@ -502,6 +586,9 @@ class TradeAnalyticsService:
             # Get daily breakdown for heatmap (all time)
             daily_breakdown = self._get_daily_breakdown(trades, 3650) # Use large number for all time
 
+            # Calculate strategy breakdown
+            strategy_breakdown = self._get_strategy_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "overall",
@@ -514,7 +601,8 @@ class TradeAnalyticsService:
                     "strategies_used": list(set(t.strategy_name for t in trades))
                 },
                 "pnl_chart_data": pnl_chart_data,
-                "daily_breakdown": daily_breakdown
+                "daily_breakdown": daily_breakdown,
+                "strategy_breakdown": strategy_breakdown
             }
 
         except Exception as e:

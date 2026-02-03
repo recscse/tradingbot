@@ -491,6 +491,66 @@ const PerformanceAnalyticsPage = () => {
               </div>
             </div>
 
+            {/* Strategy Performance */}
+            {performanceData.strategy_breakdown && performanceData.strategy_breakdown.length > 0 && (
+              <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
+                <div className="tw-flex tw-items-center tw-gap-3 tw-mb-6 tw-pb-4 tw-border-b tw-border-slate-800">
+                  <div className="tw-w-10 tw-h-10 tw-bg-gradient-to-br tw-from-violet-600 tw-to-fuchsia-600 tw-rounded-lg tw-flex tw-items-center tw-justify-center">
+                    <svg className="tw-w-5 tw-h-5 tw-text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="tw-text-xl tw-font-bold tw-text-white">Strategy Performance</h2>
+                    <p className="tw-text-xs tw-text-slate-400">ROI & Accuracy by Strategy</p>
+                  </div>
+                </div>
+                <div className="tw-grid tw-grid-cols-1 md:tw-grid-cols-2 lg:tw-grid-cols-3 tw-gap-4">
+                  {performanceData.strategy_breakdown.map((strategy, idx) => (
+                    <div key={idx} className="tw-bg-slate-800/30 tw-border tw-border-slate-700/50 tw-rounded-xl tw-p-4 tw-transition-all hover:tw-border-violet-500/30 hover:tw-shadow-lg hover:tw-shadow-violet-500/10">
+                      <div className="tw-flex tw-justify-between tw-items-start tw-mb-3">
+                        <div>
+                          <h3 className="tw-font-bold tw-text-white tw-text-base tw-capitalize">{strategy.strategy.replace(/_/g, ' ')}</h3>
+                          <span className="tw-text-xs tw-text-slate-500">{strategy.trades_count} Trades</span>
+                        </div>
+                        <span className={`tw-px-2 tw-py-1 tw-rounded-lg tw-text-xs tw-font-bold ${
+                          strategy.total_pnl >= 0 ? 'tw-bg-emerald-500/10 tw-text-emerald-400' : 'tw-bg-rose-500/10 tw-text-rose-400'
+                        }`}>
+                          {format_currency(strategy.total_pnl)}
+                        </span>
+                      </div>
+                      
+                      <div className="tw-grid tw-grid-cols-2 tw-gap-2 tw-mb-3">
+                        <div className="tw-bg-slate-900/50 tw-rounded-lg tw-p-2">
+                          <p className="tw-text-[10px] tw-text-slate-500 tw-uppercase">Win Rate</p>
+                          <p className={`tw-text-sm tw-font-bold ${strategy.win_rate >= 50 ? 'tw-text-emerald-400' : 'tw-text-amber-400'}`}>
+                            {strategy.win_rate}%
+                          </p>
+                        </div>
+                        <div className="tw-bg-slate-900/50 tw-rounded-lg tw-p-2">
+                          <p className="tw-text-[10px] tw-text-slate-500 tw-uppercase">Avg PnL</p>
+                          <p className={`tw-text-sm tw-font-bold ${strategy.avg_pnl >= 0 ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                            {format_currency(strategy.avg_pnl)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="tw-w-full tw-bg-slate-700/50 tw-rounded-full tw-h-1.5 tw-overflow-hidden">
+                        <div 
+                          className={`tw-h-full tw-rounded-full ${strategy.win_rate >= 50 ? 'tw-bg-emerald-500' : 'tw-bg-amber-500'}`}
+                          style={{ width: `${strategy.win_rate}%` }}
+                        ></div>
+                      </div>
+                      <div className="tw-flex tw-justify-between tw-mt-1">
+                        <span className="tw-text-[10px] tw-text-emerald-400">{strategy.wins} Wins</span>
+                        <span className="tw-text-[10px] tw-text-rose-400">{strategy.losses} Losses</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Risk Analysis */}
             {performanceData.max_drawdown !== undefined && (
               <div className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-xl">
