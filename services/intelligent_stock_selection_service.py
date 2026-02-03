@@ -1382,6 +1382,7 @@ class IntelligentStockSelectionService:
                             "market_sentiment_at_selection": sentiment_data.get(
                                 "sentiment", "neutral"
                             ),
+                            "lot_size": stock.lot_size,
                         }
                     ),
                     is_active=True,
