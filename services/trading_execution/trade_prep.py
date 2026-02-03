@@ -514,12 +514,13 @@ class TradePrepService:
             risk = abs(premium_signal.entry_price - premium_signal.stop_loss)
             # CRITICAL FIX: For Option Buying (Long), Target is ALWAYS higher than Entry (Premium must rise)
             # Previous logic incorrectly subtracted for PE, treating it as a short premium trade
-            target_price = premium_signal.entry_price + (risk * (premium_signal.trailing_stop_config.get('risk_reward_ratio') or 2.0))
+            rr_ratio = Decimal(str(premium_signal.trailing_stop_config.get('risk_reward_ratio') or 2.0))
+            target_price = premium_signal.entry_price + (risk * rr_ratio)
             
             # Update signal with correct target
             premium_signal.target_price = target_price
             
-            risk_reward_ratio = Decimal(str(premium_signal.trailing_stop_config.get('risk_reward_ratio') or 2.0))
+            risk_reward_ratio = rr_ratio
 
             # Step 9: Create prepared trade (with premium-based signal)
             prepared_trade = PreparedTrade(
