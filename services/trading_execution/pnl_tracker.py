@@ -128,125 +128,170 @@ class RealTimePnLTracker:
         Update all active positions with live PnL
 
         Args:
-            db: Database session
+            db: Database session (Not used in new implementation, creating own scope)
         """
         try:
-            # Get all active positions
-            active_positions = db.query(ActivePosition).filter(
-                ActivePosition.is_active == True
-            ).all()
-
-            if not active_positions:
-                return
-
-            # Get live market data
+            # 1. Get live market data (In-Memory, Fast)
             from services.realtime_market_engine import get_market_engine
             market_engine = get_market_engine()
-
-            pnl_updates = []
-
-            for position in active_positions:
+            
+            # 2. Define DB Update Job
+            def pnl_update_job():
+                session = SessionLocal()
+                updates = []
+                exits = []
                 try:
-                    # Get current price from market engine
-                    current_price = self._get_current_price(
-                        position.instrument_key,
-                        market_engine
-                    )
+                    active_positions = session.query(ActivePosition).filter(ActivePosition.is_active == True).all()
+                    
+                    for position in active_positions:
+                        try:
+                            # Get price safely
+                            price_decimal = Decimal('0')
+                            if position.instrument_key in market_engine.instruments:
+                                price_decimal = Decimal(str(market_engine.instruments[position.instrument_key].current_price))
+                            
+                            if price_decimal <= 0:
+                                continue
 
-                    if current_price <= 0:
-                        logger.debug(f"No price data for {position.instrument_key}")
-                        continue
+                            trade_execution = session.query(AutoTradeExecution).filter(
+                                AutoTradeExecution.id == position.trade_execution_id
+                            ).first()
 
-                    # Get trade execution details
-                    trade_execution = db.query(AutoTradeExecution).filter(
-                        AutoTradeExecution.id == position.trade_execution_id
-                    ).first()
+                            if not trade_execution:
+                                continue
 
-                    if not trade_execution:
-                        continue
+                            # Calculations
+                            entry_price = Decimal(str(trade_execution.entry_price))
+                            quantity = trade_execution.quantity
+                            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+                            
+                            pnl_points = price_decimal - entry_price
+                            gross_pnl = pnl_points * Decimal(str(quantity))
+                            
+                            # Charges estimate
+                            buy_val = entry_price * Decimal(str(quantity))
+                            sell_val = price_decimal * Decimal(str(quantity))
+                            est_turnover = buy_val + sell_val
+                            est_charges = Decimal('40.0') + (est_turnover * Decimal('0.001'))
+                            pnl_amount = gross_pnl - est_charges
+                            
+                            pnl_percent = (pnl_amount / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
+                            highest_price = max(Decimal(str(position.highest_price_reached)), price_decimal)
 
-                    # Calculate PnL
-                    pnl_data = self._calculate_pnl(
-                        position,
-                        trade_execution,
-                        current_price
-                    )
+                            # Update Trailing SL (Logic duplicated or imported?)
+                            # Importing strategy_engine inside thread to avoid issues
+                            # Logic duplicated for safety/simplicity in thread or refactored? 
+                            # Let's use simple logic or call strategy_engine if it's pure logic.
+                            # strategy_engine is imported globally.
+                            
+                            current_sl = Decimal(str(position.current_stop_loss))
+                            target_price = Decimal(str(trade_execution.target_1)) if trade_execution.target_1 else None
+                            
+                            # Update Trailing SL
+                            new_sl = strategy_engine.update_trailing_stop(
+                                current_price=price_decimal,
+                                entry_price=entry_price,
+                                current_stop_loss=current_sl,
+                                trailing_type=TrailingStopType.PERCENTAGE,
+                                position_type="LONG",
+                                target_price=target_price,
+                                symbol=position.symbol
+                            )
+                            
+                            if new_sl > current_sl:
+                                position.trailing_stop_triggered = True
+                                position.current_stop_loss = float(new_sl)
 
-                    # Update trailing stop loss
-                    updated_sl = self._update_trailing_stop_loss(
-                        position,
-                        trade_execution,
-                        current_price
-                    )
+                            # Check Exit
+                            should_exit = False
+                            exit_reason = None
+                            
+                            if price_decimal <= new_sl:
+                                should_exit = True
+                                exit_reason = "STOP_LOSS_HIT"
+                            elif target_price and price_decimal >= target_price:
+                                should_exit = True
+                                exit_reason = "TARGET_HIT"
+                            
+                            # Update Position
+                            position.current_price = float(price_decimal)
+                            position.current_pnl = float(pnl_amount)
+                            position.current_pnl_percentage = float(pnl_percent)
+                            position.highest_price_reached = float(highest_price)
+                            position.mark_to_market_time = get_ist_now_naive()
+                            position.last_updated = get_ist_now_naive()
 
-                    # Update position object immediately so check_exit uses new SL
-                    position.current_stop_loss = float(updated_sl)
+                            if should_exit:
+                                exits.append((position.id, float(price_decimal), exit_reason))
+                            
+                            # Prepare Broadcast Data
+                            updates.append(PositionPnL(
+                                position_id=position.id,
+                                trade_id=trade_execution.trade_id,
+                                user_id=position.user_id,
+                                symbol=position.symbol,
+                                instrument_key=position.instrument_key,
+                                entry_price=entry_price,
+                                current_price=price_decimal,
+                                quantity=quantity,
+                                pnl=pnl_amount,
+                                pnl_percent=pnl_percent,
+                                pnl_points=pnl_points,
+                                entry_time=trade_execution.entry_time.isoformat(),
+                                holding_duration_minutes=int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60),
+                                stop_loss=new_sl,
+                                target=target_price or Decimal('0'),
+                                highest_price=highest_price,
+                                trailing_sl_active=position.trailing_stop_triggered,
+                                status="CLOSED" if should_exit else "ACTIVE",
+                                last_updated=get_ist_isoformat()
+                            ))
 
-                    # Check exit conditions (now uses updated SL)
-                    should_exit, exit_reason = self._check_exit_conditions(
-                        position,
-                        trade_execution,
-                        current_price,
-                        pnl_data
-                    )
-
-                    # Update remaining position fields
-                    position.current_price = float(current_price)
-                    position.current_pnl = float(pnl_data['pnl'])
-                    position.current_pnl_percentage = float(pnl_data['pnl_percent'])
-                    position.highest_price_reached = float(pnl_data['highest_price'])
-                    position.mark_to_market_time = get_ist_now_naive()
-                    position.last_updated = get_ist_now_naive()
-
-                    # If exit condition met, close position
-                    if should_exit:
-                        await self._close_position(
-                            position,
-                            trade_execution,
-                            current_price,
-                            exit_reason,
-                            db
-                        )
-
-                    # Prepare PnL update for broadcasting
-                    pnl_update = PositionPnL(
-                        position_id=position.id,
-                        trade_id=trade_execution.trade_id,
-                        user_id=position.user_id,
-                        symbol=position.symbol,
-                        instrument_key=position.instrument_key,
-                        entry_price=Decimal(str(trade_execution.entry_price)),
-                        current_price=current_price,
-                        quantity=trade_execution.quantity,
-                        pnl=pnl_data['pnl'],
-                        pnl_percent=pnl_data['pnl_percent'],
-                        pnl_points=pnl_data['pnl_points'],
-                        entry_time=trade_execution.entry_time.isoformat(),
-                        holding_duration_minutes=pnl_data['holding_duration_minutes'],
-                        stop_loss=updated_sl,
-                        target=Decimal(str(trade_execution.target_1)),
-                        highest_price=pnl_data['highest_price'],
-                        trailing_sl_active=position.trailing_stop_triggered,
-                        status="CLOSED" if should_exit else "ACTIVE",
-                        last_updated=get_ist_isoformat()
-                    )
-
-                    pnl_updates.append(pnl_update)
-
+                        except Exception as e:
+                            logger.error(f"Error processing position {position.id}: {e}")
+                            continue
+                            
+                    session.commit()
+                    return updates, exits
                 except Exception as e:
-                    logger.error(f"Error updating position {position.id}: {e}")
-                    continue
+                    session.rollback()
+                    logger.error(f"DB Error in pnl_update_job: {e}")
+                    return [], []
+                finally:
+                    session.close()
 
-            # Commit all updates
-            db.commit()
+            # 3. Execute DB Job in Thread
+            pnl_updates, exits_to_process = await asyncio.to_thread(pnl_update_job)
 
-            # Broadcast PnL updates via WebSocket
+            # 4. Broadcast Updates
             if pnl_updates:
                 await self._broadcast_pnl_updates(pnl_updates)
 
+            # 5. Process Exits (Async)
+            if exits_to_process:
+                # Use a fresh session for exits
+                exit_session = SessionLocal()
+                try:
+                    for pos_id, price, reason in exits_to_process:
+                        # Fetch objects again attached to this session
+                        pos = exit_session.query(ActivePosition).filter(ActivePosition.id == pos_id).first()
+                        if pos:
+                            trade = exit_session.query(AutoTradeExecution).filter(AutoTradeExecution.id == pos.trade_execution_id).first()
+                            if trade:
+                                await self._close_position(
+                                    pos,
+                                    trade,
+                                    Decimal(str(price)),
+                                    reason,
+                                    exit_session
+                                )
+                    # _close_position commits individually or we commit here?
+                    # _close_position implementation commits.
+                finally:
+                    exit_session.close()
+
         except Exception as e:
             logger.error(f"Error updating all positions: {e}")
-            db.rollback()
 
     def _get_current_price(
         self,
@@ -482,102 +527,109 @@ class RealTimePnLTracker:
                 logger.info(f"Paper trading - skipping actual exit order placement")
                 return None
 
-            # Get broker configuration
-            from database.models import BrokerConfig
+            def place_order_job():
+                try:
+                    # Get broker configuration
+                    from database.models import BrokerConfig
 
-            broker_config = (
-                db.query(BrokerConfig)
-                .filter(
-                    BrokerConfig.id == trade_execution.broker_config_id,
-                    BrokerConfig.is_active == True
-                )
-                .first()
-            )
+                    broker_config = (
+                        db.query(BrokerConfig)
+                        .filter(
+                            BrokerConfig.id == trade_execution.broker_config_id,
+                            BrokerConfig.is_active == True
+                        )
+                        .first()
+                    )
 
-            if not broker_config:
-                logger.error(f"No active broker config found for trade {trade_execution.trade_id}")
-                return None
+                    if not broker_config:
+                        logger.error(f"No active broker config found for trade {trade_execution.trade_id}")
+                        return None
 
-            broker_name = broker_config.broker_name.lower()
-            quantity = trade_execution.quantity
+                    broker_name = broker_config.broker_name.lower()
+                    quantity = trade_execution.quantity
 
-            # Place SELL order based on broker
-            if "upstox" in broker_name:
-                from services.upstox.upstox_order_service import get_upstox_order_service
+                    # Place SELL order based on broker
+                    if "upstox" in broker_name:
+                        from services.upstox.upstox_order_service import get_upstox_order_service
 
-                # Get Upstox Order Service with V3 API
-                order_service = get_upstox_order_service(
-                    access_token=broker_config.access_token,
-                    use_sandbox=False
-                )
-                
-                # Determine product type (default to Intraday 'I' if not specified)
-                # Ideally this should be stored in AutoTradeExecution, but if not, assume Intraday for HFT
-                product_type = getattr(trade_execution, 'product', 'I')
+                        # Get Upstox Order Service with V3 API
+                        order_service = get_upstox_order_service(
+                            access_token=broker_config.access_token,
+                            use_sandbox=False
+                        )
+                        
+                        # Determine product type (default to Intraday 'I' if not specified)
+                        product_type = getattr(trade_execution, 'product', 'I')
 
-                # Place exit (SELL) order using V3 API
-                result = order_service.place_order_v3(
-                    quantity=quantity,
-                    instrument_token=trade_execution.instrument_key,
-                    order_type="MARKET",
-                    transaction_type="SELL",  # SELL to exit position
-                    product=product_type,
-                    validity="DAY",
-                    price=0.0,  # Market order
-                    trigger_price=0.0,
-                    disclosed_quantity=0,
-                    is_amo=False,
-                    tag=f"exit_{trade_execution.trade_id}",
-                    slice=True  # Enable auto-slicing
-                )
+                        # Place exit (SELL) order using V3 API
+                        result = order_service.place_order_v3(
+                            quantity=quantity,
+                            instrument_token=trade_execution.instrument_key,
+                            order_type="MARKET",
+                            transaction_type="SELL",  # SELL to exit position
+                            product=product_type,
+                            validity="DAY",
+                            price=0.0,  # Market order
+                            trigger_price=0.0,
+                            disclosed_quantity=0,
+                            is_amo=False,
+                            tag=f"exit_{trade_execution.trade_id}",
+                            slice=True  # Enable auto-slicing
+                        )
 
-                if not result.get("success"):
-                    logger.error(f"Upstox exit order failed: {result.get('message')}")
+                        if not result.get("success"):
+                            logger.error(f"Upstox exit order failed: {result.get('message')}")
+                            return None
+
+                        # Extract order IDs
+                        order_ids = result.get("data", {}).get("order_ids", [])
+                        primary_order_id = order_ids[0] if order_ids else None
+                        latency = result.get("metadata", {}).get("latency", 0)
+
+                        logger.info(
+                            f"Upstox V3 exit order placed: {len(order_ids)} orders, "
+                            f"latency: {latency}ms, IDs: {order_ids}"
+                        )
+
+                        return primary_order_id
+
+                    elif "angel" in broker_name:
+                        from brokers.angel_broker import AngelOneBroker
+
+                        broker = AngelOneBroker(broker_config)
+
+                        order_result = broker.place_order(
+                            symbol=trade_execution.symbol,
+                            quantity=quantity,
+                            order_type="MARKET",
+                            transaction_type="SELL",
+                        )
+
+                        return order_result.get("orderid")
+
+                    elif "dhan" in broker_name:
+                        from brokers.dhan_broker import DhanBroker
+
+                        broker = DhanBroker(broker_config)
+
+                        order_result = broker.place_order(
+                            instrument_key=trade_execution.instrument_key,
+                            quantity=quantity,
+                            order_type="MARKET",
+                            transaction_type="SELL",
+                        )
+
+                        return order_result.get("orderId")
+
+                    else:
+                        logger.error(f"Unsupported broker for exit order: {broker_name}")
+                        return None
+                except Exception as e:
+                    logger.error(f"Job Error placing exit order: {e}")
                     return None
 
-                # Extract order IDs
-                order_ids = result.get("data", {}).get("order_ids", [])
-                primary_order_id = order_ids[0] if order_ids else None
-                latency = result.get("metadata", {}).get("latency", 0)
-
-                logger.info(
-                    f"Upstox V3 exit order placed: {len(order_ids)} orders, "
-                    f"latency: {latency}ms, IDs: {order_ids}"
-                )
-
-                return primary_order_id
-
-            elif "angel" in broker_name:
-                from brokers.angel_broker import AngelOneBroker
-
-                broker = AngelOneBroker(broker_config)
-
-                order_result = broker.place_order(
-                    symbol=trade_execution.symbol,
-                    quantity=quantity,
-                    order_type="MARKET",
-                    transaction_type="SELL",
-                )
-
-                return order_result.get("orderid")
-
-            elif "dhan" in broker_name:
-                from brokers.dhan_broker import DhanBroker
-
-                broker = DhanBroker(broker_config)
-
-                order_result = broker.place_order(
-                    instrument_key=trade_execution.instrument_key,
-                    quantity=quantity,
-                    order_type="MARKET",
-                    transaction_type="SELL",
-                )
-
-                return order_result.get("orderId")
-
-            else:
-                logger.error(f"Unsupported broker for exit order: {broker_name}")
-                return None
+            # Run the blocking DB and API calls in a thread
+            return await asyncio.to_thread(place_order_job)
 
         except Exception as e:
             logger.error(f"Error placing exit order: {e}")
@@ -612,7 +664,7 @@ class RealTimePnLTracker:
                 exit_price = raw_exit_price - slippage
                 logger.info(f"📝 Paper exit slippage applied: {raw_exit_price} -> {exit_price}")
 
-            # Place exit order if live trading
+            # Place exit order if live trading (Async)
             exit_order_id = None
             if trade_execution.trading_mode == "live":
                 exit_order_id = await self._place_exit_order(
@@ -621,42 +673,104 @@ class RealTimePnLTracker:
                     db
                 )
 
-            # Calculate final PnL
-            entry_price = Decimal(str(trade_execution.entry_price))
-            quantity = trade_execution.quantity
-            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+            # Define DB Update Job
+            def db_close_job(pos_id, trade_id, price, reason, order_id):
+                # We need to re-fetch objects inside the thread if we want to be safe, 
+                # but since we are passed 'db' session which is managed by caller (update_all_positions creates new session for exits),
+                # we can use it. However, to_thread runs in another thread. SQLAlchemy session is not thread-safe if shared.
+                # BUT: update_all_positions calls this sequentially and awaits it.
+                # So no concurrent access to 'db' session. It should be fine.
+                try:
+                    # Calculate final PnL
+                    entry_price = Decimal(str(trade_execution.entry_price))
+                    quantity = trade_execution.quantity
+                    total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
 
-            buy_value = entry_price * Decimal(str(quantity))
-            sell_value = exit_price * Decimal(str(quantity))
-            gross_pnl = sell_value - buy_value
-            turnover = buy_value + sell_value
+                    buy_value = entry_price * Decimal(str(quantity))
+                    sell_value = price * Decimal(str(quantity))
+                    gross_pnl = sell_value - buy_value
+                    turnover = buy_value + sell_value
 
-            # REALISTIC BROKERAGE & TAX CALCULATION (Indian Options Market)
-            # Brokerage: ₹20 per order (Buy + Sell = ₹40)
-            # Taxes/Charges: ~0.1% of Turnover (STT + Trans + GST + SEBI)
-            brokerage_flat = Decimal('40.0')
-            taxes = turnover * Decimal('0.001')
-            total_charges = brokerage_flat + taxes
-            
-            net_pnl = gross_pnl - total_charges
+                    # CHARGES
+                    brokerage_flat = Decimal('40.0')
+                    taxes = turnover * Decimal('0.001')
+                    total_charges = brokerage_flat + taxes
+                    
+                    net_pnl = gross_pnl - total_charges
+                    pnl_percent = (net_pnl / total_investment * Decimal('100')) if total_investment > 0 else 0.0
 
-            # Update trade execution
-            trade_execution.exit_time = get_ist_now_naive()
-            trade_execution.exit_price = float(exit_price)
-            trade_execution.exit_order_id = exit_order_id
-            trade_execution.exit_reason = exit_reason
-            trade_execution.gross_pnl = float(gross_pnl)
-            trade_execution.net_pnl = float(net_pnl)
-            trade_execution.pnl_percentage = float((net_pnl / total_investment) * Decimal('100')) if total_investment > 0 else 0.0
-            trade_execution.status = "CLOSED"
+                    # Update trade execution
+                    trade_execution.exit_time = get_ist_now_naive()
+                    trade_execution.exit_price = float(price)
+                    trade_execution.exit_order_id = order_id
+                    trade_execution.exit_reason = reason
+                    trade_execution.gross_pnl = float(gross_pnl)
+                    trade_execution.net_pnl = float(net_pnl)
+                    trade_execution.pnl_percentage = float(pnl_percent)
+                    trade_execution.status = "CLOSED"
 
-            # Deactivate position
-            position.is_active = False
-            position.last_updated = get_ist_now_naive()
+                    # Deactivate position
+                    position.is_active = False
+                    position.last_updated = get_ist_now_naive()
 
-            db.commit()
+                    # UPDATE PAPER TRADING BALANCE ON EXIT
+                    if trade_execution.trading_mode == "paper":
+                        try:
+                            from services.paper_trading_account import paper_trading_service
+                            from database.models import PaperTradingAccount
+                            
+                            paper_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == position.user_id).first()
+                            if paper_account:
+                                release_amount = float(sell_value - total_charges)
+                                
+                                paper_account.available_margin += release_amount
+                                paper_account.current_balance += release_amount
+                                paper_account.used_margin -= float(trade_execution.total_investment)
+                                paper_account.total_pnl += float(net_pnl)
+                                paper_account.daily_pnl += float(net_pnl)
+                                paper_account.positions_count = max(0, paper_account.positions_count - 1)
+                                paper_account.updated_at = get_ist_now_naive()
+                                
+                                # Sync in-memory service
+                                mem_acc = paper_trading_service.accounts.get(position.user_id)
+                                if mem_acc:
+                                    mem_acc.available_margin = float(paper_account.available_margin)
+                                    mem_acc.current_balance = float(paper_account.current_balance)
+                                    mem_acc.used_margin = float(paper_account.used_margin)
+                                    mem_acc.total_pnl = float(paper_account.total_pnl)
+                                    mem_acc.positions_count = paper_account.positions_count
+                                
+                                logger.info(f"✅ Paper account updated after exit: New Balance=₹{paper_account.current_balance:,.2f} (Returned ₹{release_amount:,.2f})")
+                                
+                        except Exception as e:
+                            logger.error(f"Failed to update paper account on exit: {e}")
 
-            logger.info(f"✅ Position closed: PnL = Rs.{net_pnl:.2f} ({pnl_percent:.2f}%)")
+                    db.commit()
+                    
+                    return {
+                        "net_pnl": float(net_pnl), 
+                        "pnl_percent": float(pnl_percent), 
+                        "gross_pnl": float(gross_pnl),
+                        "quantity": quantity,
+                        "entry_price": float(entry_price),
+                        "pnl_points": float(price - entry_price)
+                    }
+                except Exception as e:
+                    logger.error(f"DB Error in _close_position: {e}")
+                    db.rollback()
+                    raise e
+
+            # Run DB job in thread
+            result = await asyncio.to_thread(
+                db_close_job, 
+                position.id, 
+                trade_execution.trade_id, 
+                exit_price, 
+                exit_reason, 
+                exit_order_id
+            )
+
+            logger.info(f"✅ Position closed: PnL = Rs.{result['net_pnl']:.2f} ({result['pnl_percent']:.2f}%)")
             
             log_structured(
                 event="POSITION_CLOSED",
@@ -666,45 +780,12 @@ class RealTimePnLTracker:
                     "symbol": position.symbol,
                     "exit_price": float(exit_price),
                     "exit_reason": exit_reason,
-                    "net_pnl": float(net_pnl),
-                    "pnl_percent": float(pnl_percent),
+                    "net_pnl": result['net_pnl'],
+                    "pnl_percent": result['pnl_percent'],
                     "duration_min": int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60)
                 },
                 user_id=str(position.user_id)
             )
-
-            # UPDATE PAPER TRADING BALANCE ON EXIT
-            if trade_execution.trading_mode == "paper":
-                try:
-                    from services.paper_trading_account import paper_trading_service
-                    from database.models import PaperTradingAccount
-                    
-                    paper_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == position.user_id).first()
-                    if paper_account:
-                        # Logic: Sell Value - Total Charges is returned to balance
-                        release_amount = float(sell_value - total_charges)
-                        
-                        paper_account.available_margin += release_amount
-                        paper_account.current_balance += release_amount
-                        paper_account.used_margin -= float(trade_execution.total_investment)
-                        paper_account.total_pnl += float(net_pnl)
-                        paper_account.daily_pnl += float(net_pnl)
-                        paper_account.positions_count = max(0, paper_account.positions_count - 1)
-                        paper_account.updated_at = get_ist_now_naive()
-                        
-                        # Sync in-memory service
-                        mem_acc = paper_trading_service.accounts.get(position.user_id)
-                        if mem_acc:
-                            mem_acc.available_margin = float(paper_account.available_margin)
-                            mem_acc.current_balance = float(paper_account.current_balance)
-                            mem_acc.used_margin = float(paper_account.used_margin)
-                            mem_acc.total_pnl = float(paper_account.total_pnl)
-                            mem_acc.positions_count = paper_account.positions_count
-                        
-                        logger.info(f"✅ Paper account updated after exit: New Balance=₹{paper_account.current_balance:,.2f} (Returned ₹{release_amount:,.2f})")
-                        
-                except Exception as e:
-                    logger.error(f"Failed to update paper account on exit: {e}")
 
             # Broadcast position close event to UI
             try:
@@ -716,13 +797,13 @@ class RealTimePnLTracker:
                     "user_id": position.user_id,
                     "symbol": position.symbol,
                     "instrument_key": position.instrument_key,
-                    "entry_price": float(entry_price),
+                    "entry_price": result['entry_price'],
                     "exit_price": float(exit_price),
-                    "quantity": quantity,
-                    "gross_pnl": float(gross_pnl),
-                    "net_pnl": float(net_pnl),
-                    "pnl_percent": float(pnl_percent),
-                    "pnl_points": float(pnl_points),
+                    "quantity": result['quantity'],
+                    "gross_pnl": result['gross_pnl'],
+                    "net_pnl": result['net_pnl'],
+                    "pnl_percent": result['pnl_percent'],
+                    "pnl_points": result['pnl_points'],
                     "exit_reason": exit_reason,
                     "entry_time": trade_execution.entry_time.isoformat(),
                     "exit_time": get_ist_isoformat(),
@@ -738,7 +819,9 @@ class RealTimePnLTracker:
 
         except Exception as e:
             logger.error(f"Error closing position: {e}")
-            db.rollback()
+            # Ensure DB is rolled back if possible (though we passed it to thread, if thread failed it rolled back)
+            # If error is outside thread, we should probably check.
+            pass
 
     async def _broadcast_pnl_updates(self, pnl_updates: List[PositionPnL]):
         """

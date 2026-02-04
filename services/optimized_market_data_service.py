@@ -616,10 +616,11 @@ class OptimizedMarketDataService:
             logger.error(f"❌ Error rebuilding {list_name}: {e}")
 
     def _rebuild_new_highs_lows(self):
-        """Rebuild new highs and lows lists"""
+        """Rebuild new highs and lows lists with enhanced metadata for UI"""
         try:
             new_highs = []
             new_lows = []
+            timestamp = datetime.now().isoformat()
 
             for instrument_key, instrument in self.instruments.items():
                 if instrument.instrument_type == "INDEX" or instrument.ltp <= 0:
@@ -627,27 +628,56 @@ class OptimizedMarketDataService:
 
                 # Near day high (within 0.5%)
                 if instrument.high > 0 and (instrument.ltp / instrument.high) >= 0.995:
+                    proximity = (instrument.ltp / instrument.high) * 100
+                    strength = min(10, max(5, (proximity - 99) * 10))  # Scale 5-10
+                    
                     new_highs.append(
                         {
                             "symbol": instrument.symbol,
-                            "key": instrument_key,
+                            "name": instrument.name,
+                            "instrument_key": instrument_key,
+                            "key": instrument_key, # Backward compatibility
                             "ltp": instrument.ltp,
+                            "current_price": instrument.ltp, # UI compatibility
                             "high": instrument.high,
-                            "proximity": (instrument.ltp / instrument.high) * 100,
+                            "low": instrument.low,
+                            "proximity": proximity,
                             "change_percent": instrument.change_percent,
+                            "percentage_move": instrument.change_percent, # UI compatibility
+                            "volume": instrument.volume,
+                            "breakout_type": "resistance_breakout", # UI mapped type
+                            "strength": strength,
+                            "confidence": min(95, proximity),
+                            "timestamp": timestamp,
+                            "sector": instrument.sector
                         }
                     )
 
                 # Near day low (within 0.5%)
                 if instrument.low > 0 and (instrument.ltp / instrument.low) <= 1.005:
+                    proximity = (instrument.ltp / instrument.low) * 100
+                    # For lows, closer to 100% (from above) is stronger breakdown
+                    strength = min(10, max(5, (101 - proximity) * 10)) 
+                    
                     new_lows.append(
                         {
                             "symbol": instrument.symbol,
-                            "key": instrument_key,
+                            "name": instrument.name,
+                            "instrument_key": instrument_key,
+                            "key": instrument_key, # Backward compatibility
                             "ltp": instrument.ltp,
+                            "current_price": instrument.ltp, # UI compatibility
+                            "high": instrument.high,
                             "low": instrument.low,
-                            "proximity": (instrument.ltp / instrument.low) * 100,
+                            "proximity": proximity,
                             "change_percent": instrument.change_percent,
+                            "percentage_move": instrument.change_percent, # UI compatibility
+                            "volume": instrument.volume,
+                            "breakout_type": "support_breakdown", # UI mapped type
+                            "strength": strength,
+                            "confidence": min(95, (200 - proximity)), # Inverse proximity for confidence
+                            "timestamp": timestamp,
+                            "sector": instrument.sector
                         }
                     )
 
