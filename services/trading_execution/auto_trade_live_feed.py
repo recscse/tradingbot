@@ -39,6 +39,7 @@ from services.trading_execution.shared_instrument_registry import (
     SharedInstrument,
 )
 from router.unified_websocket_routes import broadcast_to_clients
+from services.notifications.telegram_service import telegram_notifier
 from utils.market_hours import is_market_open
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import (
@@ -199,10 +200,24 @@ class AutoTradeLiveFeed:
             logger.info(f"Synced active positions from database into memory")
 
             logger.info(f"Auto-trading started in {trading_mode.value} mode")
+            
+            # Send Telegram Alert
+            asyncio.create_task(telegram_notifier.send_system_alert(
+                "AutoTradeLiveFeed", 
+                f"Auto-trading STARTED in {trading_mode.value} mode with {len(shared_registry.instruments)} instruments",
+                level="INFO"
+            ))
         except Exception as e:
             self.is_running = False
             self.last_error = str(e)
             logger.error(f"Error starting auto-trading: {e}")
+            
+            # Send Telegram Error
+            asyncio.create_task(telegram_notifier.send_system_alert(
+                "AutoTradeLiveFeed", 
+                f"CRITICAL STARTUP ERROR: {str(e)}",
+                level="ERROR"
+            ))
             
             log_to_db(
                 component="auto_trade_live_feed",
@@ -849,6 +864,14 @@ class AutoTradeLiveFeed:
                 f"✅ Valid signal for {instrument.stock_symbol}: "
                 f"{premium_signal.signal_type.value} (Conf: {premium_signal.confidence})"
             )
+
+            # Notify Admin of Signal
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.send_admin_system_status(
+                "Strategy Engine", 
+                "SIGNAL", 
+                f"{premium_signal.signal_type.value.upper()} signal for {instrument.stock_symbol} @ {premium_signal.price:.2f} (Conf: {premium_signal.confidence:.2f})"
+            ))
 
             # Get all users subscribed to this instrument
             subscribed_users = shared_registry.get_instrument_subscribers(

@@ -20,6 +20,7 @@ from services.trading_execution.strategy_engine import (
 )
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import log_structured
+from services.notifications.telegram_service import telegram_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -792,6 +793,18 @@ class RealTimePnLTracker:
                 exit_reason, 
                 exit_order_id
             )
+
+            # Send Alert via AlertManager (Professional Unified Interface)
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.notify_trade_exit(
+                user_id=position.user_id,
+                trade_data={
+                    "symbol": position.symbol,
+                    "exit_price": float(exit_price),
+                    "pnl": result['net_pnl'],
+                    "exit_reason": exit_reason
+                }
+            ))
 
             logger.info(f"✅ Position closed: PnL = Rs.{result['net_pnl']:.2f} ({result['pnl_percent']:.2f}%)")
             

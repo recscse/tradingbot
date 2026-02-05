@@ -1,0 +1,152 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": "TradingDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0 }
+            ]
+          },
+          "unit": "currencyINR"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT sum(net_pnl) FROM auto_trade_executions WHERE status = 'CLOSED' AND exit_time >= now() - interval '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "title": "Daily Net PnL",
+      "type": "stat"
+    },
+    {
+      "datasource": "TradingDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 40 },
+              { "color": "green", "value": 60 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT (count(*) filter (where net_pnl > 0) * 100.0 / count(*)) as win_rate FROM auto_trade_executions WHERE status = 'CLOSED'",
+          "refId": "A"
+        }
+      ],
+      "title": "Win Rate",
+      "type": "stat"
+    },
+    {
+      "datasource": "TradingDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "pointSize": 5 },
+          "unit": "currencyINR"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 4,
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT exit_time as time, sum(net_pnl) OVER (ORDER BY exit_time) as value FROM auto_trade_executions WHERE status = 'CLOSED' ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "title": "Equity Curve (Cumulative Profit)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "TradingDB",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 5,
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT symbol, sum(net_pnl) as profit FROM auto_trade_executions WHERE status = 'CLOSED' GROUP BY symbol ORDER BY profit DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Profit by Symbol",
+      "type": "barchart"
+    },
+    {
+      "datasource": "TradingDB",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 12 },
+      "id": 6,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT entry_time, symbol, signal_type, entry_price, exit_price, quantity, net_pnl, status FROM auto_trade_executions ORDER BY entry_time DESC LIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent Executions",
+      "type": "table"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["trading"],
+  "timezone": "browser",
+  "title": "Trading Bot Financial Analytics",
+  "uid": "trading_bi",
+  "version": 2
+}

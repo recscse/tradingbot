@@ -479,12 +479,27 @@ class MarketScheduleService:
                 )
                 
                 from utils.logging_utils import log_to_db
+                from services.notifications.alert_manager import alert_manager
+                
                 log_to_db(
                     component="market_scheduler",
                     message=f"Pre-open Stock Selection COMPLETE: {len(selected_stocks_data)} stocks selected",
                     level="INFO",
                     additional_data={"count": len(selected_stocks_data), "sentiment": sentiment_analysis.get('sentiment')}
                 )
+
+                # Send Admin Alert
+                asyncio.create_task(alert_manager.send_market_intelligence(
+                    sentiment=sentiment_analysis.get('sentiment', 'neutral'),
+                    ad_ratio=float(sentiment_analysis.get('advance_decline_ratio', 1.0)),
+                    top_sectors=[s.get('sector', 'Other') for s in selected_stocks_data[:3]]
+                ))
+                
+                asyncio.create_task(alert_manager.send_stock_selection_summary(
+                    count=len(selected_stocks_data),
+                    stocks=[s.get('symbol') for s in selected_stocks_data],
+                    phase="pre-open"
+                ))
 
             else:
                 error_msg = (
@@ -601,12 +616,21 @@ class MarketScheduleService:
                     )
                     
                     from utils.logging_utils import log_to_db
+                    from services.notifications.alert_manager import alert_manager
+                    
                     log_to_db(
                         component="market_scheduler",
                         message=f"Market Open Validation COMPLETE: {len(self.selected_stocks)} stocks locked for trading",
                         level="INFO",
                         additional_data={"count": len(self.selected_stocks), "action": validation_action}
                     )
+
+                    # Send Admin Alert
+                    asyncio.create_task(alert_manager.send_stock_selection_summary(
+                        count=len(self.selected_stocks),
+                        stocks=list(self.selected_stocks.keys()),
+                        phase="market-open-final"
+                    ))
                 else:
                     error_msg = (
                         validation_result.get("error", "Unknown error")

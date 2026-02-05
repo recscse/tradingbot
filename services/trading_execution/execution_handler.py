@@ -16,6 +16,7 @@ from services.trading_execution.capital_manager import TradingMode
 from services.trading_execution.trade_prep import PreparedTrade, TradeStatus
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import log_structured, log_trade_result, log_to_db
+from services.notifications.telegram_service import telegram_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +312,20 @@ class TradeExecutionHandler:
             db.add(active_position)
             db.commit()
 
+            # Send Alert via AlertManager (Professional Unified Interface)
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.notify_trade_entry(
+                user_id=prepared_trade.user_id,
+                trade_data={
+                    "symbol": prepared_trade.stock_symbol,
+                    "option_type": prepared_trade.option_type,
+                    "entry_price": float(entry_price),
+                    "stop_loss": float(prepared_trade.stop_loss),
+                    "target": float(prepared_trade.target_price),
+                    "trading_mode": "paper"
+                }
+            ))
+
             log_to_db(
                 component="execution_handler",
                 message=f"✅ PAPER SUCCESS: {prepared_trade.stock_symbol} @ {entry_price}",
@@ -482,6 +497,20 @@ class TradeExecutionHandler:
 
             db.add(active_position)
             db.commit()
+
+            # Send Alert via AlertManager (Professional Unified Interface)
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.notify_trade_entry(
+                user_id=prepared_trade.user_id,
+                trade_data={
+                    "symbol": prepared_trade.stock_symbol,
+                    "option_type": prepared_trade.option_type,
+                    "entry_price": float(actual_entry_price),
+                    "stop_loss": float(prepared_trade.stop_loss),
+                    "target": float(prepared_trade.target_price),
+                    "trading_mode": "live"
+                }
+            ))
 
             log_to_db(
                 component="execution_handler",
