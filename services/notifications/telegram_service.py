@@ -19,12 +19,7 @@ logger = logging.getLogger("telegram_service")
 class TelegramNotificationService:
     """
     Singleton service for sending formatted Telegram notifications.
-    Features: 
-    - Async HTTP requests (non-blocking)
-    - Professional MarkdownV2 formatting
-    - Retry logic for reliability
-    - Rate limiting protection
-    - Multi-user routing via chat_id
+    Uses HTML Parse Mode for better reliability and simpler escaping.
     """
     
     _instance = None
@@ -42,7 +37,7 @@ class TelegramNotificationService:
             self.admin_chat_id = TELEGRAM_CHAT_ID
             self.api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             self.initialized = True
-            logger.info("Telegram Notification Service initialized (Multi-User Support)")
+            logger.info("Telegram Notification Service initialized (HTML Mode)")
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the shared httpx client"""
@@ -50,20 +45,13 @@ class TelegramNotificationService:
             self._client = httpx.AsyncClient(timeout=10.0)
         return self._client
 
-    def _escape_markdown(self, text: str) -> str:
-        """
-        Escape special characters for Telegram MarkdownV2.
-        Required by Telegram API to prevent 'Bad Request: can't parse entities' errors.
-        """
-        if text is None:
-            return ""
-        # Official list of characters that must be escaped outside of code blocks
-        escape_chars = r'_*[]()~`>#+-=|{}.!'
-        return "".join(['\\' + char if char in escape_chars else char for char in str(text)])
+    def _clean(self, text: Any) -> str:
+        """Clean text for HTML mode"""
+        if text is None: return ""
+        return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     async def send_message(self, message: str, priority: str = "INFO", chat_id: Optional[str] = None) -> bool:
         """Send a raw message to Telegram"""
-        # Default to admin chat ID if user chat ID not provided
         target_chat_id = chat_id or self.admin_chat_id
         
         if self.bot_token == "YOUR_TELEGRAM_BOT_TOKEN" or not target_chat_id:
@@ -73,7 +61,7 @@ class TelegramNotificationService:
         payload = {
             "chat_id": str(target_chat_id),
             "text": message,
-            "parse_mode": "MarkdownV2",
+            "parse_mode": "HTML",
             "disable_web_page_preview": True
         }
         
@@ -87,6 +75,9 @@ class TelegramNotificationService:
                 await asyncio.sleep(retry_after)
                 response = await client.post(self.api_url, json=payload)
 
+            if response.status_code != 200:
+                logger.error(f"Telegram HTML Error {response.status_code}: {response.text}")
+
             response.raise_for_status()
             return True
         except Exception as e:
@@ -94,52 +85,55 @@ class TelegramNotificationService:
             return False
 
     async def send_trade_entry(self, trade_data: Dict[str, Any], chat_id: Optional[str] = None):
-        """Send professional trade entry alert"""
-        symbol = self._escape_markdown(trade_data.get('symbol', 'Unknown'))
-        option_type = self._escape_markdown(trade_data.get('option_type', ''))
-        entry_price = self._escape_markdown(f"{trade_data.get('entry_price', 0):.2f}")
-        sl = self._escape_markdown(f"{trade_data.get('stop_loss', 0):.2f}")
-        target = self._escape_markdown(f"{trade_data.get('target', 0):.2f}")
-        mode = self._escape_markdown(trade_data.get('trading_mode', 'PAPER').upper())
+        """Send professional trade entry alert (HTML)"""
+        symbol = self._clean(trade_data.get('symbol', 'Unknown'))
+        option_type = self._clean(trade_data.get('option_type', ''))
+        entry_price = f"{trade_data.get('entry_price', 0):.2f}"
+        sl = f"{trade_data.get('stop_loss', 0):.2f}"
+        target = f"{trade_data.get('target', 0):.2f}"
+        mode = trade_data.get('trading_mode', 'PAPER').upper()
         
         msg = (
-            f"🚀 *TRADE EXECUTED ({mode})*\n\n"
-            f"📈 *Symbol:* {symbol} {option_type}\n"
-            f"🎯 *Entry:* ₹{entry_price}\n"
-            f"🛡️ *Stop Loss:* ₹{sl}\n"
-            f"🎯 *Target:* ₹{target}\n\n"
-            f"🕒 {self._escape_markdown(get_ist_now_naive().strftime('%H:%M:%S'))} IST"
+            f"🚀 <b>TRADE EXECUTED ({mode})</b>\n\n"
+            f"📈 <b>Symbol:</b> {symbol} {option_type}\n"
+            f"🎯 <b>Entry:</b> ₹{entry_price}\n"
+            f"🛡️ <b>Stop Loss:</b> ₹{sl}\n"
+            f"🎯 <b>Target:</b> ₹{target}\n\n"
+            f"🕒 {get_ist_now_naive().strftime('%H:%M:%S')} IST"
         )
         await self.send_message(msg, chat_id=chat_id)
 
     async def send_trade_exit(self, trade_data: Dict[str, Any], chat_id: Optional[str] = None):
-        """Send professional trade exit alert"""
-        symbol = self._escape_markdown(trade_data.get('symbol', 'Unknown'))
-        exit_price = self._escape_markdown(f"{trade_data.get('exit_price', 0):.2f}")
+        """Send professional trade exit alert (HTML)"""
+        symbol = self._clean(trade_data.get('symbol', 'Unknown'))
+        exit_price = f"{trade_data.get('exit_price', 0):.2f}"
         pnl = float(trade_data.get('pnl', 0))
-        pnl_str = self._escape_markdown(f"{pnl:+.2f}")
-        reason = self._escape_markdown(trade_data.get('exit_reason', 'Signal').replace('_', ' '))
+        pnl_str = f"{pnl:+.2f}"
+        reason = self._clean(trade_data.get('exit_reason', 'Signal').replace('_', ' '))
         
         emoji = "✅" if pnl >= 0 else "❌"
-        pnl_label = "*PROFIT*" if pnl >= 0 else "*LOSS*"
+        pnl_label = "PROFIT" if pnl >= 0 else "LOSS"
 
         msg = (
-            f"{emoji} *POSITION CLOSED*\n\n"
-            f"📈 *Symbol:* {symbol}\n"
-            f"🚪 *Exit Reason:* {reason}\n"
-            f"🧾 *Exit Price:* ₹{exit_price}\n"
-            f"💰 {pnl_label}: *₹{pnl_str}*\n\n"
-            f"🕒 {self._escape_markdown(get_ist_now_naive().strftime('%H:%M:%S'))} IST"
+            f"{emoji} <b>POSITION CLOSED</b>\n\n"
+            f"📈 <b>Symbol:</b> {symbol}\n"
+            f"🚪 <b>Exit Reason:</b> {reason}\n"
+            f"🧾 <b>Exit Price:</b> ₹{exit_price}\n"
+            f"💰 <b>{pnl_label}:</b> <b>₹{pnl_str}</b>\n\n"
+            f"🕒 {get_ist_now_naive().strftime('%H:%M:%S')} IST"
         )
         await self.send_message(msg, chat_id=chat_id)
 
     async def send_system_alert(self, component: str, message: str, level: str = "ERROR", chat_id: Optional[str] = None):
-        """Send system health alert"""
+        """Send system health alert (HTML)"""
         level_emoji = "⚠️" if level == "ERROR" else "ℹ️"
+        comp = self._clean(component.upper())
+        msg_text = self._clean(message)
+        
         msg = (
-            f"{level_emoji} *SYSTEM ALERT: {self._escape_markdown(component.upper())}*\n\n"
-            f"_{self._escape_markdown(message)}_\n\n"
-            f"🕒 {self._escape_markdown(get_ist_now_naive().strftime('%H:%M:%S'))} IST"
+            f"{level_emoji} <b>SYSTEM ALERT: {comp}</b>\n\n"
+            f"<i>{msg_text}</i>\n\n"
+            f"🕒 {get_ist_now_naive().strftime('%H:%M:%S')} IST"
         )
         await self.send_message(msg, priority=level, chat_id=chat_id)
 
