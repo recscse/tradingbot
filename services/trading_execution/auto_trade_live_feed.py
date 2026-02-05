@@ -16,6 +16,8 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set
 
+from sqlalchemy.orm import Session
+
 from services.upstox.ws_client import UpstoxWebSocketClient
 from database.connection import SessionLocal, get_db
 from database.models import (
@@ -40,11 +42,11 @@ from router.unified_websocket_routes import broadcast_to_clients
 from utils.market_hours import is_market_open
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import (
-    log_signal_generation, 
-    log_trade_attempt, 
-    log_trade_result, 
-    generate_trace_id, 
-    log_structured
+    log_signal_generation,
+    log_trade_attempt,
+    log_trade_result,
+    generate_trace_id,
+    log_structured,
 )
 
 logger = logging.getLogger("auto_trade_live_feed")
@@ -83,7 +85,7 @@ class AutoTradeLiveFeed:
 
         # Active user positions tracking (user_id -> {option_key -> position_data})
         self.active_user_positions: Dict[int, Dict[str, Dict[str, Any]]] = {}
-        
+
         # Cooldown tracking (user_id -> {stock_symbol -> last_exit_time})
         self.user_last_exit_times: Dict[int, Dict[str, datetime]] = {}
 
@@ -161,7 +163,9 @@ class AutoTradeLiveFeed:
 
             # Start WebSocket client in background
             loop = asyncio.get_event_loop()
-            self.ws_client_task = loop.create_task(self.upstox_client.connect_and_stream())
+            self.ws_client_task = loop.create_task(
+                self.upstox_client.connect_and_stream()
+            )
 
             # Start monitoring loop
             if not self.ws_task or self.ws_task.done():
@@ -184,6 +188,7 @@ class AutoTradeLiveFeed:
             self.last_error = str(e)
             logger.error(f"Error starting auto-trading: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
 
     async def stop(self):
@@ -235,13 +240,19 @@ class AutoTradeLiveFeed:
         """Get auto-trading service status for system health dashboard"""
         return {
             "is_running": self.is_running,
-            "websocket_connected": self.upstox_client.is_connected() if self.upstox_client else False,
-            "trading_mode": self.default_trading_mode.value if hasattr(self.default_trading_mode, 'value') else str(self.default_trading_mode),
+            "websocket_connected": (
+                self.upstox_client.is_connected() if self.upstox_client else False
+            ),
+            "trading_mode": (
+                self.default_trading_mode.value
+                if hasattr(self.default_trading_mode, "value")
+                else str(self.default_trading_mode)
+            ),
             "stats": self.stats,
             "active_users": len(self.active_user_positions),
             "instruments_tracked": len(shared_registry.instruments),
             "last_error": getattr(self, "last_error", None),
-            "timestamp": get_ist_isoformat()
+            "timestamp": get_ist_isoformat(),
         }
 
     # ============================================================================
@@ -734,7 +745,7 @@ class AutoTradeLiveFeed:
             # Store PREMIUM signal (this is what we'll use for trading)
             instrument.last_signal = premium_signal
             self.stats["signals_generated"] += 1
-            
+
             trace_id = generate_trace_id()
 
             log_signal_generation(
@@ -743,9 +754,9 @@ class AutoTradeLiveFeed:
                 confidence=float(premium_signal.confidence),
                 strategy="SuperTrend+EMA",
                 price=float(premium_signal.price),
-                trace_id=trace_id
+                trace_id=trace_id,
             )
-            
+
             logger.info(
                 f"Signal for {instrument.stock_symbol}: "
                 f"Spot({spot_signal.signal_type.value}) → "
@@ -1207,11 +1218,13 @@ class AutoTradeLiveFeed:
             logger.info(
                 f"🎯 Processing ENTRY signal for {instrument.stock_symbol} - opening position for user {user_id}"
             )
-            
+
             # PERFORMANCE MEASURE: Calculate latency between signal and processing
             signal_time = datetime.fromisoformat(signal.timestamp)
             latency_ms = (get_ist_now_naive() - signal_time).total_seconds() * 1000
-            logger.info(f"⏱️ Signal Latency: {latency_ms:.2f}ms for {instrument.stock_symbol}")
+            logger.info(
+                f"⏱️ Signal Latency: {latency_ms:.2f}ms for {instrument.stock_symbol}"
+            )
 
             # Validate data availability
             current_candles = len(instrument.historical_spot_data.get("close", []))
@@ -1328,25 +1341,25 @@ class AutoTradeLiveFeed:
                     try:
                         db.commit()
                         logger.info(f"Database commit successful for trade {trade_id}")
-                        
+
                         log_trade_result(
                             user_id=str(user_id),
                             trade_id=str(trade_id),
-                            status="SUCCESS"
+                            status="SUCCESS",
                         )
                     except Exception as commit_error:
                         logger.error(
                             f"Database commit failed for trade {trade_id}: {commit_error}"
                         )
                         db.rollback()
-                        
+
                         log_trade_result(
                             user_id=str(user_id),
                             trade_id=str(trade_id),
                             status="FAILED",
-                            error=f"DB Commit Failed: {str(commit_error)}"
+                            error=f"DB Commit Failed: {str(commit_error)}",
                         )
-                        
+
                         # Don't broadcast if commit failed - data inconsistency
                         self.stats["errors"] += 1
                         await broadcast_to_clients(
@@ -1511,7 +1524,7 @@ class AutoTradeLiveFeed:
             for user_id, positions in self.active_user_positions.items():
                 if instrument.option_instrument_key in positions:
                     users_to_update.append(user_id)
-            
+
             if not users_to_update:
                 return
 
@@ -1523,28 +1536,38 @@ class AutoTradeLiveFeed:
                 exits_to_process = []
                 try:
                     for uid in user_ids:
-                        position_data = self.active_user_positions[uid].get(instrument.option_instrument_key)
+                        position_data = self.active_user_positions[uid].get(
+                            instrument.option_instrument_key
+                        )
                         if not position_data:
                             continue
-                            
+
                         position_id = position_data.get("position_id")
                         if not position_id:
                             continue
 
-                        position = db.query(ActivePosition).filter(
-                            ActivePosition.id == position_id,
-                            ActivePosition.is_active == True,
-                        ).first()
+                        position = (
+                            db.query(ActivePosition)
+                            .filter(
+                                ActivePosition.id == position_id,
+                                ActivePosition.is_active == True,
+                            )
+                            .first()
+                        )
 
                         if not position:
                             continue
 
                         entry_price = position_data["entry_price"]
-                        
+
                         # Get quantity
-                        trade = db.query(AutoTradeExecution).filter(
-                            AutoTradeExecution.id == position.trade_execution_id
-                        ).first()
+                        trade = (
+                            db.query(AutoTradeExecution)
+                            .filter(
+                                AutoTradeExecution.id == position.trade_execution_id
+                            )
+                            .first()
+                        )
 
                         if not trade:
                             continue
@@ -1570,7 +1593,7 @@ class AutoTradeLiveFeed:
 
                         if should_exit:
                             exits_to_process.append((uid, reason))
-                    
+
                     db.commit()
                     return exits_to_process
                 except Exception as e:
@@ -1581,7 +1604,9 @@ class AutoTradeLiveFeed:
                     db.close()
 
             # Run DB update in thread
-            exits_needed = await asyncio.to_thread(update_pnl_db_job, users_to_update, current_price)
+            exits_needed = await asyncio.to_thread(
+                update_pnl_db_job, users_to_update, current_price
+            )
 
             # 3. Process exits (if any) - these involve more DB ops but are infrequent
             if exits_needed:
@@ -1589,11 +1614,11 @@ class AutoTradeLiveFeed:
                 try:
                     for uid, reason in exits_needed:
                         await self._close_position_for_user(
-                            user_id=uid, 
-                            instrument=instrument, 
-                            exit_price=current_price, 
-                            exit_reason=reason, 
-                            db=db_session
+                            user_id=uid,
+                            instrument=instrument,
+                            exit_price=current_price,
+                            exit_reason=reason,
+                            db=db_session,
                         )
                     db_session.commit()
                 finally:
@@ -1726,10 +1751,16 @@ class AutoTradeLiveFeed:
         """
         try:
             # 1. Get position data from memory (Main Thread)
-            if user_id not in self.active_user_positions or instrument.option_instrument_key not in self.active_user_positions[user_id]:
+            if (
+                user_id not in self.active_user_positions
+                or instrument.option_instrument_key
+                not in self.active_user_positions[user_id]
+            ):
                 return {"success": False, "error": "Position not found in memory"}
 
-            position_data = self.active_user_positions[user_id][instrument.option_instrument_key]
+            position_data = self.active_user_positions[user_id][
+                instrument.option_instrument_key
+            ]
             position_id = position_data.get("position_id")
             entry_price_mem = Decimal(str(position_data["entry_price"]))
 
@@ -1739,11 +1770,19 @@ class AutoTradeLiveFeed:
             # 2. Define DB Job (Thread)
             def db_job(pid, price, reason):
                 try:
-                    position = db.query(ActivePosition).filter(ActivePosition.id == pid).first()
+                    position = (
+                        db.query(ActivePosition)
+                        .filter(ActivePosition.id == pid)
+                        .first()
+                    )
                     if not position:
                         return None
 
-                    trade = db.query(AutoTradeExecution).filter(AutoTradeExecution.id == position.trade_execution_id).first()
+                    trade = (
+                        db.query(AutoTradeExecution)
+                        .filter(AutoTradeExecution.id == position.trade_execution_id)
+                        .first()
+                    )
                     if not trade:
                         return None
 
@@ -1752,19 +1791,21 @@ class AutoTradeLiveFeed:
                     if trade.trading_mode == "paper":
                         slippage = price * Decimal("0.0005")
                         final_exit_price = price - slippage
-                        logger.info(f"📝 Paper exit slippage applied: {price} -> {final_exit_price}")
+                        logger.info(
+                            f"📝 Paper exit slippage applied: {price} -> {final_exit_price}"
+                        )
 
                     entry_price = Decimal(str(trade.entry_price))
                     quantity = trade.quantity
-                    
+
                     buy_value = entry_price * Decimal(str(quantity))
                     sell_value = final_exit_price * Decimal(str(quantity))
                     gross_pnl = sell_value - buy_value
                     turnover = buy_value + sell_value
 
                     # CHARGES
-                    brokerage_flat = Decimal('40.0')
-                    taxes = turnover * Decimal('0.001')
+                    brokerage_flat = Decimal("40.0")
+                    taxes = turnover * Decimal("0.001")
                     total_charges = brokerage_flat + taxes
                     net_pnl = gross_pnl - total_charges
 
@@ -1790,7 +1831,12 @@ class AutoTradeLiveFeed:
                     # UPDATE PAPER TRADING ACCOUNT
                     if trade.trading_mode == "paper":
                         from database.models import PaperTradingAccount
-                        paper_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
+
+                        paper_account = (
+                            db.query(PaperTradingAccount)
+                            .filter(PaperTradingAccount.user_id == user_id)
+                            .first()
+                        )
                         if paper_account:
                             release_amount = float(sell_value - total_charges)
                             paper_account.available_margin += release_amount
@@ -1798,17 +1844,19 @@ class AutoTradeLiveFeed:
                             paper_account.used_margin -= float(trade.total_investment)
                             paper_account.total_pnl += float(net_pnl)
                             paper_account.daily_pnl += float(net_pnl)
-                            paper_account.positions_count = max(0, paper_account.positions_count - 1)
+                            paper_account.positions_count = max(
+                                0, paper_account.positions_count - 1
+                            )
                             paper_account.updated_at = get_ist_now_naive()
 
                     db.commit()
-                    
+
                     return {
                         "success": True,
                         "pnl": float(net_pnl),
                         "pnl_percent": float(pnl_percent),
                         "exit_price": float(final_exit_price),
-                        "position_id": pid
+                        "position_id": pid,
                     }
                 except Exception as e:
                     db.rollback()
@@ -1816,15 +1864,23 @@ class AutoTradeLiveFeed:
                     raise e
 
             # 3. Execute DB Job
-            result = await asyncio.to_thread(db_job, position_id, exit_price, exit_reason)
+            result = await asyncio.to_thread(
+                db_job, position_id, exit_price, exit_reason
+            )
 
             if not result:
                 return {"success": False, "error": "Position or Trade not found"}
 
             # 4. Update Memory & Broadcast (Main Thread)
-            if user_id in self.active_user_positions and instrument.option_instrument_key in self.active_user_positions[user_id]:
-                del self.active_user_positions[user_id][instrument.option_instrument_key]
-            
+            if (
+                user_id in self.active_user_positions
+                and instrument.option_instrument_key
+                in self.active_user_positions[user_id]
+            ):
+                del self.active_user_positions[user_id][
+                    instrument.option_instrument_key
+                ]
+
             self.stats["positions_closed"] += 1
 
             # Update in-memory paper service if needed
@@ -1832,7 +1888,7 @@ class AutoTradeLiveFeed:
                 try:
                     # We can't easily sync in-memory service here without DB access or duplicating logic
                     # Rely on DB source of truth or eventual sync
-                    pass 
+                    pass
                 except Exception:
                     pass
 
@@ -1846,10 +1902,10 @@ class AutoTradeLiveFeed:
                 {
                     "user_id": user_id,
                     "symbol": instrument.stock_symbol,
-                    "exit_price": result['exit_price'],
+                    "exit_price": result["exit_price"],
                     "exit_reason": exit_reason,
-                    "pnl": result['pnl'],
-                    "pnl_percent": result['pnl_percent'],
+                    "pnl": result["pnl"],
+                    "pnl_percent": result["pnl_percent"],
                     "timestamp": get_ist_isoformat(),
                 },
             )
@@ -1948,6 +2004,7 @@ class AutoTradeLiveFeed:
             Access token string
         """
         try:
+
             def db_job():
                 try:
                     db = next(get_db())
@@ -1976,7 +2033,11 @@ class AutoTradeLiveFeed:
                         return ""
 
                     token = admin_broker.access_token
-                    if not token or not isinstance(token, str) or len(token.strip()) < 20:
+                    if (
+                        not token
+                        or not isinstance(token, str)
+                        or len(token.strip()) < 20
+                    ):
                         logger.error("Invalid token format")
                         return ""
 
