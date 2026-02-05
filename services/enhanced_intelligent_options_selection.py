@@ -346,10 +346,19 @@ class EnhancedIntelligentOptionsService:
             raise ValueError("Invalid stock selection provided")
 
         try:
-            # Get underlying instrument key
+            # Get underlying instrument key using OptimizedInstrumentService for accuracy (e.g. NIFTY INDEX)
+            from services.optimized_instrument_service import get_primary_instrument_key
+            
             underlying_key = stock_selection.instrument_key
             if not underlying_key:
+                # Try to get authoritative key from instrument master (handles INDEX vs EQ)
+                underlying_key = get_primary_instrument_key(stock_selection.symbol)
+                
+            if not underlying_key:
+                # Last resort fallback
                 underlying_key = f"NSE_EQ|{stock_selection.symbol}"
+            
+            logger.info(f"Using underlying_key: {underlying_key} for {stock_selection.symbol}")
 
             # Step 1: Get available expiry dates and lot size
             expiry_dates, lot_size = await self._get_available_expiry_and_lot_size(underlying_key, db)
@@ -512,8 +521,16 @@ class EnhancedIntelligentOptionsService:
             )
             expiry_dates.sort()
 
-            # Extract lot size from the first contract
-            lot_size = int(contracts[0].get("lot_size", 0))
+            # Extract lot size - Iterate to find first non-zero lot size
+            lot_size = 0
+            for contract in contracts:
+                ls = int(contract.get("lot_size", 0))
+                if ls > 0:
+                    lot_size = ls
+                    break
+
+            if lot_size <= 0:
+                logger.error(f"❌ Failed to determine lot_size for {underlying_key} (Contracts: {len(contracts)})")
 
             # Filter only future expiry dates
             today = datetime.now().date()
@@ -778,6 +795,9 @@ class EnhancedIntelligentOptionsService:
             final_lot_size = lot_size
             if final_lot_size <= 0:
                 final_lot_size = int(best_contract["option_data"].get("lot_size", 0))
+
+            if final_lot_size <= 0:
+                logger.warning(f"⚠️ Lot size is 0 for {option_chain.get('underlying_key')} contract selection. Trade execution may fail.")
 
             # Create OptionContract object
             option_contract = OptionContract(
@@ -1234,6 +1254,12 @@ class EnhancedIntelligentOptionsService:
                         "exit_conditions": selection.exit_conditions,
                         "trailing_stop_loss": selection.trailing_stop_loss,
                     }
+
+                    # FINAL VALIDATION BEFORE PERSISTENCE
+                    if contract.lot_size <= 0:
+                         logger.error(f"❌ CRITICAL: Attempting to save contract with lot_size 0 for {selection.symbol}. This will fail trade execution.")
+                    else:
+                         logger.info(f"✅ Saving contract for {selection.symbol}: Lot Size={contract.lot_size}, Strike={contract.strike_price}")
 
                     # Prepare option contract JSON for database
                     import json

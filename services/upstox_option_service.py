@@ -143,7 +143,7 @@ class UpstoxOptionService:
             logger.info(f"Fetching option contracts for {instrument_key}")
             response_data = self._make_upstox_request(endpoint, params, db)
 
-            if not response_data:
+            if response_data is None:
                 return None
 
             # Cache and return EXACT Upstox data list

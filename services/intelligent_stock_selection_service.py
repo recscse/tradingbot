@@ -1336,10 +1336,19 @@ class IntelligentStockSelectionService:
             )
 
             # Save new selections with complete market context
+            from services.optimized_instrument_service import get_primary_instrument_key
             for stock in selections:
+                # Use authoritative key if available, otherwise fallback
+                instrument_key = stock.instrument_key
+                if not instrument_key:
+                    instrument_key = get_primary_instrument_key(stock.symbol)
+                
+                if not instrument_key:
+                    instrument_key = f"NSE_EQ|{stock.symbol}"
+
                 selected_stock = SelectedStock(
                     symbol=stock.symbol,
-                    instrument_key=stock.instrument_key or f"NSE_EQ|{stock.symbol}",
+                    instrument_key=instrument_key,
                     selection_date=today,
                     selection_score=float(stock.final_score),
                     selection_reason=f"{selection_type}_selection_{stock.selection_reason or 'ai_based'}",
