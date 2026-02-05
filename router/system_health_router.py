@@ -128,7 +128,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
         }
 
 @router.get("/logs")
-async def get_system_logs(
+def get_system_logs(
     limit: int = Query(50, ge=1, le=200),
     level: str = Query(None),
     component: str = Query(None),
