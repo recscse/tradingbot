@@ -23,7 +23,7 @@ from services.trading_execution.strategy_engine import (
     SignalType,
     TrailingStopType,
 )
-from utils.logging_utils import log_trade_prep
+from utils.logging_utils import log_trade_prep, log_to_db
 
 logger = logging.getLogger(__name__)
 
@@ -564,6 +564,20 @@ class TradePrepService:
             )
 
             logger.info(f"Trade prepared successfully: {stock_symbol} {option_type}")
+            log_to_db(
+                component="trade_prep",
+                message=f"Trade READY: {stock_symbol} {option_type} @ {premium_signal.entry_price}",
+                level="INFO",
+                user_id=user_id,
+                symbol=stock_symbol,
+                additional_data={
+                    "option_type": option_type,
+                    "strike": float(strike_price),
+                    "premium": float(current_premium),
+                    "lots": capital_allocation.position_size_lots
+                }
+            )
+            
             logger.info(
                 f"  Entry: {premium_signal.entry_price}, SL: {premium_signal.stop_loss}, Target: {premium_signal.target_price}"
             )
@@ -578,6 +592,13 @@ class TradePrepService:
             self.stats["failed_preparations"] += 1
             self.last_error = str(e)
             logger.error(f"Error preparing trade with live data: {e}")
+            log_to_db(
+                component="trade_prep",
+                message=f"FAILED Prep: {stock_symbol} - {str(e)}",
+                level="ERROR",
+                user_id=user_id,
+                symbol=stock_symbol
+            )
             return self._create_error_trade(
                 TradeStatus.ERROR,
                 user_id,
@@ -864,11 +885,32 @@ class TradePrepService:
             logger.info(
                 f"  Position: {capital_allocation.position_size_lots} lots, Investment: Rs.{capital_allocation.allocated_capital:,.2f}"
             )
+            
+            log_to_db(
+                component="trade_prep",
+                message=f"Trade READY: {stock_symbol} {option_type} @ {signal.entry_price}",
+                level="INFO",
+                user_id=user_id,
+                symbol=stock_symbol,
+                additional_data={
+                    "option_type": option_type,
+                    "strike": float(strike_price),
+                    "premium": float(current_premium),
+                    "lots": capital_allocation.position_size_lots
+                }
+            )
 
             return prepared_trade
 
         except Exception as e:
             logger.error(f"Error preparing trade: {e}")
+            log_to_db(
+                component="trade_prep",
+                message=f"FAILED Prep: {stock_symbol} - {str(e)}",
+                level="ERROR",
+                user_id=user_id,
+                symbol=stock_symbol
+            )
             return self._create_error_trade(
                 TradeStatus.ERROR,
                 user_id,

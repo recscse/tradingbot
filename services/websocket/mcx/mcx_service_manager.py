@@ -318,6 +318,7 @@ class MCXServiceManager:
 
     async def _health_monitoring_service(self):
         """Background health monitoring service"""
+        heartbeat_counter = 0
         try:
             while self.is_running:
                 try:
@@ -325,6 +326,13 @@ class MCXServiceManager:
                     if self.service_start_time:
                         uptime = (datetime.now() - self.service_start_time).total_seconds()
                         self.service_stats['total_uptime_seconds'] = uptime
+
+                    # Heartbeat every 15 minutes
+                    heartbeat_counter += 1
+                    if heartbeat_counter >= 15:
+                        logger.info(f"💓 MCX Service Heartbeat: Health monitor active at {datetime.now().strftime('%H:%M:%S')}")
+                        logger.info(f"📊 MCX Stats: Uptime={uptime/3600:.1f}h, Data Points={self.service_stats['data_points_processed']}")
+                        heartbeat_counter = 0
 
                     # Check client health
                     if self.mcx_client:

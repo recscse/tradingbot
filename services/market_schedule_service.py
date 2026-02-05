@@ -175,11 +175,21 @@ class MarketScheduleService:
 
         while self.is_running:
             try:
-                current_time = datetime.now(self.ist).time()
+                now_ist = datetime.now(self.ist)
+                current_time = now_ist.time()
                 current_date = get_ist_now_naive().date()
 
                 # Reset daily tasks at midnight (new trading day)
                 self._reset_daily_tasks_if_new_day(current_date)
+
+                # Heartbeat every 15 minutes
+                if now_ist.minute % 15 == 0:
+                    logger.info(f"💓 Market Scheduler Heartbeat: Active at {now_ist.strftime('%H:%M:%S')} IST")
+                    # Log tasks status periodically
+                    if now_ist.minute % 30 == 0:
+                        completed = [k for k, v in self.daily_tasks_completed.items() if v == current_date]
+                        pending = [k for k, v in self.daily_tasks_completed.items() if v != current_date]
+                        logger.info(f"📊 Market Tasks Status: {len(completed)} completed, {len(pending)} pending today")
 
                 # Check if it's a weekday (Monday=0, Sunday=6)
                 if datetime.now(self.ist).weekday() >= 5:
@@ -467,6 +477,14 @@ class MarketScheduleService:
                 logger.info(
                     "✅ Background: Pre-open stock selection complete - will validate at market open (9:15 AM)"
                 )
+                
+                from utils.logging_utils import log_to_db
+                log_to_db(
+                    component="market_scheduler",
+                    message=f"Pre-open Stock Selection COMPLETE: {len(selected_stocks_data)} stocks selected",
+                    level="INFO",
+                    additional_data={"count": len(selected_stocks_data), "sentiment": sentiment_analysis.get('sentiment')}
+                )
 
             else:
                 error_msg = (
@@ -483,6 +501,14 @@ class MarketScheduleService:
         except Exception as e:
             logger.error(f"❌ Background: Pre-open stock selection failed: {e}")
             self.task_errors["preopen_selection"] = str(e)
+            
+            from utils.logging_utils import log_to_db
+            log_to_db(
+                component="market_scheduler",
+                message=f"Pre-open Selection FAILED: {str(e)}",
+                level="ERROR"
+            )
+            
             import traceback
 
             traceback.print_exc()
@@ -572,6 +598,14 @@ class MarketScheduleService:
 
                     logger.info(
                         f"✅ Final selections confirmed: {len(self.selected_stocks)} stocks ready for auto-trading"
+                    )
+                    
+                    from utils.logging_utils import log_to_db
+                    log_to_db(
+                        component="market_scheduler",
+                        message=f"Market Open Validation COMPLETE: {len(self.selected_stocks)} stocks locked for trading",
+                        level="INFO",
+                        additional_data={"count": len(self.selected_stocks), "action": validation_action}
                     )
                 else:
                     error_msg = (
