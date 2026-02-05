@@ -252,6 +252,13 @@ class AutoTradeScheduler:
                     )
                 )
 
+                # Send Alert
+                from services.notifications.alert_manager import alert_manager
+                asyncio.create_task(alert_manager.send_admin_system_status(
+                    "AutoTradeScheduler", "AUTO_START", 
+                    f"Market conditions met. Starting auto-trading for User {user_id}."
+                ))
+
                 log_to_db(
                     component="auto_trade_scheduler",
                     message=f"AUTO-START: User {user_id} started trading",
