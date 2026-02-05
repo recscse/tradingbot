@@ -180,7 +180,7 @@ from router.profile_router import router as profile_router
 # from router.paper_trading_router import router as paper_trading_router
 from router.notification_router import router as notification_router
 
-# from router.instrument_routes import router as instrument_router
+from router.instrument_routes import router as instrument_router
 # from services.instrument_registry import instrument_registry
 from router.websocket_routes import router as websocket_router
 from router.debug_routes import router as debug_router
@@ -1029,7 +1029,7 @@ app.include_router(
 )  # app.include_router(trading_config_router, prefix="/api", tags=["Trading Configuration"])
 app.include_router(notification_router, tags=["Notifications"])
 # app.include_router(dashboard_router, tags=["Dashboard & Trading Engine"])
-# app.include_router(instrument_router, tags=["Instruments"])
+app.include_router(instrument_router, tags=["Instruments"])
 app.include_router(websocket_router, tags=["🗑️ WebSocket Management (REDUNDANT)"])
 app.include_router(debug_router, tags=["Debug"])
 app.include_router(

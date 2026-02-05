@@ -1392,6 +1392,37 @@ export const useUnifiedMarketData = () => {
     [safeSend]
   );
 
+  // Dynamic Subscription for specific instruments (e.g. Option Chain)
+  const subscribeToInstruments = useCallback(async (instrumentKeys) => {
+    if (!instrumentKeys || instrumentKeys.length === 0) return;
+    
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      // Call backend API to add to upstream subscription
+      const response = await fetch(
+        `${process.env.REACT_APP_API_URL}/api/v1/ws/subscribe`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(instrumentKeys),
+        }
+      );
+
+      if (response.ok) {
+        debugLog("info", `Dynamically subscribed to ${instrumentKeys.length} instruments`);
+      } else {
+        console.error("Failed to subscribe to instruments via API");
+      }
+    } catch (err) {
+      console.error("Error subscribing to instruments:", err);
+    }
+  }, []);
+
   // Optimized utility functions
   const getStocksBySector = useCallback(() => {
     const sectorGroups = {};
@@ -1831,6 +1862,7 @@ export const useUnifiedMarketData = () => {
     getStocksBySector,
     searchStocks,
     getMarketSummary,
+    subscribeToInstruments,
 
     // Performance metrics
     messageCount: messageCount.current,

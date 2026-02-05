@@ -15,7 +15,7 @@ const useOptionChain = (symbolOrInstrumentKey) => {
   const API_URL = process.env.REACT_APP_API_URL;
 
   // Get market data hook for live prices
-  const { getStockData, /* getLivePrices, */ isConnected } = useUnifiedMarketData(); // getLivePrices reserved for future live price updates
+  const { getStockData, /* getLivePrices, */ isConnected, subscribeToInstruments } = useUnifiedMarketData(); // getLivePrices reserved for future live price updates
 
   // Resolve symbol to instrument key
   const resolveInstrumentKey = useCallback(async (input) => {
@@ -445,6 +445,11 @@ const useOptionChain = (symbolOrInstrumentKey) => {
       // Request subscription to option instrument keys for real-time data
       console.log('🔔 Subscribing to option instruments for real-time data:', getAllInstrumentKeys.slice(0, 5), '...');
       
+      // Call the backend to ensure upstream subscription
+      if (subscribeToInstruments) {
+        subscribeToInstruments(getAllInstrumentKeys);
+      }
+      
       // Initial price update
       updateLivePrices();
       
@@ -460,7 +465,7 @@ const useOptionChain = (symbolOrInstrumentKey) => {
     if (!isConnected) {
       setLivePrices({});
     }
-  }, [getAllInstrumentKeys, isConnected, updateLivePrices]);
+  }, [getAllInstrumentKeys, isConnected, updateLivePrices, subscribeToInstruments]);
 
   // Enhanced refresh function with real-time status
   const refresh = useCallback(async () => {

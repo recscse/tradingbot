@@ -546,6 +546,43 @@ async def stop_websocket_service():
         raise HTTPException(status_code=500, detail="Failed to stop WebSocket service")
 
 
+@router.post("/api/v1/ws/subscribe")
+async def subscribe_instruments(
+    instrument_keys: List[str],
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Dynamically subscribe to specific instrument keys on the backend WebSocket.
+    Useful for Option Chain or detailed views not covered by default dashboard.
+    """
+    try:
+        if not CENTRALIZED_WS_AVAILABLE or not centralized_manager:
+            raise HTTPException(status_code=503, detail="Centralized WebSocket manager not available")
+
+        # Validate keys
+        if not instrument_keys:
+            return {"success": True, "message": "No keys provided", "count": 0}
+
+        # Call manager to subscribe
+        success = await centralized_manager.subscribe_instruments(instrument_keys)
+
+        if success:
+            return {
+                "success": True,
+                "message": f"Successfully subscribed to {len(instrument_keys)} instruments",
+                "count": len(instrument_keys),
+                "timestamp": datetime.now().isoformat(),
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to subscribe to instruments")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error subscribing to instruments: {e}")
+        raise HTTPException(status_code=500, detail=f"Subscription failed: {str(e)}")
+
+
 @router.get("/api/v1/market-data/latest/{symbol}")
 async def get_latest_price(symbol: str):
     """Get latest price data for a symbol"""
