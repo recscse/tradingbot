@@ -1003,6 +1003,14 @@ class FnoStockListService:
             logger.info(
                 f"Γ£à F&O stock list update completed in {processing_time:.2f}s"
             )
+            
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.send_admin_system_status(
+                "FNO Stock List", 
+                "SUCCESS", 
+                f"Updated {len(stocks)} F&O symbols. Processed in {processing_time:.1f}s."
+            ))
+            
             log_structured(
                 event="FNO_LIST_UPDATE_COMPLETE",
                 message=f"F&O stock list update completed: {len(stocks)} stocks",

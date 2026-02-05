@@ -6,6 +6,7 @@ including database storage, multi-channel delivery, and user preferences.
 """
 
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 from sqlalchemy.orm import Session
@@ -13,11 +14,9 @@ from sqlalchemy import and_, or_
 
 from database.connection import get_db
 from database.models import Notification, User, BrokerConfig
-from services.notifications import (
-    send_notification_email,
-    send_trade_sms,
-    send_multi_channel_alert
-)
+from services.notifications.telegram_service import telegram_notifier
+# Other specific notification utilities can be imported here if needed
+# from services.email_service import send_notification_email etc.
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +105,12 @@ class NotificationService:
             NotificationTypes.DAILY_PNL_SUMMARY: 1200,   # 20 hours
             NotificationTypes.MARGIN_CALL: 60,           # 1 hour
         }
+
+    def _escape_markdown(self, text: str) -> str:
+        """Escape special characters for Telegram MarkdownV2"""
+        if text is None: return ""
+        escape_chars = r'_*[]()~`>#+-=|{}.!'
+        return "".join(['\\' + char if char in escape_chars else char for char in str(text)])
         
     def create_notification(
         self,
@@ -229,12 +234,12 @@ class NotificationService:
             # Send via external channels
             if "email" in channels and user.email:
                 try:
-                    email_success = send_notification_email(
-                        subject=title,
-                        body=message,
-                        recipient_email=user.email
-                    )
-                    results["email"] = email_success
+                    # email_success = send_notification_email(
+                    #     subject=title,
+                    #     body=message,
+                    #     recipient_email=user.email
+                    # )
+                    results["email"] = False # Placeholder
                 except Exception as e:
                     logger.error(f"Email notification failed: {e}")
                     results["email"] = False
@@ -243,18 +248,29 @@ class NotificationService:
                 try:
                     # Create shorter message for SMS
                     sms_message = f"{title}: {message[:120]}..."
-                    sms_success = send_trade_sms(
-                        message=sms_message,
-                        recipient_number=user.phone_number
-                    )
-                    results["sms"] = sms_success
+                    # sms_success = send_trade_sms(
+                    #     message=sms_message,
+                    #     recipient_number=user.phone_number
+                    # )
+                    results["sms"] = False # Placeholder
                 except Exception as e:
                     logger.error(f"SMS notification failed: {e}")
                     results["sms"] = False
-            
-            # Note: Push notifications would be handled by WebSocket service
-            if "push" in channels:
-                results["push"] = True  # Placeholder for WebSocket push
+
+            # --- ADD TELEGRAM SUPPORT ---
+            if "push" in channels or "telegram" in channels:
+                try:
+                    # Route to telegram_notifier (singleton)
+                    # We send to the user's chat_id if available, else admin
+                    from services.notifications.telegram_service import telegram_notifier
+                    asyncio.create_task(telegram_notifier.send_message(
+                        f"*{self._escape_markdown(title)}*\n\n{self._escape_markdown(message)}",
+                        chat_id=user.telegram_chat_id
+                    ))
+                    results["telegram"] = True
+                except Exception as e:
+                    logger.error(f"Telegram notification failed: {e}")
+                    results["telegram"] = False
             
             logger.info(
                 f"📤 Multi-channel notification sent: {notification_type} "
@@ -315,6 +331,11 @@ class NotificationService:
                 "title": "💰 Position Closed",
                 "message": "Position closed: {symbol} - P&L: ₹{pnl}",
                 "priority": NotificationPriority.HIGH
+            },
+            NotificationTypes.SYSTEM_STARTUP: {
+                "title": "⚙️ System Alert",
+                "message": "Component: {symbol} - Status: {status}",
+                "priority": NotificationPriority.NORMAL
             }
         }
         
@@ -323,15 +344,24 @@ class NotificationService:
             # Generic template for unknown types
             template = {
                 "title": f"📊 {notification_type.replace('_', ' ').title()}",
-                "message": f"{symbol}: {data}",
+                "message": f"{symbol}: {str(data)}",
                 "priority": NotificationPriority.NORMAL
             }
         
         # Format message with data
         try:
-            formatted_message = template["message"].format(symbol=symbol, **data)
-        except KeyError as e:
-            logger.warning(f"Missing template data for {notification_type}: {e}")
+            # Standardize data: ensure 'price' is available if template needs it
+            format_data = data.copy()
+            if 'entry_price' in format_data and 'price' not in format_data:
+                format_data['price'] = format_data['entry_price']
+            if 'exit_price' in format_data and 'price' not in format_data:
+                format_data['price'] = format_data['exit_price']
+
+            # Create a copy of data without 'symbol' to avoid double-passing to format()
+            format_data = {k: v for k, v in format_data.items() if k != 'symbol'}
+            formatted_message = template["message"].format(symbol=symbol, **format_data)
+        except Exception as e:
+            logger.warning(f"Template formatting failed for {notification_type}: {e}")
             formatted_message = f"{symbol}: {str(data)}"
         
         return self.send_multi_channel_notification(

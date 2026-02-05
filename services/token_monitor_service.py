@@ -258,6 +258,14 @@ class TokenMonitorService:
                 f"⚠️ Disabled expired token: {config.broker_name} "
                 f"for user {config.user_id}"
             )
+            
+            # Send Admin Alert
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.notify_critical_error(
+                user_id=1, 
+                component=f"{config.broker_name} Token", 
+                error=f"Token EXPIRED for user {config.user_id}. Trading automatically disabled."
+            ))
 
         except Exception as e:
             logger.error(f"❌ Failed to handle expired token: {e}")

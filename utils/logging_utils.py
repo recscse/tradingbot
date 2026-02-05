@@ -1,7 +1,12 @@
 import logging
 import uuid
+import sys
+import traceback
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
+from sqlalchemy.orm import Session
+from database.connection import SessionLocal
+from database.models import TradingSystemLog
 from core.production_logging import get_trading_logger, get_audit_logger
 
 logger = get_trading_logger().setup_trading_logger()
@@ -12,6 +17,53 @@ audit_logger = get_audit_logger()
 def generate_trace_id() -> str:
     """Generate a unique trace ID for tracking request flows"""
     return str(uuid.uuid4())
+
+def log_to_db(
+    component: str,
+    message: str,
+    level: str = "INFO",
+    user_id: Optional[int] = None,
+    trade_id: Optional[str] = None,
+    symbol: Optional[str] = None,
+    latency_ms: Optional[int] = None,
+    additional_data: Optional[Dict[str, Any]] = None
+):
+    """
+    Persist a log entry to the database for UI tracking.
+    """
+    db = SessionLocal()
+    try:
+        # Get function name and line number from stack
+        caller = sys._getframe(1)
+        function_name = caller.f_code.co_name
+        line_number = caller.f_lineno
+        
+        stack_trace = None
+        if level in ["ERROR", "CRITICAL"]:
+            stack_trace = traceback.format_exc()
+            if stack_trace == "NoneType: None\n": # No exception active
+                stack_trace = "".join(traceback.format_stack()[:-1])
+
+        log_entry = TradingSystemLog(
+            log_level=level.upper(),
+            component=component,
+            message=message,
+            user_id=user_id,
+            trade_id=trade_id,
+            symbol=symbol,
+            latency_ms=latency_ms,
+            function_name=function_name,
+            line_number=line_number,
+            stack_trace=stack_trace,
+            additional_data=additional_data,
+            timestamp=datetime.now()
+        )
+        db.add(log_entry)
+        db.commit()
+    except Exception as e:
+        trading_logger.error(f"Failed to log to database: {e}")
+    finally:
+        db.close()
 
 def log_structured(
     event: str, 

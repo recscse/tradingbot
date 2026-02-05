@@ -46,6 +46,9 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("Origin", "")
         
+        import time
+        start_time = time.time()
+        
         # Determine log level based on request type
         is_polling = request.url.path.startswith("/api/notifications") and request.method == "GET"
         is_options = request.method == "OPTIONS"
@@ -117,15 +120,16 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
                 return response
 
         response = await call_next(request)
+        process_time = (time.time() - start_time) * 1000
 
         #  Log Response Status
         if is_polling or is_options:
              logger.debug(
-                f"📤 Response {response.status_code} for {request.method} {request.url.path}"
+                f"📤 Response {response.status_code} for {request.method} {request.url.path} - Latency: {process_time:.2f}ms"
             )
         else:
             logger.info(
-                f"📤 Response {response.status_code} for {request.method} {request.url.path}"
+                f"📤 Response {response.status_code} for {request.method} {request.url.path} - Latency: {process_time:.2f}ms"
             )
 
         #  Set Correct CORS Headers on Response

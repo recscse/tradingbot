@@ -81,9 +81,17 @@ class NotificationScheduler:
     
     def _run_scheduler(self):
         """Run the scheduler loop."""
+        heartbeat_counter = 0
         while self.running:
             try:
                 schedule.run_pending()
+                
+                # Heartbeat every 30 minutes (30 * 60s)
+                heartbeat_counter += 1
+                if heartbeat_counter >= 30:
+                    logger.info("💓 Notification Scheduler Heartbeat: Thread is active")
+                    heartbeat_counter = 0
+                    
                 time.sleep(60)  # Check every minute
             except Exception as e:
                 logger.error(f"❌ Scheduler error: {e}")

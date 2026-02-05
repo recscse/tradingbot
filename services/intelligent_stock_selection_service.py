@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock
 from utils.timezone_utils import get_ist_now_naive
-from utils.logging_utils import log_stock_selection, log_structured
+from utils.logging_utils import log_stock_selection, log_structured, log_to_db
 
 # Import services at module level for better performance
 from services.realtime_market_engine import (
@@ -297,6 +297,13 @@ class IntelligentStockSelectionService:
                 event="STOCK_SELECTION_INIT",
                 message=f"Initialized stock selection services with {total_stocks} stocks",
                 data={"total_stocks": total_stocks, "engine_ready": True}
+            )
+            
+            log_to_db(
+                component="stock_selection",
+                message=f"Initialized stock selection with {total_stocks} stocks",
+                level="INFO",
+                additional_data={"total_stocks": total_stocks}
             )
 
             if total_stocks == 0:
@@ -592,6 +599,21 @@ class IntelligentStockSelectionService:
                     "options_direction": options_direction
                 }
             )
+            
+            # Log to DB for high-quality selections
+            if final_score >= 0.6:
+                log_to_db(
+                    component="stock_selection",
+                    message=f"Stock SELECTED: {stock_data['symbol']} (Score: {final_score:.2f})",
+                    level="INFO",
+                    symbol=stock_data["symbol"],
+                    additional_data={
+                        "score": final_score,
+                        "sector": sector,
+                        "sentiment": self.current_sentiment.value if self.current_sentiment else "unknown",
+                        "options_direction": options_direction
+                    }
+                )
 
             # Create selection
             selection = StockSelection(

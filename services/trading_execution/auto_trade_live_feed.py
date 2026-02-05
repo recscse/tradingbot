@@ -39,6 +39,7 @@ from services.trading_execution.shared_instrument_registry import (
     SharedInstrument,
 )
 from router.unified_websocket_routes import broadcast_to_clients
+from services.notifications.telegram_service import telegram_notifier
 from utils.market_hours import is_market_open
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import (
@@ -138,6 +139,11 @@ class AutoTradeLiveFeed:
                 logger.warning("No instruments to monitor - stopping")
                 self.is_running = False
                 self.last_error = "No instruments to monitor"
+                log_to_db(
+                    component="auto_trade_live_feed",
+                    message="Startup FAILED: No instruments to monitor",
+                    level="ERROR"
+                )
                 return
 
             # Get all unique keys to subscribe
@@ -147,6 +153,17 @@ class AutoTradeLiveFeed:
                 f"Starting auto-trade: {len(shared_registry.instruments)} instruments, "
                 f"{len(shared_registry.user_subscriptions)} users, "
                 f"{len(keys_to_subscribe)} subscription keys"
+            )
+
+            log_to_db(
+                component="auto_trade_live_feed",
+                message=f"Live feed STARTING: {len(shared_registry.instruments)} instruments monitored",
+                level="INFO",
+                additional_data={
+                    "instruments": len(shared_registry.instruments),
+                    "users": len(shared_registry.user_subscriptions),
+                    "trading_mode": trading_mode.value
+                }
             )
 
             # Create WebSocket client
@@ -183,10 +200,31 @@ class AutoTradeLiveFeed:
             logger.info(f"Synced active positions from database into memory")
 
             logger.info(f"Auto-trading started in {trading_mode.value} mode")
+            
+            # Send Telegram Alert
+            asyncio.create_task(telegram_notifier.send_system_alert(
+                "AutoTradeLiveFeed", 
+                f"Auto-trading STARTED in {trading_mode.value} mode with {len(shared_registry.instruments)} instruments",
+                level="INFO"
+            ))
         except Exception as e:
             self.is_running = False
             self.last_error = str(e)
             logger.error(f"Error starting auto-trading: {e}")
+            
+            # Send Telegram Error
+            asyncio.create_task(telegram_notifier.send_system_alert(
+                "AutoTradeLiveFeed", 
+                f"CRITICAL STARTUP ERROR: {str(e)}",
+                level="ERROR"
+            ))
+            
+            log_to_db(
+                component="auto_trade_live_feed",
+                message=f"CRITICAL STARTUP ERROR: {str(e)}",
+                level="ERROR"
+            )
+            
             import traceback
 
             logger.error(traceback.format_exc())
@@ -227,6 +265,13 @@ class AutoTradeLiveFeed:
                 await self.pnl_task
             except asyncio.CancelledError:
                 pass
+
+        log_to_db(
+            component="auto_trade_live_feed",
+            message="Live feed STOPPED",
+            level="INFO",
+            additional_data=self.stats
+        )
 
         logger.info("Auto-trading stopped")
         logger.info(f"Final Stats: {self.stats}")
@@ -319,6 +364,12 @@ class AutoTradeLiveFeed:
                     user_broker_map[bc.user_id] = bc
 
             logger.info(f"Found {len(user_broker_map)} users with active brokers")
+            
+            log_to_db(
+                component="auto_trade_live_feed",
+                message=f"Loading instruments: Found {len(stocks)} stocks and {len(user_broker_map)} active users",
+                level="DEBUG"
+            )
 
             # Process each stock - register ONCE, subscribe ALL users
             for stock in stocks:
@@ -397,9 +448,16 @@ class AutoTradeLiveFeed:
         """Monitor and restart WebSocket client if needed"""
         backoff = 1
         market_close_notified = False
+        heartbeat_counter = 0
 
         while self.is_running:
             try:
+                # Heartbeat every 15 minutes
+                heartbeat_counter += 1
+                if heartbeat_counter >= 180: # 180 * 5s = 900s = 15m
+                    logger.info(f"💓 Auto-Trade Live Feed Heartbeat: Monitoring loop active at {get_ist_now_naive().strftime('%H:%M:%S')} IST")
+                    heartbeat_counter = 0
+
                 # CRITICAL: Check if market is open
                 if not is_market_open():
                     if not market_close_notified:
@@ -806,6 +864,14 @@ class AutoTradeLiveFeed:
                 f"✅ Valid signal for {instrument.stock_symbol}: "
                 f"{premium_signal.signal_type.value} (Conf: {premium_signal.confidence})"
             )
+
+            # Notify Admin of Signal
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.send_admin_system_status(
+                "Strategy Engine", 
+                "SIGNAL", 
+                f"{premium_signal.signal_type.value.upper()} signal for {instrument.stock_symbol} @ {premium_signal.price:.2f} (Conf: {premium_signal.confidence:.2f})"
+            ))
 
             # Get all users subscribed to this instrument
             subscribed_users = shared_registry.get_instrument_subscribers(
@@ -1499,6 +1565,14 @@ class AutoTradeLiveFeed:
                         "user_id": user_id,
                         "timestamp": get_ist_isoformat(),
                     },
+                )
+                
+                log_to_db(
+                    component="auto_trade_live_feed",
+                    message=f"Trade Prep FAILED for {instrument.stock_symbol}: {error_reason}",
+                    level="WARNING",
+                    user_id=user_id,
+                    symbol=instrument.stock_symbol
                 )
 
         except Exception:

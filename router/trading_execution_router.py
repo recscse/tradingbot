@@ -460,7 +460,7 @@ async def auto_execute_selected_stocks(
 
 
 @router.get("/active-positions")
-async def get_active_positions(
+def get_active_positions(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """
@@ -561,20 +561,10 @@ async def get_active_positions(
 
 
 @router.get("/pnl-summary")
-
-
-async def get_pnl_summary(
-
-
+def get_pnl_summary(
     trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
-
-
     current_user: User = Depends(get_current_user),
-
-
     db: Session = Depends(get_db)
-
-
 ):
 
 
@@ -828,7 +818,7 @@ async def get_auto_trading_status(current_user: User = Depends(get_current_user)
 
 
 @router.get("/selected-stocks")
-async def get_selected_stock(
+def get_selected_stock(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1043,7 +1033,7 @@ async def get_selected_stocks_live_prices(
 
 
 @router.get("/trade-history")
-async def get_trade_history(
+def get_trade_history(
     limit: int = Query(50, description="Number of trades to fetch"),
     trading_mode: Optional[str] = Query(None, description="Trading mode: paper or live"),
     start_date: Optional[date] = Query(None, description="Filter by start date (YYYY-MM-DD)"),

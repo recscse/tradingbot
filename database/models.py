@@ -50,6 +50,7 @@ class User(Base):
     auth_provider = Column(String, default="email")  # email, google
     email_verified = Column(Boolean, default=False)
     profile_picture = Column(String, nullable=True)
+    telegram_chat_id = Column(String, nullable=True, unique=True, index=True)
 
     # Relationships
     accounts = relationship("Account", back_populates="user", cascade="all, delete")

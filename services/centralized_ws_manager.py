@@ -2685,6 +2685,7 @@ class CentralizedWebSocketManager:
         async def check_market_open():
             ist = pytz.timezone("Asia/Kolkata")
             logger.info("🕐 Market open scheduler started - will auto-connect at 9:00 AM IST")
+            heartbeat_counter = 0
 
             while self.is_running:
                 try:
@@ -2692,6 +2693,15 @@ class CentralizedWebSocketManager:
                     now_ist = datetime.now(ist)
                     current_time = now_ist.time()
                     current_day = now_ist.weekday()
+
+                    # Heartbeat every 15 minutes
+                    heartbeat_counter += 1
+                    # Since loop sleep varies, we just use a simple counter for 60s intervals 
+                    # or better, check time.
+                    if now_ist.minute % 15 == 0:
+                         logger.info(f"💓 Centralized WS Manager Heartbeat: Market scheduler active at {now_ist.strftime('%H:%M:%S')} IST")
+                         # Log status summary
+                         logger.info(f"📊 Status: Running={self.is_running}, Ready={self._is_connection_ready}, Data Count={self.data_count}")
 
                     # Define market timings in IST
                     pre_market_start = time(9, 0)   # 9:00 AM - Pre-open starts

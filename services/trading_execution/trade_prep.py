@@ -23,7 +23,7 @@ from services.trading_execution.strategy_engine import (
     SignalType,
     TrailingStopType,
 )
-from utils.logging_utils import log_trade_prep
+from utils.logging_utils import log_trade_prep, log_to_db
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +280,14 @@ class TradePrepService:
                     f"User {user_id} has {active_position_count} active positions "
                     f"(max: {MAX_CONCURRENT_POSITIONS})"
                 )
+                
+                # Notify User of Limit
+                from services.notifications.alert_manager import alert_manager
+                asyncio.create_task(alert_manager.send_admin_system_status(
+                    "Risk Manager", "LIMIT_REACHED", 
+                    f"Blocked trade for {stock_symbol}. Max positions ({MAX_CONCURRENT_POSITIONS}) reached."
+                ))
+                
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id,
@@ -365,6 +373,14 @@ class TradePrepService:
                 logger.warning(
                     f"Insufficient capital: need {capital_allocation.allocated_capital}"
                 )
+                
+                # Notify User of Capital Failure
+                from services.notifications.alert_manager import alert_manager
+                asyncio.create_task(alert_manager.send_admin_system_status(
+                    "Capital Manager", "INSUFFICIENT_FUNDS", 
+                    f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
+                ))
+                
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id,
@@ -564,6 +580,20 @@ class TradePrepService:
             )
 
             logger.info(f"Trade prepared successfully: {stock_symbol} {option_type}")
+            log_to_db(
+                component="trade_prep",
+                message=f"Trade READY: {stock_symbol} {option_type} @ {premium_signal.entry_price}",
+                level="INFO",
+                user_id=user_id,
+                symbol=stock_symbol,
+                additional_data={
+                    "option_type": option_type,
+                    "strike": float(strike_price),
+                    "premium": float(current_premium),
+                    "lots": capital_allocation.position_size_lots
+                }
+            )
+            
             logger.info(
                 f"  Entry: {premium_signal.entry_price}, SL: {premium_signal.stop_loss}, Target: {premium_signal.target_price}"
             )
@@ -578,6 +608,22 @@ class TradePrepService:
             self.stats["failed_preparations"] += 1
             self.last_error = str(e)
             logger.error(f"Error preparing trade with live data: {e}")
+            log_to_db(
+                component="trade_prep",
+                message=f"FAILED Prep: {stock_symbol} - {str(e)}",
+                level="ERROR",
+                user_id=user_id,
+                symbol=stock_symbol
+            )
+            
+            # Notify Admin/User of failure
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.notify_critical_error(
+                user_id=user_id,
+                component="TRADE_PREP",
+                error=f"Failed to prepare trade for {stock_symbol}: {str(e)}"
+            ))
+            
             return self._create_error_trade(
                 TradeStatus.ERROR,
                 user_id,
@@ -749,6 +795,14 @@ class TradePrepService:
                 logger.warning(
                     f"Insufficient capital: need {capital_allocation.allocated_capital}"
                 )
+                
+                # Notify User of Capital Failure
+                from services.notifications.alert_manager import alert_manager
+                asyncio.create_task(alert_manager.send_admin_system_status(
+                    "Capital Manager", "INSUFFICIENT_FUNDS", 
+                    f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
+                ))
+                
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id,
@@ -864,11 +918,41 @@ class TradePrepService:
             logger.info(
                 f"  Position: {capital_allocation.position_size_lots} lots, Investment: Rs.{capital_allocation.allocated_capital:,.2f}"
             )
+            
+            log_to_db(
+                component="trade_prep",
+                message=f"Trade READY: {stock_symbol} {option_type} @ {signal.entry_price}",
+                level="INFO",
+                user_id=user_id,
+                symbol=stock_symbol,
+                additional_data={
+                    "option_type": option_type,
+                    "strike": float(strike_price),
+                    "premium": float(current_premium),
+                    "lots": capital_allocation.position_size_lots
+                }
+            )
 
             return prepared_trade
 
         except Exception as e:
             logger.error(f"Error preparing trade: {e}")
+            log_to_db(
+                component="trade_prep",
+                message=f"FAILED Prep: {stock_symbol} - {str(e)}",
+                level="ERROR",
+                user_id=user_id,
+                symbol=stock_symbol
+            )
+            
+            # Notify Admin/User of failure
+            from services.notifications.alert_manager import alert_manager
+            asyncio.create_task(alert_manager.notify_critical_error(
+                user_id=user_id,
+                component="TRADE_PREP",
+                error=f"Failed to prepare trade for {stock_symbol}: {str(e)}"
+            ))
+            
             return self._create_error_trade(
                 TradeStatus.ERROR,
                 user_id,

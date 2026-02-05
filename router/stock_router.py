@@ -10,41 +10,82 @@ from utils.instrument_key_cache import save_instrument_keys
 router = APIRouter()
 logger = logging.getLogger("stock_router")
 
+# Global Cache for performance
+_INSTRUMENT_CACHE = {
+    "instruments": None,
+    "top_stocks": None,
+    "last_loaded": None,
+    "instrument_index": None
+}
+CACHE_TIMEOUT_SECONDS = 3600  # Cache instruments for 1 hour
 
-@router.get("/api/stocks/top")
-def get_top_stock_details(request: Request):
+def _get_cached_data():
+    now = datetime.now()
     top_stocks_path = Path("data/top_stocks.json")
     instrument_path = Path("data/upstox_instruments.json")
+    
     if not top_stocks_path.exists() or not instrument_path.exists():
         logger.error("❌ Missing required JSON files.")
-        return {"data": {}, "error": "Missing JSON files."}
+        return None, None, None
+
+    # Check if cache is still valid
+    if (_INSTRUMENT_CACHE["last_loaded"] and 
+        (now - _INSTRUMENT_CACHE["last_loaded"]).total_seconds() < CACHE_TIMEOUT_SECONDS and
+        _INSTRUMENT_CACHE["instruments"] is not None):
+        return _INSTRUMENT_CACHE["top_stocks"], _INSTRUMENT_CACHE["instruments"], _INSTRUMENT_CACHE["instrument_index"]
 
     try:
+        start_time = datetime.now()
+        logger.info("📂 Loading instruments and top stocks from JSON...")
+        
         with open(top_stocks_path, "r", encoding="utf-8") as f:
             top_stocks = json.load(f).get("securities", [])
 
         with open(instrument_path, "r", encoding="utf-8") as f:
             all_instruments = json.load(f)
+            
+        # Index instruments by (exchange, symbol)
+        instrument_index = defaultdict(list)
+        for instr in all_instruments:
+            if not instr.get("instrument_key"):
+                continue
+
+            # Skip expired instruments
+            expiry = instr.get("expiry")
+            if expiry and datetime.fromtimestamp(expiry / 1000) < now:
+                continue
+
+            exchange = instr.get("exchange", "").upper()
+            added_symbols = set()
+            for field in ("trading_symbol", "asset_symbol", "underlying_symbol"):
+                sym = instr.get(field, "").strip().upper()
+                if sym and sym not in added_symbols:
+                    instrument_index[(exchange, sym)].append(instr)
+                    added_symbols.add(sym)
+
+        _INSTRUMENT_CACHE["top_stocks"] = top_stocks
+        _INSTRUMENT_CACHE["instruments"] = all_instruments
+        _INSTRUMENT_CACHE["instrument_index"] = instrument_index
+        _INSTRUMENT_CACHE["last_loaded"] = now
+        
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"✅ Loaded {len(all_instruments)} instruments in {elapsed:.2f}s")
+        
+        return top_stocks, all_instruments, instrument_index
+        
     except Exception as e:
         logger.error(f"❌ Failed to load or parse files: {e}")
-        return {"data": {}, "error": "JSON parsing error."}
+        return None, None, None
+
+
+@router.get("/api/stocks/top")
+def get_top_stock_details(request: Request):
+    top_stocks, _, instrument_index = _get_cached_data()
+    
+    if top_stocks is None or instrument_index is None:
+        return {"data": {}, "error": "Failed to load stock data."}
 
     now = datetime.now()
-    instrument_index = defaultdict(list)
-
-    for instr in all_instruments:
-        if not instr.get("instrument_key"):
-            continue
-
-        expiry = instr.get("expiry")
-        if expiry and datetime.fromtimestamp(expiry / 1000) < now:
-            continue
-
-        exchange = instr.get("exchange", "").upper()
-        for field in ("trading_symbol", "asset_symbol", "underlying_symbol"):
-            sym = instr.get(field, "").strip().upper()
-            if sym:
-                instrument_index[(exchange, sym)].append(instr)
 
     grouped = {}
     instrument_keys_set = set()

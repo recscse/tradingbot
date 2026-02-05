@@ -41,7 +41,6 @@ repos:
         exclude: ^(ui/|\.md$)
       - id: check-yaml
       - id: check-json
-        exclude: ^(ui/)
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=1000]
@@ -56,6 +55,17 @@ repos:
       - id: debug-statements
       - id: name-tests-test
         args: [--pytest-test-first]
+
+  # Frontend linting
+  - repo: local
+    hooks:
+      - id: frontend-lint
+        name: Lint Frontend (ESLint)
+        entry: bash -c "cd ui/trading-bot-ui && npm run lint"
+        language: system
+        files: ^ui/trading-bot-ui/src/.*\.(js|jsx|ts|tsx)$
+        pass_filenames: false
+        stages: [commit]
         
   # Custom testing hook
   - repo: local

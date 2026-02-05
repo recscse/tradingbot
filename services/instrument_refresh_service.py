@@ -378,6 +378,13 @@ class TradingInstrumentService:
 
         logger.info(f"💾 Saved {len(filtered_instruments)} filtered instruments")
         
+        from services.notifications.alert_manager import alert_manager
+        asyncio.create_task(alert_manager.send_admin_system_status(
+            "Instrument Refresh", 
+            "SUCCESS", 
+            f"Processed {total_count} total instruments. Extracted {len(nse_instrument_keys)} NSE stocks and {len(mcx_instruments)} MCX instruments."
+        ))
+        
         log_structured(
             event="INSTRUMENT_DOWNLOAD_COMPLETE", 
             message=f"Downloaded and processed {total_count} instruments",

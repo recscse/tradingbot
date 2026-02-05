@@ -277,9 +277,25 @@ class EnhancedIntelligentOptionsService:
                     enhanced_stock = await self._enhance_stock_with_options(stock, db)
                     if enhanced_stock and enhanced_stock.selected_option_contract:
                         enhanced_selections.append(enhanced_stock)
+                        contract = enhanced_stock.selected_option_contract
                         logger.info(
-                            f"Enhanced {stock.symbol} with {enhanced_stock.selected_option_contract.option_type} "
-                            f"option at strike {enhanced_stock.selected_option_contract.strike_price}"
+                            f"Enhanced {stock.symbol} with {contract.option_type} "
+                            f"option at strike {contract.strike_price}"
+                        )
+                        
+                        from utils.logging_utils import log_to_db
+                        log_to_db(
+                            component="option_selection",
+                            message=f"Option Selected: {stock.symbol} {contract.option_type} {contract.strike_price}",
+                            level="INFO",
+                            symbol=stock.symbol,
+                            additional_data={
+                                "strike": float(contract.strike_price),
+                                "expiry": contract.expiry_date,
+                                "premium": float(contract.premium),
+                                "iv": float(contract.implied_volatility),
+                                "oi": contract.open_interest
+                            }
                         )
                     else:
                         logger.warning(

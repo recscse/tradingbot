@@ -11,3 +11,14 @@ datasources:
     type: loki
     access: proxy
     url: http://loki:3100
+
+  - name: TradingDB
+    type: postgres
+    url: localhost:5432
+    database: trading_db
+    user: postgres
+    jsonData:
+      sslmode: 'disable'
+      postgresVersion: 1300
+    secureJsonData:
+      password: "password"
