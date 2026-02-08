@@ -496,7 +496,7 @@ const SignupForm = () => {
         >
           Already have an account?{" "}
           <Link
-            href="/login"
+            href="/"
             sx={{
               fontWeight: 600,
               color: "primary.main",

@@ -274,7 +274,7 @@ const Navbar = () => {
     toast.success("Logged out successfully!");
     setTimeout(() => {
       logout();
-      navigate("/login");
+      navigate("/");
     }, 1000);
   };
 
