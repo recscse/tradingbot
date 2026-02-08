@@ -78,7 +78,7 @@ apiClient.interceptors.response.use(
       if (!refreshToken) {
         console.error("❌ Refresh token missing, logging out user.");
         clearTokens();
-        window.location.href = "/login";
+        window.location.href = "/";
         return Promise.reject(error);
       }
 
@@ -114,7 +114,7 @@ apiClient.interceptors.response.use(
       } catch (refreshError) {
         console.error("❌ Token refresh failed:", refreshError);
         clearTokens();
-        window.location.href = "/login";
+        window.location.href = "/";
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;

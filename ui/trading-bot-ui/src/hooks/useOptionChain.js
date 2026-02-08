@@ -85,7 +85,7 @@ const useOptionChain = (symbolOrInstrumentKey) => {
         if (!response.ok) {
           if (response.status === 401) {
             localStorage.removeItem("token");
-            window.location.href = "/login";
+            window.location.href = "/";
             throw new Error("Authentication failed. Please login again.");
           }
           if (response.status === 404) {
@@ -134,7 +134,7 @@ const useOptionChain = (symbolOrInstrumentKey) => {
         if (!response.ok) {
           if (response.status === 401) {
             localStorage.removeItem("token");
-            window.location.href = "/login";
+            window.location.href = "/";
             throw new Error("Authentication failed. Please login again.");
           }
           if (response.status === 404) {

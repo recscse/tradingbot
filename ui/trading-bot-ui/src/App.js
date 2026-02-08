@@ -8,7 +8,6 @@ import {
 import Layout from "./components/common/Layout";
 import LandingPage from "./pages/LandingPage";
 import DashboardPage from "./pages/DashboardPage";
-import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import TradeControlPage from "./pages/TradeControlPage";
 import ConfigPage from "./pages/BrokerConfigPage";
@@ -76,7 +75,7 @@ const App = () => {
                 )
               }
             />
-            <Route path="/login" element={<LoginPage />} />
+            <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/privacy" element={<PrivacyPolicyPage />} />
