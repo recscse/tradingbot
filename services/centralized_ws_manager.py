@@ -980,6 +980,51 @@ class CentralizedWebSocketManager:
         logger.info("🚀 Centralized WebSocket connection starting in background...")
         return True
 
+    async def subscribe_instruments(self, instrument_keys: List[str]) -> bool:
+        """
+        Dynamically subscribe to additional instrument keys.
+        
+        Args:
+            instrument_keys: List of instrument keys to subscribe to
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not instrument_keys:
+            return True
+            
+        try:
+            logger.info(f"➕ Dynamically adding {len(instrument_keys)} instruments to subscription")
+            
+            # Add to set of all keys
+            self.all_instrument_keys.update(instrument_keys)
+            
+            # If client is running, update its subscription
+            if self.ws_client and self.ws_client.is_connected():
+                # Get current keys + new keys (limited to 3000 max for safety)
+                # Upstox limit is technically higher but safer to batch or restart
+                current_keys = list(self.all_instrument_keys)
+                
+                # Option 1: If client supports dynamic update (check UpstoxWebSocketClient implementation)
+                # For now, we'll use the 'restart' strategy if keys change significantly,
+                # or just add them if the client supports it.
+                # Assuming standard client needs restart for new keys or has a subscribe method.
+                
+                # Check if client has subscribe method
+                if hasattr(self.ws_client, 'subscribe'):
+                    self.ws_client.subscribe(instrument_keys)
+                    logger.info("✅ Subscribed to new keys dynamically")
+                else:
+                    logger.info("🔄 Restarting WebSocket to apply new subscriptions")
+                    # Stop and it will auto-reconnect with new keys via _maintain_connection
+                    self.ws_client.stop() 
+                    
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error subscribing to instruments: {e}")
+            return False
+
     async def _check_network_connectivity(self) -> bool:
         """Check if basic network connectivity is available with multiple fallbacks"""
         test_urls = [

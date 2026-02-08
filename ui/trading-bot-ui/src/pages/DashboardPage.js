@@ -406,11 +406,25 @@ const DashboardPage = () => {
     if (fnoLoading) return;
     setFnoLoading(true);
     try {
+      // Use categorized=true for better data organization
       const response = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/instruments/fno-stocks`
+        `${process.env.REACT_APP_API_URL}/api/instruments/fno-stocks?categorized=true`
       );
       const data = await response.json();
-      if (data.success && data.stocks) {
+      
+      // Handle categorized data structure
+      if (data.success && data.data) {
+        const securities = [
+          ...(data.data.indices || []),
+          ...(data.data.stocks || [])
+        ];
+        
+        setFnoStockList({
+          securities: securities,
+          total_count: data.data.metadata?.total_count || securities.length,
+        });
+      } else if (data.success && data.stocks) {
+        // Fallback for flat structure
         setFnoStockList({
           securities: data.stocks,
           total_count: data.count || data.stocks.length,

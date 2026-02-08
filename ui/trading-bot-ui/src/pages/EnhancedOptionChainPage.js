@@ -1,4 +1,3 @@
-// src/pages/EnhancedOptionChainPage.jsx - Complete Option Chain Page with Upstox Integration
 import React, { useState /* , useEffect */ } from 'react'; // useEffect reserved for data fetching
 import {
   Box,
@@ -9,12 +8,6 @@ import {
   CardContent,
   Tabs,
   Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Paper,
   Chip,
   Button,
@@ -29,21 +22,22 @@ import {
   AppBar,
   Toolbar,
   Stack,
-  /* Divider */ // Reserved for section separators
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   Refresh as RefreshIcon,
   ShowChart as OptionsIcon,
   Timeline as FuturesIcon,
-  /* TrendingUp as TrendingUpIcon, */ // Reserved for trend indicators
-  /* TrendingDown as TrendingDownIcon, */ // Reserved for trend indicators
-  /* Assessment as AssessmentIcon, */ // Reserved for analytics features
-  /* Fullscreen as FullscreenIcon, */ // Reserved for fullscreen mode
-  /* Download as DownloadIcon */ // Reserved for export functionality
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import useOptionChain from '../hooks/useOptionChain';
+import EnhancedOptionChainTable from '../components/OptionChain/EnhancedOptionChainTable';
 import '../styles/OptionChainOverrides.css';
 
 const EnhancedOptionChainPage = () => {
@@ -51,7 +45,6 @@ const EnhancedOptionChainPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  // const isTablet = useMediaQuery(theme.breakpoints.down('md')); // Reserved for tablet responsive features
 
   // Option chain hook
   const {
@@ -78,61 +71,7 @@ const EnhancedOptionChainPage = () => {
 
   // Get option metrics
   const optionMetrics = getOptionMetrics();
-  const atmStrikes = getATMStrikes(atmRange);
-
-  // ULTRA HIGH CONTRAST - MAXIMUM VISIBILITY (Based on dashboard pattern)
-  const colors = {
-    call: {
-      bg: theme.palette.mode === 'dark' ? '#000000' : '#e8f8e8',
-      text: '#ffffff',
-      profit: '#00ff00',
-      border: '#00ff00',
-      headerText: '#ffffff'
-    },
-    put: {
-      bg: theme.palette.mode === 'dark' ? '#000000' : '#f8e8e8',
-      text: '#ffffff',
-      profit: '#ff4444',
-      border: '#ff4444',  
-      headerText: '#ffffff'
-    },
-    atm: {
-      bg: theme.palette.mode === 'dark' ? '#000000' : '#fff0cc',
-      border: '#ffaa00',
-      text: '#ffffff',
-      headerText: '#ffffff'
-    },
-    itm: {
-      bg: theme.palette.mode === 'dark' ? '#000000' : '#f0e8f0',
-      text: '#ffffff'
-    },
-    otm: {
-      bg: theme.palette.mode === 'dark' ? '#000000' : '#e8f0f8',
-      text: '#ffffff'
-    },
-    header: theme.palette.mode === 'dark' ? '#000000' : '#ffffff',
-    neutral: '#ffffff',
-    positive: '#00ff00',
-    negative: '#ff4444',
-    primaryText: '#ffffff',
-    secondaryText: '#ffffff',
-    strongText: '#ffffff'
-  };
-
-  // Calculate strike color
-  const getStrikeColor = (strike, currentSpotPrice, allStrikes) => {
-    if (!currentSpotPrice) return colors.otm;
-    
-    // Find the exact ATM strike (closest to spot price)
-    const atmStrike = allStrikes?.reduce((prev, curr) => 
-      Math.abs(curr - currentSpotPrice) < Math.abs(prev - currentSpotPrice) ? curr : prev
-    );
-    
-    if (strike === atmStrike) return colors.atm; // Exact ATM strike
-    if (strike < currentSpotPrice) return colors.itm; // In the money for calls
-    return colors.otm; // Out of the money
-  };
-
+  
   // Format functions
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return '–';
@@ -151,315 +90,39 @@ const EnhancedOptionChainPage = () => {
     return volume.toString();
   };
 
-  // Render option chain table
+  // Render option chain table using the new Enhanced Component
   const renderOptionChainTable = () => {
     if (!optionChainData) return null;
 
-    const strikes = showOnlyATM ? atmStrikes : (optionChainData.strike_prices || []);
-    const options = optionChainData.options || {};
+    // Filter strikes if ATM only is selected
+    // Note: The hook provides getATMStrikes but the table expects full data object structure
+    // We pass the filtering logic down or pre-filter here. 
+    // For simplicity, let's just pass data and let the table handle rendering, 
+    // but we can filter the `options` object if needed. 
+    // To keep it simple for now, we pass the whole chain and let the table logic sort it.
+    // If showOnlyATM is true, we might need to filter the `options` object passed to the table.
+    
+    let displayData = optionChainData;
+    
+    if (showOnlyATM) {
+       const atmStrikesList = getATMStrikes(atmRange);
+       const filteredOptions = {};
+       atmStrikesList.forEach(strike => {
+           if (optionChainData.options[strike]) {
+               filteredOptions[strike] = optionChainData.options[strike];
+           }
+       });
+       // Create a shallow copy with filtered options
+       displayData = { ...optionChainData, options: filteredOptions };
+    }
 
     return (
-      <div className="option-chain-container">
-        <TableContainer 
-          component={Paper} 
-          className="option-chain-table-container"
-          sx={{ 
-            maxHeight: '70vh',
-            backgroundColor: colors.header,
-            color: colors.primaryText,
-            '& .MuiPaper-root': {
-              backgroundColor: colors.header,
-              color: colors.primaryText
-            }
-          }}
-        >
-        <Table 
-          stickyHeader 
-          size={isMobile ? 'small' : 'medium'}
-          className="option-chain-table"
-        >
-          <TableHead>
-            <TableRow>
-              <TableCell 
-                align="center" 
-                colSpan={5}
-                className="option-chain-header-call"
-              >
-                CALLS
-              </TableCell>
-              <TableCell 
-                align="center"
-                className="option-chain-header-strike"
-              >
-                STRIKE
-              </TableCell>
-              <TableCell 
-                align="center" 
-                colSpan={5}
-                className="option-chain-header-put"
-              >
-                PUTS
-              </TableCell>
-            </TableRow>
-            <TableRow sx={{ backgroundColor: colors.header, borderBottom: '3px solid #666' }}>
-              {/* Call headers */}
-              <TableCell align="right" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.call.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>LTP</TableCell>
-              <TableCell align="right" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.call.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>CHG</TableCell>
-              <TableCell align="right" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.call.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>%CHG</TableCell>
-              <TableCell align="right" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.call.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>VOL</TableCell>
-              <TableCell align="right" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.call.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>OI</TableCell>
-              
-              {/* Strike */}
-              <TableCell align="center" sx={{ 
-                fontWeight: '900', 
-                fontSize: '1.2rem', 
-                color: colors.strongText,
-                py: 2,
-                borderBottom: `4px solid ${colors.atm.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>PRICE</TableCell>
-              
-              {/* Put headers */}
-              <TableCell align="left" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.put.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>OI</TableCell>
-              <TableCell align="left" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.put.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>VOL</TableCell>
-              <TableCell align="left" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.put.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>%CHG</TableCell>
-              <TableCell align="left" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.put.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>CHG</TableCell>
-              <TableCell align="left" sx={{ 
-                fontWeight: '900', 
-                color: colors.strongText, 
-                fontSize: '1.1rem',
-                py: 2,
-                borderBottom: `3px solid ${colors.put.border}`,
-                textShadow: theme.palette.mode === 'dark' ? '2px 2px 4px rgba(0,0,0,0.8)' : '1px 1px 2px rgba(255,255,255,0.8)'
-              }}>LTP</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {strikes.map((strike, index) => {
-              const strikeOptions = options[strike] || {};
-              const callOption = strikeOptions.CE;
-              const putOption = strikeOptions.PE;
-              
-              // Get live price from WebSocket or fallback to backend market data
-              const callLTP = callOption ? (
-                getLivePrice(callOption.instrument_key) || 
-                callOption.market_data?.ltp || 
-                0
-              ) : null;
-              
-              const putLTP = putOption ? (
-                getLivePrice(putOption.instrument_key) || 
-                putOption.market_data?.ltp || 
-                0
-              ) : null;
-              
-              // Get price data from WebSocket or fallback to backend market data
-              const callData = callOption ? (
-                getLivePriceData(callOption.instrument_key) || 
-                callOption.market_data || 
-                {}
-              ) : null;
-              
-              const putData = putOption ? (
-                getLivePriceData(putOption.instrument_key) || 
-                putOption.market_data || 
-                {}
-              ) : null;
-              
-              const strikeColor = getStrikeColor(strike, spotPrice, strikes);
-              const isATM = strikeColor === colors.atm;
-              
-              return (
-                <TableRow 
-                  key={strike}
-                  sx={{
-                    backgroundColor: isATM 
-                      ? colors.atm.bg 
-                      : index % 2 === 0 
-                        ? strikeColor.bg 
-                        : theme.palette.mode === 'dark' 
-                          ? 'rgba(255, 255, 255, 0.02)' 
-                          : 'rgba(0, 0, 0, 0.02)',
-                    borderLeft: isATM ? `3px solid ${colors.atm.border}` : `2px solid ${strikeColor.border || 'transparent'}`,
-                    borderRight: isATM ? `3px solid ${colors.atm.border}` : `2px solid ${strikeColor.border || 'transparent'}`,
-                    borderTop: isATM ? `3px solid ${colors.atm.border}` : 'none',
-                    borderBottom: isATM ? `3px solid ${colors.atm.border}` : `1px solid ${theme.palette.mode === 'dark' 
-                      ? 'rgba(255, 255, 255, 0.1)' 
-                      : 'rgba(0, 0, 0, 0.1)'}`,
-                    '&:hover': {
-                      backgroundColor: isATM 
-                        ? colors.atm.bg 
-                        : theme.palette.mode === 'dark' 
-                          ? 'rgba(255, 255, 255, 0.12)' 
-                          : 'rgba(0, 0, 0, 0.06)',
-                      transform: 'scale(1.002)',
-                      transition: 'all 0.15s ease',
-                      boxShadow: theme.palette.mode === 'dark' 
-                        ? '0 4px 12px rgba(255, 255, 255, 0.15)' 
-                        : '0 4px 12px rgba(0, 0, 0, 0.15)',
-                      zIndex: 1
-                    },
-                    ...(isATM && {
-                      fontWeight: 'bold',
-                      '& .MuiTableCell-root': {
-                        color: colors.atm.text,
-                        fontWeight: 'bold'
-                      }
-                    })
-                  }}
-                >
-                  {/* Call data */}
-                  <TableCell align="right">
-                    <span className="option-chain-cell-ltp">
-                      {callLTP !== null ? formatCurrency(callLTP) : '–'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="right">
-                    <span className={callData?.change && callData?.change !== 0 ? 
-                      (callData.change >= 0 ? 'option-chain-cell-change-positive' : 'option-chain-cell-change-negative') 
-                      : 'option-chain-cell-neutral'}>
-                      {callData?.change !== undefined ? 
-                        `${callData.change >= 0 ? '+' : ''}${callData.change.toFixed(2)}` : '0.00'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="right">
-                    <span className={callData?.change_percent && callData?.change_percent !== 0 ? 
-                      (callData.change_percent >= 0 ? 'option-chain-cell-change-positive' : 'option-chain-cell-change-negative') 
-                      : 'option-chain-cell-neutral'}>
-                      {callData?.change_percent !== undefined ? 
-                        formatPercent(callData.change_percent) : '0.00%'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="right">
-                    <span className="option-chain-cell-neutral">
-                      {callData?.volume !== undefined ? formatVolume(callData.volume) : '0'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="right">
-                    <span className="option-chain-cell-neutral">–</span>
-                  </TableCell>
-                  
-                  {/* Strike price */}
-                  <TableCell 
-                    align="center"
-                    sx={{ 
-                      fontWeight: 'bold',
-                      fontSize: '1.1rem',
-                      backgroundColor: strikeColor.bg,
-                      borderLeft: `3px solid ${strikeColor.border || 'transparent'}`,
-                      borderRight: `3px solid ${strikeColor.border || 'transparent'}`,
-                      color: strikeColor.text,
-                      minWidth: 100,
-                      position: 'sticky',
-                      left: '50%',
-                      zIndex: 1
-                    }}
-                  >
-                    <Typography variant="body1" sx={{ fontWeight: 'bold', fontSize: '1rem' }}>
-                      {strike.toLocaleString('en-IN')}{isATM && ' (ATM)'}
-                    </Typography>
-                  </TableCell>
-                  
-                  {/* Put data */}
-                  <TableCell align="left">
-                    <span className="option-chain-cell-neutral">–</span>
-                  </TableCell>
-                  <TableCell align="left">
-                    <span className="option-chain-cell-neutral">
-                      {putData?.volume !== undefined ? formatVolume(putData.volume) : '0'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="left">
-                    <span className={putData?.change_percent && putData?.change_percent !== 0 ? 
-                      (putData.change_percent >= 0 ? 'option-chain-cell-change-positive' : 'option-chain-cell-change-negative') 
-                      : 'option-chain-cell-neutral'}>
-                      {putData?.change_percent !== undefined ? 
-                        formatPercent(putData.change_percent) : '0.00%'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="left">
-                    <span className={putData?.change && putData?.change !== 0 ? 
-                      (putData.change >= 0 ? 'option-chain-cell-change-positive' : 'option-chain-cell-change-negative') 
-                      : 'option-chain-cell-neutral'}>
-                      {putData?.change !== undefined ? 
-                        `${putData.change >= 0 ? '+' : ''}${putData.change.toFixed(2)}` : '0.00'}
-                    </span>
-                  </TableCell>
-                  <TableCell align="left">
-                    <span className="option-chain-cell-ltp">
-                      {putLTP !== null ? formatCurrency(putLTP) : '–'}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      </div>
+      <EnhancedOptionChainTable 
+        optionChainData={displayData}
+        getLivePrice={getLivePrice}
+        getLivePriceData={getLivePriceData}
+        highlightATM={true}
+      />
     );
   };
 
