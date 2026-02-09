@@ -333,6 +333,18 @@ class EnhancedIntelligentOptionsService:
             logger.info(
                 f"Options enhancement complete: {len(enhanced_selections)}/{len(selected_stocks)} stocks enhanced"
             )
+            
+            from utils.logging_utils import log_to_db
+            log_to_db(
+                component="option_selection",
+                message=f"Enhancement Summary: {len(enhanced_selections)}/{len(selected_stocks)} stocks ready for options trading",
+                level="INFO",
+                additional_data={
+                    "total": len(selected_stocks),
+                    "enhanced": len(enhanced_selections),
+                    "selection_type": selection_type
+                }
+            )
             return result
 
         except ValueError as ve:
@@ -380,6 +392,11 @@ class EnhancedIntelligentOptionsService:
             expiry_dates, lot_size = await self._get_available_expiry_and_lot_size(underlying_key, db)
             if not expiry_dates:
                 logger.warning(f"No expiry dates found for {stock_selection.symbol}")
+                return None
+            
+            # CRITICAL FIX: If lot_size is 0, we cannot trade this option accurately
+            if lot_size <= 0:
+                logger.error(f"❌ Cannot enhance {stock_selection.symbol} with options: lot_size is 0. Returning None.")
                 return None
 
             # Step 2: Select optimal expiry
@@ -736,6 +753,10 @@ class EnhancedIntelligentOptionsService:
 
             for strike_data in chain_data:
                 strike_price = Decimal(str(strike_data.get("strike_price", 0)))
+                
+                # CRITICAL FIX: Skip invalid strikes with 0 price
+                if strike_price <= 0:
+                    continue
 
                 # Get option data based on direction
                 option_data = None
@@ -1339,7 +1360,7 @@ class EnhancedIntelligentOptionsService:
                         existing_stock.option_expiry_date = contract.expiry_date
                         existing_stock.option_expiry_dates = option_expiry_dates_json
                         existing_stock.option_chain_data = option_chain_data_json
-                        existing_stock.score_breakdown = str(enhanced_metadata)
+                        existing_stock.score_breakdown = json.dumps(enhanced_metadata)
                         # Append selection reason to history
                         if "options" not in existing_stock.selection_reason:
                              existing_stock.selection_reason += f" | {contract.option_type} {contract.strike_price}"
@@ -1356,7 +1377,7 @@ class EnhancedIntelligentOptionsService:
                             volume_at_selection=int(selection.volume),
                             change_percent_at_selection=float(selection.change_percent),
                             sector=selection.sector,
-                            score_breakdown=str(enhanced_metadata),
+                            score_breakdown=json.dumps(enhanced_metadata),
                             is_active=True,
                             option_type=contract.option_type,
                             option_contract=option_contract_json,

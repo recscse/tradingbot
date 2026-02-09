@@ -414,7 +414,7 @@ class AutoTradeLiveFeed:
                                 metadata = ast.literal_eval(stock.score_breakdown)
                         else:
                             metadata = stock.score_breakdown
-                        
+                            
                         target_lots = int(metadata.get("position_size_lots", 1))
                 except Exception as e:
                     logger.error(f"Error extracting position_size_lots: {e}")
