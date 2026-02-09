@@ -125,26 +125,15 @@ class NotificationService:
     ) -> Notification:
         """
         Create a new database notification.
-        
-        Args:
-            user_id: User ID to send notification to
-            title: Notification title
-            message: Notification message body
-            notification_type: Type of notification (from NotificationTypes)
-            priority: Priority level (from NotificationPriority)
-            category: Optional category for grouping
-            metadata: Optional metadata dictionary
-            db: Database session (optional)
-            
-        Returns:
-            Created Notification object
         """
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
         try:
             # Deduplication: Check for identical unread notification within dynamic window
-            # Default window is 30 minutes to prevent short-term spam
             dedup_minutes = self.deduplication_windows.get(notification_type, 30)
             cutoff = datetime.utcnow() - timedelta(minutes=dedup_minutes)
             
@@ -182,9 +171,13 @@ class NotificationService:
             return notification
             
         except Exception as e:
-            db.rollback()
+            if is_local_db:
+                db.rollback()
             logger.error(f"❌ Failed to create notification: {e}")
             raise
+        finally:
+            if is_local_db:
+                db.close()
     
     async def send_multi_channel_notification(
         self,
@@ -199,17 +192,19 @@ class NotificationService:
     ) -> Dict[str, bool]:
         """
         Send notification via multiple channels based on priority and user preferences.
-        
-        Returns:
-            Dictionary with channel success status
         """
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
         results = {}
         
         try:
             # Always create database notification
+            # create_notification handles its own local DB if passed None, 
+            # but here we pass our local db to maintain the same session
             db_notification = self.create_notification(
                 user_id=user_id,
                 title=title,
@@ -233,35 +228,14 @@ class NotificationService:
             
             # Send via external channels
             if "email" in channels and user.email:
-                try:
-                    # email_success = send_notification_email(
-                    #     subject=title,
-                    #     body=message,
-                    #     recipient_email=user.email
-                    # )
-                    results["email"] = False # Placeholder
-                except Exception as e:
-                    logger.error(f"Email notification failed: {e}")
-                    results["email"] = False
+                results["email"] = False # Placeholder
             
             if "sms" in channels and user.phone_number:
-                try:
-                    # Create shorter message for SMS
-                    sms_message = f"{title}: {message[:120]}..."
-                    # sms_success = send_trade_sms(
-                    #     message=sms_message,
-                    #     recipient_number=user.phone_number
-                    # )
-                    results["sms"] = False # Placeholder
-                except Exception as e:
-                    logger.error(f"SMS notification failed: {e}")
-                    results["sms"] = False
+                results["sms"] = False # Placeholder
 
             # --- ADD TELEGRAM SUPPORT ---
             if "push" in channels or "telegram" in channels:
                 try:
-                    # Route to telegram_notifier (singleton)
-                    # We send to the user's chat_id if available, else admin
                     from services.notifications.telegram_service import telegram_notifier
                     asyncio.create_task(telegram_notifier.send_message(
                         f"*{self._escape_markdown(title)}*\n\n{self._escape_markdown(message)}",
@@ -282,6 +256,9 @@ class NotificationService:
         except Exception as e:
             logger.error(f"❌ Multi-channel notification failed: {e}")
             return {"error": True, "message": str(e)}
+        finally:
+            if is_local_db:
+                db.close()
     
     def create_trading_notification(
         self,
@@ -464,24 +441,31 @@ class NotificationService:
         """
         Retrieve user notifications with filtering options.
         """
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
         
-        query = db.query(Notification).filter(Notification.user_id == user_id)
-        
-        if notification_type:
-            query = query.filter(Notification.type == notification_type)
-        if is_read is not None:
-            query = query.filter(Notification.is_read == is_read)
-        if priority:
-            query = query.filter(Notification.priority == priority)
-        
-        return (
-            query.order_by(Notification.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
+        try:
+            query = db.query(Notification).filter(Notification.user_id == user_id)
+            
+            if notification_type:
+                query = query.filter(Notification.type == notification_type)
+            if is_read is not None:
+                query = query.filter(Notification.is_read == is_read)
+            if priority:
+                query = query.filter(Notification.priority == priority)
+            
+            return (
+                query.order_by(Notification.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+        finally:
+            if is_local_db:
+                db.close()
     
     def mark_notification_read(
         self,
@@ -490,8 +474,11 @@ class NotificationService:
         db: Optional[Session] = None
     ) -> bool:
         """Mark a notification as read."""
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
         try:
             notification = db.query(Notification).filter(
@@ -509,9 +496,13 @@ class NotificationService:
             return False
             
         except Exception as e:
-            db.rollback()
+            if is_local_db:
+                db.rollback()
             logger.error(f"❌ Failed to mark notification as read: {e}")
             return False
+        finally:
+            if is_local_db:
+                db.close()
     
     def mark_all_notifications_read(
         self,
@@ -519,8 +510,11 @@ class NotificationService:
         db: Optional[Session] = None
     ) -> int:
         """Mark all user notifications as read. Returns count of updated notifications."""
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
         try:
             updated_count = (
@@ -540,25 +534,36 @@ class NotificationService:
             return updated_count
             
         except Exception as e:
-            db.rollback()
+            if is_local_db:
+                db.rollback()
             logger.error(f"❌ Failed to mark all notifications as read: {e}")
             return 0
+        finally:
+            if is_local_db:
+                db.close()
     
     def get_unread_count(self, user_id: int, db: Optional[Session] = None) -> int:
         """Get count of unread notifications for a user."""
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
-        return (
-            db.query(Notification)
-            .filter(
-                and_(
-                    Notification.user_id == user_id,
-                    Notification.is_read == False
+        try:
+            return (
+                db.query(Notification)
+                .filter(
+                    and_(
+                        Notification.user_id == user_id,
+                        Notification.is_read == False
+                    )
                 )
+                .count()
             )
-            .count()
-        )
+        finally:
+            if is_local_db:
+                db.close()
     
     def delete_notification(
         self,
@@ -567,8 +572,11 @@ class NotificationService:
         db: Optional[Session] = None
     ) -> bool:
         """Delete a notification."""
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
         try:
             notification = db.query(Notification).filter(
@@ -585,9 +593,13 @@ class NotificationService:
             return False
             
         except Exception as e:
-            db.rollback()
+            if is_local_db:
+                db.rollback()
             logger.error(f"❌ Failed to delete notification: {e}")
             return False
+        finally:
+            if is_local_db:
+                db.close()
     
     def cleanup_old_notifications(
         self,
@@ -598,8 +610,11 @@ class NotificationService:
         Clean up notifications older than specified days.
         Returns count of deleted notifications.
         """
+        is_local_db = False
         if db is None:
-            db = next(get_db())
+            from database.connection import SessionLocal
+            db = SessionLocal()
+            is_local_db = True
             
         cutoff_date = datetime.utcnow() - timedelta(days=days_old)
         
@@ -615,9 +630,13 @@ class NotificationService:
             return deleted_count
             
         except Exception as e:
-            db.rollback()
+            if is_local_db:
+                db.rollback()
             logger.error(f"❌ Failed to cleanup notifications: {e}")
             return 0
+        finally:
+            if is_local_db:
+                db.close()
 
 
 # Global notification service instance

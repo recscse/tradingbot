@@ -41,7 +41,8 @@ class TokenMonitorService:
         Returns:
             Dictionary with counts of notifications sent by priority level
         """
-        db = next(get_db())
+        from database.connection import SessionLocal
+        db = SessionLocal()
         results = {
             "critical": 0,
             "high": 0,
@@ -337,7 +338,8 @@ class TokenMonitorService:
         Returns:
             Dictionary with expiring tokens grouped by urgency
         """
-        db = next(get_db())
+        from database.connection import SessionLocal
+        db = SessionLocal()
         summary = {
             "expired": [],
             "critical": [],  # < 2 hours
@@ -396,8 +398,9 @@ class TokenMonitorService:
         Returns:
             Dictionary with refresh results per broker
         """
+        from database.connection import SessionLocal
         results = {}
-        db = next(get_db())
+        db = SessionLocal()
 
         try:
             expired_configs = (

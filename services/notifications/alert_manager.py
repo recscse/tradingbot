@@ -29,6 +29,8 @@ class AlertManager:
             self.telegram = telegram_notifier
             self.db_service = notification_service
             self.initialized = True
+            # Deduplication cache for system alerts {(component, status): last_sent_time}
+            self._system_alert_cache = {}
             logger.info("Alert Manager initialized")
 
     # ============================================================================
@@ -36,7 +38,21 @@ class AlertManager:
     # ============================================================================
 
     async def send_admin_system_status(self, component: str, status: str, details: str = ""):
-        """Send service-specific status update"""
+        """Send service-specific status update with 5-minute deduplication"""
+        import datetime
+        now = datetime.datetime.now()
+        cache_key = (component, status)
+        
+        # Check deduplication window (5 minutes)
+        if cache_key in self._system_alert_cache:
+            last_sent = self._system_alert_cache[cache_key]
+            if (now - last_sent).total_seconds() < 300:
+                logger.debug(f"Skipping duplicate system alert for {component}:{status} (last sent {last_sent})")
+                return
+
+        # Update cache
+        self._system_alert_cache[cache_key] = now
+        
         await self.telegram.send_system_alert(component, details, level="INFO" if status == "SUCCESS" else "ERROR")
         
         await self.db_service.create_trading_notification(
