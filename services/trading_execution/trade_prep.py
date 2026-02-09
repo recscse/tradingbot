@@ -99,6 +99,7 @@ class PreparedTrade:
     metadata: Dict[str, Any]
     parent_trade_id: Optional[str] = None
     product: str = "I"
+    segment: str = "F&O"
 
 
 class TradePrepService:
