@@ -106,6 +106,7 @@ class UpstoxWebSocketClient:
                     ping_interval=30,
                     ping_timeout=90,
                     close_timeout=10,
+                    handshake_timeout=30,
                     max_size=None,
                 ) as conn:
                     self.websocket = conn
