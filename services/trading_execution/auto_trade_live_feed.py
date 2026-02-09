@@ -2210,13 +2210,13 @@ class AutoTradeLiveFeed:
                                 "position_id": pos.id,
                                 "entry_price": Decimal(str(trade.entry_price)),
                                 "stop_loss": (
-                                    Decimal(str(trade.stop_loss))
-                                    if trade.stop_loss
+                                    Decimal(str(trade.initial_stop_loss))
+                                    if trade.initial_stop_loss
                                     else Decimal("0")
                                 ),
                                 "target": (
-                                    Decimal(str(trade.target_price))
-                                    if trade.target_price
+                                    Decimal(str(trade.target_1))
+                                    if trade.target_1
                                     else Decimal("0")
                                 ),
                             }
