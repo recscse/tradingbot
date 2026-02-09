@@ -589,6 +589,9 @@ class TradeAnalyticsService:
             # Calculate strategy breakdown
             strategy_breakdown = self._get_strategy_breakdown(trades)
 
+            # Calculate segment breakdown
+            segment_breakdown = self._get_segment_breakdown(trades)
+
             return {
                 "success": True,
                 "period": "overall",
@@ -602,12 +605,61 @@ class TradeAnalyticsService:
                 },
                 "pnl_chart_data": pnl_chart_data,
                 "daily_breakdown": daily_breakdown,
-                "strategy_breakdown": strategy_breakdown
+                "strategy_breakdown": strategy_breakdown,
+                "segment_breakdown": segment_breakdown
             }
 
         except Exception as e:
             logger.error(f"Error getting overall performance: {e}")
             return {"success": False, "error": str(e)}
+
+    def _get_segment_breakdown(self, trades: List[AutoTradeExecution]) -> List[Dict[str, Any]]:
+        """
+        Get performance breakdown by segment (Equity, F&O, etc.)
+
+        Args:
+            trades: List of closed trades
+
+        Returns:
+            List of segment performance metrics
+        """
+        try:
+            if not trades:
+                return []
+
+            segment_stats = {}
+
+            for trade in trades:
+                # Default to F&O if segment is not set (for older records)
+                segment = trade.segment or "F&O"
+                
+                if segment not in segment_stats:
+                    segment_stats[segment] = {
+                        "segment": segment,
+                        "trades_count": 0,
+                        "total_pnl": Decimal('0'),
+                    }
+                
+                stats = segment_stats[segment]
+                stats["trades_count"] += 1
+                
+                pnl = Decimal(str(trade.net_pnl)) if trade.net_pnl else Decimal('0')
+                stats["total_pnl"] += pnl
+
+            # Format for response
+            breakdown = []
+            for stats in segment_stats.values():
+                breakdown.append({
+                    "segment": stats["segment"],
+                    "trades_count": stats["trades_count"],
+                    "total_pnl": float(stats["total_pnl"])
+                })
+
+            return sorted(breakdown, key=lambda x: x["total_pnl"], reverse=True)
+
+        except Exception as e:
+            logger.error(f"Error calculating segment breakdown: {e}")
+            return []
 
     def get_detailed_performance(
         self,

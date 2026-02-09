@@ -1277,6 +1277,7 @@ class AutoTradeExecution(Base):
     allocated_capital = Column(Numeric(15, 2), nullable=True)  # Capital allocated for this demat
     parent_trade_id = Column(String(100), nullable=True, index=True)  # Link multiple demat executions
     trading_mode = Column(String(20), default="paper", index=True)  # paper or live
+    segment = Column(String(20), default="F&O", index=True)  # EQUITY, F&O, CURRENCY, COMMODITY
 
     # Status & Metadata
     status = Column(

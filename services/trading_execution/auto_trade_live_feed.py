@@ -48,6 +48,7 @@ from utils.logging_utils import (
     log_trade_result,
     generate_trace_id,
     log_structured,
+    log_to_db,
 )
 
 logger = logging.getLogger("auto_trade_live_feed")
@@ -83,6 +84,10 @@ class AutoTradeLiveFeed:
 
         # WebSocket client
         self.upstox_client: Optional[UpstoxWebSocketClient] = None
+        
+        # Data flow tracking
+        self.tick_counter = 0
+        self.last_tick_time: Optional[datetime] = None
 
         # Active user positions tracking (user_id -> {option_key -> position_data})
         self.active_user_positions: Dict[int, Dict[str, Dict[str, Any]]] = {}
@@ -400,11 +405,16 @@ class AutoTradeLiveFeed:
                 target_lots = 1
                 try:
                     if stock.score_breakdown:
-                        metadata = (
-                            json.loads(stock.score_breakdown)
-                            if isinstance(stock.score_breakdown, str)
-                            else stock.score_breakdown
-                        )
+                        if isinstance(stock.score_breakdown, str):
+                            try:
+                                metadata = json.loads(stock.score_breakdown)
+                            except json.JSONDecodeError:
+                                # Fallback for single-quoted string dicts
+                                import ast
+                                metadata = ast.literal_eval(stock.score_breakdown)
+                        else:
+                            metadata = stock.score_breakdown
+                            
                         target_lots = int(metadata.get("position_size_lots", 1))
                 except Exception as e:
                     logger.error(f"Error extracting position_size_lots: {e}")
@@ -608,6 +618,14 @@ class AutoTradeLiveFeed:
             feeds = data.get("feeds", {})
             if not feeds:
                 return
+            
+            # Increment tick counter for heartbeat
+            self.tick_counter += 1
+            self.last_tick_time = get_ist_now_naive()
+            
+            # Periodically log heartbeat (every 500 ticks)
+            if self.tick_counter % 500 == 0:
+                logger.info(f"💓 Live Data Heartbeat: Received {self.tick_counter} ticks so far. Last tick at {self.last_tick_time.strftime('%H:%M:%S')}")
 
             for instrument_key, feed_data in feeds.items():
                 # Update spot data (if applicable)
@@ -1059,6 +1077,7 @@ class AutoTradeLiveFeed:
             signal: Trading signal
             user_id: User ID to execute trade for
         """
+        import asyncio
         logger.info(f"Executing trade for user {user_id}: {instrument.stock_symbol}")
 
         # CRITICAL: Check if market is open before executing trades
@@ -1390,15 +1409,31 @@ class AutoTradeLiveFeed:
                 )
 
                 # Execute trade
-                exec_result = await asyncio.to_thread(
-                    execution_handler.execute_trade,
-                    prepared_trade,
-                    db,
-                    None,  # parent_trade_id
-                    broker_name,
-                    broker_config_id,
-                    investment,
-                )
+                try:
+                    exec_result = await asyncio.to_thread(
+                        execution_handler.execute_trade,
+                        prepared_trade,
+                        db,
+                        None,  # parent_trade_id
+                        broker_name,
+                        broker_config_id,
+                        investment,
+                    )
+                except NameError as ne:
+                    logger.error(f"❌ Critical NameError in execution for user {user_id}: {ne}")
+                    import asyncio as _asyncio
+                    exec_result = await _asyncio.to_thread(
+                        execution_handler.execute_trade,
+                        prepared_trade,
+                        db,
+                        None,
+                        broker_name,
+                        broker_config_id,
+                        investment,
+                    )
+                except Exception as e:
+                    logger.exception(f"❌ Async execution failed for user {user_id}: {e}")
+                    raise
 
                 if getattr(exec_result, "success", False):
                     trade_id = getattr(exec_result, "trade_id", "unknown")
@@ -2080,11 +2115,8 @@ class AutoTradeLiveFeed:
         try:
 
             def db_job():
-                try:
-                    db = next(get_db())
-                except Exception:
-                    db = SessionLocal()
-
+                from database.connection import SessionLocal
+                db = SessionLocal()
                 try:
                     admin_broker = (
                         db.query(BrokerConfig)
@@ -2117,12 +2149,11 @@ class AutoTradeLiveFeed:
 
                     logger.info("Loaded Upstox access token from database")
                     return token.strip()
-
+                except Exception as e:
+                    logger.error(f"Error loading admin token: {e}")
+                    return ""
                 finally:
-                    try:
-                        db.close()
-                    except Exception:
-                        pass
+                    db.close()
 
             return await asyncio.to_thread(db_job)
 
@@ -2184,13 +2215,13 @@ class AutoTradeLiveFeed:
                                 "position_id": pos.id,
                                 "entry_price": Decimal(str(trade.entry_price)),
                                 "stop_loss": (
-                                    Decimal(str(trade.stop_loss))
-                                    if trade.stop_loss
+                                    Decimal(str(trade.initial_stop_loss))
+                                    if trade.initial_stop_loss
                                     else Decimal("0")
                                 ),
                                 "target": (
-                                    Decimal(str(trade.target_price))
-                                    if trade.target_price
+                                    Decimal(str(trade.target_1))
+                                    if trade.target_1
                                     else Decimal("0")
                                 ),
                             }

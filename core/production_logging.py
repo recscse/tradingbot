@@ -178,14 +178,19 @@ class TradingLogger:
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)
             
-        # Console handler for development
-        if os.getenv('ENVIRONMENT') != 'production':
-            console_handler = logging.StreamHandler(sys.stdout)
+        # Console handler - ALWAYS ENABLED FOR CLOUD PLATFORMS (Railway, Render, etc.)
+        console_handler = logging.StreamHandler(sys.stdout)
+        
+        # In production, use structured JSON logging even for console
+        if os.getenv('ENVIRONMENT') == 'production' or os.getenv('RAILWAY_ENVIRONMENT'):
+            console_handler.setFormatter(TradingFormatter())
+        else:
             console_formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
             )
             console_handler.setFormatter(console_formatter)
-            logger.addHandler(console_handler)
+            
+        logger.addHandler(console_handler)
         
         # File handler with rotation
         file_handler = logging.handlers.TimedRotatingFileHandler(
@@ -197,6 +202,16 @@ class TradingLogger:
         )
         file_handler.setFormatter(TradingFormatter())
         logger.addHandler(file_handler)
+        
+        # Database handler for UI tracking - capture WARNING and higher
+        try:
+            from utils.logging_utils import DBLoggingHandler
+            db_handler = DBLoggingHandler()
+            db_handler.setLevel(logging.WARNING)
+            logger.addHandler(db_handler)
+        except ImportError:
+            # Handle circular import during initialization
+            pass
         
     def setup_trading_logger(self):
         """Set up dedicated trading operations logger"""

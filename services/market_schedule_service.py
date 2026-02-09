@@ -750,18 +750,18 @@ class MarketScheduleService:
             logger.info("🔗 Validating broker connections...")
             
             def db_job():
+                from database.connection import SessionLocal
+                db = SessionLocal()
                 try:
-                    db = next(get_db())
-                    try:
-                        configs = (
-                            db.query(BrokerConfig).filter(BrokerConfig.is_active == True).all()
-                        )
-                        return len(configs)
-                    finally:
-                        db.close()
+                    configs = (
+                        db.query(BrokerConfig).filter(BrokerConfig.is_active == True).all()
+                    )
+                    return len(configs)
                 except Exception as e:
                     logger.error(f"DB Error in validate_broker_connections: {e}")
                     return 0
+                finally:
+                    db.close()
 
             count = await asyncio.to_thread(db_job)
             logger.info(f"Found {count} active broker configurations")

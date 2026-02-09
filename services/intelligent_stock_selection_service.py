@@ -1399,7 +1399,7 @@ class IntelligentStockSelectionService:
                     selection_phase=selection_phase,
                     # Options Direction - CE for bullish market, PE for bearish market
                     option_type=stock.options_direction,  # CE or PE based on market sentiment
-                    score_breakdown=str(
+                    score_breakdown=json.dumps(
                         {
                             "sentiment_score": stock.sentiment_score,
                             "sector_score": stock.sector_score,

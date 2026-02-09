@@ -286,6 +286,7 @@ class TradeExecutionHandler:
                 allocated_capital=allocated_capital,
                 parent_trade_id=None,
                 trading_mode=prepared_trade.trading_mode,
+                segment=prepared_trade.segment,
             )
 
             db.add(trade_execution)
@@ -472,6 +473,7 @@ class TradeExecutionHandler:
                 allocated_capital=float(prepared_trade.total_investment),
                 parent_trade_id=prepared_trade.parent_trade_id or None,
                 trading_mode=prepared_trade.trading_mode,
+                segment=prepared_trade.segment,
             )
 
             db.add(trade_execution)

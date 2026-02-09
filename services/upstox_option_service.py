@@ -200,9 +200,14 @@ class UpstoxOptionService:
             # Process with pandas for optional analytics (keeps raw `data` intact)
             chain_rows: List[Dict[str, Any]] = []
             for item in response_data:
+                # CRITICAL: Robust strike price extraction
+                strike_price = item.get("strike_price")
+                if strike_price is None:
+                    continue
+                
                 row = {
                     "expiry": item.get("expiry"),
-                    "strike_price": item.get("strike_price"),
+                    "strike_price": float(strike_price),
                     "underlying_key": item.get("underlying_key"),
                     "underlying_spot_price": item.get("underlying_spot_price"),
                     "pcr": item.get("pcr"),
@@ -297,7 +302,7 @@ class UpstoxOptionService:
                 ).fillna(0)
 
                 spot_price = (
-                    float(df["underlying_spot_price"].iloc[0]) if len(df) > 0 else 0.0
+                    float(df["underlying_spot_price"].iloc[0]) if "underlying_spot_price" in df.columns else 0.0
                 )
                 df["distance_from_spot"] = abs(df["strike_price"] - spot_price)
                 atm_strike = float(
@@ -334,11 +339,16 @@ class UpstoxOptionService:
                     },
                 }
             else:
+                # Fallback if no valid rows were processed
+                spot_price = 0.0
+                if response_data and len(response_data) > 0:
+                    spot_price = float(response_data[0].get("underlying_spot_price", 0.0))
+
                 processed_data = {
                     "status": "success",
                     "underlying_key": instrument_key,
                     "expiry": expiry_date,
-                    "spot_price": 0.0,
+                    "spot_price": spot_price,
                     "atm_strike": 0.0,
                     "total_strikes": 0,
                     "data": response_data,

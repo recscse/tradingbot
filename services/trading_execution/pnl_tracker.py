@@ -98,6 +98,7 @@ class RealTimePnLTracker:
         Args:
             db: Database session (optional, will create own session if not provided)
         """
+        import asyncio
         self.is_running = True
         logger.info("🔴 Starting real-time PnL tracking...")
         

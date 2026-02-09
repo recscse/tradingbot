@@ -817,14 +817,14 @@ const PerformanceAnalyticsPage = () => {
 
             {/* Segment Summary Cards */}
             <div className="tw-grid tw-grid-cols-2 md:tw-grid-cols-4 tw-gap-4">
-               {['Equity', 'F&O', 'Currency', 'Commodity'].map((segment) => {
-                 // Mocking segment breakdown for now as backend mainly does Options (F&O)
-                 // In a real scenario, backend should return this breakdown
-                 const isFnO = segment === 'F&O';
-                 const pnl = isFnO ? performanceData.total_pnl : 0;
+               {['Equity', 'F&O', 'Currency', 'Commodity'].map((segmentName) => {
+                 const segmentData = performanceData.segment_breakdown?.find(
+                   s => s.segment?.toUpperCase() === segmentName.toUpperCase()
+                 );
+                 const pnl = segmentData ? segmentData.total_pnl : 0;
                  return (
-                  <div key={segment} className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-sm">
-                    <p className="tw-text-slate-400 tw-text-sm tw-font-semibold tw-mb-2">{segment}</p>
+                  <div key={segmentName} className="tw-bg-slate-900/30 tw-backdrop-blur-xl tw-border tw-border-slate-800/50 tw-rounded-2xl tw-p-6 tw-shadow-sm">
+                    <p className="tw-text-slate-400 tw-text-sm tw-font-semibold tw-mb-2">{segmentName}</p>
                     <p className={`tw-text-xl tw-font-bold ${get_color_class(pnl)}`}>
                       {format_currency(pnl)}
                     </p>

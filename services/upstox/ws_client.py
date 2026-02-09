@@ -104,7 +104,7 @@ class UpstoxWebSocketClient:
                     ws_url,
                     ssl=ssl_context,
                     ping_interval=30,
-                    ping_timeout=20,
+                    ping_timeout=90,
                     close_timeout=10,
                     max_size=None,
                 ) as conn:

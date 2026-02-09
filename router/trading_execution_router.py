@@ -657,8 +657,6 @@ async def start_auto_trading(
         mode = TradingMode(trading_mode)
         asyncio.create_task(
             auto_trade_live_feed.start_auto_trading(
-                user_id=current_user.id,
-                access_token=broker_config.access_token,
                 trading_mode=mode,
             )
         )
