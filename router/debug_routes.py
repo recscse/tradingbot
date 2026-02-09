@@ -471,8 +471,6 @@ async def debug_force_start_auto_trading():
 
             asyncio.create_task(
                 auto_trade_live_feed.start_auto_trading(
-                    user_id=broker_config.user_id,
-                    access_token=broker_config.access_token,
                     trading_mode=TradingMode.PAPER,  # Force paper mode for testing
                 )
             )
