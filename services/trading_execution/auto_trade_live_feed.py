@@ -405,11 +405,16 @@ class AutoTradeLiveFeed:
                 target_lots = 1
                 try:
                     if stock.score_breakdown:
-                        metadata = (
-                            json.loads(stock.score_breakdown)
-                            if isinstance(stock.score_breakdown, str)
-                            else stock.score_breakdown
-                        )
+                        if isinstance(stock.score_breakdown, str):
+                            try:
+                                metadata = json.loads(stock.score_breakdown)
+                            except json.JSONDecodeError:
+                                # Fallback for single-quoted string dicts
+                                import ast
+                                metadata = ast.literal_eval(stock.score_breakdown)
+                        else:
+                            metadata = stock.score_breakdown
+                        
                         target_lots = int(metadata.get("position_size_lots", 1))
                 except Exception as e:
                     logger.error(f"Error extracting position_size_lots: {e}")
