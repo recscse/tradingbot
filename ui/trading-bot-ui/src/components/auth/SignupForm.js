@@ -438,57 +438,6 @@ const SignupForm = () => {
         </Box>
 
         {/* Google Sign Up Button */}
-        <Box sx={{ mt: 4, mb: 2 }}>
-          <Divider>
-            <Typography variant="body2" sx={{ color: "text.secondary", px: 1 }}>
-              or sign up with
-            </Typography>
-          </Divider>
-
-          <Box sx={{ display: "flex", justifyContent: "center", mt: 2 }}>
-            <Button
-              startIcon={<GoogleIcon />}
-              variant="outlined"
-              sx={{
-                px: 3,
-                py: 1,
-                borderRadius: "8px",
-                borderColor: "#ddd",
-                color: "#444",
-                textTransform: "none",
-                fontWeight: 500,
-                backgroundColor: "white",
-                "&:hover": {
-                  backgroundColor: "#f5f5f5",
-                  borderColor: "#ccc",
-                  boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
-                },
-              }}
-            >
-              Google
-            </Button>
-          </Box>
-        </Box>
-
-        {/* Terms and Conditions */}
-        <Typography
-          variant="caption"
-          sx={{
-            display: "block",
-            textAlign: "center",
-            mt: 3,
-            color: "text.secondary",
-          }}
-        >
-          By signing up, you agree to our{" "}
-          <Link href="#" sx={{ fontWeight: 500 }}>
-            Terms of Service
-          </Link>{" "}
-          and{" "}
-          <Link href="#" sx={{ fontWeight: 500 }}>
-            Privacy Policy
-          </Link>
-        </Typography>
 
         <Typography
           variant="body2"

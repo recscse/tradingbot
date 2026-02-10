@@ -1352,26 +1352,6 @@ const AuthModal = ({
                     </Button>
                   </Box>
                 </Box>
-
-                {/* Terms and Conditions */}
-                <Typography
-                  variant="caption"
-                  sx={{
-                    display: "block",
-                    textAlign: "center",
-                    mt: 2,
-                    color: "text.secondary",
-                  }}
-                >
-                  By signing up, you agree to our{" "}
-                  <Link href="#" sx={{ fontWeight: 500 }}>
-                    Terms of Service
-                  </Link>{" "}
-                  and{" "}
-                  <Link href="#" sx={{ fontWeight: 500 }}>
-                    Privacy Policy
-                  </Link>
-                </Typography>
               </Box>
             )}
           </>

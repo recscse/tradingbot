@@ -248,17 +248,6 @@ const FloatingCTA = () => {
                 </Button>
               </form>
             </DialogContent>
-
-            <DialogActions sx={{ px: 3, pb: 3, justifyContent: "center" }}>
-              <Typography
-                variant="caption"
-                align="center"
-                color="textSecondary"
-              >
-                By submitting, you agree to our Terms of Service and Privacy
-                Policy. We'll never share your information with third parties.
-              </Typography>
-            </DialogActions>
           </>
         ) : (
           <>
