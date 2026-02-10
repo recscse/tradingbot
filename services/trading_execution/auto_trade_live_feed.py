@@ -80,6 +80,17 @@ class AutoTradeLiveFeed:
             "trades_executed": 0,
             "positions_closed": 0,
             "errors": 0,
+            "last_signal_time": None,
+            "last_trade_time": None,
+            "last_error_time": None
+        }
+
+        # Detailed Error Tracking
+        self.service_errors = {
+            "websocket": None,
+            "strategy": None,
+            "execution": None,
+            "registry": None
         }
 
         # WebSocket client
@@ -96,6 +107,16 @@ class AutoTradeLiveFeed:
         self.user_last_exit_times: Dict[int, Dict[str, datetime]] = {}
 
         logger.info("Auto-Trading Live Feed Service (REFACTORED) initialized")
+
+    def _set_service_error(self, component: str, error: str):
+        """Set component-specific error and update global stats"""
+        self.service_errors[component] = {
+            "error": error,
+            "timestamp": get_ist_isoformat()
+        }
+        self.stats["errors"] += 1
+        self.stats["last_error_time"] = get_ist_isoformat()
+        self.last_error = f"[{component}] {error}"
 
     # ============================================================================
     # PUBLIC API
@@ -128,13 +149,14 @@ class AutoTradeLiveFeed:
             self.is_running = True
             self.default_trading_mode = trading_mode
             self.last_error = None
+            self.service_errors = {k: None for k in self.service_errors} # Reset errors
 
             # Load admin access token (common for all users)
             self.access_token = await self.load_upstox_access_token()
             if not self.access_token:
                 logger.error("No Upstox access token found - aborting start")
                 self.is_running = False
-                self.last_error = "No access token found"
+                self._set_service_error("websocket", "No access token found")
                 return
 
             # Load instruments and user subscriptions
@@ -143,7 +165,7 @@ class AutoTradeLiveFeed:
             if not shared_registry.instruments:
                 logger.warning("No instruments to monitor - stopping")
                 self.is_running = False
-                self.last_error = "No instruments to monitor"
+                self._set_service_error("registry", "No instruments to monitor")
                 log_to_db(
                     component="auto_trade_live_feed",
                     message="Startup FAILED: No instruments to monitor",
@@ -214,7 +236,7 @@ class AutoTradeLiveFeed:
             ))
         except Exception as e:
             self.is_running = False
-            self.last_error = str(e)
+            self._set_service_error("execution", str(e))
             logger.error(f"Error starting auto-trading: {e}")
             
             # Send Telegram Error
@@ -288,7 +310,14 @@ class AutoTradeLiveFeed:
 
     def get_status(self) -> Dict[str, Any]:
         """Get auto-trading service status for system health dashboard"""
+        # Determine service health from errors
+        service_status = "healthy"
+        critical_errors = [e for k, e in self.service_errors.items() if e is not None]
+        if critical_errors:
+            service_status = "error" if self.is_running else "degraded"
+
         return {
+            "status": service_status,
             "is_running": self.is_running,
             "websocket_connected": (
                 self.upstox_client.is_connected() if self.upstox_client else False
@@ -299,9 +328,12 @@ class AutoTradeLiveFeed:
                 else str(self.default_trading_mode)
             ),
             "stats": self.stats,
+            "service_errors": self.service_errors,
             "active_users": len(self.active_user_positions),
             "instruments_tracked": len(shared_registry.instruments),
             "last_error": getattr(self, "last_error", None),
+            "last_tick_time": self.last_tick_time.isoformat() if self.last_tick_time else None,
+            "tick_counter": self.tick_counter,
             "timestamp": get_ist_isoformat(),
         }
 
