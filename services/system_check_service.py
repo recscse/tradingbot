@@ -324,6 +324,20 @@ class SystemCheckService:
             logger.error(f"Trade prep check failed: {e}")
             return {"status": "error", "error": str(e)}
 
+    def check_capital_manager_status(self) -> Dict[str, Any]:
+        """Check capital manager service status"""
+        cached = self._get_from_cache("capital_status")
+        if cached: return cached
+
+        try:
+            from services.trading_execution.capital_manager import capital_manager
+            result = capital_manager.get_status()
+            self._save_to_cache("capital_status", result)
+            return result
+        except Exception as e:
+            logger.error(f"Capital manager check failed: {e}")
+            return {"status": "error", "error": str(e)}
+
     def check_realtime_analytics_status(self) -> Dict[str, Any]:
         """Check real-time market analytics engine status"""
         cached = self._get_from_cache("analytics_status")

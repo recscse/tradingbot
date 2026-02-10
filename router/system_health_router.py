@@ -44,6 +44,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
         strategy_status = system_check_service.check_strategy_status()
         automation_status = system_check_service.check_automation_status()
         trade_prep_status = system_check_service.check_trade_prep_status()
+        capital_status = system_check_service.check_capital_manager_status()
         analytics_status = system_check_service.check_realtime_analytics_status()
         option_status = system_check_service.check_option_service_status()
         
@@ -55,6 +56,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
             ("instruments", instrument_status), ("live_feed", live_feed_status),
             ("strategy", strategy_status), ("scheduler", scheduler_status),
             ("automation", automation_status), ("trade_prep", trade_prep_status),
+            ("capital_manager", capital_status),
             ("analytics", analytics_status), ("options", option_status)
         ]:
             if isinstance(status, dict):
@@ -66,6 +68,26 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 if check_name == "scheduler" and status.get("task_errors"):
                     for task, err in status["task_errors"].items():
                         errors.append({"component": f"scheduler:{task}", "error": err})
+
+                # Check for function-level health errors
+                if status.get("function_health"):
+                    for func, health in status["function_health"].items():
+                        if health.get("status") == "error" or health.get("error"):
+                            errors.append({
+                                "component": f"{check_name}:{func}", 
+                                "error": health.get("error") or f"Function {func} failed",
+                                "last_run": health.get("last_run")
+                            })
+
+                # Check for service-specific errors (Live Feed)
+                if status.get("service_errors"):
+                    for svc, err_info in status["service_errors"].items():
+                        if err_info:
+                            errors.append({
+                                "component": f"{check_name}:{svc}", 
+                                "error": err_info.get("error"),
+                                "timestamp": err_info.get("timestamp")
+                            })
 
                 # Check for auto-trade scheduler errors (Strategy)
                 if check_name == "strategy" and status.get("auto_trade_scheduler_error"):
@@ -79,7 +101,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
         overall_health = "healthy"
         if errors:
             overall_health = "degraded"
-        if db_status.get("status") == "error":
+        if db_status.get("status") == "error" or (live_feed_status.get("status") == "error" and live_feed_status.get("is_running")):
             overall_health = "unhealthy"
 
         return {
@@ -99,6 +121,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 "token_status": token_status,
                 "automation": automation_status,
                 "trade_prep": trade_prep_status,
+                "capital_manager": capital_status,
                 "option_service": option_status,
             },
             "live_operations": {

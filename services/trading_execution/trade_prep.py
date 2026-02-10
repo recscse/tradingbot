@@ -124,14 +124,35 @@ class TradePrepService:
             "insufficient_capital": 0,
             "last_preparation_time": None
         }
+        self.function_health = {
+            "capital_allocation": {"status": "unknown", "last_run": None, "error": None},
+            "signal_generation": {"status": "unknown", "last_run": None, "error": None},
+            "option_validation": {"status": "unknown", "last_run": None, "error": None}
+        }
         self.last_error = None
         logger.info("Trade Preparation Service initialized")
 
+    def _update_function_health(self, func_name: str, status: str, error: str = None):
+        """Update health status for a specific internal function"""
+        self.function_health[func_name] = {
+            "status": status,
+            "last_run": get_ist_isoformat(),
+            "error": error
+        }
+
     def get_status(self) -> Dict[str, Any]:
         """Get service status for system health monitoring"""
+        # Service is healthy if most preparations succeed or if it's idle
+        overall_status = "active"
+        if self.stats["failed_preparations"] > 0 and self.stats["successful_preparations"] == 0:
+            overall_status = "error"
+        elif self.stats["failed_preparations"] > self.stats["successful_preparations"]:
+            overall_status = "degraded"
+
         return {
-            "status": "active",
+            "status": overall_status,
             "stats": self.stats,
+            "function_health": self.function_health,
             "last_error": self.last_error,
             "timestamp": get_ist_isoformat()
         }

@@ -64,8 +64,36 @@ class TradingCapitalManager:
         self.max_capital_per_trade_percent = Decimal('0.60')  # 60% max per trade
         self.max_risk_per_trade_percent = Decimal('0.02')  # 2% max risk per trade
         self.min_capital_buffer = Decimal('0.10')  # Keep 10% buffer
+        self.last_error = None
+        self.function_health = {
+            "fetch_funds": {"status": "unknown", "last_run": None, "error": None},
+            "position_sizing": {"status": "unknown", "last_run": None, "error": None}
+        }
 
         logger.info("Trading Capital Manager initialized")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get status for system health monitoring"""
+        status = "healthy"
+        if self.last_error:
+            status = "warning"
+            
+        return {
+            "status": status,
+            "last_error": self.last_error,
+            "function_health": self.function_health,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def _update_function_health(self, func_name: str, status: str, error: str = None):
+        """Update internal function health"""
+        self.function_health[func_name] = {
+            "status": status,
+            "last_run": datetime.now().isoformat(),
+            "error": error
+        }
+        if error:
+            self.last_error = f"[{func_name}] {error}"
 
     def get_active_broker_config(
         self,
