@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from database.models import ActivePosition, AutoTradeExecution
+from database.connection import SessionLocal
 from services.trading_execution.strategy_engine import (
     strategy_engine,
     SignalType,
@@ -98,7 +99,6 @@ class RealTimePnLTracker:
         Args:
             db: Database session (optional, will create own session if not provided)
         """
-        import asyncio
         self.is_running = True
         logger.info("🔴 Starting real-time PnL tracking...")
         
@@ -107,9 +107,6 @@ class RealTimePnLTracker:
             message="Real-time PnL tracking STARTED",
             level="INFO"
         )
-
-        # Import database connection
-        from database.connection import SessionLocal
 
         heartbeat_counter = 0
         try:
