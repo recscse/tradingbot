@@ -472,13 +472,56 @@ class UpstoxWebSocketClient:
                 f"⚠️ {self.connection_type}: Detected {len(mcx_instruments)} MCX instruments - these should be handled by dedicated MCX service"
             )
 
-    async def _send_subscription(self):
+    async def update_subscriptions(self, new_keys: list):
+        """Dynamically update subscriptions without reconnecting"""
+        if not self.is_connected():
+            self.instrument_keys = new_keys
+            return
+
+        # Find keys to add and remove
+        old_keys_set = set(self.instrument_keys)
+        new_keys_set = set(new_keys)
+        
+        to_add = list(new_keys_set - old_keys_set)
+        to_remove = list(old_keys_set - new_keys_set)
+        
+        if to_remove:
+            logger.info(f"🔄 Unsubscribing from {len(to_remove)} keys")
+            await self._send_unsubscription(to_remove)
+            
+        if to_add:
+            logger.info(f"🔄 Subscribing to {len(to_add)} new keys")
+            self.instrument_keys = new_keys # Update internal list
+            await self._send_subscription(keys=to_add)
+        else:
+            self.instrument_keys = new_keys
+
+    async def _send_unsubscription(self, keys: list):
+        """Send unsubscription request"""
+        if not self.websocket or self.websocket.closed:
+            return
+            
+        payload = {
+            "guid": f"unsub-{self.connection_id}",
+            "method": "unsub",
+            "data": {
+                "instrumentKeys": keys[:1500]
+            }
+        }
+        await self.websocket.send(json.dumps(payload).encode("utf-8"))
+
+    async def _send_subscription(self, keys: list = None):
         """Send subscription request to WebSocket with enhanced error handling"""
         if not self.websocket:
             logger.error(
                 f"❌ {self.connection_type}: Cannot send subscription - no active WebSocket"
             )
             return False
+
+        # Use provided keys or default to self.instrument_keys
+        keys_to_subscribe = keys if keys is not None else self.instrument_keys
+        if not keys_to_subscribe:
+            return True
 
         # Create unique identifier for this subscription
         guid = f"{self.connection_type}-{self.connection_id}"
@@ -497,7 +540,7 @@ class UpstoxWebSocketClient:
             "method": "sub",
             "data": {
                 "mode": mode,
-                "instrumentKeys": self.instrument_keys[:1500],  # Upstox limit
+                "instrumentKeys": keys_to_subscribe[:1500],  # Upstox limit
             },
         }
 
@@ -510,7 +553,7 @@ class UpstoxWebSocketClient:
             try:
                 await self.websocket.send(encoded_payload)
                 logger.info(
-                    f"📩 {self.connection_type.title()}: Subscription sent for {len(self.instrument_keys[:1500])} instruments in '{mode}' mode"
+                    f"📩 {self.connection_type.title()}: Subscription sent for {len(keys_to_subscribe[:1500])} instruments in '{mode}' mode"
                 )
                 return True
             except websockets.exceptions.ConnectionClosed:
@@ -550,7 +593,7 @@ class UpstoxWebSocketClient:
 
     def is_connected(self):
         """Check if WebSocket is currently connected"""
-        return self.websocket is not None and self.websocket.open and self.should_run
+        return self.websocket is not None and not self.websocket.closed and self.should_run
 
     def get_status(self):
         """Get current connection status"""

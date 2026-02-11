@@ -30,7 +30,7 @@ import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
 import TermsPage from "./pages/TermsPage";
 import NotificationsDashboard from "./components/notifications/NotificationsDashboard";
 import SecurityPage from "./pages/SecurityPage";
-import TermsModal from "./components/TermsModal";
+// import TermsModal from "./components/TermsModal";
 import { UnifiedMarketProvider } from "./hooks/useUnifiedMarketData";
 import LivePnLWidget from "./components/trading/LivePnLWidget";
 
@@ -62,7 +62,7 @@ const App = () => {
       <CssBaseline />
       <NotificationProvider>
         <Router>
-          <TermsModal />
+          {/* <TermsModal /> */}
           <Routes>
             {/* ===== PUBLIC ROUTES ===== */}
             <Route

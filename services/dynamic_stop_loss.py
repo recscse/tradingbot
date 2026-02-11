@@ -24,7 +24,7 @@ def calculate_dynamic_stop_loss(user_id: int, symbol: str, db: Session):
         stop_loss = trade.entry_price - (volatility * 2) if trade.trade_type == "BUY" else trade.entry_price + (volatility * 2)
         
         # Update stop-loss in DB
-        trade.stop_loss = stop_loss
+        trade.trailing_stop_loss = stop_loss
         db.commit()
 
         return {"message": f"✅ Stop-loss updated for {symbol} at ₹{stop_loss}"}

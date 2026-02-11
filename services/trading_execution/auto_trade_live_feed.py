@@ -70,6 +70,7 @@ class AutoTradeLiveFeed:
         self.ws_task: Optional[asyncio.Task] = None
         self.ws_client_task: Optional[asyncio.Task] = None
         self.pnl_task: Optional[asyncio.Task] = None
+        self.atm_task: Optional[asyncio.Task] = None
         self.default_trading_mode: TradingMode = TradingMode.PAPER
         self.access_token: str = ""
         self.last_error: Optional[str] = None
@@ -215,6 +216,11 @@ class AutoTradeLiveFeed:
             if not self.ws_task or self.ws_task.done():
                 self.ws_task = asyncio.create_task(self._ws_connection_loop())
 
+            # Start dynamic ATM update loop
+            if not self.atm_task or self.atm_task.done():
+                self.atm_task = asyncio.create_task(self._dynamic_atm_update_loop())
+                logger.info("Started dynamic ATM strike update loop")
+
             # Start PnL tracking using singleton tracker from pnl_tracker module
             if not self.pnl_task or self.pnl_task.done():
                 from services.trading_execution.pnl_tracker import pnl_tracker
@@ -282,6 +288,13 @@ class AutoTradeLiveFeed:
             except asyncio.CancelledError:
                 pass
 
+        if self.atm_task:
+            self.atm_task.cancel()
+            try:
+                await self.atm_task
+            except asyncio.CancelledError:
+                pass
+
         # Stop PnL tracking using singleton tracker
         if self.pnl_task:
             from services.trading_execution.pnl_tracker import pnl_tracker
@@ -307,6 +320,142 @@ class AutoTradeLiveFeed:
         shared_registry.clear()
         self.active_user_positions.clear()
         self.upstox_client = None
+
+    async def _dynamic_atm_update_loop(self):
+        """Background loop to update ATM strikes if spot price moves significantly"""
+        while self.is_running:
+            try:
+                # Market hours check handled in _ws_connection_loop, but double check here
+                if not is_market_open():
+                    await asyncio.sleep(60)
+                    continue
+
+                # Run update every 5 minutes
+                await asyncio.sleep(300)
+                
+                if self.is_running:
+                    logger.info("🔄 Running dynamic ATM strike update check...")
+                    await self._update_atm_instruments()
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in dynamic ATM update loop: {e}")
+                await asyncio.sleep(60)
+
+    async def _update_atm_instruments(self):
+        """Find new ATM strikes for monitored stocks and update subscriptions"""
+        from services.upstox_option_service import upstox_option_service
+        
+        # 1. Group currently monitored instruments by stock
+        stock_instruments = {} # symbol -> { 'CE': inst, 'PE': inst }
+        for inst in shared_registry.instruments.values():
+            if inst.stock_symbol not in stock_instruments:
+                stock_instruments[inst.stock_symbol] = {}
+            stock_instruments[inst.stock_symbol][inst.option_type] = inst
+            
+        for symbol, options in stock_instruments.items():
+            try:
+                # Get any option to find underlying data
+                any_opt = next(iter(options.values()))
+                spot_price = float(any_opt.live_spot_price)
+                
+                if spot_price <= 0:
+                    logger.debug(f"Skipping strike update for {symbol} - no spot price yet")
+                    continue
+                    
+                # 2. Check if current strike is still ATM (within 0.5% of spot)
+                current_strike = float(any_opt.strike_price)
+                deviation = abs(spot_price - current_strike) / current_strike
+                
+                # If spot moved > 0.5%, re-select ATM
+                if deviation < 0.005:
+                    logger.debug(f"Strike {current_strike} still ATM for {symbol} (spot: {spot_price})")
+                    continue
+                    
+                logger.info(f"📍 Spot moved for {symbol} ({spot_price} vs strike {current_strike}). Refreshing ATM...")
+                
+                # 3. Fetch NEW ATM CE and PE
+                db_session = SessionLocal()
+                option_chain = upstox_option_service.get_option_chain(any_opt.spot_instrument_key, any_opt.expiry_date, db_session)
+                db_session.close()
+                
+                if not option_chain or "data" not in option_chain:
+                    continue
+                    
+                new_atm_strike = float(option_chain.get("atm_strike", spot_price))
+                
+                if new_atm_strike == current_strike:
+                    logger.debug(f"ATM strike for {symbol} hasn't changed from {current_strike}")
+                    continue
+                    
+                logger.info(f"🚀 Updating ATM for {symbol}: {current_strike} -> {new_atm_strike}")
+                
+                chain_data = option_chain.get("data", [])
+                new_ce_key = None
+                new_pe_key = None
+                lot_size = any_opt.lot_size
+                
+                for strike in chain_data:
+                    if float(strike.get("strike_price", 0)) == new_atm_strike:
+                        if strike.get("call_options"):
+                            new_ce_key = strike["call_options"].get("instrument_key")
+                            lot_size = int(strike["call_options"].get("lot_size", lot_size))
+                        if strike.get("put_options"):
+                            new_pe_key = strike["put_options"].get("instrument_key")
+                        break
+                
+                if not new_ce_key or not new_pe_key:
+                    continue
+                    
+                # 4. SWAP INSTRUMENTS IN REGISTRY
+                # Get current subscribers
+                ce_inst = options.get("CE")
+                pe_inst = options.get("PE")
+                
+                if ce_inst and pe_inst:
+                    old_ce_key = ce_inst.option_instrument_key
+                    old_pe_key = pe_inst.option_instrument_key
+                    
+                    # Migration: Register NEW, Subscribe users, then DELETE old
+                    subscribers = shared_registry.get_instrument_subscribers(old_ce_key)
+                    
+                    # Register New
+                    shared_registry.register_instrument(
+                        symbol, any_opt.spot_instrument_key, new_ce_key, "CE", 
+                        Decimal(str(new_atm_strike)), any_opt.expiry_date, lot_size, any_opt.target_lots
+                    )
+                    shared_registry.register_instrument(
+                        symbol, any_opt.spot_instrument_key, new_pe_key, "PE", 
+                        Decimal(str(new_atm_strike)), any_opt.expiry_date, lot_size, any_opt.target_lots
+                    )
+                    
+                    # Subscribe existing users to new keys
+                    for uid in list(subscribers):
+                        meta = shared_registry.get_user_metadata(uid)
+                        shared_registry.subscribe_user(uid, new_ce_key, meta.get("broker_name"), meta.get("broker_config_id"))
+                        shared_registry.subscribe_user(uid, new_pe_key, meta.get("broker_name"), meta.get("broker_config_id"))
+                        
+                        # Unsubscribe from old keys
+                        shared_registry.unsubscribe_user(uid, old_ce_key)
+                        shared_registry.unsubscribe_user(uid, old_pe_key)
+                    
+                    # Remove old instruments from registry mapping
+                    if old_ce_key in shared_registry.instruments:
+                        del shared_registry.instruments[old_ce_key]
+                    if old_pe_key in shared_registry.instruments:
+                        del shared_registry.instruments[old_pe_key]
+                        
+                    logger.info(f"✅ Successfully swapped strikes for {symbol} to {new_atm_strike}")
+                    
+                    # 5. Trigger WebSocket Update
+                    if self.upstox_client:
+                        new_keys = shared_registry.get_all_instrument_keys()
+                        logger.info(f"🔄 Updating WebSocket subscriptions: {len(new_keys)} keys")
+                        await self.upstox_client.update_subscriptions(new_keys)
+
+            except Exception as e:
+                logger.error(f"Error updating ATM instruments for {symbol}: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """Get auto-trading service status for system health dashboard"""
@@ -408,76 +557,101 @@ class AutoTradeLiveFeed:
                 level="DEBUG"
             )
 
-            # Process each stock - register ONCE, subscribe ALL users
+            # Process each stock - register BOTH CE and PE at ATM levels
+            from services.upstox_option_service import upstox_option_service
+            
             for stock in stocks:
-                option_data = {}
-                if stock.option_contract:
-                    try:
-                        option_data = (
-                            json.loads(stock.option_contract)
-                            if isinstance(stock.option_contract, str)
-                            else stock.option_contract
-                        )
-                    except Exception:
-                        logger.exception(f"Bad option_contract for {stock.symbol}")
+                spot_key = stock.instrument_key or f"NSE_EQ|{stock.symbol}"
+                spot_price = float(stock.price_at_selection or 100.0)
+                
+                # Use current day's expiry (or nearest)
+                expiry = stock.option_expiry_date
+                
+                # Fetch BOTH CE and PE at ATM
+                try:
+                    db_session = SessionLocal()
+                    option_chain = upstox_option_service.get_option_chain(spot_key, expiry, db_session)
+                    db_session.close()
+                    
+                    if not option_chain or "data" not in option_chain:
+                        logger.warning(f"Could not fetch option chain for {stock.symbol} to determine ATM strikes")
+                        continue
+                        
+                    atm_strike = float(option_chain.get("atm_strike", spot_price))
+                    chain_data = option_chain.get("data", [])
+                    
+                    # Find CE and PE keys for the ATM strike
+                    atm_ce_key = None
+                    atm_pe_key = None
+                    lot_size = 1
+                    
+                    for strike in chain_data:
+                        if float(strike.get("strike_price", 0)) == atm_strike:
+                            if strike.get("call_options"):
+                                atm_ce_key = strike["call_options"].get("instrument_key")
+                                lot_size = int(strike["call_options"].get("lot_size", 1))
+                            if strike.get("put_options"):
+                                atm_pe_key = strike["put_options"].get("instrument_key")
+                                lot_size = int(strike["put_options"].get("lot_size", 1))
+                            break
+                    
+                    if not atm_ce_key or not atm_pe_key:
+                        logger.warning(f"Could not find ATM keys for {stock.symbol} at {atm_strike}")
                         continue
 
-                spot_key = stock.instrument_key or f"NSE_EQ|{stock.symbol}"
-                option_key = option_data.get("option_instrument_key")
-                if not option_key:
-                    logger.warning(f"No option_instrument_key for {stock.symbol}")
-                    continue
+                    # EXTRACT POSITION SIZE (LOTS)
+                    target_lots = 1
+                    try:
+                        if stock.score_breakdown:
+                            if isinstance(stock.score_breakdown, str):
+                                try:
+                                    metadata = json.loads(stock.score_breakdown)
+                                except Exception:
+                                    import ast
+                                    metadata = ast.literal_eval(stock.score_breakdown)
+                            else:
+                                metadata = stock.score_breakdown
+                            target_lots = int(metadata.get("position_size_lots", 1))
+                    except Exception:
+                        pass
 
-                option_type = stock.option_type or option_data.get("option_type")
-                if option_type not in ("CE", "PE"):
-                    logger.error(f"Invalid option_type for {stock.symbol}")
-                    continue
-
-                # EXTRACT POSITION SIZE (LOTS) from enhanced metadata if available
-                target_lots = 1
-                try:
-                    if stock.score_breakdown:
-                        if isinstance(stock.score_breakdown, str):
-                            try:
-                                metadata = json.loads(stock.score_breakdown)
-                            except json.JSONDecodeError:
-                                # Fallback for single-quoted string dicts
-                                import ast
-                                metadata = ast.literal_eval(stock.score_breakdown)
-                        else:
-                            metadata = stock.score_breakdown
-                            
-                        target_lots = int(metadata.get("position_size_lots", 1))
-                except Exception as e:
-                    logger.error(f"Error extracting position_size_lots: {e}")
-                    logger.warning(f"Could not extract target_lots for {stock.symbol}")
-
-                # REGISTER INSTRUMENT ONCE (shared across all users)
-                instrument = shared_registry.register_instrument(
-                    stock_symbol=stock.symbol,
-                    spot_key=spot_key,
-                    option_key=option_key,
-                    option_type=option_type,
-                    strike_price=Decimal(str(option_data.get("strike_price", 0))),
-                    expiry_date=stock.option_expiry_date
-                    or option_data.get("expiry_date"),
-                    lot_size=option_data.get("lot_size", 1),
-                    target_lots=target_lots,
-                )
-
-                # SUBSCRIBE ALL USERS to this instrument
-                for user_id, broker_config in user_broker_map.items():
-                    shared_registry.subscribe_user(
-                        user_id=user_id,
-                        option_key=option_key,
-                        broker_name=broker_config.broker_name,
-                        broker_config_id=broker_config.id,
+                    # REGISTER CE INSTRUMENT
+                    shared_registry.register_instrument(
+                        stock_symbol=stock.symbol,
+                        spot_key=spot_key,
+                        option_key=atm_ce_key,
+                        option_type="CE",
+                        strike_price=Decimal(str(atm_strike)),
+                        expiry_date=expiry,
+                        lot_size=lot_size,
+                        target_lots=target_lots
                     )
 
-                logger.info(
-                    f"Registered {stock.symbol} {option_type} {option_data.get('strike_price')} "
-                    f"for {len(user_broker_map)} users"
-                )
+                    # REGISTER PE INSTRUMENT
+                    shared_registry.register_instrument(
+                        stock_symbol=stock.symbol,
+                        spot_key=spot_key,
+                        option_key=atm_pe_key,
+                        option_type="PE",
+                        strike_price=Decimal(str(atm_strike)),
+                        expiry_date=expiry,
+                        lot_size=lot_size,
+                        target_lots=target_lots
+                    )
+
+                    # SUBSCRIBE ALL USERS to BOTH
+                    for user_id, broker_config in user_broker_map.items():
+                        shared_registry.subscribe_user(user_id, atm_ce_key, broker_config.broker_name, broker_config.id)
+                        shared_registry.subscribe_user(user_id, atm_pe_key, broker_config.broker_name, broker_config.id)
+
+                    logger.info(f"Registered ATM CE/PE for {stock.symbol} at strike {atm_strike}")
+
+                except Exception as e:
+                    logger.error(f"Error determining ATM strikes for {stock.symbol}: {e}")
+                    continue
+
+        except Exception:
+            logger.exception("Error loading instruments and subscriptions")
 
         except Exception:
             logger.exception("Error loading instruments and subscriptions")
@@ -1187,13 +1361,13 @@ class AutoTradeLiveFeed:
                         "position_id": db_position.id,
                         "entry_price": Decimal(str(trade.entry_price)),
                         "stop_loss": (
-                            Decimal(str(trade.stop_loss))
-                            if trade.stop_loss
+                            Decimal(str(trade.initial_stop_loss))
+                            if trade.initial_stop_loss
                             else Decimal("0")
                         ),
                         "target": (
-                            Decimal(str(trade.target_price))
-                            if trade.target_price
+                            Decimal(str(trade.target_1))
+                            if trade.target_1
                             else Decimal("0")
                         ),
                     }
