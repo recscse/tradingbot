@@ -107,7 +107,116 @@ class OptionsAnalyzer:
         # delta, theta, and other Greeks
         return 0.75  # Placeholder
 
-    def _calculate_risk_reward(self, option: pd.Series) -> float:
-        """Calculate risk-reward ratio"""
-        # Implement your risk-reward calculation
-        return 2.0  # Placeholder
+        def _calculate_risk_reward(self, option: pd.Series) -> float:
+
+            """Calculate risk-reward ratio"""
+
+            # Implement your risk-reward calculation
+
+            return 2.0  # Placeholder
+
+    
+
+        def calculate_hedged_position(
+
+            self, 
+
+            primary_option: Dict, 
+
+            chain: pd.DataFrame, 
+
+            strategy_type: str = "SPREAD"
+
+        ) -> Optional[Dict]:
+
+            """
+
+            Identify a hedging leg to create a Delta-Neutral or Risk-Defined position.
+
+            Example: If buying CE (Delta 0.6), sell OTM CE (Delta 0.3) to reduce cost/theta.
+
+            """
+
+            try:
+
+                primary_strike = primary_option['strike']
+
+                option_type = primary_option['type']
+
+                
+
+                # Filter chain for OTM options (Hedge candidates)
+
+                if option_type == 'CALL':
+
+                    hedge_candidates = chain[chain['strike'] > primary_strike].copy()
+
+                else:
+
+                    hedge_candidates = chain[chain['strike'] < primary_strike].copy()
+
+                    
+
+                if hedge_candidates.empty:
+
+                    return None
+
+                    
+
+                # Sort by strike to find nearest appropriate hedge
+
+                # Ideal hedge: 2-3 strikes away for reasonable credit
+
+                if option_type == 'CALL':
+
+                    hedge_candidates.sort_values('strike', ascending=True, inplace=True)
+
+                else:
+
+                    hedge_candidates.sort_values('strike', ascending=False, inplace=True)
+
+                    
+
+                # Select the 2nd or 3rd OTM strike as hedge
+
+                hedge_index = min(2, len(hedge_candidates) - 1)
+
+                hedge_leg = hedge_candidates.iloc[hedge_index]
+
+                
+
+                # Logic: Hedge should reduce Theta decay and Delta exposure
+
+                # Delta Neutral approximation: Combine +0.6 Delta Long with -0.3 Delta Short -> Net +0.3
+
+                
+
+                return {
+
+                    "action": "SELL",
+
+                    "symbol": primary_option['symbol'],
+
+                    "strike": hedge_leg['strike'],
+
+                    "type": option_type,
+
+                    "expiry": primary_option['expiry'],
+
+                    "delta": hedge_leg.get('delta', 0.3), # Placeholder if greek not avail
+
+                    "price": hedge_leg.get('lastPrice', 0),
+
+                    "reason": "Delta/Theta Hedge"
+
+                }
+
+                
+
+            except Exception as e:
+
+                print(f"Error calculating hedge: {e}")
+
+                return None
+
+    
