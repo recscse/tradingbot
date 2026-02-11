@@ -498,7 +498,7 @@ class UpstoxWebSocketClient:
 
     async def _send_unsubscription(self, keys: list):
         """Send unsubscription request"""
-        if not self.websocket or not self.websocket.open:
+        if not self.websocket or self.websocket.closed:
             return
             
         payload = {
@@ -593,7 +593,7 @@ class UpstoxWebSocketClient:
 
     def is_connected(self):
         """Check if WebSocket is currently connected"""
-        return self.websocket is not None and self.websocket.open and self.should_run
+        return self.websocket is not None and not self.websocket.closed and self.should_run
 
     def get_status(self):
         """Get current connection status"""

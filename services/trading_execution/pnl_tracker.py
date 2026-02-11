@@ -19,7 +19,7 @@ from services.trading_execution.strategy_engine import (
     TrailingStopType
 )
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
-from utils.logging_utils import log_structured
+from utils.logging_utils import log_structured, log_to_db
 from services.notifications.telegram_service import telegram_notifier
 
 logger = logging.getLogger(__name__)
