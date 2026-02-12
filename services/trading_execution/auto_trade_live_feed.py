@@ -375,15 +375,15 @@ class AutoTradeLiveFeed:
                     
                 logger.info(f"📍 Spot moved for {symbol} ({spot_price} vs strike {current_strike}). Refreshing ATM...")
                 
-                # 3. Fetch NEW ATM CE and PE
+                # 3. Fetch NEW ATM CE and PE using optimized get_atm_keys
                 db_session = SessionLocal()
-                option_chain = upstox_option_service.get_option_chain(any_opt.spot_instrument_key, any_opt.expiry_date, db_session)
+                atm_data = upstox_option_service.get_atm_keys(any_opt.spot_instrument_key, any_opt.expiry_date, db_session)
                 db_session.close()
                 
-                if not option_chain or "data" not in option_chain:
+                if not atm_data or not atm_data.get("ce_key") or not atm_data.get("pe_key"):
                     continue
                     
-                new_atm_strike = float(option_chain.get("atm_strike", spot_price))
+                new_atm_strike = float(atm_data["atm_strike"])
                 
                 if new_atm_strike == current_strike:
                     logger.debug(f"ATM strike for {symbol} hasn't changed from {current_strike}")
@@ -391,23 +391,10 @@ class AutoTradeLiveFeed:
                     
                 logger.info(f"🚀 Updating ATM for {symbol}: {current_strike} -> {new_atm_strike}")
                 
-                chain_data = option_chain.get("data", [])
-                new_ce_key = None
-                new_pe_key = None
-                lot_size = any_opt.lot_size
+                new_ce_key = atm_data["ce_key"]
+                new_pe_key = atm_data["pe_key"]
+                lot_size = atm_data["lot_size"]
                 
-                for strike in chain_data:
-                    if float(strike.get("strike_price", 0)) == new_atm_strike:
-                        if strike.get("call_options"):
-                            new_ce_key = strike["call_options"].get("instrument_key")
-                            lot_size = int(strike["call_options"].get("lot_size", lot_size))
-                        if strike.get("put_options"):
-                            new_pe_key = strike["put_options"].get("instrument_key")
-                        break
-                
-                if not new_ce_key or not new_pe_key:
-                    continue
-                    
                 # 4. SWAP INSTRUMENTS IN REGISTRY
                 # Get current subscribers
                 ce_inst = options.get("CE")
@@ -436,17 +423,32 @@ class AutoTradeLiveFeed:
                         shared_registry.subscribe_user(uid, new_ce_key, meta.get("broker_name"), meta.get("broker_config_id"))
                         shared_registry.subscribe_user(uid, new_pe_key, meta.get("broker_name"), meta.get("broker_config_id"))
                         
-                        # Unsubscribe from old keys
-                        shared_registry.unsubscribe_user(uid, old_ce_key)
-                        shared_registry.unsubscribe_user(uid, old_pe_key)
+                        # CRITICAL FIX: Only unsubscribe if user DOES NOT have an active position in this specific old key
+                        user_has_pos_ce = uid in self.active_user_positions and old_ce_key in self.active_user_positions[uid]
+                        user_has_pos_pe = uid in self.active_user_positions and old_pe_key in self.active_user_positions[uid]
+
+                        if not user_has_pos_ce:
+                            shared_registry.unsubscribe_user(uid, old_ce_key)
+                            logger.debug(f"Unsubscribed user {uid} from old strike {old_ce_key} (No active position)")
+                        else:
+                            logger.info(f"KEEPING subscription for user {uid} to old strike {old_ce_key} (ACTIVE POSITION)")
+
+                        if not user_has_pos_pe:
+                            shared_registry.unsubscribe_user(uid, old_pe_key)
+                            logger.debug(f"Unsubscribed user {uid} from old strike {old_pe_key} (No active position)")
+                        else:
+                            logger.info(f"KEEPING subscription for user {uid} to old strike {old_pe_key} (ACTIVE POSITION)")
                     
-                    # Remove old instruments from registry mapping
-                    if old_ce_key in shared_registry.instruments:
-                        del shared_registry.instruments[old_ce_key]
-                    if old_pe_key in shared_registry.instruments:
-                        del shared_registry.instruments[old_pe_key]
+                    # Only remove old instruments from registry mapping if NO ONE is subscribed anymore
+                    if not shared_registry.get_instrument_subscribers(old_ce_key):
+                        if old_ce_key in shared_registry.instruments:
+                            del shared_registry.instruments[old_ce_key]
+                    
+                    if not shared_registry.get_instrument_subscribers(old_pe_key):
+                        if old_pe_key in shared_registry.instruments:
+                            del shared_registry.instruments[old_pe_key]
                         
-                    logger.info(f"✅ Successfully swapped strikes for {symbol} to {new_atm_strike}")
+                    logger.info(f"✅ Successfully updated monitoring for {symbol}. Active strikes preserved.")
                     
                     # 5. Trigger WebSocket Update
                     if self.upstox_client:
@@ -567,37 +569,20 @@ class AutoTradeLiveFeed:
                 # Use current day's expiry (or nearest)
                 expiry = stock.option_expiry_date
                 
-                # Fetch BOTH CE and PE at ATM
+                # Fetch BOTH CE and PE at ATM using optimized get_atm_keys
                 try:
                     db_session = SessionLocal()
-                    option_chain = upstox_option_service.get_option_chain(spot_key, expiry, db_session)
+                    atm_data = upstox_option_service.get_atm_keys(spot_key, expiry, db_session)
                     db_session.close()
                     
-                    if not option_chain or "data" not in option_chain:
-                        logger.warning(f"Could not fetch option chain for {stock.symbol} to determine ATM strikes")
+                    if not atm_data or not atm_data.get("ce_key") or not atm_data.get("pe_key"):
+                        logger.warning(f"Could not determine ATM strikes for {stock.symbol} using optimized fetch")
                         continue
                         
-                    atm_strike = float(option_chain.get("atm_strike", spot_price))
-                    chain_data = option_chain.get("data", [])
-                    
-                    # Find CE and PE keys for the ATM strike
-                    atm_ce_key = None
-                    atm_pe_key = None
-                    lot_size = 1
-                    
-                    for strike in chain_data:
-                        if float(strike.get("strike_price", 0)) == atm_strike:
-                            if strike.get("call_options"):
-                                atm_ce_key = strike["call_options"].get("instrument_key")
-                                lot_size = int(strike["call_options"].get("lot_size", 1))
-                            if strike.get("put_options"):
-                                atm_pe_key = strike["put_options"].get("instrument_key")
-                                lot_size = int(strike["put_options"].get("lot_size", 1))
-                            break
-                    
-                    if not atm_ce_key or not atm_pe_key:
-                        logger.warning(f"Could not find ATM keys for {stock.symbol} at {atm_strike}")
-                        continue
+                    atm_strike = atm_data["atm_strike"]
+                    atm_ce_key = atm_data["ce_key"]
+                    atm_pe_key = atm_data["pe_key"]
+                    lot_size = atm_data["lot_size"]
 
                     # EXTRACT POSITION SIZE (LOTS)
                     target_lots = 1
@@ -1590,6 +1575,7 @@ class AutoTradeLiveFeed:
                 bid_price=instrument.bid_price,
                 ask_price=instrument.ask_price,
                 target_lots=instrument.target_lots,
+                underlying_key=instrument.spot_instrument_key,
             )
 
             prepared_status = getattr(prepared_trade, "status", None)

@@ -4,6 +4,7 @@ Validates and prepares trades for execution with complete risk management
 """
 
 import logging
+import asyncio
 from decimal import Decimal
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
@@ -140,6 +141,17 @@ class TradePrepService:
             "error": error
         }
 
+    def _safe_dispatch(self, coro):
+        """Safely dispatch a coroutine to the main event loop from any thread"""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.call_soon_threadsafe(lambda: asyncio.create_task(coro))
+            else:
+                asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception as e:
+            logger.error(f"Error in thread-safe dispatch: {e}")
+
     def get_status(self) -> Dict[str, Any]:
         """Get service status for system health monitoring"""
         # Service is healthy if most preparations succeed or if it's idle
@@ -179,6 +191,7 @@ class TradePrepService:
         ask_price: Optional[float] = None,
         target_lots: Optional[int] = None,
         product: str = "I",
+        underlying_key: Optional[str] = None,
     ) -> PreparedTrade:
         """
         Prepare trade with live market data already provided (optimized for auto-trading)
@@ -200,6 +213,7 @@ class TradePrepService:
             db: Database session
             trading_mode: Paper or Live trading mode
             broker_name: Broker name (optional)
+            underlying_key: Authoritative instrument key for the underlying asset (e.g. NSE_INDEX|Nifty 50)
 
         Returns:
             PreparedTrade with complete execution details
@@ -226,22 +240,29 @@ class TradePrepService:
                 f"Preparing trade for user {user_id}: {stock_symbol} {option_type} {strike_price} (with live data)"
             )
 
-            # Step 0: Validate/Fetch Lot Size if missing or suspicious (lot_size=1 is usually wrong for options)
+            # Step 0: Validate/Fetch Lot Size if missing or suspicious
+            # Use provided underlying_key if available, fallback to guesser
+            resolved_underlying_key = underlying_key or self._get_underlying_key(stock_symbol)
+
             if lot_size <= 1:
                 try:
                     from services.upstox_option_service import upstox_option_service
-                    from services.optimized_instrument_service import get_primary_instrument_key
-                    # Fetch contract details to get authoritative lot size
-                    # Use optimized service to get correct key for symbol/index
-                    underlying_key = get_primary_instrument_key(stock_symbol)
-                    contracts = upstox_option_service.get_option_contracts(underlying_key, db)
-                    if contracts and len(contracts) > 0:
-                        fetched_lot_size = int(contracts[0].get("lot_size", 0))
-                        if fetched_lot_size > 0:
-                            lot_size = fetched_lot_size
-                            logger.info(f"Fetched corrected lot_size for {stock_symbol} ({underlying_key}): {lot_size}")
+                    # Fetch ATM data which includes lot size for the specific expiry
+                    if resolved_underlying_key and expiry_date:
+                        atm_data = upstox_option_service.get_atm_keys(resolved_underlying_key, expiry_date, db)
+                        if atm_data and atm_data.get("lot_size", 0) > 0:
+                            lot_size = atm_data["lot_size"]
+                            logger.info(f"Fetched corrected lot_size for {stock_symbol} via ATM chain: {lot_size}")
+                        else:
+                            # Fallback to full contract fetch if ATM chain fails
+                            contracts = upstox_option_service.get_option_contracts(resolved_underlying_key, db)
+                            if contracts and len(contracts) > 0:
+                                fetched_lot_size = int(contracts[0].get("lot_size", 0))
+                                if fetched_lot_size > 0:
+                                    lot_size = fetched_lot_size
+                                    logger.info(f"Fetched corrected lot_size for {stock_symbol} via contracts fallback: {lot_size}")
                 except Exception as e:
-                    logger.warning(f"Failed to fetch lot size from broker: {e}")
+                    logger.warning(f"Failed to fetch lot size from broker for {stock_symbol}: {e}")
 
             if lot_size <= 0:
                  return self._create_error_trade(
@@ -305,7 +326,7 @@ class TradePrepService:
                 
                 # Notify User of Limit
                 from services.notifications.alert_manager import alert_manager
-                asyncio.create_task(alert_manager.send_admin_system_status(
+                self._safe_dispatch(alert_manager.send_admin_system_status(
                     "Risk Manager", "LIMIT_REACHED", 
                     f"Blocked trade for {stock_symbol}. Max positions ({MAX_CONCURRENT_POSITIONS}) reached."
                 ))
@@ -398,7 +419,7 @@ class TradePrepService:
                 
                 # Notify User of Capital Failure
                 from services.notifications.alert_manager import alert_manager
-                asyncio.create_task(alert_manager.send_admin_system_status(
+                self._safe_dispatch(alert_manager.send_admin_system_status(
                     "Capital Manager", "INSUFFICIENT_FUNDS", 
                     f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
                 ))
@@ -640,7 +661,7 @@ class TradePrepService:
             
             # Notify Admin/User of failure
             from services.notifications.alert_manager import alert_manager
-            asyncio.create_task(alert_manager.notify_critical_error(
+            self._safe_dispatch(alert_manager.notify_critical_error(
                 user_id=user_id,
                 component="TRADE_PREP",
                 error=f"Failed to prepare trade for {stock_symbol}: {str(e)}"
@@ -658,6 +679,22 @@ class TradePrepService:
                 trading_mode,
                 str(e),
             )
+
+    def _get_underlying_key(self, symbol: str) -> Optional[str]:
+        """
+        Helper to map symbol/index names to Upstox instrument keys.
+        Supports NIFTY, BANKNIFTY, FINNIFTY and Equity stocks.
+        """
+        sym = symbol.upper().strip()
+        if sym == "NIFTY" or sym == "NIFTY 50":
+            return "NSE_INDEX|Nifty 50"
+        elif sym == "BANKNIFTY" or sym == "NIFTY BANK":
+            return "NSE_INDEX|Nifty Bank"
+        elif sym == "FINNIFTY" or sym == "NIFTY FIN SERVICE":
+            return "NSE_INDEX|Nifty Fin Service"
+        
+        # Default for stocks
+        return f"NSE_EQ|{sym}"
 
     async def prepare_trade(
         self,
@@ -709,17 +746,24 @@ class TradePrepService:
             if lot_size <= 1:
                 try:
                     from services.upstox_option_service import upstox_option_service
-                    from services.optimized_instrument_service import get_primary_instrument_key
-                    # Fetch contract details to get authoritative lot size
-                    underlying_key = get_primary_instrument_key(stock_symbol)
-                    contracts = upstox_option_service.get_option_contracts(underlying_key, db)
-                    if contracts and len(contracts) > 0:
-                        fetched_lot_size = int(contracts[0].get("lot_size", 0))
-                        if fetched_lot_size > 0:
-                            lot_size = fetched_lot_size
-                            logger.info(f"Fetched missing/corrected lot_size for {stock_symbol} ({underlying_key}): {lot_size}")
+                    # Fetch ATM data which includes lot size for the specific expiry
+                    underlying_key = self._get_underlying_key(stock_symbol)
+                    
+                    if underlying_key and expiry_date:
+                        atm_data = upstox_option_service.get_atm_keys(underlying_key, expiry_date, db)
+                        if atm_data and atm_data.get("lot_size", 0) > 0:
+                            lot_size = atm_data["lot_size"]
+                            logger.info(f"Fetched missing lot_size for {stock_symbol} via ATM chain: {lot_size}")
+                        else:
+                            # Fallback to full contract fetch
+                            contracts = upstox_option_service.get_option_contracts(underlying_key, db)
+                            if contracts and len(contracts) > 0:
+                                fetched_lot_size = int(contracts[0].get("lot_size", 0))
+                                if fetched_lot_size > 0:
+                                    lot_size = fetched_lot_size
+                                    logger.info(f"Fetched missing lot_size for {stock_symbol} via contracts fallback: {lot_size}")
                 except Exception as e:
-                    logger.warning(f"Failed to fetch lot size from broker: {e}")
+                    logger.warning(f"Failed to fetch lot size from broker for {stock_symbol}: {e}")
 
             if lot_size <= 0:
                 return self._create_error_trade(
@@ -820,7 +864,7 @@ class TradePrepService:
                 
                 # Notify User of Capital Failure
                 from services.notifications.alert_manager import alert_manager
-                asyncio.create_task(alert_manager.send_admin_system_status(
+                self._safe_dispatch(alert_manager.send_admin_system_status(
                     "Capital Manager", "INSUFFICIENT_FUNDS", 
                     f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
                 ))
@@ -969,7 +1013,7 @@ class TradePrepService:
             
             # Notify Admin/User of failure
             from services.notifications.alert_manager import alert_manager
-            asyncio.create_task(alert_manager.notify_critical_error(
+            self._safe_dispatch(alert_manager.notify_critical_error(
                 user_id=user_id,
                 component="TRADE_PREP",
                 error=f"Failed to prepare trade for {stock_symbol}: {str(e)}"

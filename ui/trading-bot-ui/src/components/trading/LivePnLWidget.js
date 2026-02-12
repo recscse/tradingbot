@@ -238,7 +238,7 @@ const LivePnLWidget = () => {
                       <div className="tw-flex tw-items-center tw-justify-between tw-mb-1">
                         <div className="tw-flex tw-items-center tw-gap-2">
                           <span className="tw-text-white tw-text-sm tw-font-semibold tw-truncate tw-max-w-[120px]">
-                            {position.symbol || position.trading_symbol}
+                            {position.symbol || position.trading_symbol} {position.strike_price ? `@ ${position.strike_price}` : ""}
                           </span>
 
                           <span

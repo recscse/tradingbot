@@ -21,125 +21,103 @@ const getPnlColor = (value) => {
 
 const ActivePositionCard = memo(({ position, onClose }) => {
   const isProfit = position.current_pnl >= 0;
-
+  const optionType = position.option_type || (position.signal_type?.includes("CE") ? "CE" : "PE");
+  
   return (
     <div
-      className={`tw-relative tw-overflow-hidden tw-rounded-2xl tw-border tw-transition-all tw-duration-300 hover:tw-shadow-2xl hover:tw-scale-[1.02] ${
-        isProfit
-          ? 'tw-bg-gradient-to-br tw-from-emerald-950/40 tw-to-emerald-900/20 tw-border-emerald-500/30'
-          : 'tw-bg-gradient-to-br tw-from-rose-950/40 tw-to-rose-900/20 tw-border-rose-500/30'
+      className={`tw-relative tw-overflow-hidden tw-rounded-xl tw-border tw-bg-slate-900/80 tw-transition-all tw-duration-300 hover:tw-border-blue-500/50 ${
+        isProfit ? 'tw-border-emerald-500/20' : 'tw-border-rose-500/20'
       }`}
     >
-      {/* Real-time Pulse Indicator */}
-      <div className="tw-absolute tw-top-4 tw-right-4">
-        <span className="tw-relative tw-flex tw-h-3 tw-w-3">
-          <span className={`tw-animate-ping tw-absolute tw-inline-flex tw-h-full tw-w-full tw-rounded-full ${isProfit ? 'tw-bg-emerald-400' : 'tw-bg-rose-400'} tw-opacity-75`}></span>
-          <span className={`tw-relative tw-inline-flex tw-rounded-full tw-h-3 tw-w-3 ${isProfit ? 'tw-bg-emerald-500' : 'tw-bg-rose-500'}`}></span>
-        </span>
-      </div>
+      {/* Broker-style Left Status Strip */}
+      <div className={`tw-absolute tw-left-0 tw-top-0 tw-bottom-0 tw-w-1 ${isProfit ? 'tw-bg-emerald-500' : 'tw-bg-rose-500'}`} />
 
-      <div className="tw-p-6">
-        {/* Header: Symbol & Type */}
-        <div className="tw-flex tw-items-start tw-justify-between tw-mb-4">
+      <div className="tw-p-4 tw-pl-5">
+        {/* Header: Broker Style Layout */}
+        <div className="tw-flex tw-justify-between tw-items-start tw-mb-3">
           <div>
-            <h3 className="tw-text-2xl tw-font-bold tw-text-white tw-mb-1">{position.symbol}</h3>
             <div className="tw-flex tw-items-center tw-gap-2">
-              <span className={`tw-px-3 tw-py-1 tw-rounded-full tw-text-xs tw-font-bold ${
-                position.signal_type?.includes("CE")
-                  ? 'tw-bg-emerald-500/30 tw-text-emerald-200 tw-border tw-border-emerald-500/50'
-                  : 'tw-bg-rose-500/30 tw-text-rose-200 tw-border tw-border-rose-500/50'
+              <h3 className="tw-text-lg tw-font-bold tw-text-slate-100">
+                {position.symbol} {position.strike_price || ""} {optionType}
+              </h3>
+              <span className={`tw-text-[10px] tw-px-1.5 tw-py-0.5 tw-rounded tw-font-black ${
+                isProfit ? 'tw-bg-emerald-500/10 tw-text-emerald-500' : 'tw-bg-rose-500/10 tw-text-rose-500'
               }`}>
-                {position.signal_type}
+                LONG
               </span>
-              <span className="tw-text-xs tw-text-slate-400 tw-font-medium">
-                {position.broker_name?.toUpperCase() || "BROKER"}
-              </span>
+            </div>
+            <div className="tw-text-[11px] tw-text-slate-500 tw-font-medium tw-mt-0.5">
+              {position.broker_name?.toUpperCase()} • {position.trading_mode?.toUpperCase()}
             </div>
           </div>
 
-          {/* Large P&L Display */}
           <div className="tw-text-right">
-            <div className={`tw-text-3xl tw-font-bold ${getPnlColor(position.current_pnl)}`}>
+            <div className={`tw-text-xl tw-font-bold ${getPnlColor(position.current_pnl)}`}>
               {formatCurrency(position.current_pnl)}
             </div>
-            <div className={`tw-text-lg tw-font-semibold ${getPnlColor(position.current_pnl_percentage)}`}>
+            <div className={`tw-text-xs tw-font-bold ${getPnlColor(position.current_pnl_percentage)}`}>
               {formatPercentage(position.current_pnl_percentage)}
             </div>
           </div>
         </div>
 
-        {/* Price Progress Bar */}
-        <div className="tw-mb-4">
-          <div className="tw-flex tw-justify-between tw-text-xs tw-text-slate-400 tw-mb-2">
-            <span>Entry: {formatCurrency(position.entry_price)}</span>
-            <span>Current: {formatCurrency(position.current_price)}</span>
+        {/* Market Data Grid (Broker Standard) */}
+        <div className="tw-grid tw-grid-cols-3 tw-gap-2 tw-py-3 tw-border-y tw-border-slate-800/50 tw-mb-4">
+          <div>
+            <div className="tw-text-[10px] tw-text-slate-500 tw-uppercase tw-tracking-wider">Qty</div>
+            <div className="tw-text-sm tw-font-bold tw-text-slate-200">{position.quantity}</div>
           </div>
-          <div className="tw-relative tw-h-2 tw-bg-slate-800 tw-rounded-full tw-overflow-hidden">
-            <div
-              className={`tw-absolute tw-h-full tw-rounded-full tw-transition-all tw-duration-500 ${
-                isProfit ? 'tw-bg-gradient-to-r tw-from-emerald-500 tw-to-emerald-400' : 'tw-bg-gradient-to-r tw-from-rose-500 tw-to-rose-400'
-              }`}
-              style={{ width: `${Math.min(Math.abs(position.current_pnl_percentage) * 2, 100)}%` }}
-            ></div>
+          <div>
+            <div className="tw-text-[10px] tw-text-slate-500 tw-uppercase tw-tracking-wider">Avg.</div>
+            <div className="tw-text-sm tw-font-bold tw-text-slate-200">₹{safeNum(position.entry_price).toFixed(2)}</div>
           </div>
-          <div className="tw-flex tw-justify-between tw-text-xs tw-mt-1">
-            <span className="tw-text-slate-500">SL: {formatCurrency(position.stop_loss || 0)}</span>
-            <span className="tw-text-slate-500">Target: {formatCurrency(position.target || 0)}</span>
-          </div>
-        </div>
-
-        {/* Stats Grid */}
-        <div className="tw-grid tw-grid-cols-3 tw-gap-3 tw-mb-4">
-          <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
-            <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Quantity</div>
-            <div className="tw-text-lg tw-font-bold tw-text-white">{position.quantity}</div>
-          </div>
-          <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
-            <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Investment</div>
-            <div className="tw-text-sm tw-font-bold tw-text-cyan-400">
-              {formatCurrency(position.entry_price * position.quantity)}
-            </div>
-          </div>
-          <div className="tw-bg-slate-800/50 tw-rounded-xl tw-p-3 tw-border tw-border-slate-700/50">
-            <div className="tw-text-xs tw-text-slate-400 tw-mb-1">Value</div>
-            <div className="tw-text-sm tw-font-bold tw-text-white">
-              {formatCurrency(position.current_price * position.quantity)}
+          <div className="tw-text-right">
+            <div className="tw-text-[10px] tw-text-slate-500 tw-uppercase tw-tracking-wider">LTP</div>
+            <div className="tw-text-sm tw-font-bold tw-text-cyan-400 tw-flex tw-items-center tw-justify-end tw-gap-1">
+              ₹{safeNum(position.current_price).toFixed(2)}
+              <span className="tw-w-1.5 tw-h-1.5 tw-rounded-full tw-bg-cyan-500 tw-animate-pulse" />
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="tw-flex tw-gap-2">
-          <button
-            onClick={() => onClose(position.position_id)}
-            className="tw-flex-1 tw-px-4 tw-py-3 tw-bg-rose-600 hover:tw-bg-rose-700 tw-text-white tw-rounded-xl tw-font-semibold tw-transition-all tw-duration-200 tw-shadow-lg hover:tw-shadow-xl tw-flex tw-items-center tw-justify-center tw-gap-2"
-          >
-            <svg className="tw-w-5 tw-h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            Close Position
-          </button>
+        {/* Secondary Info: SL & Target */}
+        <div className="tw-flex tw-justify-between tw-mb-4 tw-px-1">
+          <div className="tw-flex tw-gap-4">
+            <div className="tw-flex tw-items-center tw-gap-1.5">
+              <div className="tw-w-1 tw-h-3 tw-bg-rose-500/50 tw-rounded-full" />
+              <span className="tw-text-[10px] tw-text-slate-500">SL: <span className="tw-text-slate-300">₹{safeNum(position.stop_loss).toFixed(2)}</span></span>
+            </div>
+            <div className="tw-flex tw-items-center tw-gap-1.5">
+              <div className="tw-w-1 tw-h-3 tw-bg-emerald-500/50 tw-rounded-full" />
+              <span className="tw-text-[10px] tw-text-slate-500">TGT: <span className="tw-text-slate-300">₹{safeNum(position.target).toFixed(2)}</span></span>
+            </div>
+          </div>
           {position.trailing_stop_active && (
-            <div className="tw-px-4 tw-py-3 tw-bg-amber-500/20 tw-border tw-border-amber-500/30 tw-rounded-xl tw-flex tw-items-center tw-justify-center">
-              <svg className="tw-w-5 tw-h-5 tw-text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
+            <div className="tw-flex tw-items-center tw-gap-1 tw-text-[10px] tw-text-amber-400">
+              <div className="tw-w-1.5 tw-h-1.5 tw-rounded-full tw-bg-amber-500 tw-animate-ping" />
+              Trailing Active
             </div>
           )}
         </div>
 
-        {/* Time Indicator */}
-        <div className="tw-mt-3 tw-text-xs tw-text-slate-500 tw-flex tw-items-center tw-gap-2">
-          <svg className="tw-w-4 tw-h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Entry: {new Date(position.entry_time).toLocaleString('en-IN', {
-            timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-          })}
+        {/* Actions */}
+        <div className="tw-flex tw-gap-2">
+          <button
+            onClick={() => onClose(position.position_id)}
+            className="tw-flex-1 tw-py-2 tw-bg-slate-800 hover:tw-bg-rose-900/40 tw-text-slate-300 hover:tw-text-rose-200 tw-rounded-lg tw-text-xs tw-font-bold tw-transition-all tw-duration-200 tw-border tw-border-slate-700 hover:tw-border-rose-500/50"
+          >
+            Exit Position
+          </button>
         </div>
       </div>
     </div>
   );
 });
+
+// Helper for numbers
+const safeNum = (val) => {
+  const n = parseFloat(val);
+  return isNaN(n) ? 0 : n;
+};
 
 export default ActivePositionCard;

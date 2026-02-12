@@ -504,6 +504,7 @@ def get_active_positions(
                     "signal_type": trade.signal_type,
                     "instrument_key": position.instrument_key,
                     "entry_price": float(trade.entry_price),
+                    "strike_price": float(trade.strike_price) if trade.strike_price else None,
                     "current_price": (
                         float(position.current_price)
                         if position.current_price

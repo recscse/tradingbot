@@ -230,7 +230,7 @@ class EnhancedIntelligentOptionsService:
             "min_open_interest": 500,
             "max_premium_percentage": Decimal("5.0"),
             "min_iv_threshold": Decimal("15.0"),
-            "max_iv_threshold": Decimal("40.0"),
+            "max_iv_threshold": Decimal("50.0"),
             "capital_per_stock": Decimal("50000"),
             "max_risk_per_trade": Decimal("0.02"),
         }
@@ -388,29 +388,42 @@ class EnhancedIntelligentOptionsService:
             
             logger.info(f"Using underlying_key: {underlying_key} for {stock_selection.symbol}")
 
-            # Step 1: Get available expiry dates and lot size
-            expiry_dates, lot_size = await self._get_available_expiry_and_lot_size(underlying_key, db)
-            if not expiry_dates:
-                logger.warning(f"No expiry dates found for {stock_selection.symbol}")
+            # Step 1: Get available expiries, lot size, and nearest chain in ONE optimized call
+            selection_data = await asyncio.to_thread(
+                self.option_service.get_fast_option_selection_data, underlying_key, db
+            )
+            
+            if not selection_data:
+                logger.warning(f"Failed to fetch option selection data for {stock_selection.symbol}")
                 return None
+
+            expiry_dates = selection_data["expiries"]
+            lot_size = selection_data["lot_size"]
             
             # CRITICAL FIX: If lot_size is 0, we cannot trade this option accurately
             if lot_size <= 0:
                 logger.error(f"❌ Cannot enhance {stock_selection.symbol} with options: lot_size is 0. Returning None.")
                 return None
 
-            # Step 2: Select optimal expiry
+            # Step 2: Select optimal expiry (we already have selection_data['nearest_expiry'])
+            # But we call the logic to handle different strategies
             selected_expiry = await self._select_optimal_expiry(
                 expiry_dates, underlying_key, db
             )
+            
             if not selected_expiry:
                 logger.warning(f"No suitable expiry found for {stock_selection.symbol}")
                 return None
 
-            # Step 3: Get option chain for selected expiry
-            option_chain = await self._get_option_chain_async(
-                underlying_key, selected_expiry, db
-            )
+            # Step 3: Get option chain (reuse from selection_data if it matches selected_expiry)
+            if selected_expiry == selection_data["nearest_expiry"]:
+                option_chain = selection_data["chain"]
+                logger.debug(f"Reusing fetched option chain for {stock_selection.symbol} expiry {selected_expiry}")
+            else:
+                option_chain = await self._get_option_chain_async(
+                    underlying_key, selected_expiry, db
+                )
+            
             if not option_chain or not option_chain.get("data"):
                 logger.warning(f"No option chain data for {stock_selection.symbol}")
                 return None
@@ -523,63 +536,22 @@ class EnhancedIntelligentOptionsService:
         self, underlying_key: str, db: Session
     ) -> Tuple[List[str], int]:
         """
-        Get available expiry dates and lot size for the underlying
-
-        Args:
-            underlying_key: Instrument key for underlying asset
-            db: Database session
-
-        Returns:
-            Tuple of (List of expiry dates, lot_size)
-
-        Raises:
-            ValueError: If underlying_key is invalid
+        Get available expiry dates and lot size for the underlying using optimized fetch.
         """
         if not underlying_key:
             raise ValueError("Underlying key cannot be empty")
 
         try:
-            # Get option contracts to find expiry dates and lot size
-            contracts = self.option_service.get_option_contracts(underlying_key, db)
-            if not contracts:
+            # Use optimized fetch
+            data = await asyncio.to_thread(
+                self.option_service.get_fast_option_selection_data, underlying_key, db
+            )
+            
+            if not data:
                 return [], 0
 
-            # Extract unique expiry dates
-            expiry_dates = list(
-                set(
-                    contract.get("expiry")
-                    for contract in contracts
-                    if contract.get("expiry")
-                )
-            )
-            expiry_dates.sort()
+            return data["expiries"][:10], data["lot_size"]
 
-            # Extract lot size - Iterate to find first non-zero lot size
-            lot_size = 0
-            for contract in contracts:
-                ls = int(contract.get("lot_size", 0))
-                if ls > 0:
-                    lot_size = ls
-                    break
-
-            if lot_size <= 0:
-                logger.error(f"❌ Failed to determine lot_size for {underlying_key} (Contracts: {len(contracts)})")
-
-            # Filter only future expiry dates
-            today = datetime.now().date()
-            future_expiries = [
-                expiry
-                for expiry in expiry_dates
-                if datetime.strptime(expiry, "%Y-%m-%d").date() > today
-            ]
-
-            return future_expiries[:10], lot_size
-
-        except ValueError as ve:
-            logger.error(
-                f"Validation error getting expiry dates for {underlying_key}: {ve}"
-            )
-            return [], 0
         except Exception as e:
             logger.error(f"Error getting expiry dates for {underlying_key}: {e}")
             return [], 0

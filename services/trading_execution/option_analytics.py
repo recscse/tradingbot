@@ -111,7 +111,7 @@ class OptionAnalyticsService:
     def __init__(self):
         """Initialize option analytics with default thresholds"""
         # IV thresholds
-        self.max_iv = Decimal('0.35')  # 35% max IV
+        self.max_iv = Decimal('0.50')  # 50% max IV
         self.high_iv_percentile = 75  # Warn if IV in top 25%
 
         # Liquidity thresholds
@@ -248,8 +248,8 @@ class OptionAnalyticsService:
                 "metrics": {"iv": float(iv), "iv_percent": float(iv*100)}
             }
 
-        # Warn if IV is elevated (above 25%)
-        if iv_decimal > Decimal('0.25'):
+        # Warn if IV is elevated (above 35%)
+        if iv_decimal > Decimal('0.35'):
             warnings.append(
                 f"Elevated IV ({iv*100:.2f}%) - Monitor for volatility changes"
             )
@@ -263,7 +263,7 @@ class OptionAnalyticsService:
         metrics = {
             "iv": float(iv),
             "iv_percent": float(iv * 100),
-            "iv_status": "high" if iv_decimal > Decimal('0.25') else ("low" if iv_decimal < Decimal('0.15') else "normal")
+            "iv_status": "high" if iv_decimal > Decimal('0.35') else ("low" if iv_decimal < Decimal('0.15') else "normal")
         }
 
         logger.info(f"IV validation passed: {iv*100:.2f}%")
