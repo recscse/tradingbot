@@ -5,6 +5,7 @@ Handles both paper trading (virtual) and live trading (real broker API) executio
 
 import logging
 import uuid
+import asyncio
 from decimal import Decimal
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
@@ -69,6 +70,18 @@ class TradeExecutionHandler:
     def __init__(self):
         """Initialize execution handler"""
         logger.info("Trade Execution Handler initialized")
+
+    def _safe_dispatch(self, coro):
+        """Safely dispatch a coroutine to the main event loop from any thread"""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.call_soon_threadsafe(lambda: asyncio.create_task(coro))
+            else:
+                # If loop not running, we might be in startup/shutdown
+                asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception as e:
+            logger.error(f"Error in thread-safe dispatch: {e}")
 
     def execute_trade(
         self,
@@ -315,7 +328,7 @@ class TradeExecutionHandler:
 
             # Send Alert via AlertManager (Professional Unified Interface)
             from services.notifications.alert_manager import alert_manager
-            asyncio.create_task(alert_manager.notify_trade_entry(
+            self._safe_dispatch(alert_manager.notify_trade_entry(
                 user_id=prepared_trade.user_id,
                 trade_data={
                     "symbol": prepared_trade.stock_symbol,
@@ -502,7 +515,7 @@ class TradeExecutionHandler:
 
             # Send Alert via AlertManager (Professional Unified Interface)
             from services.notifications.alert_manager import alert_manager
-            asyncio.create_task(alert_manager.notify_trade_entry(
+            self._safe_dispatch(alert_manager.notify_trade_entry(
                 user_id=prepared_trade.user_id,
                 trade_data={
                     "symbol": prepared_trade.stock_symbol,

@@ -329,6 +329,7 @@ const AutoTradingPage = () => {
               current_price: data.current_price,
               current_pnl: data.pnl,
               current_pnl_percentage: data.pnl_percent,
+              strike_price: data.strike_price,
               stop_loss: data.stop_loss,
               trailing_stop_active: data.trailing_sl_active,
               last_updated: data.last_updated,

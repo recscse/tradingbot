@@ -71,6 +71,7 @@ class PositionPnL:
     trailing_sl_active: bool
     status: str
     last_updated: str
+    strike_price: Optional[Decimal] = None
 
 
 class RealTimePnLTracker:
@@ -167,13 +168,25 @@ class RealTimePnLTracker:
                     
                     for position in active_positions:
                         try:
+                            # CRITICAL: Check time-based exit FIRST (doesn't need live price to trigger)
+                            now_t = get_ist_now_naive().time()
+                            is_time_exit = False
+                            if now_t.hour >= 15 and now_t.minute >= 20:
+                                is_time_exit = True
+                                logger.info(f"Time-based exit triggered for {position.symbol} at {now_t}")
+
                             # Get price safely
                             price_decimal = Decimal('0')
                             if position.instrument_key in market_engine.instruments:
                                 price_decimal = Decimal(str(market_engine.instruments[position.instrument_key].current_price))
                             
+                            # If no price but it's time to exit, use entry_price or last price as fallback
                             if price_decimal <= 0:
-                                continue
+                                if is_time_exit:
+                                    # Fallback price for DB record
+                                    price_decimal = Decimal(str(position.current_price)) if position.current_price else Decimal('0')
+                                else:
+                                    continue
 
                             trade_execution = session.query(AutoTradeExecution).filter(
                                 AutoTradeExecution.id == position.trade_execution_id
@@ -225,15 +238,16 @@ class RealTimePnLTracker:
                                 position.current_stop_loss = float(new_sl)
 
                             # Check Exit
-                            should_exit = False
-                            exit_reason = None
+                            should_exit = is_time_exit
+                            exit_reason = "TIME_BASED_EXIT" if is_time_exit else None
                             
-                            if price_decimal <= new_sl:
-                                should_exit = True
-                                exit_reason = "STOP_LOSS_HIT"
-                            elif target_price and price_decimal >= target_price:
-                                should_exit = True
-                                exit_reason = "TARGET_HIT"
+                            if not should_exit:
+                                if price_decimal <= new_sl:
+                                    should_exit = True
+                                    exit_reason = "STOP_LOSS_HIT"
+                                elif target_price and price_decimal >= target_price:
+                                    should_exit = True
+                                    exit_reason = "TARGET_HIT"
                             
                             # Update Position
                             position.current_price = float(price_decimal)
@@ -266,7 +280,8 @@ class RealTimePnLTracker:
                                 highest_price=highest_price,
                                 trailing_sl_active=position.trailing_stop_triggered,
                                 status="CLOSED" if should_exit else "ACTIVE",
-                                last_updated=get_ist_isoformat()
+                                last_updated=get_ist_isoformat(),
+                                strike_price=Decimal(str(trade_execution.strike_price)) if trade_execution.strike_price else None
                             ))
 
                         except Exception as e:
@@ -891,6 +906,7 @@ class RealTimePnLTracker:
                     "current_price": float(pnl_update.current_price),
                     "pnl": float(pnl_update.pnl),
                     "pnl_percent": float(pnl_update.pnl_percent),
+                    "strike_price": float(pnl_update.strike_price) if pnl_update.strike_price else None,
                     "stop_loss": float(pnl_update.stop_loss),
                     "target": float(pnl_update.target),
                     "trailing_sl_active": pnl_update.trailing_sl_active,
