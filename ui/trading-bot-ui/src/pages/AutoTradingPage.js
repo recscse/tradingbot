@@ -64,15 +64,14 @@ const AutoTradingPage = () => {
         setActivePositions(prev => {
           let hasChanges = false;
           const newPositions = prev.map(pos => {
-            if (buffer.activePositions[pos.position_id]) {
+            const update = buffer.activePositions[pos.position_id];
+            if (update) {
               hasChanges = true;
-              return { ...pos, ...buffer.activePositions[pos.position_id] };
+              return { ...pos, ...update };
             }
             return pos;
           });
           
-          // Also handle new positions created via WS
-          // Note: Full sync is handled by fetchActivePositions, this is just for updates
           return hasChanges ? newPositions : prev;
         });
         buffer.activePositions = {};
@@ -84,9 +83,10 @@ const AutoTradingPage = () => {
           let hasChanges = false;
           const newStocks = prev.map(stock => {
             const key = stock.option_instrument_key || stock.symbol;
-            if (buffer.selectedStocks[key]) {
+            const update = buffer.selectedStocks[key];
+            if (update) {
               hasChanges = true;
-              return { ...stock, ...buffer.selectedStocks[key] };
+              return { ...stock, ...update };
             }
             return stock;
           });
@@ -98,7 +98,7 @@ const AutoTradingPage = () => {
       buffer.hasUpdates = false;
     };
 
-    const interval = setInterval(processUpdates, 500); // 500ms throttle
+    const interval = setInterval(processUpdates, 200); // 200ms throttle for better responsiveness
     return () => clearInterval(interval);
   }, []);
 
