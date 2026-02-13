@@ -117,6 +117,7 @@ class TradePrepService:
 
     def __init__(self):
         """Initialize trade preparation service"""
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.signal_validity_minutes = 15  # Signals valid for 15 minutes
         self.stats = {
             "total_preparations": 0,
@@ -133,6 +134,11 @@ class TradePrepService:
         self.last_error = None
         logger.info("Trade Preparation Service initialized")
 
+    def initialize(self, loop: asyncio.AbstractEventLoop):
+        """Initialize with event loop for thread-safe dispatch"""
+        self.loop = loop
+        logger.info("Trade Preparation Service initialized with event loop")
+
     def _update_function_health(self, func_name: str, status: str, error: str = None):
         """Update health status for a specific internal function"""
         self.function_health[func_name] = {
@@ -144,11 +150,11 @@ class TradePrepService:
     def _safe_dispatch(self, coro):
         """Safely dispatch a coroutine to the main event loop from any thread"""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.call_soon_threadsafe(lambda: asyncio.create_task(coro))
+            target_loop = self.loop or asyncio.get_event_loop()
+            if target_loop.is_running():
+                target_loop.call_soon_threadsafe(lambda: asyncio.create_task(coro))
             else:
-                asyncio.run_coroutine_threadsafe(coro, loop)
+                asyncio.run_coroutine_threadsafe(coro, target_loop)
         except Exception as e:
             logger.error(f"Error in thread-safe dispatch: {e}")
 
@@ -192,6 +198,7 @@ class TradePrepService:
         target_lots: Optional[int] = None,
         product: str = "I",
         underlying_key: Optional[str] = None,
+        current_spot_price: Optional[Decimal] = None,
     ) -> PreparedTrade:
         """
         Prepare trade with live market data already provided (optimized for auto-trading)
@@ -214,6 +221,7 @@ class TradePrepService:
             trading_mode: Paper or Live trading mode
             broker_name: Broker name (optional)
             underlying_key: Authoritative instrument key for the underlying asset (e.g. NSE_INDEX|Nifty 50)
+            current_spot_price: Current spot price of underlying (optional, used if provided)
 
         Returns:
             PreparedTrade with complete execution details
@@ -497,7 +505,8 @@ class TradePrepService:
             )
 
             # CRITICAL DEBUG: Log actual values being used for signal generation
-            spot_current_price = Decimal(str(historical_data["close"][-1]))
+            # Use provided current_spot_price or fallback to last closed candle
+            spot_current_price = current_spot_price if current_spot_price is not None else Decimal(str(historical_data["close"][-1]))
             
             # CHECK ATM DISTANCE (Verify if selection is still relevant)
             try:
@@ -559,7 +568,7 @@ class TradePrepService:
             # Convert spot signal to premium signal (only for valid signals)
             premium_signal = strategy_engine.convert_spot_signal_to_premium(
                 signal=spot_signal,
-                spot_price=Decimal(str(historical_data["close"][-1])),
+                spot_price=spot_current_price,
                 option_premium=current_premium,
                 option_delta=option_greeks.get("delta") if option_greeks else None,
             )
