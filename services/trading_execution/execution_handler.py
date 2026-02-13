@@ -69,17 +69,25 @@ class TradeExecutionHandler:
 
     def __init__(self):
         """Initialize execution handler"""
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
         logger.info("Trade Execution Handler initialized")
+
+    def initialize(self, loop: asyncio.AbstractEventLoop):
+        """Initialize with event loop for thread-safe dispatch"""
+        self.loop = loop
+        logger.info("Trade Execution Handler initialized with event loop")
 
     def _safe_dispatch(self, coro):
         """Safely dispatch a coroutine to the main event loop from any thread"""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.call_soon_threadsafe(lambda: asyncio.create_task(coro))
+            # Use stored loop or try to get current one
+            target_loop = self.loop or asyncio.get_event_loop()
+            
+            if target_loop.is_running():
+                target_loop.call_soon_threadsafe(lambda: asyncio.create_task(coro))
             else:
                 # If loop not running, we might be in startup/shutdown
-                asyncio.run_coroutine_threadsafe(coro, loop)
+                asyncio.run_coroutine_threadsafe(coro, target_loop)
         except Exception as e:
             logger.error(f"Error in thread-safe dispatch: {e}")
 

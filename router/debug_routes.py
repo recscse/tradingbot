@@ -908,7 +908,8 @@ async def debug_complete_trading_flow():
                 open_interest=instrument.open_interest,
                 volume=instrument.volume,
                 bid_price=instrument.bid_price,
-                ask_price=instrument.ask_price
+                ask_price=instrument.ask_price,
+                current_spot_price=simulated_spot_price
             )
 
             flow_results["step_6_trade_preparation"] = {

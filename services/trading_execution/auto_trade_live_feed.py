@@ -107,6 +107,9 @@ class AutoTradeLiveFeed:
         # Cooldown tracking (user_id -> {stock_symbol -> last_exit_time})
         self.user_last_exit_times: Dict[int, Dict[str, datetime]] = {}
 
+        # Attempt cooldown tracking (user_id -> {instrument_key -> last_attempt_time})
+        self.user_last_attempt_times: Dict[int, Dict[str, datetime]] = {}
+
         logger.info("Auto-Trading Live Feed Service (REFACTORED) initialized")
 
     def _set_service_error(self, component: str, error: str):
@@ -1100,15 +1103,34 @@ class AutoTradeLiveFeed:
 
             # Quick check using in-memory positions first (fast path)
             for user_id in subscribed_users:
-                has_position_in_memory = (
+                # Check if user has position in THIS specific instrument
+                has_instrument_position = (
                     user_id in self.active_user_positions
                     and instrument.option_instrument_key
                     in self.active_user_positions[user_id]
                 )
+                
+                # Check if user has ANY position for this STOCK SYMBOL (symbol-aware check)
+                # We always check DB for full accuracy on symbol to handle service restarts
+                has_symbol_position = False
+                db = SessionLocal()
+                try:
+                    db_symbol_pos = (
+                        db.query(ActivePosition)
+                        .join(AutoTradeExecution, ActivePosition.trade_execution_id == AutoTradeExecution.id)
+                        .filter(
+                            AutoTradeExecution.user_id == user_id,
+                            AutoTradeExecution.symbol == instrument.stock_symbol,
+                            ActivePosition.is_active == True
+                        )
+                        .first()
+                    )
+                    has_symbol_position = db_symbol_pos is not None
+                finally:
+                    db.close()
 
                 # For critical decisions, also check database (slower but accurate)
-                # This ensures correctness after service restarts
-                has_position = has_position_in_memory
+                has_position = has_instrument_position or has_symbol_position
 
                 # If memory says no position but this is an EXIT signal, double-check DB
                 # to avoid missing positions after service restart
@@ -1270,6 +1292,26 @@ class AutoTradeLiveFeed:
         """
         import asyncio
         logger.info(f"Executing trade for user {user_id}: {instrument.stock_symbol}")
+
+        # ADDED: Cooldown check to prevent spamming attempts for the same instrument
+        # CRITICAL: Do NOT apply cooldown to EXIT signals, only to ENTRY signals
+        is_exit_signal = signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT)
+        
+        now = datetime.now()
+        if not is_exit_signal and user_id in self.user_last_attempt_times:
+            last_attempt = self.user_last_attempt_times[user_id].get(instrument.option_instrument_key)
+            if last_attempt and (now - last_attempt).total_seconds() < 3:
+                logger.debug(
+                    f"⏭️ Skipping entry attempt for user {user_id}, {instrument.stock_symbol} - "
+                    f"cooldown active (last attempt {int((now - last_attempt).total_seconds())}s ago)"
+                )
+                return
+
+        # Initialize or update last attempt time (only for entries)
+        if not is_exit_signal:
+            if user_id not in self.user_last_attempt_times:
+                self.user_last_attempt_times[user_id] = {}
+            self.user_last_attempt_times[user_id][instrument.option_instrument_key] = now
 
         # CRITICAL: Check if market is open before executing trades
         if not is_market_open():
@@ -1475,7 +1517,22 @@ class AutoTradeLiveFeed:
                     return
             else:
                 # ENTRY signal (BUY/SELL): Only process if no position exists
-                if has_position:
+                # SYMBOL-AWARE CHECK: Verify if user has ANY position for this stock
+                db_symbol_position = (
+                    db.query(ActivePosition)
+                    .join(
+                        AutoTradeExecution,
+                        ActivePosition.trade_execution_id == AutoTradeExecution.id,
+                    )
+                    .filter(
+                        AutoTradeExecution.user_id == user_id,
+                        AutoTradeExecution.symbol == instrument.stock_symbol,
+                        ActivePosition.is_active == True,
+                    )
+                    .first()
+                )
+                
+                if has_position or db_symbol_position:
                     logger.info(
                         f"⏭️ User {user_id} already has position in {instrument.stock_symbol} - skipping entry signal"
                     )
@@ -1484,7 +1541,7 @@ class AutoTradeLiveFeed:
                         {
                             "symbol": instrument.stock_symbol,
                             "signal_type": signal.signal_type.value,
-                            "reason": "Position already exists",
+                            "reason": "Position already exists for this stock",
                             "user_id": user_id,
                             "timestamp": get_ist_isoformat(),
                         },
@@ -1576,6 +1633,7 @@ class AutoTradeLiveFeed:
                 ask_price=instrument.ask_price,
                 target_lots=instrument.target_lots,
                 underlying_key=instrument.spot_instrument_key,
+                current_spot_price=instrument.live_spot_price,
             )
 
             prepared_status = getattr(prepared_trade, "status", None)
@@ -1776,8 +1834,13 @@ class AutoTradeLiveFeed:
             else:
                 # Trade preparation failed or not ready
                 metadata = getattr(prepared_trade, "metadata", {})
-                error_reason = metadata.get("error", "Unknown reason")
-                logger.warning(
+                error_reason = metadata.get("error", metadata.get("reason", "Unknown reason"))
+                
+                # Use INFO for pending signals to avoid log spam, WARNING for actual errors
+                log_level = logging.INFO if prepared_status_value == "pending_signal" else logging.WARNING
+                
+                logger.log(
+                    log_level,
                     f"Trade not ready for user {user_id}: "
                     f"status={prepared_status_value}, "
                     f"symbol={instrument.stock_symbol}, "

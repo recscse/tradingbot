@@ -400,6 +400,63 @@ class UpstoxOptionService:
             logger.error(f"Error getting option chain: {e}")
             return None
 
+    def get_atm_keys(
+        self, instrument_key: str, expiry_date: str, db: Session
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Helper method to specifically get ATM CE and PE keys.
+        Returns: {"ce_key": str, "pe_key": str, "atm_strike": float, "lot_size": int}
+        """
+        try:
+            chain_data = self.get_option_chain(instrument_key, expiry_date, db)
+            if not chain_data or not chain_data.get("data"):
+                return None
+
+            atm_strike = chain_data.get("atm_strike")
+            if not atm_strike:
+                return None
+
+            ce_key = None
+            pe_key = None
+
+            # Find the specific strike in the chain data
+            for item in chain_data["data"]:
+                if float(item.get("strike_price", 0)) == atm_strike:
+                    if "call_options" in item and item["call_options"]:
+                        ce_key = item["call_options"].get("instrument_key")
+                    if "put_options" in item and item["put_options"]:
+                        pe_key = item["put_options"].get("instrument_key")
+                    break
+
+            # Fallback: if exact match not found (due to floating point), find nearest
+            if not ce_key or not pe_key:
+                closest_item = min(
+                    chain_data["data"],
+                    key=lambda x: abs(float(x.get("strike_price", 0)) - atm_strike),
+                )
+                if "call_options" in closest_item and closest_item["call_options"]:
+                    ce_key = closest_item["call_options"].get("instrument_key")
+                if "put_options" in closest_item and closest_item["put_options"]:
+                    pe_key = closest_item["put_options"].get("instrument_key")
+
+            # Get lot size from contracts
+            contracts = self.get_option_contracts(instrument_key, db, expiry_date)
+            lot_size = 0
+            if contracts:
+                lot_size = int(
+                    contracts[0].get("lot_size") or contracts[0].get("minimum_lot", 0)
+                )
+
+            return {
+                "ce_key": ce_key,
+                "pe_key": pe_key,
+                "atm_strike": atm_strike,
+                "lot_size": lot_size,
+            }
+        except Exception as e:
+            logger.error(f"Error in get_atm_keys: {e}")
+            return None
+
     def _calculate_max_pain(self, df: pd.DataFrame) -> float:
         """Calculate max pain point using pandas"""
         try:

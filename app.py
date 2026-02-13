@@ -466,6 +466,18 @@ async def lifespan(app: FastAPI):
     )
     log_structured(event="APP_STARTUP_START", message="Starting Enhanced Trading Application")
 
+    # Initialize execution handlers with event loop for thread-safe dispatch
+    try:
+        loop = asyncio.get_running_loop()
+        from services.trading_execution.execution_handler import execution_handler
+        from services.trading_execution.trade_prep import trade_prep_service
+        
+        execution_handler.initialize(loop)
+        trade_prep_service.initialize(loop)
+        logger.info("✅ Execution handlers initialized with event loop for thread-safe dispatch.")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize execution handlers with loop: {e}")
+
     try:
         # 1. DB initialization
         db = next(get_db())
