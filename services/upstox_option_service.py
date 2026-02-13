@@ -117,6 +117,41 @@ class UpstoxOptionService:
             logger.error(f"Error making Upstox request: {e}")
             return None
 
+    def get_fast_option_selection_data(
+        self, instrument_key: str, db: Session
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Optimized fetch of expiries and lot size for an underlying.
+        Returns: {"expiries": List[str], "lot_size": int, "nearest_expiry": str, "chain": Dict}
+        """
+        try:
+            contracts = self.get_option_contracts(instrument_key, db)
+            if not contracts:
+                return None
+
+            # Extract unique expiries and sort them
+            expiries = sorted(list(set(c.get("expiry") for c in contracts if c.get("expiry"))))
+            if not expiries:
+                return None
+                
+            nearest_expiry = expiries[0]
+            
+            # Get chain for nearest expiry
+            chain = self.get_option_chain(instrument_key, nearest_expiry, db)
+
+            # Extract lot size from the first contract
+            lot_size = contracts[0].get("lot_size") or contracts[0].get("minimum_lot", 0)
+
+            return {
+                "expiries": expiries,
+                "lot_size": int(lot_size),
+                "nearest_expiry": nearest_expiry,
+                "chain": chain
+            }
+        except Exception as e:
+            logger.error(f"Error in get_fast_option_selection_data: {e}")
+            return None
+
     def get_option_contracts(
         self, instrument_key: str, db: Session, expiry_date: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
