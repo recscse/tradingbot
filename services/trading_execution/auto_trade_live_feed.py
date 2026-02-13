@@ -1749,6 +1749,7 @@ class AutoTradeLiveFeed:
                                 )
                             )
                         ),
+                        "quantity": getattr(exec_result, "quantity", 0),
                         "stop_loss": getattr(signal, "stop_loss", Decimal("0")),
                         "target": getattr(signal, "target_price", Decimal("0")),
                     }
@@ -1972,7 +1973,36 @@ class AutoTradeLiveFeed:
                 update_pnl_db_job, users_to_update, current_price
             )
 
-            # 3. Process exits (if any) - these involve more DB ops but are infrequent
+            # 3. BROADCAST UPDATES TO UI (CRITICAL for live price/pnl updates)
+            for uid in users_to_update:
+                position_data = self.active_user_positions[uid].get(instrument.option_instrument_key)
+                if not position_data:
+                    continue
+                
+                # Calculate live PnL for broadcast using exact quantity from memory
+                entry_price = position_data["entry_price"]
+                quantity = position_data.get("quantity", instrument.lot_size * instrument.target_lots)
+                pnl = (current_price - entry_price) * Decimal(str(quantity))
+                pnl_percent = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                
+                await broadcast_to_clients(
+                    "pnl_update",
+                    {
+                        "position_id": position_data.get("position_id"),
+                        "symbol": instrument.stock_symbol,
+                        "instrument_key": instrument.option_instrument_key,
+                        "current_price": float(current_price),
+                        "pnl": float(pnl),
+                        "pnl_percent": float(pnl_percent),
+                        "strike_price": float(instrument.strike_price),
+                        "stop_loss": float(position_data.get("stop_loss", 0)),
+                        "target": float(position_data.get("target", 0)),
+                        "user_id": uid,
+                        "timestamp": get_ist_isoformat(),
+                    },
+                )
+
+            # 4. Process exits (if any) - these involve more DB ops but are infrequent
             if exits_needed:
                 db_session = SessionLocal()
                 try:
@@ -2469,6 +2499,7 @@ class AutoTradeLiveFeed:
                                 "instrument_key": trade.instrument_key,
                                 "position_id": pos.id,
                                 "entry_price": Decimal(str(trade.entry_price)),
+                                "quantity": trade.quantity,
                                 "stop_loss": (
                                     Decimal(str(trade.initial_stop_loss))
                                     if trade.initial_stop_loss
@@ -2499,6 +2530,7 @@ class AutoTradeLiveFeed:
                 self.active_user_positions[user_id][instrument_key] = {
                     "position_id": pos_data["position_id"],
                     "entry_price": pos_data["entry_price"],
+                    "quantity": pos_data.get("quantity", 0),
                     "stop_loss": pos_data["stop_loss"],
                     "target": pos_data["target"],
                 }

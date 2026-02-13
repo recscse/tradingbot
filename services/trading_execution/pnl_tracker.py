@@ -180,12 +180,14 @@ class RealTimePnLTracker:
                             if position.instrument_key in market_engine.instruments:
                                 price_decimal = Decimal(str(market_engine.instruments[position.instrument_key].current_price))
                             
-                            # If no price but it's time to exit, use entry_price or last price as fallback
+                            # LOG MISSING PRICE FOR DEBUGGING (Slow updates issue)
                             if price_decimal <= 0:
+                                logger.debug(f"⚠️ Missing price for {position.symbol} (Key: {position.instrument_key}) in Market Engine")
                                 if is_time_exit:
                                     # Fallback price for DB record
                                     price_decimal = Decimal(str(position.current_price)) if position.current_price else Decimal('0')
                                 else:
+                                    # Skip calculation if no price and not time to exit
                                     continue
 
                             trade_execution = session.query(AutoTradeExecution).filter(
@@ -712,11 +714,6 @@ class RealTimePnLTracker:
 
             # Define DB Update Job
             def db_close_job(pos_id, trade_id, price, reason, order_id):
-                # We need to re-fetch objects inside the thread if we want to be safe, 
-                # but since we are passed 'db' session which is managed by caller (update_all_positions creates new session for exits),
-                # we can use it. However, to_thread runs in another thread. SQLAlchemy session is not thread-safe if shared.
-                # BUT: update_all_positions calls this sequentially and awaits it.
-                # So no concurrent access to 'db' session. It should be fine.
                 try:
                     # Calculate final PnL
                     entry_price = Decimal(str(trade_execution.entry_price))
@@ -882,8 +879,6 @@ class RealTimePnLTracker:
 
         except Exception as e:
             logger.error(f"Error closing position: {e}")
-            # Ensure DB is rolled back if possible (though we passed it to thread, if thread failed it rolled back)
-            # If error is outside thread, we should probably check.
             pass
 
     async def _broadcast_pnl_updates(self, pnl_updates: List[PositionPnL]):
@@ -956,17 +951,44 @@ class RealTimePnLTracker:
 
             active_positions = query.all()
 
-            total_pnl = sum(
-                Decimal(str(pos.current_pnl)) for pos in active_positions
-            )
+            from services.realtime_market_engine import get_market_engine
+            market_engine = get_market_engine()
 
+            total_pnl = Decimal('0')
             total_investment = Decimal('0')
+
             for pos in active_positions:
                 trade = db.query(AutoTradeExecution).filter(
                     AutoTradeExecution.id == pos.trade_execution_id
                 ).first()
-                if trade:
-                    total_investment += Decimal(str(trade.entry_price)) * Decimal(str(trade.quantity))
+                if not trade:
+                    continue
+
+                # Get entry price and quantity
+                entry_price = Decimal(str(trade.entry_price))
+                quantity = trade.quantity
+                investment = entry_price * Decimal(str(quantity))
+                total_investment += investment
+
+                # Get current price (LTP) from market engine
+                current_price = Decimal('0')
+                if pos.instrument_key in market_engine.instruments:
+                    current_price = Decimal(str(market_engine.instruments[pos.instrument_key].current_price))
+                
+                # Fallback to DB price if not in engine
+                if current_price <= 0:
+                    current_price = Decimal(str(pos.current_price)) if pos.current_price else entry_price
+
+                # Calculate live PnL for summary
+                pnl_points = current_price - entry_price
+                gross_pnl = pnl_points * Decimal(str(quantity))
+                
+                # Estimated charges
+                buy_val = entry_price * Decimal(str(quantity))
+                sell_val = current_price * Decimal(str(quantity))
+                est_charges = Decimal('40.0') + ((buy_val + sell_val) * Decimal('0.001'))
+                
+                total_pnl += (gross_pnl - est_charges)
 
             return {
                 "user_id": user_id,
