@@ -13,6 +13,7 @@ Market Sentiment → Sector Analysis → Stock Selection → Value Ranking
 
 import logging
 import time
+import json
 from datetime import datetime, time as dt_time, date
 from typing import Dict, List, Any, Optional, Tuple
 from decimal import Decimal
@@ -1185,10 +1186,24 @@ class IntelligentStockSelectionService:
                     )
                 else:
                     result["database_saved"] = False
-                    logger.warning("⚠️ Failed to save validated selections to database")
+                    result["available_for_autotrading"] = False
+                    error_msg = "⚠️ Failed to save validated selections to database"
+                    logger.warning(error_msg)
+                    log_to_db(
+                        component="stock_selection",
+                        message=error_msg,
+                        level="WARNING"
+                    )
             except Exception as db_error:
-                logger.error(f"❌ Database save error: {db_error}")
+                error_msg = f"❌ Database save error: {db_error}"
+                logger.error(error_msg)
+                log_to_db(
+                    component="stock_selection",
+                    message=error_msg,
+                    level="ERROR"
+                )
                 result["database_saved"] = False
+                result["available_for_autotrading"] = False
 
             # Enhance final selections with option contracts
             try:
@@ -1433,7 +1448,13 @@ class IntelligentStockSelectionService:
             return True
 
         except Exception as e:
-            logger.error(f"❌ Error saving selections to database: {e}")
+            error_msg = f"❌ Error saving selections to database: {e}"
+            logger.error(error_msg)
+            log_to_db(
+                component="stock_selection",
+                message=error_msg,
+                level="ERROR"
+            )
             if db:
                 db.rollback()
             return False

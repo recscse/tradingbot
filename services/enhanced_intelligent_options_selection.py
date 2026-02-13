@@ -527,8 +527,14 @@ class EnhancedIntelligentOptionsService:
             )
             return None
         except Exception as e:
-            logger.error(
-                f"Error enhancing stock with options for {stock_selection.symbol}: {e}"
+            error_msg = f"Error enhancing stock with options for {stock_selection.symbol}: {e}"
+            logger.error(error_msg)
+            from utils.logging_utils import log_to_db
+            log_to_db(
+                component="option_selection",
+                message=error_msg,
+                level="ERROR",
+                symbol=stock_selection.symbol
             )
             return None
 
@@ -553,7 +559,14 @@ class EnhancedIntelligentOptionsService:
             return data["expiries"][:10], data["lot_size"]
 
         except Exception as e:
-            logger.error(f"Error getting expiry dates for {underlying_key}: {e}")
+            error_msg = f"Error getting expiry dates for {underlying_key}: {e}"
+            logger.error(error_msg)
+            from utils.logging_utils import log_to_db
+            log_to_db(
+                component="option_selection",
+                message=error_msg,
+                level="ERROR"
+            )
             return [], 0
 
     async def _select_optimal_expiry(
