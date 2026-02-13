@@ -22,7 +22,7 @@ const getPnlColor = (value) => {
 const ActivePositionCard = memo(({ position, onClose }) => {
   const isProfit = position.current_pnl >= 0;
   const optionType = position.option_type || (position.signal_type?.includes("CE") ? "CE" : "PE");
-  const strikeDisplay = position.strike_price ? parseFloat(position.strike_price).toFixed(0) : "";
+  const strikeDisplay = position.strike_price ? parseFloat(position.strike_price).toFixed(0) : "N/A";
   
   return (
     <div
@@ -39,7 +39,7 @@ const ActivePositionCard = memo(({ position, onClose }) => {
           <div className="tw-space-y-1">
             <div className="tw-flex tw-items-center tw-gap-2">
               <h3 className="tw-text-base tw-font-bold tw-text-white tw-tracking-tight">
-                {position.symbol} <span className="tw-text-cyan-400">{strikeDisplay}</span> {optionType}
+                {position.symbol} <span className="tw-text-cyan-400 tw-ml-1">{strikeDisplay}</span> <span className="tw-text-slate-400">{optionType}</span>
               </h3>
               <span className={`tw-text-[9px] tw-px-1.5 tw-py-0.5 tw-rounded tw-font-black tw-tracking-widest ${
                 isProfit ? 'tw-bg-emerald-500/10 tw-text-emerald-400 tw-border tw-border-emerald-500/20' : 'tw-bg-rose-500/10 tw-text-rose-400 tw-border tw-border-rose-500/20'
