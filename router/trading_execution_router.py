@@ -505,6 +505,7 @@ def get_active_positions(
                     "instrument_key": position.instrument_key,
                     "entry_price": float(trade.entry_price),
                     "strike_price": float(trade.strike_price) if trade.strike_price else None,
+                    "expiry_date": trade.expiry_date,
                     "current_price": (
                         float(position.current_price)
                         if position.current_price
@@ -1117,6 +1118,7 @@ def get_trade_history(
                     "symbol": trade.symbol,
                     "signal_type": trade.signal_type,
                     "strike_price": float(trade.strike_price) if trade.strike_price else 0,
+                    "expiry_date": trade.expiry_date,
                     "entry_time": (
                         trade.entry_time.isoformat() if trade.entry_time else None
                     ),

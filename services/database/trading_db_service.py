@@ -75,6 +75,8 @@ class TradingDatabaseService:
                 strategy_name=trade_data.get('strategy_name', 'fibonacci_ema'),
                 signal_type=trade_data['signal_type'],  # BUY_CE, BUY_PE
                 signal_strength=Decimal(str(trade_data.get('signal_strength', 0))),
+                strike_price=Decimal(str(trade_data.get('strike_price', 0))) if trade_data.get('strike_price') else None,
+                expiry_date=trade_data.get('expiry_date'),
                 
                 # Fibonacci strategy specific data
                 fibonacci_levels=trade_data.get('fibonacci_levels', {}),
@@ -550,6 +552,8 @@ class TradingDatabaseService:
                     'current_pnl_percentage': float(pos.current_pnl_percentage) if pos.current_pnl_percentage else 0,
                     'current_stop_loss': float(pos.current_stop_loss) if pos.current_stop_loss else None,
                     'entry_price': float(pos.trade_execution.entry_price),
+                    'strike_price': float(pos.trade_execution.strike_price) if pos.trade_execution.strike_price else 0,
+                    'expiry_date': pos.trade_execution.expiry_date,
                     'quantity': pos.trade_execution.quantity,
                     'signal_type': pos.trade_execution.signal_type,
                     'entry_time': pos.trade_execution.entry_time.isoformat()
@@ -663,6 +667,7 @@ class TradingDatabaseService:
                 'strategy_name': 'fibonacci_ema_hft',
                 'signal_type': f"{signal_data.get('signal_type', 'HOLD')}_{signal_data.get('option_type', 'CE')}",
                 'signal_strength': signal_data.get('signal_strength', 0),
+                'strike_price': signal_data.get('strike_price', 0),
                 'fibonacci_levels': {
                     'level_name': signal_data.get('fibonacci_level'),
                     'level_value': signal_data.get('fibonacci_value'),
@@ -963,6 +968,8 @@ class TradingDatabaseService:
                     'trade_id': exec.trade_id,
                     'symbol': exec.symbol,
                     'signal_type': exec.signal_type,
+                    'strike_price': float(exec.strike_price) if exec.strike_price else 0,
+                    'expiry_date': exec.expiry_date,
                     'entry_price': float(exec.entry_price) if exec.entry_price else 0,
                     'quantity': exec.quantity,
                     'status': exec.status,

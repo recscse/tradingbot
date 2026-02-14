@@ -1228,6 +1228,7 @@ class AutoTradeExecution(Base):
     signal_type = Column(String(10), nullable=False)  # BUY_CE, BUY_PE
     signal_strength = Column(Numeric(5, 2))  # 0-100 score
     strike_price = Column(Numeric(10, 2), nullable=True)  # Option strike price
+    expiry_date = Column(String(20), nullable=True)  # Option expiry date (e.g., 2025-11-20)
 
     # Fibonacci Strategy Specific (JSON fields for complex data)
     fibonacci_levels = Column(JSON)  # All fib levels at entry {fib_23_6: 2450.50, ...}
