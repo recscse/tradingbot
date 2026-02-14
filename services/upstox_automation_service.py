@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import pyotp
 import pytz  # ✅ Added pytz import
 import requests
+from filelock import FileLock
 from playwright.async_api import async_playwright
 from sqlalchemy.orm import Session
 
@@ -241,8 +242,8 @@ class UpstoxAutomationService:
                 try:
                     await page.goto(auth_url, timeout=45000, wait_until="domcontentloaded") # Increased timeout
                 except Exception as nav_err:
-                     logger.error(f"Navigation timed out: {nav_err}")
-                     # Try to proceed anyway, maybe it loaded enough
+                    logger.error(f"Navigation timed out: {nav_err}")
+                    # Try to proceed anyway, maybe it loaded enough
                 
                 logger.info("✅ Navigated to Upstox auth page")
 
@@ -518,6 +519,21 @@ class UpstoxAutomationService:
         """
         global _refresh_in_progress, _last_refresh_attempt
 
+        # CROSS-PROCESS LOCK: Prevent multiple processes/threads from doing automation simultaneously
+        lock_path = Path("logs/upstox_automation.lock")
+        lock_path.parent.mkdir(exist_ok=True)
+        
+        # Check for recent success to avoid spamming if multiple triggers happen close together
+        success_file = Path("logs/upstox_refresh.success")
+        if not emergency_bypass and success_file.exists():
+            try:
+                last_success_time = datetime.fromtimestamp(success_file.stat().st_mtime)
+                if (datetime.now() - last_success_time).total_seconds() < 60: # 1 minute cooldown
+                    logger.info("✅ Token was recently refreshed successfully (within 1m), skipping duplicate attempt")
+                    return {"success": True, "message": "Already refreshed recently"}
+            except Exception:
+                pass
+
         # Use loop-specific lock to prevent concurrent refresh attempts within the same loop
         automation_lock = _get_automation_lock()
         
@@ -527,83 +543,96 @@ class UpstoxAutomationService:
             return {"success": False, "error": "No active event loop"}
 
         async with automation_lock:
-            # ✅ CRITICAL FIX: Always allow refresh if emergency_bypass=True or token is expired
-            now = datetime.now()
-            should_proceed = emergency_bypass
-            
-            log_structured(
-                event="TOKEN_REFRESH_ATTEMPT", 
-                message="Starting admin token refresh attempt",
-                data={"emergency_bypass": emergency_bypass}
-            )
-
-            # Check if token is actually expired - always allow refresh for expired tokens
+            # Use FileLock for cross-process/cross-thread protection (e.g. Scheduler thread vs Main loop task)
+            # Timeout increased to 30s to allow one automation to finish while another waits
             try:
-                db = SessionLocal()
-                admin_broker = self.get_admin_broker_config(db)
-                if admin_broker and admin_broker.access_token_expiry:
-                    if admin_broker.access_token_expiry < now:
-                        should_proceed = True
-                        logger.info(
-                            "🚨 Token expired - proceeding with emergency refresh"
-                        )
-                    # Test current token validity if near expiry
-                    elif (
-                        admin_broker.access_token_expiry - now
-                    ).total_seconds() < 600:  # 10 minutes
-                        try:
-                            if not self._test_token_validity(admin_broker.access_token):
-                                should_proceed = True
-                                logger.info(
-                                    "🚨 Token failed API validation - proceeding with refresh"
-                                )
-                        except Exception:
+                with FileLock(str(lock_path), timeout=30):
+                    # ✅ CRITICAL FIX: Always allow refresh if emergency_bypass=True or token is expired
+                    now = datetime.now()
+                    should_proceed = emergency_bypass
+                
+                log_structured(
+                    event="TOKEN_REFRESH_ATTEMPT", 
+                    message="Starting admin token refresh attempt",
+                    data={"emergency_bypass": emergency_bypass}
+                )
+
+                # Check if token is actually expired - always allow refresh for expired tokens
+                try:
+                    db = SessionLocal()
+                    admin_broker = self.get_admin_broker_config(db)
+                    if admin_broker and admin_broker.access_token_expiry:
+                        if admin_broker.access_token_expiry < now:
                             should_proceed = True
                             logger.info(
-                                "🚨 Token validation error - proceeding with refresh"
+                                "🚨 Token expired - proceeding with emergency refresh"
                             )
-                db.close()
-            except Exception as e:
-                logger.warning(f"Could not check token status: {e}")
-                should_proceed = True  # Proceed if we can't verify
+                        # Test current token validity if near expiry
+                        elif (
+                            admin_broker.access_token_expiry - now
+                        ).total_seconds() < 600:  # 10 minutes
+                            try:
+                                if not self._test_token_validity(admin_broker.access_token):
+                                    should_proceed = True
+                                    logger.info(
+                                        "🚨 Token failed API validation - proceeding with refresh"
+                                    )
+                            except Exception:
+                                should_proceed = True
+                                logger.info(
+                                    "🚨 Token validation error - proceeding with refresh"
+                                )
+                    db.close()
+                except Exception as e:
+                    logger.warning(f"Could not check token status: {e}")
+                    should_proceed = True  # Proceed if we can't verify
 
-            # Use threading lock to protect global state check across loops/threads
-            with _sync_lock:
-                # Only check cooldown if not in emergency/expired mode
-                if not should_proceed:
-                    if (
-                        _last_refresh_attempt
-                        and (now - _last_refresh_attempt).seconds < 120
-                    ):
-                        logger.warning(
-                            "⏳ Token refresh attempted recently, skipping duplicate request"
-                        )
-                        log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped due to cooldown")
-                        return {
-                            "success": False,
-                            "error": "Token refresh attempted recently. Please wait before retrying.",
-                            "retry_after_seconds": 120
-                            - (now - _last_refresh_attempt).seconds,
-                        }
-
-                    if _refresh_in_progress:
-                        logger.warning(
-                            "⏳ Token refresh already in progress, skipping duplicate request"
-                        )
-                        log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped - already in progress")
-                        return {
-                            "success": False,
-                            "error": "Token refresh already in progress",
-                        }
-
-                _refresh_in_progress = True
-                _last_refresh_attempt = now
-
-            try:
-                return await self._perform_token_refresh()
-            finally:
+                # Use threading lock to protect global state check across loops/threads
                 with _sync_lock:
-                    _refresh_in_progress = False
+                    # Only check cooldown if not in emergency/expired mode
+                    if not should_proceed:
+                        if (
+                            _last_refresh_attempt
+                            and (now - _last_refresh_attempt).seconds < 60
+                        ):
+                            logger.warning(
+                                "⏳ Token refresh attempted recently, skipping duplicate request"
+                            )
+                            log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped due to cooldown")
+                            return {
+                                "success": False,
+                                "error": "Token refresh attempted recently. Please wait before retrying.",
+                                "retry_after_seconds": 60
+                                - (now - _last_refresh_attempt).seconds,
+                            }
+
+                        if _refresh_in_progress:
+                            logger.warning(
+                                "⏳ Token refresh already in progress, skipping duplicate request"
+                            )
+                            log_structured(event="TOKEN_REFRESH_SKIPPED", level="WARNING", message="Token refresh skipped - already in progress")
+                            return {
+                                "success": False,
+                                "error": "Token refresh already in progress",
+                            }
+
+                    _refresh_in_progress = True
+                    _last_refresh_attempt = now
+
+                try:
+                    result = await self._perform_token_refresh()
+                    if result.get("success"):
+                        # Mark success to prevent immediate retries from other triggers
+                        success_file.touch()
+                    return result
+                finally:
+                    with _sync_lock:
+                        _refresh_in_progress = False
+            except Exception as e:
+                if "timeout" in str(e).lower():
+                    logger.info("⏳ Another refresh process is holding the lock, skipping this attempt")
+                    return {"success": True, "message": "Another process is already refreshing"}
+                raise e
 
     async def _perform_token_refresh(self) -> Dict:
         """
@@ -907,15 +936,18 @@ class UpstoxTokenScheduler:
                 time.sleep(60)
 
     def _run_refresh(self):
+        global _refresh_in_progress
         logger.info("⏰ Scheduled admin token refresh triggered")
         try:
             # Check if refresh is already in progress (global flag)
-            global _refresh_in_progress
             if _refresh_in_progress:
                 logger.warning(
                     "🔄 Token refresh already in progress, skipping scheduled refresh"
                 )
                 return
+
+            # Set flag immediately BEFORE spawning thread
+            _refresh_in_progress = True
 
             def run_async_refresh():
                 loop = asyncio.new_event_loop()
@@ -936,6 +968,9 @@ class UpstoxTokenScheduler:
                 except Exception as e:
                     logger.error(f"❌ Exception during scheduled refresh: {e}")
                 finally:
+                    # Reset flag after thread finishes
+                    global _refresh_in_progress
+                    _refresh_in_progress = False
                     loop.close()
 
             refresh_thread = threading.Thread(target=run_async_refresh, daemon=True)
@@ -943,6 +978,8 @@ class UpstoxTokenScheduler:
 
         except Exception as e:
             logger.error(f"❌ Scheduled admin refresh failed: {e}")
+            # Ensure flag is reset on error if thread didn't start
+            _refresh_in_progress = False
 
     def validate_and_refresh_if_needed(self):
         """
