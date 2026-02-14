@@ -4,6 +4,11 @@ Includes structured logging, error tracking, audit trails, and compliance loggin
 """
 import logging
 import logging.handlers
+try:
+    from concurrent_log_handler import ConcurrentRotatingFileHandler
+    HAS_CONCURRENT_LOG = True
+except ImportError:
+    HAS_CONCURRENT_LOG = False
 import json
 import sys
 import traceback
@@ -71,14 +76,22 @@ class AuditLogger:
         # Remove default handlers to avoid duplication
         self.logger.handlers.clear()
         
-        # File handler for audit logs (daily rotation)
-        audit_handler = logging.handlers.TimedRotatingFileHandler(
-            filename=self.log_dir / 'audit.log',
-            when='midnight',
-            interval=1,
-            backupCount=365,  # Keep 1 year of audit logs
-            encoding='utf-8'
-        )
+        # File handler for audit logs (concurrent-safe rotation)
+        if HAS_CONCURRENT_LOG:
+            audit_handler = ConcurrentRotatingFileHandler(
+                filename=self.log_dir / 'audit.log',
+                mode='a',
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=365,
+                encoding='utf-8'
+            )
+        else:
+            audit_handler = logging.handlers.RotatingFileHandler(
+                filename=self.log_dir / 'audit.log',
+                maxBytes=10 * 1024 * 1024,
+                backupCount=365,
+                encoding='utf-8'
+            )
         audit_handler.setFormatter(TradingFormatter())
         self.logger.addHandler(audit_handler)
         
@@ -193,13 +206,21 @@ class TradingLogger:
         logger.addHandler(console_handler)
         
         # File handler with rotation
-        file_handler = logging.handlers.TimedRotatingFileHandler(
-            filename=self.log_dir / "application" / "app.log",
-            when='midnight',
-            interval=1,
-            backupCount=30,
-            encoding='utf-8'
-        )
+        if HAS_CONCURRENT_LOG:
+            file_handler = ConcurrentRotatingFileHandler(
+                filename=self.log_dir / "application" / "app.log",
+                mode='a',
+                maxBytes=10 * 1024 * 1024, # 10MB
+                backupCount=30,
+                encoding='utf-8'
+            )
+        else:
+            file_handler = logging.handlers.RotatingFileHandler(
+                filename=self.log_dir / "application" / "app.log",
+                maxBytes=10 * 1024 * 1024,
+                backupCount=30,
+                encoding='utf-8'
+            )
         file_handler.setFormatter(TradingFormatter())
         logger.addHandler(file_handler)
         
@@ -219,13 +240,21 @@ class TradingLogger:
         trading_logger.setLevel(logging.INFO)
         
         # Trading operations log
-        trading_handler = logging.handlers.TimedRotatingFileHandler(
-            filename=self.log_dir / "trading" / "trading.log",
-            when='midnight',
-            interval=1,
-            backupCount=90,  # Keep 3 months of trading logs
-            encoding='utf-8'
-        )
+        if HAS_CONCURRENT_LOG:
+            trading_handler = ConcurrentRotatingFileHandler(
+                filename=self.log_dir / "trading" / "trading.log",
+                mode='a',
+                maxBytes=20 * 1024 * 1024, # 20MB
+                backupCount=90,
+                encoding='utf-8'
+            )
+        else:
+            trading_handler = logging.handlers.RotatingFileHandler(
+                filename=self.log_dir / "trading" / "trading.log",
+                maxBytes=20 * 1024 * 1024,
+                backupCount=90,
+                encoding='utf-8'
+            )
         trading_handler.setFormatter(TradingFormatter())
         trading_logger.addHandler(trading_handler)
         trading_logger.propagate = False
@@ -236,13 +265,21 @@ class TradingLogger:
         error_logger.setLevel(logging.ERROR)
         
         # Error log file
-        error_handler = logging.handlers.TimedRotatingFileHandler(
-            filename=self.log_dir / "errors" / "errors.log",
-            when='midnight',
-            interval=1,
-            backupCount=365,  # Keep 1 year of error logs
-            encoding='utf-8'
-        )
+        if HAS_CONCURRENT_LOG:
+            error_handler = ConcurrentRotatingFileHandler(
+                filename=self.log_dir / "errors" / "errors.log",
+                mode='a',
+                maxBytes=10 * 1024 * 1024,
+                backupCount=365,
+                encoding='utf-8'
+            )
+        else:
+            error_handler = logging.handlers.RotatingFileHandler(
+                filename=self.log_dir / "errors" / "errors.log",
+                maxBytes=10 * 1024 * 1024,
+                backupCount=365,
+                encoding='utf-8'
+            )
         error_handler.setFormatter(TradingFormatter())
         error_logger.addHandler(error_handler)
         
@@ -266,13 +303,22 @@ class TradingLogger:
         perf_logger = logging.getLogger('performance')
         perf_logger.setLevel(logging.INFO)
         
-        perf_handler = logging.handlers.TimedRotatingFileHandler(
-            filename=self.log_dir / "performance" / "performance.log",
-            when='midnight',
-            interval=1,
-            backupCount=30,
-            encoding='utf-8'
-        )
+        # Performance log file
+        if HAS_CONCURRENT_LOG:
+            perf_handler = ConcurrentRotatingFileHandler(
+                filename=self.log_dir / "performance" / "performance.log",
+                mode='a',
+                maxBytes=10 * 1024 * 1024,
+                backupCount=30,
+                encoding='utf-8'
+            )
+        else:
+            perf_handler = logging.handlers.RotatingFileHandler(
+                filename=self.log_dir / "performance" / "performance.log",
+                maxBytes=10 * 1024 * 1024,
+                backupCount=30,
+                encoding='utf-8'
+            )
         perf_handler.setFormatter(TradingFormatter())
         perf_logger.addHandler(perf_handler)
         perf_logger.propagate = False
