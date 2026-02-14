@@ -289,6 +289,7 @@ class TradeExecutionHandler:
                     prepared_trade.metadata.get("signal_confidence", 0) * 100
                 ),
                 strike_price=prepared_trade.strike_price,
+                expiry_date=prepared_trade.expiry_date,
                 entry_time=get_ist_now_naive(),
                 entry_price=float(entry_price),
                 entry_order_id=order_id,
@@ -479,6 +480,7 @@ class TradeExecutionHandler:
                 signal_type=f"BUY_{prepared_trade.option_type}",
                 signal_strength=signal_strength,
                 strike_price=prepared_trade.strike_price,
+                expiry_date=prepared_trade.expiry_date,
                 entry_time=get_ist_now_naive(),
                 entry_price=float(actual_entry_price),
                 entry_order_id=broker_order_id,

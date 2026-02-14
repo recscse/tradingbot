@@ -906,6 +906,8 @@ const AutoTradingPage = () => {
                     <tr>
                       <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Date</th>
                       <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Instrument</th>
+                      <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Strike</th>
+                      <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Expiry</th>
                       <th className="tw-px-4 tw-py-3 tw-whitespace-nowrap">Type</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Qty</th>
                       <th className="tw-px-4 tw-py-3 tw-text-right">Buy Avg</th>
@@ -926,6 +928,13 @@ const AutoTradingPage = () => {
                       const netPnl = trade.net_pnl || (grossPnl - charges);
                       const isProfit = netPnl >= 0;
 
+                      // Format Strike Price
+                      let strikeDisplay = '-';
+                      if (trade.strike_price && trade.strike_price > 0) {
+                        const optionType = trade.signal_type?.includes('CE') ? 'CE' : trade.signal_type?.includes('PE') ? 'PE' : '';
+                        strikeDisplay = `${trade.strike_price} ${optionType}`;
+                      }
+
                       return (
                         <tr key={idx} className="tw-hover:bg-slate-800/30 tw-transition-colors">
                           <td className="tw-px-4 tw-py-3 tw-text-slate-400 tw-whitespace-nowrap">
@@ -937,10 +946,18 @@ const AutoTradingPage = () => {
                             {/* <div className="tw-text-[10px] tw-text-slate-500">{trade.trade_id}</div> */}
                           </td>
                           <td className="tw-px-4 tw-py-3">
+                            <div className="tw-text-slate-300 tw-font-mono">{strikeDisplay}</div>
+                          </td>
+                          <td className="tw-px-4 tw-py-3">
+                            <div className="tw-text-slate-400 tw-text-[10px]">{trade.expiry_date || '-'}</div>
+                          </td>
+                          <td className="tw-px-4 tw-py-3">
                             <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold tw-uppercase ${
-                              trade.signal_type?.includes('BUY') ? 'tw-bg-emerald-500/10 tw-text-emerald-400' : 'tw-bg-rose-500/10 tw-text-rose-400'
+                              trade.signal_type?.includes('CE') ? 'tw-bg-emerald-500/10 tw-text-emerald-400' : 
+                              trade.signal_type?.includes('PE') ? 'tw-bg-rose-500/10 tw-text-rose-400' :
+                              'tw-bg-blue-500/10 tw-text-blue-400'
                             }`}>
-                              {trade.signal_type?.includes('BUY') ? 'INTRADAY' : 'DELIVERY'}
+                              {trade.signal_type?.includes('CE') ? 'CALL' : trade.signal_type?.includes('PE') ? 'PUT' : 'EQUITY'}
                             </span>
                           </td>
                           <td className="tw-px-4 tw-py-3 tw-text-right tw-font-medium tw-text-slate-300">{trade.quantity}</td>
