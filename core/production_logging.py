@@ -66,8 +66,12 @@ class AuditLogger:
     """Dedicated audit logger for compliance and regulatory requirements"""
     
     def __init__(self, log_dir: str = "logs/audit"):
+        self._is_production = (
+            os.getenv('ENVIRONMENT') == 'production' or os.getenv('RAILWAY_ENVIRONMENT')
+        )
         self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        if not self._is_production:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
         
         # Create audit logger
         self.logger = logging.getLogger('audit')
@@ -76,24 +80,30 @@ class AuditLogger:
         # Remove default handlers to avoid duplication
         self.logger.handlers.clear()
         
-        # File handler for audit logs (concurrent-safe rotation)
-        if HAS_CONCURRENT_LOG:
-            audit_handler = ConcurrentRotatingFileHandler(
-                filename=self.log_dir / 'audit.log',
-                mode='a',
-                maxBytes=10 * 1024 * 1024,  # 10MB
-                backupCount=365,
-                encoding='utf-8'
-            )
+        if self._is_production:
+            # In production, log audit events to stdout (structured JSON)
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(TradingFormatter())
+            self.logger.addHandler(console_handler)
         else:
-            audit_handler = logging.handlers.RotatingFileHandler(
-                filename=self.log_dir / 'audit.log',
-                maxBytes=10 * 1024 * 1024,
-                backupCount=365,
-                encoding='utf-8'
-            )
-        audit_handler.setFormatter(TradingFormatter())
-        self.logger.addHandler(audit_handler)
+            # File handler for audit logs (concurrent-safe rotation)
+            if HAS_CONCURRENT_LOG:
+                audit_handler = ConcurrentRotatingFileHandler(
+                    filename=self.log_dir / 'audit.log',
+                    mode='a',
+                    maxBytes=10 * 1024 * 1024,  # 10MB
+                    backupCount=365,
+                    encoding='utf-8'
+                )
+            else:
+                audit_handler = logging.handlers.RotatingFileHandler(
+                    filename=self.log_dir / 'audit.log',
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=365,
+                    encoding='utf-8'
+                )
+            audit_handler.setFormatter(TradingFormatter())
+            self.logger.addHandler(audit_handler)
         
         # Prevent propagation to root logger
         self.logger.propagate = False
@@ -164,14 +174,19 @@ class TradingLogger:
     
     def __init__(self, app_name: str = "TradingBot", log_level: str = "INFO"):
         self.app_name = app_name
+        self._is_production = (
+            os.getenv('ENVIRONMENT') == 'production' or os.getenv('RAILWAY_ENVIRONMENT')
+        )
         self.log_dir = Path("logs")
-        self.log_dir.mkdir(exist_ok=True)
+        if not self._is_production:
+            self.log_dir.mkdir(exist_ok=True)
         
         # Create subdirectories for different log types
-        (self.log_dir / "application").mkdir(exist_ok=True)
-        (self.log_dir / "trading").mkdir(exist_ok=True)
-        (self.log_dir / "errors").mkdir(exist_ok=True)
-        (self.log_dir / "performance").mkdir(exist_ok=True)
+        if not self._is_production:
+            (self.log_dir / "application").mkdir(exist_ok=True)
+            (self.log_dir / "trading").mkdir(exist_ok=True)
+            (self.log_dir / "errors").mkdir(exist_ok=True)
+            (self.log_dir / "performance").mkdir(exist_ok=True)
         
         # Set up loggers
         self.setup_application_logger(log_level)
@@ -205,24 +220,25 @@ class TradingLogger:
             
         logger.addHandler(console_handler)
         
-        # File handler with rotation
-        if HAS_CONCURRENT_LOG:
-            file_handler = ConcurrentRotatingFileHandler(
-                filename=self.log_dir / "application" / "app.log",
-                mode='a',
-                maxBytes=10 * 1024 * 1024, # 10MB
-                backupCount=30,
-                encoding='utf-8'
-            )
-        else:
-            file_handler = logging.handlers.RotatingFileHandler(
-                filename=self.log_dir / "application" / "app.log",
-                maxBytes=10 * 1024 * 1024,
-                backupCount=30,
-                encoding='utf-8'
-            )
-        file_handler.setFormatter(TradingFormatter())
-        logger.addHandler(file_handler)
+        # File handler with rotation (non-production only)
+        if not self._is_production:
+            if HAS_CONCURRENT_LOG:
+                file_handler = ConcurrentRotatingFileHandler(
+                    filename=self.log_dir / "application" / "app.log",
+                    mode='a',
+                    maxBytes=10 * 1024 * 1024, # 10MB
+                    backupCount=30,
+                    encoding='utf-8'
+                )
+            else:
+                file_handler = logging.handlers.RotatingFileHandler(
+                    filename=self.log_dir / "application" / "app.log",
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=30,
+                    encoding='utf-8'
+                )
+            file_handler.setFormatter(TradingFormatter())
+            logger.addHandler(file_handler)
         
         # Database handler for UI tracking - capture WARNING and higher
         try:
@@ -239,49 +255,53 @@ class TradingLogger:
         trading_logger = logging.getLogger('trading')
         trading_logger.setLevel(logging.INFO)
         
-        # Trading operations log
-        if HAS_CONCURRENT_LOG:
-            trading_handler = ConcurrentRotatingFileHandler(
-                filename=self.log_dir / "trading" / "trading.log",
-                mode='a',
-                maxBytes=20 * 1024 * 1024, # 20MB
-                backupCount=90,
-                encoding='utf-8'
-            )
-        else:
-            trading_handler = logging.handlers.RotatingFileHandler(
-                filename=self.log_dir / "trading" / "trading.log",
-                maxBytes=20 * 1024 * 1024,
-                backupCount=90,
-                encoding='utf-8'
-            )
-        trading_handler.setFormatter(TradingFormatter())
-        trading_logger.addHandler(trading_handler)
-        trading_logger.propagate = False
+        # Trading operations log (non-production only)
+        if not self._is_production:
+            if HAS_CONCURRENT_LOG:
+                trading_handler = ConcurrentRotatingFileHandler(
+                    filename=self.log_dir / "trading" / "trading.log",
+                    mode='a',
+                    maxBytes=20 * 1024 * 1024, # 20MB
+                    backupCount=90,
+                    encoding='utf-8'
+                )
+            else:
+                trading_handler = logging.handlers.RotatingFileHandler(
+                    filename=self.log_dir / "trading" / "trading.log",
+                    maxBytes=20 * 1024 * 1024,
+                    backupCount=90,
+                    encoding='utf-8'
+                )
+            trading_handler.setFormatter(TradingFormatter())
+            trading_logger.addHandler(trading_handler)
+        
+        # In production, propagate trading logs to root (stdout handler)
+        trading_logger.propagate = True if self._is_production else False
         
     def setup_error_logger(self):
         """Set up dedicated error logger with immediate notification"""
         error_logger = logging.getLogger('errors')
         error_logger.setLevel(logging.ERROR)
         
-        # Error log file
-        if HAS_CONCURRENT_LOG:
-            error_handler = ConcurrentRotatingFileHandler(
-                filename=self.log_dir / "errors" / "errors.log",
-                mode='a',
-                maxBytes=10 * 1024 * 1024,
-                backupCount=365,
-                encoding='utf-8'
-            )
-        else:
-            error_handler = logging.handlers.RotatingFileHandler(
-                filename=self.log_dir / "errors" / "errors.log",
-                maxBytes=10 * 1024 * 1024,
-                backupCount=365,
-                encoding='utf-8'
-            )
-        error_handler.setFormatter(TradingFormatter())
-        error_logger.addHandler(error_handler)
+        # Error log file (non-production only)
+        if not self._is_production:
+            if HAS_CONCURRENT_LOG:
+                error_handler = ConcurrentRotatingFileHandler(
+                    filename=self.log_dir / "errors" / "errors.log",
+                    mode='a',
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=365,
+                    encoding='utf-8'
+                )
+            else:
+                error_handler = logging.handlers.RotatingFileHandler(
+                    filename=self.log_dir / "errors" / "errors.log",
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=365,
+                    encoding='utf-8'
+                )
+            error_handler.setFormatter(TradingFormatter())
+            error_logger.addHandler(error_handler)
         
         # Email handler for critical errors (if configured)
         if os.getenv('SMTP_HOST') and os.getenv('ERROR_EMAIL_TO'):
@@ -303,24 +323,25 @@ class TradingLogger:
         perf_logger = logging.getLogger('performance')
         perf_logger.setLevel(logging.INFO)
         
-        # Performance log file
-        if HAS_CONCURRENT_LOG:
-            perf_handler = ConcurrentRotatingFileHandler(
-                filename=self.log_dir / "performance" / "performance.log",
-                mode='a',
-                maxBytes=10 * 1024 * 1024,
-                backupCount=30,
-                encoding='utf-8'
-            )
-        else:
-            perf_handler = logging.handlers.RotatingFileHandler(
-                filename=self.log_dir / "performance" / "performance.log",
-                maxBytes=10 * 1024 * 1024,
-                backupCount=30,
-                encoding='utf-8'
-            )
-        perf_handler.setFormatter(TradingFormatter())
-        perf_logger.addHandler(perf_handler)
+        # Performance log file (non-production only)
+        if not self._is_production:
+            if HAS_CONCURRENT_LOG:
+                perf_handler = ConcurrentRotatingFileHandler(
+                    filename=self.log_dir / "performance" / "performance.log",
+                    mode='a',
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=30,
+                    encoding='utf-8'
+                )
+            else:
+                perf_handler = logging.handlers.RotatingFileHandler(
+                    filename=self.log_dir / "performance" / "performance.log",
+                    maxBytes=10 * 1024 * 1024,
+                    backupCount=30,
+                    encoding='utf-8'
+                )
+            perf_handler.setFormatter(TradingFormatter())
+            perf_logger.addHandler(perf_handler)
         perf_logger.propagate = False
 
 # Global logger instances

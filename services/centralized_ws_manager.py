@@ -33,10 +33,6 @@ import sqlalchemy.exc
 from core.config import ADMIN_EMAIL
 from utils.logging_utils import log_structured
 
-# Configure logging first
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 # Import Redis manager with error handling
@@ -2744,9 +2740,9 @@ class CentralizedWebSocketManager:
                     # Since loop sleep varies, we just use a simple counter for 60s intervals 
                     # or better, check time.
                     if now_ist.minute % 15 == 0:
-                         logger.info(f"💓 Centralized WS Manager Heartbeat: Market scheduler active at {now_ist.strftime('%H:%M:%S')} IST")
+                         logger.debug(f"💓 Centralized WS Manager Heartbeat: Market scheduler active at {now_ist.strftime('%H:%M:%S')} IST")
                          # Log status summary
-                         logger.info(f"📊 Status: Running={self.is_running}, Ready={self._is_connection_ready}, Data Count={self.data_count}")
+                         logger.debug(f"📊 Status: Running={self.is_running}, Ready={self._is_connection_ready}, Data Count={self.data_count}")
 
                     # Define market timings in IST
                     pre_market_start = time(9, 0)   # 9:00 AM - Pre-open starts
@@ -3142,7 +3138,7 @@ class CentralizedWebSocketManager:
             self.callbacks[event_type] = []
 
         self.callbacks[event_type].append(callback)
-        logger.info(f"Registered callback for {event_type}")
+        logger.debug(f"Registered callback for {event_type}")
         return True
 
     def unregister_callback(self, event_type: str, callback: CallbackFunction) -> bool:
@@ -3161,7 +3157,7 @@ class CentralizedWebSocketManager:
         """
         if event_type in self.callbacks and callback in self.callbacks[event_type]:
             self.callbacks[event_type].remove(callback)
-            logger.info(f"Unregistered callback for {event_type}")
+            logger.debug(f"Unregistered callback for {event_type}")
             return True
         return False
 
