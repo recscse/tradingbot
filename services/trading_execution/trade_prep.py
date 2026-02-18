@@ -515,21 +515,21 @@ class TradePrepService:
                 moneyness = "OTM" if (option_type == "CE" and strike_val > spot_current_price) or \
                                    (option_type == "PE" and strike_val < spot_current_price) else "ITM"
                 
-                logger.info(f"ATM CHECK for {stock_symbol}: Spot={spot_current_price}, Strike={strike_val}")
-                logger.info(f"  Moneyness: {moneyness} ({abs(distance_pct):.2f}% from Spot)")
+                logger.debug(f"ATM CHECK for {stock_symbol}: Spot={spot_current_price}, Strike={strike_val}")
+                logger.debug(f"  Moneyness: {moneyness} ({abs(distance_pct):.2f}% from Spot)")
                 
                 if abs(distance_pct) > 2.0:
                     logger.warning(f"⚠️ Strike {strike_val} is {abs(distance_pct):.2f}% away from Spot {spot_current_price}. Selection might be stale.")
             except Exception as dist_err:
                 logger.warning(f"Could not calculate strike distance: {dist_err}")
 
-            logger.info(f"DEBUG - Signal generation inputs for {stock_symbol}:")
-            logger.info(f"  Spot current_price (last close): {spot_current_price}")
-            logger.info(f"  Option premium: {current_premium}")
-            logger.info(
+            logger.debug(f"DEBUG - Signal generation inputs for {stock_symbol}:")
+            logger.debug(f"  Spot current_price (last close): {spot_current_price}")
+            logger.debug(f"  Option premium: {current_premium}")
+            logger.debug(
                 f"  Historical data length: {len(historical_data.get('close', []))} candles"
             )
-            logger.info(f"  Last 3 closes: {historical_data.get('close', [])[-3:]}")
+            logger.debug(f"  Last 3 closes: {historical_data.get('close', [])[-3:]}")
 
             # IMPORTANT: Strategy runs on SPOT data (trend detection on underlying)
             # We'll convert to premium-based values afterward
@@ -539,7 +539,7 @@ class TradePrepService:
                 option_type=option_type,
             )
 
-            logger.info(
+            logger.debug(
                 f"Spot signal generated: {spot_signal.signal_type.value} at {spot_signal.entry_price}, "
                 f"confidence={spot_signal.confidence}"
             )
@@ -547,7 +547,7 @@ class TradePrepService:
             # Check signal validity BEFORE conversion
             # CRITICAL FIX: Don't convert HOLD signals - they're already invalid
             if spot_signal.signal_type == SignalType.HOLD:
-                logger.info(
+                logger.debug(
                     f"No clear trading signal for {stock_symbol} - spot signal is HOLD"
                 )
                 return self._create_pending_trade(

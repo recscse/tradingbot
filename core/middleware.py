@@ -7,20 +7,7 @@ from starlette.responses import JSONResponse
 
 from core.config import JWT_SECRET as CONFIG_SECRET
 
-#  Configure Logger (Console Only)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
-
-#  Console Handler (Logs to Terminal)
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.DEBUG)
-console_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-console_handler.setFormatter(console_formatter)
-
-#  Add Console Handler (No File Logging)
-logger.addHandler(console_handler)
 
 #  Load Secret Keys
 SECRET_KEY = CONFIG_SECRET
@@ -36,7 +23,7 @@ ALLOWED_ORIGINS = [
     "https://www.growthquantix.com",  #  Production Frontend
     "https://api.growthquantix.com",  #  Production Backend
     "https://api.growthquantix.com/v1",  #  Production Backend (API Version)
-    "https://growth-quantix.netlify.app", #  Alternative Netlify URL
+    "https://growth-quantix.netlify.app",  #  Alternative Netlify URL
 ]
 
 
@@ -45,22 +32,15 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("Origin", "")
-        
+
         import time
+
         start_time = time.time()
-        
-        # Determine log level based on request type
-        is_polling = request.url.path.startswith("/api/notifications") and request.method == "GET"
-        is_options = request.method == "OPTIONS"
-        
-        if is_polling or is_options:
-            logger.debug(
-                f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
-            )
-        else:
-            logger.info(
-                f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
-            )
+
+        # Log incoming request at DEBUG level
+        logger.debug(
+            f"📌 Incoming request: {request.method} {request.url.path} from {origin}"
+        )
 
         #  Handle CORS Preflight (OPTIONS Request)
         if request.method == "OPTIONS":
@@ -83,14 +63,9 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
             access_token = access_token.split("Bearer ")[-1]
             try:
                 jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
-                if is_polling:
-                    logger.debug(
-                        f" Token successfully validated for request: {request.url.path}"
-                    )
-                else:
-                    logger.info(
-                        f" Token successfully validated for request: {request.url.path}"
-                    )
+                logger.debug(
+                    f" Token successfully validated for request: {request.url.path}"
+                )
             except jwt.ExpiredSignatureError:
                 logger.warning(f"⚠️ Token expired for request: {request.url.path}")
                 response = JSONResponse(
@@ -122,15 +97,10 @@ class TokenRefreshMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         process_time = (time.time() - start_time) * 1000
 
-        #  Log Response Status
-        if is_polling or is_options:
-             logger.debug(
-                f"📤 Response {response.status_code} for {request.method} {request.url.path} - Latency: {process_time:.2f}ms"
-            )
-        else:
-            logger.info(
-                f"📤 Response {response.status_code} for {request.method} {request.url.path} - Latency: {process_time:.2f}ms"
-            )
+        #  Log Response Status at DEBUG level to reduce noise
+        logger.debug(
+            f"📤 Response {response.status_code} for {request.method} {request.url.path} - Latency: {process_time:.2f}ms"
+        )
 
         #  Set Correct CORS Headers on Response
         if origin in ALLOWED_ORIGINS:

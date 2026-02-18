@@ -44,7 +44,7 @@ async def broadcast_to_clients(event_type: str, data: dict):
             disconnected.append(client_id)
 
     if event_type == "analytics_update" and sent_count > 0:
-        logger.info(f"Sent analytics_update to {sent_count} client(s)")
+        logger.debug(f"Sent analytics_update to {sent_count} client(s)")
 
     for client_id in disconnected:
         active_connections.pop(client_id, None)
@@ -73,7 +73,7 @@ def register_engine_listeners():
         if active_connections:
             gainers = data.get("top_movers", {}).get("gainers", [])
             losers = data.get("top_movers", {}).get("losers", [])
-            logger.info(
+            logger.debug(
                 f"Broadcasting analytics to {len(active_connections)} clients: "
                 f"{len(gainers)} gainers, {len(losers)} losers"
             )
