@@ -371,7 +371,7 @@ class MarketScheduleService:
         except Exception as e:
             logger.error(f"❌ Background: Early morning preparation failed: {e}")
 
-    async def _run_preopen_stock_selection(self):
+    async def _run_preopen_stock_selection(self, wait_for_completion: bool = False):
         """
         Run pre-open stock selection from 9:00-9:15 AM.
 
@@ -391,12 +391,18 @@ class MarketScheduleService:
             "📊 Starting pre-open stock selection in BACKGROUND (9:00-9:15 AM)..."
         )
 
-        # Run as background task - DON'T WAIT FOR IT!
-        asyncio.create_task(self._background_preopen_selection())
-
-        logger.info(
-            "✅ Pre-open stock selection started in background - application remains responsive"
-        )
+        if wait_for_completion:
+            # Explicitly wait for completion (used by market-open fallback path)
+            await self._background_preopen_selection()
+            logger.info(
+                "✅ Pre-open stock selection completed (waited for completion)"
+            )
+        else:
+            # Run as background task - DON'T WAIT FOR IT!
+            asyncio.create_task(self._background_preopen_selection())
+            logger.info(
+                "✅ Pre-open stock selection started in background - application remains responsive"
+            )
 
     async def _background_preopen_selection(self):
         """
@@ -557,7 +563,8 @@ class MarketScheduleService:
                 logger.info("Attempting to run pre-open selection now...")
 
                 # Fallback: Run pre-open selection if it didn't run at 9:00 AM
-                await self._run_preopen_stock_selection()
+                # IMPORTANT: Wait for completion here, otherwise selected_stocks will still be empty.
+                await self._run_preopen_stock_selection(wait_for_completion=True)
 
                 # If still no selections, log error
                 if not self.selected_stocks:
