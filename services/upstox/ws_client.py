@@ -52,6 +52,12 @@ class UpstoxWebSocketClient:
         self.connection_type = connection_type
         self.subscription_mode = subscription_mode
         self.connection_id = f"{connection_type}_{id(self)}"
+        # Logging controls (simple):
+        # Use log level only:
+        # - INFO: minimal lifecycle logs
+        # - DEBUG: verbose payload logs
+        self._log_lifecycle = logger.isEnabledFor(logging.INFO)
+        self._verbose_logs = logger.isEnabledFor(logging.DEBUG)
 
         # Message sequence tracking
         self.got_market_status = False  # Track if we've received initial market status
@@ -62,7 +68,7 @@ class UpstoxWebSocketClient:
         result = await loop.run_in_executor(
             None, functools.partial(sync_fetch_feed_url, self.access_token)
         )
-        logger.info(f"🔐 Feed Auth Response for {self.connection_type}: {result}")
+        logger.debug(f"🔐 Feed Auth Response for {self.connection_type}: {result}")
 
         if result.get("status") != "success":
             if self.on_auth_error and not self.auth_error_sent:
@@ -82,7 +88,8 @@ class UpstoxWebSocketClient:
 
     async def connect_and_stream(self):
         """Connect to Upstox WebSocket and handle the message sequence properly"""
-        logger.info(
+        lifecycle_log = logger.info if self._log_lifecycle else logger.debug
+        lifecycle_log(
             f"🚀 Starting {self.connection_type} WebSocket with {len(self.instrument_keys)} instruments"
         )
 
@@ -116,7 +123,7 @@ class UpstoxWebSocketClient:
                     self.got_market_status = False
                     self.got_snapshot = False
 
-                    logger.info(
+                    lifecycle_log(
                         f"✅ {self.connection_type.title()} WebSocket connected."
                     )
 
@@ -141,8 +148,8 @@ class UpstoxWebSocketClient:
                             parsed = MessageToDict(msg)
 
                             # Log full parsed data for first few messages to debug
-                            if message_sequence <= 3:
-                                logger.info(f"Parsed data for ws client - {parsed}")
+                            if self._verbose_logs and message_sequence <= 3:
+                                logger.debug(f"Parsed data for ws client - {parsed}")
 
                             # Process message based on type and sequence
                             msg_type = parsed.get("type")
@@ -153,7 +160,7 @@ class UpstoxWebSocketClient:
                                 segment_status = parsed.get("marketInfo", {}).get(
                                     "segmentStatus", {}
                                 )
-                                logger.info(
+                                logger.debug(
                                     f"📊 Market segment statuses: {segment_status}"
                                 )
 
@@ -181,7 +188,7 @@ class UpstoxWebSocketClient:
 
                                 # Check if all markets are closed
                                 if all_markets_closed:
-                                    logger.info(
+                                    logger.debug(
                                         f"📴 {self.connection_type}: All markets closed."
                                     )
                                     self.market_closed = True
@@ -205,9 +212,9 @@ class UpstoxWebSocketClient:
                                 is_snapshot = not self.got_snapshot
                                 if is_snapshot:
                                     self.got_snapshot = True
-                                    logger.info(
-                                        f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
-                                    )
+                                lifecycle_log(
+                                    f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
+                                )
 
                                 # Log exchange breakdown
                                 self._log_exchange_summary(feeds)
@@ -218,7 +225,7 @@ class UpstoxWebSocketClient:
 
                                 # Check if market is closed and we should stop
                                 if self.market_closed and self.received_ltp:
-                                    logger.info(
+                                    logger.debug(
                                         f"📴 {self.connection_type}: Market closed & live data received. Stopping."
                                     )
                                     self.should_run = False
@@ -240,9 +247,9 @@ class UpstoxWebSocketClient:
                                 is_snapshot = not self.got_snapshot
                                 if is_snapshot:
                                     self.got_snapshot = True
-                                    logger.info(
-                                        f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
-                                    )
+                                lifecycle_log(
+                                    f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
+                                )
 
                                 # Log exchange breakdown
                                 self._log_exchange_summary(feeds)
@@ -262,7 +269,7 @@ class UpstoxWebSocketClient:
 
                                 # Check if market is closed and we should stop
                                 if self.market_closed and self.received_ltp:
-                                    logger.info(
+                                    logger.debug(
                                         f"📴 {self.connection_type}: Market closed & live data received. Stopping."
                                     )
                                     self.should_run = False
@@ -298,7 +305,7 @@ class UpstoxWebSocketClient:
                                 # Send manual ping to check connection
                                 pong_waiter = await conn.ping()
                                 await asyncio.wait_for(pong_waiter, timeout=10)
-                                logger.info("✅ Connection ping successful")
+                                logger.debug("✅ Connection ping successful")
                                 last_activity = datetime.now().timestamp()
                             except Exception as ping_err:
                                 logger.error(f"❌ Connection ping failed: {ping_err}")
@@ -307,7 +314,7 @@ class UpstoxWebSocketClient:
                                 )
 
                     # This line will only execute if the websocket closed gracefully
-                    logger.info(
+                    logger.debug(
                         f"🔌 {self.connection_type} WebSocket closed gracefully"
                     )
 
@@ -427,7 +434,7 @@ class UpstoxWebSocketClient:
         )
 
         # Log market status details - no MCX since it's handled separately
-        logger.info(
+        logger.debug(
             f"📊 {self.connection_type}: Market Status - "
             f"NSE: {nse_eq_status} ({nse_status}), "
             f"BSE: {bse_eq_status} ({bse_status})"
@@ -449,6 +456,8 @@ class UpstoxWebSocketClient:
 
     def _log_exchange_summary(self, feeds):
         """Log a summary of instruments by exchange - MCX handled by dedicated service"""
+        if not self._verbose_logs:
+            return
         nse_instruments = [k for k in feeds.keys() if k.startswith("NSE_")]
         bse_instruments = [k for k in feeds.keys() if k.startswith("BSE_")]
 
@@ -461,7 +470,7 @@ class UpstoxWebSocketClient:
 
         # Log with segment information - MCX instruments should not appear here
         # as they are handled by the dedicated MCX WebSocket service
-        logger.info(
+        logger.debug(
             f"✅ {self.connection_type}: Processing {len(feeds)} instruments ({', '.join(exchange_summary)})"
         )
 
@@ -486,11 +495,11 @@ class UpstoxWebSocketClient:
         to_remove = list(old_keys_set - new_keys_set)
         
         if to_remove:
-            logger.info(f"🔄 Unsubscribing from {len(to_remove)} keys")
+            logger.debug(f"🔄 Unsubscribing from {len(to_remove)} keys")
             await self._send_unsubscription(to_remove)
             
         if to_add:
-            logger.info(f"🔄 Subscribing to {len(to_add)} new keys")
+            logger.debug(f"🔄 Subscribing to {len(to_add)} new keys")
             self.instrument_keys = new_keys # Update internal list
             await self._send_subscription(keys=to_add)
         else:
@@ -552,7 +561,7 @@ class UpstoxWebSocketClient:
         for attempt in range(max_attempts):
             try:
                 await self.websocket.send(encoded_payload)
-                logger.info(
+                logger.debug(
                     f"📩 {self.connection_type.title()}: Subscription sent for {len(keys_to_subscribe[:1500])} instruments in '{mode}' mode"
                 )
                 return True

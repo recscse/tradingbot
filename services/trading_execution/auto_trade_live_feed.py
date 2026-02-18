@@ -659,7 +659,7 @@ class AutoTradeLiveFeed:
                 # Heartbeat every 15 minutes
                 heartbeat_counter += 1
                 if heartbeat_counter >= 180: # 180 * 5s = 900s = 15m
-                    logger.info(f"💓 Auto-Trade Live Feed Heartbeat: Monitoring loop active at {get_ist_now_naive().strftime('%H:%M:%S')} IST")
+                    logger.debug(f"💓 Auto-Trade Live Feed Heartbeat: Monitoring loop active at {get_ist_now_naive().strftime('%H:%M:%S')} IST")
                     heartbeat_counter = 0
 
                 # CRITICAL: Check if market is open
@@ -1398,13 +1398,13 @@ class AutoTradeLiveFeed:
                             else Decimal("0")
                         ),
                     }
-                    logger.info(f"Memory sync complete for user {user_id}")
+                    logger.debug(f"Memory sync complete for user {user_id}")
 
             # CRITICAL: Handle ENTRY vs EXIT signals differently
             if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
                 # EXIT signal: Only process if position exists
                 if not has_position:
-                    logger.info(
+                    logger.debug(
                         f"⏭️ EXIT signal for {instrument.stock_symbol} but no active position for user {user_id} - skipping"
                     )
                     # Broadcast to UI that exit signal was generated but no position exists
