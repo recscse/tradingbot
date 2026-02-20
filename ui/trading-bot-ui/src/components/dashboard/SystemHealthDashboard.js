@@ -10,13 +10,10 @@ import {
   RefreshCw, 
   Cpu, 
   HardDrive, 
-  Terminal,
   Filter,
   CheckCircle2,
   XCircle,
-  AlertCircle,
-  ChevronRight,
-  ChevronDown
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 

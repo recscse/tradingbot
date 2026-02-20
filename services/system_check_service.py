@@ -26,12 +26,13 @@ logger = logging.getLogger(__name__)
 class SystemCheckService:
     def __init__(self):
         self._cache = {}
-        self._cache_timeout = 5  # Cache for 5 seconds
+        self._cache_timeout = 30  # Increased to 30 seconds for general checks
 
-    def _get_from_cache(self, key: str):
+    def _get_from_cache(self, key: str, custom_timeout: int = None):
         if key in self._cache:
             data, timestamp = self._cache[key]
-            if (datetime.now() - timestamp).total_seconds() < self._cache_timeout:
+            timeout = custom_timeout if custom_timeout is not None else self._cache_timeout
+            if (datetime.now() - timestamp).total_seconds() < timeout:
                 return data
         return None
 
@@ -52,7 +53,10 @@ class SystemCheckService:
             return result
         except Exception as e:
             logger.error(f"Database health check failed: {e}")
-            return {"status": "error", "error": str(e)}
+            # Cache failure for longer to reduce load
+            result = {"status": "error", "error": str(e)}
+            self._save_to_cache("database", result)
+            return result
 
     def check_redis(self) -> Dict[str, Any]:
         """Check Redis connectivity and latency"""
@@ -74,8 +78,8 @@ class SystemCheckService:
                 port=port, 
                 db=db_num, 
                 password=password, 
-                socket_connect_timeout=2,
-                socket_timeout=2
+                socket_connect_timeout=1,
+                socket_timeout=1
             )
             
             start_time = datetime.now()
@@ -86,12 +90,14 @@ class SystemCheckService:
             self._save_to_cache("redis", result)
             return result
         except Exception as e:
-            logger.error(f"Redis health check failed: {e}")
-            return {"status": "error", "error": str(e)}
+            # logger.error(f"Redis health check failed: {e}")
+            result = {"status": "error", "error": "Connection Timeout"}
+            self._save_to_cache("redis", result)
+            return result
 
     def check_system_resources(self) -> Dict[str, Any]:
         """Check CPU, Memory, and Disk usage"""
-        cached = self._get_from_cache("resources")
+        cached = self._get_from_cache("resources", custom_timeout=60) # Resource check every 60s
         if cached: return cached
 
         try:
@@ -125,7 +131,7 @@ class SystemCheckService:
 
     def check_broker_tokens(self) -> Dict[str, Any]:
         """Check if broker tokens are present in environment/config"""
-        cached = self._get_from_cache("broker_tokens")
+        cached = self._get_from_cache("broker_tokens", custom_timeout=3600) # Token presence check every hour
         if cached: return cached
 
         # Basic check for Upstox
@@ -165,7 +171,7 @@ class SystemCheckService:
 
     async def check_stock_selection_status(self) -> Dict[str, Any]:
         """Check intelligent stock selection status"""
-        cached = self._get_from_cache("stock_selection")
+        cached = self._get_from_cache("stock_selection", custom_timeout=300) # Selection check every 5m
         if cached: return cached
 
         try:
@@ -194,7 +200,7 @@ class SystemCheckService:
 
     async def check_token_status(self) -> Dict[str, Any]:
         """Check broker token expiry status"""
-        cached = self._get_from_cache("token_status")
+        cached = self._get_from_cache("token_status", custom_timeout=600) # Token expiry check every 10m
         if cached: return cached
 
         try:
@@ -222,7 +228,7 @@ class SystemCheckService:
 
     def check_instrument_status(self) -> Dict[str, Any]:
         """Check instrument service status"""
-        cached = self._get_from_cache("instrument_status")
+        cached = self._get_from_cache("instrument_status", custom_timeout=300) # Instrument check every 5m
         if cached: return cached
 
         try:
@@ -257,7 +263,7 @@ class SystemCheckService:
 
     def check_scheduler_status(self) -> Dict[str, Any]:
         """Check market scheduler status"""
-        cached = self._get_from_cache("scheduler_status")
+        cached = self._get_from_cache("scheduler_status", custom_timeout=30)
         if cached: return cached
 
         try:
@@ -280,7 +286,7 @@ class SystemCheckService:
 
     def check_live_feed_status(self) -> Dict[str, Any]:
         """Check live feed connection and subscription"""
-        cached = self._get_from_cache("live_feed_status")
+        cached = self._get_from_cache("live_feed_status", custom_timeout=10) # Live feed check every 10s
         if cached: return cached
 
         try:
@@ -340,7 +346,7 @@ class SystemCheckService:
 
     def check_realtime_analytics_status(self) -> Dict[str, Any]:
         """Check real-time market analytics engine status"""
-        cached = self._get_from_cache("analytics_status")
+        cached = self._get_from_cache("analytics_status", custom_timeout=30)
         if cached: return cached
 
         try:
@@ -354,7 +360,7 @@ class SystemCheckService:
 
     def check_option_service_status(self) -> Dict[str, Any]:
         """Check status of Upstox option service"""
-        cached = self._get_from_cache("option_status")
+        cached = self._get_from_cache("option_status", custom_timeout=300) # Option service check every 5m
         if cached: return cached
 
         try:
@@ -368,7 +374,7 @@ class SystemCheckService:
 
     async def check_daily_tasks(self, db: Session) -> Dict[str, Any]:
         """Check status of daily system tasks (Stock Selection, Options, Automation)"""
-        cached = self._get_from_cache("daily_tasks")
+        cached = self._get_from_cache("daily_tasks", custom_timeout=60) # Daily tasks every minute
         if cached: return cached
 
         from database.models import SelectedStock, AutoTradeExecution
@@ -419,11 +425,19 @@ class SystemCheckService:
             
             token_refresh_status = "pending"
             last_refresh_time = None
+            is_valid = False
+            
             if admin_broker:
-                # Check if token is currently valid
-                from services.upstox_automation_service import UpstoxAutomationService
-                automation_service = UpstoxAutomationService()
-                is_valid = automation_service._test_token_validity(admin_broker.access_token)
+                # OPTIMIZED: Check validity ONLY IF NOT CACHED or expiring soon
+                token_valid_cache = self._get_from_cache("token_validity", custom_timeout=1800) # 30 min cache
+                if token_valid_cache is not None:
+                    is_valid = token_valid_cache
+                else:
+                    from services.upstox_automation_service import UpstoxAutomationService
+                    automation_service = UpstoxAutomationService()
+                    # Run validity check in thread to avoid blocking event loop
+                    is_valid = await asyncio.to_thread(automation_service._test_token_validity, admin_broker.access_token)
+                    self._save_to_cache("token_validity", is_valid)
                 
                 # Check config for last automated run
                 config_data = admin_broker.config or {}
@@ -469,6 +483,12 @@ class SystemCheckService:
                     }
                 }
             }
+            
+            self._save_to_cache("daily_tasks", result)
+            return result
+        except Exception as e:
+            logger.error(f"Daily tasks check failed: {e}")
+            return {"status": "error", "error": str(e)}
             
             self._save_to_cache("daily_tasks", result)
             return result

@@ -21,46 +21,49 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
     Get comprehensive system status using parallelized checks for performance.
     """
     try:
-        # Run independent checks in parallel to minimize total response time
-        # Note: Some checks are sync, some are async
-        
-        # 1. Non-async infrastructure & logic checks
-        infrastructure_task = {
-            "db": system_check_service.check_database(db),
-            "redis": system_check_service.check_redis(),
-            "resources": system_check_service.check_system_resources(),
-        }
-        
-        # 2. Async business logic and operations checks
-        # Using gather for parallel execution of all async status checks
+        # Run ALL checks in parallel to minimize total response time
+        # This includes sync calls moved to threads and async calls gathered
         (
+            db_status,
+            redis_status,
+            resource_status,
             stock_selection_status,
             token_status,
             daily_tasks,
-            ws_status
+            ws_status,
+            instrument_status,
+            live_feed_status,
+            strategy_status,
+            scheduler_status,
+            automation_status,
+            trade_prep_status,
+            capital_status,
+            analytics_status,
+            option_status
         ) = await asyncio.gather(
+            asyncio.to_thread(system_check_service.check_database, db),
+            asyncio.to_thread(system_check_service.check_redis),
+            asyncio.to_thread(system_check_service.check_system_resources),
             system_check_service.check_stock_selection_status(),
             system_check_service.check_token_status(),
             system_check_service.check_daily_tasks(db),
-            asyncio.to_thread(lambda: get_centralized_manager().get_auto_trading_status() if get_centralized_manager() else {"error": "Not initialized"})
+            asyncio.to_thread(lambda: get_centralized_manager().get_auto_trading_status() if get_centralized_manager() else {"error": "Not initialized"}),
+            asyncio.to_thread(system_check_service.check_instrument_status),
+            asyncio.to_thread(system_check_service.check_live_feed_status),
+            asyncio.to_thread(system_check_service.check_strategy_status),
+            asyncio.to_thread(system_check_service.check_scheduler_status),
+            asyncio.to_thread(system_check_service.check_automation_status),
+            asyncio.to_thread(system_check_service.check_trade_prep_status),
+            asyncio.to_thread(system_check_service.check_capital_manager_status),
+            asyncio.to_thread(system_check_service.check_realtime_analytics_status),
+            asyncio.to_thread(system_check_service.check_option_service_status)
         )
-
-        # 3. Synchronous service checks (wrapped in to_thread if they might block)
-        instrument_status = system_check_service.check_instrument_status()
-        live_feed_status = system_check_service.check_live_feed_status()
-        strategy_status = system_check_service.check_strategy_status()
-        scheduler_status = system_check_service.check_scheduler_status()
-        automation_status = system_check_service.check_automation_status()
-        trade_prep_status = system_check_service.check_trade_prep_status()
-        capital_status = system_check_service.check_capital_manager_status()
-        analytics_status = system_check_service.check_realtime_analytics_status()
-        option_status = system_check_service.check_option_service_status()
         
         # Aggregate Errors for dashboard
         errors = []
         for check_name, status in [
-            ("database", infrastructure_task["db"]), 
-            ("redis", infrastructure_task["redis"]), 
+            ("database", db_status), 
+            ("redis", redis_status), 
             ("stock_selection", stock_selection_status), 
             ("tokens", token_status),
             ("instruments", instrument_status), 
@@ -81,7 +84,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
         overall_health = "healthy"
         if errors:
             overall_health = "degraded"
-        if infrastructure_task["db"].get("status") == "error":
+        if db_status.get("status") == "error":
             overall_health = "unhealthy"
 
         automation_enabled = bool(os.getenv("UPSTOX_MOBILE") and os.getenv("UPSTOX_PIN"))
@@ -94,8 +97,8 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 "websocket": "connected" if ws_status.get("websocket_connected") else "disconnected",
                 "automation": "enabled" if automation_enabled else "disabled",
                 "scheduler": "running" if scheduler_status.get("is_running") else "stopped",
-                "database": infrastructure_task["db"].get("status", "unknown"),
-                "redis": infrastructure_task["redis"].get("status", "unknown")
+                "database": db_status.get("status", "unknown"),
+                "redis": redis_status.get("status", "unknown")
             },
             "business_logic": {
                 "stock_selection": stock_selection_status,
@@ -115,9 +118,9 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
                 "websocket_manager": ws_status,
             },
             "infrastructure": {
-                "database": infrastructure_task["db"],
-                "redis": infrastructure_task["redis"],
-                "resources": infrastructure_task["resources"],
+                "database": db_status,
+                "redis": redis_status,
+                "resources": resource_status,
             },
             "errors": errors
         }
