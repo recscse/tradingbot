@@ -282,21 +282,6 @@ class EnhancedIntelligentOptionsService:
                             f"Enhanced {stock.symbol} with {contract.option_type} "
                             f"option at strike {contract.strike_price}"
                         )
-                        
-                        from utils.logging_utils import log_to_db
-                        log_to_db(
-                            component="option_selection",
-                            message=f"Option Selected: {stock.symbol} {contract.option_type} {contract.strike_price}",
-                            level="INFO",
-                            symbol=stock.symbol,
-                            additional_data={
-                                "strike": float(contract.strike_price),
-                                "expiry": contract.expiry_date,
-                                "premium": float(contract.premium),
-                                "iv": float(contract.implied_volatility),
-                                "oi": contract.open_interest
-                            }
-                        )
                     else:
                         logger.warning(
                             f"Could not find suitable option contract for {stock.symbol}"
@@ -332,18 +317,6 @@ class EnhancedIntelligentOptionsService:
 
             logger.info(
                 f"Options enhancement complete: {len(enhanced_selections)}/{len(selected_stocks)} stocks enhanced"
-            )
-            
-            from utils.logging_utils import log_to_db
-            log_to_db(
-                component="option_selection",
-                message=f"Enhancement Summary: {len(enhanced_selections)}/{len(selected_stocks)} stocks ready for options trading",
-                level="INFO",
-                additional_data={
-                    "total": len(selected_stocks),
-                    "enhanced": len(enhanced_selections),
-                    "selection_type": selection_type
-                }
             )
             return result
 
@@ -529,13 +502,6 @@ class EnhancedIntelligentOptionsService:
         except Exception as e:
             error_msg = f"Error enhancing stock with options for {stock_selection.symbol}: {e}"
             logger.error(error_msg)
-            from utils.logging_utils import log_to_db
-            log_to_db(
-                component="option_selection",
-                message=error_msg,
-                level="ERROR",
-                symbol=stock_selection.symbol
-            )
             return None
 
     async def _get_available_expiry_and_lot_size(
@@ -561,12 +527,6 @@ class EnhancedIntelligentOptionsService:
         except Exception as e:
             error_msg = f"Error getting expiry dates for {underlying_key}: {e}"
             logger.error(error_msg)
-            from utils.logging_utils import log_to_db
-            log_to_db(
-                component="option_selection",
-                message=error_msg,
-                level="ERROR"
-            )
             return [], 0
 
     async def _select_optimal_expiry(

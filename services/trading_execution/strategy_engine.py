@@ -492,21 +492,6 @@ class StrategyEngine:
                 price=float(current_price),
                 trace_id=generate_trace_id()
             )
-            
-            # Log to DB for actionable signals
-            if signal_type != SignalType.HOLD:
-                from utils.logging_utils import log_to_db
-                log_to_db(
-                    component="strategy_engine",
-                    message=f"Signal Generated: {signal_type.value} @ {current_price:.2f}",
-                    level="INFO",
-                    additional_data={
-                        "signal_type": signal_type.value,
-                        "confidence": float(confidence),
-                        "price": float(current_price),
-                        "reason": reason
-                    }
-                )
 
             return signal
 

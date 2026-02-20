@@ -10,7 +10,6 @@ from services.centralized_ws_manager import get_centralized_manager
 from services.market_schedule_service import get_market_scheduler
 from services.system_check_service import system_check_service
 from database.connection import get_db
-from database.models import TradingSystemLog
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -149,39 +148,3 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "message": str(e),
             "timestamp": datetime.now().isoformat()
         }
-
-@router.get("/logs")
-def get_system_logs(
-    limit: int = Query(50, ge=1, le=200),
-    level: str = Query(None),
-    component: str = Query(None),
-    db: Session = Depends(get_db)
-) -> List[Dict[str, Any]]:
-    """
-    Fetch recent system logs from the database
-    """
-    try:
-        query = db.query(TradingSystemLog)
-        
-        if level:
-            query = query.filter(TradingSystemLog.log_level == level.upper())
-        if component:
-            query = query.filter(TradingSystemLog.component == component)
-            
-        logs = query.order_by(desc(TradingSystemLog.timestamp)).limit(limit).all()
-        
-        return [
-            {
-                "id": log.id,
-                "timestamp": log.timestamp.isoformat(),
-                "level": log.log_level,
-                "component": log.component,
-                "message": log.message,
-                "latency_ms": log.latency_ms,
-                "additional_data": log.additional_data
-            }
-            for log in logs
-        ]
-    except Exception as e:
-        logger.error(f"Error fetching system logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))

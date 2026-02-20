@@ -240,16 +240,6 @@ class TradingLogger:
             file_handler.setFormatter(TradingFormatter())
             logger.addHandler(file_handler)
         
-        # Database handler for UI tracking - capture WARNING and higher
-        try:
-            from utils.logging_utils import DBLoggingHandler
-            db_handler = DBLoggingHandler()
-            db_handler.setLevel(logging.WARNING)
-            logger.addHandler(db_handler)
-        except ImportError:
-            # Handle circular import during initialization
-            pass
-        
     def setup_trading_logger(self):
         """Set up dedicated trading operations logger"""
         trading_logger = logging.getLogger('trading')

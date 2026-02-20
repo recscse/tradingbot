@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from database.connection import SessionLocal
 from database.models import SelectedStock
 from utils.timezone_utils import get_ist_now_naive
-from utils.logging_utils import log_stock_selection, log_structured, log_to_db
+from utils.logging_utils import log_stock_selection, log_structured
 
 # Import services at module level for better performance
 from services.realtime_market_engine import (
@@ -299,13 +299,6 @@ class IntelligentStockSelectionService:
                 event="STOCK_SELECTION_INIT",
                 message=f"Initialized stock selection services with {total_stocks} stocks",
                 data={"total_stocks": total_stocks, "engine_ready": True}
-            )
-            
-            log_to_db(
-                component="stock_selection",
-                message=f"Initialized stock selection with {total_stocks} stocks",
-                level="INFO",
-                additional_data={"total_stocks": total_stocks}
             )
 
             if total_stocks == 0:
@@ -609,21 +602,6 @@ class IntelligentStockSelectionService:
                     "options_direction": options_direction
                 }
             )
-            
-            # Log to DB for high-quality selections
-            if final_score >= 0.6:
-                log_to_db(
-                    component="stock_selection",
-                    message=f"Stock SELECTED: {stock_data['symbol']} (Score: {final_score:.2f})",
-                    level="INFO",
-                    symbol=stock_data["symbol"],
-                    additional_data={
-                        "score": final_score,
-                        "sector": sector,
-                        "sentiment": self.current_sentiment.value if self.current_sentiment else "unknown",
-                        "options_direction": options_direction
-                    }
-                )
 
             # Create selection
             selection = StockSelection(
@@ -1208,19 +1186,9 @@ class IntelligentStockSelectionService:
                     result["available_for_autotrading"] = False
                     error_msg = "⚠️ Failed to save validated selections to database"
                     logger.warning(error_msg)
-                    log_to_db(
-                        component="stock_selection",
-                        message=error_msg,
-                        level="WARNING"
-                    )
             except Exception as db_error:
                 error_msg = f"❌ Database save error: {db_error}"
                 logger.error(error_msg)
-                log_to_db(
-                    component="stock_selection",
-                    message=error_msg,
-                    level="ERROR"
-                )
                 result["database_saved"] = False
                 result["available_for_autotrading"] = False
 
@@ -1469,11 +1437,6 @@ class IntelligentStockSelectionService:
         except Exception as e:
             error_msg = f"❌ Error saving selections to database: {e}"
             logger.error(error_msg)
-            log_to_db(
-                component="stock_selection",
-                message=error_msg,
-                level="ERROR"
-            )
             if db:
                 db.rollback()
             return False

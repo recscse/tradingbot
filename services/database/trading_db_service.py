@@ -18,7 +18,7 @@ from sqlalchemy import func, and_, or_, desc, asc
 from database.connection import SessionLocal, engine
 from database.models import (
     User, AutoTradeExecution, ActivePosition, DailyTradingPerformance,
-    TradingSystemLog, EmergencyControl, TradingAuditTrail,
+    EmergencyControl, TradingAuditTrail,
     AutoTradingSession
 )
 
@@ -477,35 +477,6 @@ class TradingDatabaseService:
         
         return max_drawdown
     
-    async def log_system_event(self, log_data: Dict[str, Any]) -> bool:
-        """Log system events with structured data"""
-        db = self.get_session()
-        try:
-            log_entry = TradingSystemLog(
-                log_level=log_data['level'],
-                component=log_data['component'],
-                message=log_data['message'],
-                user_id=log_data.get('user_id'),
-                trade_id=log_data.get('trade_id'),
-                symbol=log_data.get('symbol'),
-                latency_ms=log_data.get('latency_ms'),
-                function_name=log_data.get('function_name'),
-                line_number=log_data.get('line_number'),
-                stack_trace=log_data.get('stack_trace'),
-                additional_data=log_data.get('additional_data', {})
-            )
-            
-            db.add(log_entry)
-            db.commit()
-            return True
-            
-        except Exception as e:
-            db.rollback()
-            self.logger.error(f"❌ Failed to log system event: {e}")
-            return False
-        finally:
-            db.close()
-    
     async def log_audit_trail(self, user_id: int, action_type: str, entity_type: str, 
                              entity_id: str, details: Dict[str, Any], 
                              state_before: Dict = None, state_after: Dict = None) -> bool:
@@ -687,18 +658,6 @@ class TradingDatabaseService:
             # Log the signal as a trade execution
             trade_id = await self.log_trade_execution(trade_execution_data)
             
-            # Log to system for monitoring
-            await self.log_system_event(
-                event_type='FIBONACCI_SIGNAL_GENERATED',
-                event_data={
-                    'instrument_key': signal_data.get('instrument_key'),
-                    'signal_type': signal_data.get('signal_type'),
-                    'confidence': signal_data.get('confidence_score'),
-                    'processing_time_ms': signal_data.get('processing_time_ms')
-                },
-                user_id=user_id
-            )
-            
             return trade_id
             
         except Exception as e:
@@ -777,39 +736,6 @@ class TradingDatabaseService:
             return False
         finally:
             db.close()
-    
-    async def log_tick_processing_metrics(self, metrics_data: Dict[str, Any]) -> bool:
-        """
-        Log tick processing performance metrics for HFT monitoring
-        
-        Args:
-            metrics_data: Performance metrics from auto_trading_data_service
-            
-        Returns:
-            True if logged successfully, False otherwise
-        """
-        try:
-            await self.log_system_event(
-                event_type='TICK_PROCESSING_METRICS',
-                event_data={
-                    'total_ticks_processed': metrics_data.get('total_ticks_processed', 0),
-                    'avg_processing_time_ms': metrics_data.get('avg_processing_time_ms', 0),
-                    'max_processing_time_ms': metrics_data.get('max_processing_time_ms', 0),
-                    'signals_generated': metrics_data.get('signals_generated', 0),
-                    'fibonacci_calculations': metrics_data.get('fibonacci_calculations', 0),
-                    'database_writes': metrics_data.get('database_writes', 0),
-                    'errors_count': metrics_data.get('errors_count', 0),
-                    'circuit_breaker_triggers': metrics_data.get('circuit_breaker_triggers', 0),
-                    'active_instruments': metrics_data.get('active_instruments', 0),
-                    'queue_size': metrics_data.get('queue_size', 0)
-                },
-                severity='INFO'
-            )
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to log tick processing metrics: {e}")
-            return False
     
     async def get_live_trading_dashboard_data(self, user_id: int) -> Dict[str, Any]:
         """

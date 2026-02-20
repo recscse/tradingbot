@@ -121,9 +121,6 @@ class User(Base):
     emergency_controls = relationship(
         "EmergencyControl", back_populates="user", cascade="all, delete"
     )
-    trading_logs = relationship(
-        "TradingSystemLog", back_populates="user", cascade="all, delete"
-    )
     audit_trails = relationship(
         "TradingAuditTrail", back_populates="user", cascade="all, delete"
     )
@@ -1400,45 +1397,6 @@ class DailyTradingPerformance(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "trading_date", name="uq_daily_perf_user_date"),
         Index("idx_daily_perf_date", "trading_date"),
-    )
-
-
-class TradingSystemLog(Base):
-    """Structured logging for the auto-trading system"""
-
-    __tablename__ = "trading_system_logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    log_level = Column(
-        String(20), nullable=False, index=True
-    )  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    component = Column(
-        String(50), nullable=False, index=True
-    )  # fibonacci_strategy, order_manager, risk_manager
-    message = Column(Text, nullable=False)
-
-    # Context Data
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    trade_id = Column(String(50), index=True)
-    symbol = Column(String(20))
-    latency_ms = Column(Integer)
-
-    # Technical Details
-    function_name = Column(String(100))
-    line_number = Column(Integer)
-    stack_trace = Column(Text)
-
-    # Metadata (JSON for flexible data)
-    additional_data = Column(JSON)
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
-
-    # Relationships
-    user = relationship("User", back_populates="trading_logs")
-
-    # Indexes for efficient log searching
-    __table_args__ = (
-        Index("idx_trading_log_timestamp", "timestamp"),
-        Index("idx_trading_log_level_component", "log_level", "component"),
     )
 
 

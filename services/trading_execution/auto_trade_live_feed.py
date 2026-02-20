@@ -48,7 +48,6 @@ from utils.logging_utils import (
     log_trade_result,
     generate_trace_id,
     log_structured,
-    log_to_db,
 )
 
 logger = logging.getLogger("auto_trade_live_feed")
@@ -170,11 +169,6 @@ class AutoTradeLiveFeed:
                 logger.warning("No instruments to monitor - stopping")
                 self.is_running = False
                 self._set_service_error("registry", "No instruments to monitor")
-                log_to_db(
-                    component="auto_trade_live_feed",
-                    message="Startup FAILED: No instruments to monitor",
-                    level="ERROR",
-                )
                 return
 
             # Get all unique keys to subscribe
@@ -184,17 +178,6 @@ class AutoTradeLiveFeed:
                 f"Starting auto-trade: {len(shared_registry.instruments)} instruments, "
                 f"{len(shared_registry.user_subscriptions)} users, "
                 f"{len(keys_to_subscribe)} subscription keys"
-            )
-
-            log_to_db(
-                component="auto_trade_live_feed",
-                message=f"Live feed STARTING: {len(shared_registry.instruments)} instruments monitored",
-                level="INFO",
-                additional_data={
-                    "instruments": len(shared_registry.instruments),
-                    "users": len(shared_registry.user_subscriptions),
-                    "trading_mode": trading_mode.value,
-                },
             )
 
             # Create WebSocket client
@@ -259,12 +242,6 @@ class AutoTradeLiveFeed:
                 )
             )
 
-            log_to_db(
-                component="auto_trade_live_feed",
-                message=f"CRITICAL STARTUP ERROR: {str(e)}",
-                level="ERROR",
-            )
-
             import traceback
 
             logger.error(traceback.format_exc())
@@ -312,13 +289,6 @@ class AutoTradeLiveFeed:
                 await self.pnl_task
             except asyncio.CancelledError:
                 pass
-
-        log_to_db(
-            component="auto_trade_live_feed",
-            message="Live feed STOPPED",
-            level="INFO",
-            additional_data=self.stats,
-        )
 
         logger.info("Auto-trading stopped")
         logger.info(f"Final Stats: {self.stats}")
@@ -617,12 +587,6 @@ class AutoTradeLiveFeed:
                     user_broker_map[bc.user_id] = bc
 
             logger.info(f"Found {len(user_broker_map)} users with active brokers")
-
-            log_to_db(
-                component="auto_trade_live_feed",
-                message=f"Loading instruments: Found {len(stocks)} stocks and {len(user_broker_map)} active users",
-                level="DEBUG",
-            )
 
             # Process each stock - register BOTH CE and PE at ATM levels
             from services.upstox_option_service import upstox_option_service
@@ -1913,14 +1877,6 @@ class AutoTradeLiveFeed:
                         "user_id": user_id,
                         "timestamp": get_ist_isoformat(),
                     },
-                )
-
-                log_to_db(
-                    component="auto_trade_live_feed",
-                    message=f"Trade Prep FAILED for {instrument.stock_symbol}: {error_reason}",
-                    level="WARNING",
-                    user_id=user_id,
-                    symbol=instrument.stock_symbol,
                 )
 
         except Exception:

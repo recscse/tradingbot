@@ -529,16 +529,8 @@ class MarketScheduleService:
                     "✅ Background: Pre-open stock selection complete - will validate at market open (9:15 AM)"
                 )
                 
-                from utils.logging_utils import log_to_db
                 from services.notifications.alert_manager import alert_manager
                 
-                log_to_db(
-                    component="market_scheduler",
-                    message=f"Pre-open Stock Selection COMPLETE: {len(selected_stocks_data)} stocks selected",
-                    level="INFO",
-                    additional_data={"count": len(selected_stocks_data), "sentiment": sentiment_analysis.get('sentiment')}
-                )
-
                 # Send Admin Alert
                 asyncio.create_task(alert_manager.send_market_intelligence(
                     sentiment=sentiment_analysis.get('sentiment', 'neutral'),
@@ -568,13 +560,6 @@ class MarketScheduleService:
         except Exception as e:
             logger.error(f"❌ Background: Pre-open stock selection failed: {e}")
             self.task_errors["preopen_selection"] = str(e)
-            
-            from utils.logging_utils import log_to_db
-            log_to_db(
-                component="market_scheduler",
-                message=f"Pre-open Selection FAILED: {str(e)}",
-                level="ERROR"
-            )
             
             import traceback
 
@@ -677,16 +662,8 @@ class MarketScheduleService:
                         f"✅ Final selections confirmed: {len(self.selected_stocks)} stocks ready for auto-trading"
                     )
                     
-                    from utils.logging_utils import log_to_db
                     from services.notifications.alert_manager import alert_manager
                     
-                    log_to_db(
-                        component="market_scheduler",
-                        message=f"Market Open Validation COMPLETE: {len(self.selected_stocks)} stocks locked for trading",
-                        level="INFO",
-                        additional_data={"count": len(self.selected_stocks), "action": validation_action}
-                    )
-
                     # Send Admin Alert
                     asyncio.create_task(alert_manager.send_stock_selection_summary(
                         count=len(self.selected_stocks),
