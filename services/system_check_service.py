@@ -2,6 +2,7 @@ import logging
 import os
 import psutil
 import redis
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
@@ -483,12 +484,6 @@ class SystemCheckService:
                     }
                 }
             }
-            
-            self._save_to_cache("daily_tasks", result)
-            return result
-        except Exception as e:
-            logger.error(f"Daily tasks check failed: {e}")
-            return {"status": "error", "error": str(e)}
             
             self._save_to_cache("daily_tasks", result)
             return result
