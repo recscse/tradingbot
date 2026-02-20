@@ -45,23 +45,21 @@ async def test_prepare_trade_with_live_data_imports():
         )
         mock_capital_manager.validate_capital_availability.return_value = {"valid": True}
         
-        # We also need to mock log_to_db to avoid DB issues
-        with patch("services.trading_execution.trade_prep.log_to_db"):
-            result = await service.prepare_trade_with_live_data(
-                premium_signal=premium_signal,
-                user_id=1,
-                stock_symbol="RELIANCE",
-                option_instrument_key="NSE_FO|12345",
-                option_type="CE",
-                strike_price=Decimal("2500.0"),
-                expiry_date="2026-02-26",
-                lot_size=250,
-                current_premium=Decimal("100.0"),
-                historical_data={"close": [100.0] * 30},
-                db=db,
-                trading_mode=TradingMode.PAPER
-            )
-            
-            assert result.status == TradeStatus.READY
-            assert result.stock_symbol == "RELIANCE"
-            # If we reached here without NameError, the imports are working
+        result = await service.prepare_trade_with_live_data(
+            premium_signal=premium_signal,
+            user_id=1,
+            stock_symbol="RELIANCE",
+            option_instrument_key="NSE_FO|12345",
+            option_type="CE",
+            strike_price=Decimal("2500.0"),
+            expiry_date="2026-02-26",
+            lot_size=250,
+            current_premium=Decimal("100.0"),
+            historical_data={"close": [100.0] * 30},
+            db=db,
+            trading_mode=TradingMode.PAPER
+        )
+        
+        assert result.status == TradeStatus.READY
+        assert result.stock_symbol == "RELIANCE"
+        # If we reached here without NameError, the imports are working

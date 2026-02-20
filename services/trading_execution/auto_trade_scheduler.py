@@ -25,7 +25,6 @@ from database.models import SelectedStock, ActivePosition, BrokerConfig
 from services.trading_execution.auto_trade_live_feed import auto_trade_live_feed
 from services.trading_execution.capital_manager import TradingMode
 from utils.timezone_utils import get_ist_now_naive
-from utils.logging_utils import log_to_db
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +74,6 @@ class AutoTradeScheduler:
             self.is_running = True
             self.default_trading_mode = trading_mode
 
-            log_to_db(
-                component="auto_trade_scheduler",
-                message=f"Auto-trade scheduler STARTED (Mode: {trading_mode.value})",
-                level="INFO",
-            )
-
             logger.info(
                 f"🕐 Auto-trade scheduler started (monitoring ALL active users)"
             )
@@ -114,13 +107,6 @@ class AutoTradeScheduler:
                         logger.info(
                             f"💓 Auto-Trade Scheduler Heartbeat: Active at {current_time.strftime('%H:%M:%S')} IST"
                         )
-                        # Also log to DB occasionally to show system health in UI
-                        if now_ist.minute % 30 == 0:
-                            log_to_db(
-                                component="auto_trade_scheduler",
-                                message=f"Heartbeat: Scheduler active (IST: {current_time.strftime('%H:%M')})",
-                                level="DEBUG",
-                            )
 
                     # Check if market is open
                     is_market_hours = (
@@ -269,14 +255,6 @@ class AutoTradeScheduler:
                     )
                 )
 
-                log_to_db(
-                    component="auto_trade_scheduler",
-                    message=f"AUTO-START: User {user_id} started trading",
-                    level="INFO",
-                    user_id=user_id,
-                    additional_data={"trading_mode": self.default_trading_mode.value},
-                )
-
                 # Mark as auto-started for today
                 self.auto_started_users[user_id] = True
 
@@ -292,11 +270,6 @@ class AutoTradeScheduler:
 
         except Exception as e:
             logger.error(f"Error checking auto-start for users: {e}")
-            log_to_db(
-                component="auto_trade_scheduler",
-                message=f"AUTO-START ERROR: {str(e)}",
-                level="ERROR",
-            )
             self.last_error = f"Auto-start check error: {str(e)}"
             import traceback
 

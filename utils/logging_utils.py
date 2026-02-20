@@ -1,13 +1,7 @@
 import logging
 import uuid
-import sys
-import traceback
 import threading
 from typing import Any, Dict, Optional
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from database.connection import SessionLocal
-from database.models import TradingSystemLog
 from core.production_logging import get_trading_logger, get_audit_logger
 
 logger = get_trading_logger().setup_trading_logger()
@@ -18,103 +12,9 @@ audit_logger = get_audit_logger()
 # Thread-local storage for recursion protection
 _local = threading.local()
 
-class DBLoggingHandler(logging.Handler):
-    """
-    Custom logging handler that persists logs to the database.
-    Used to automatically capture errors and warnings for the System Health UI.
-    """
-    def emit(self, record: logging.LogRecord):
-        # Avoid recursion and only log WARNING or higher to DB automatically
-        if record.name == 'trading' or record.levelno < logging.WARNING:
-            return
-            
-        # Check for recursion in current thread
-        if getattr(_local, 'in_db_logging', False):
-            return
-            
-        try:
-            _local.in_db_logging = True
-            db = SessionLocal()
-            try:
-                # Extract stack trace if available
-                stack_trace = None
-                if record.exc_info:
-                    stack_trace = "".join(traceback.format_exception(*record.exc_info))
-                elif record.levelno >= logging.ERROR:
-                    # Fallback stack trace for errors without exc_info
-                    stack_trace = "".join(traceback.format_stack())
-
-                log_entry = TradingSystemLog(
-                    log_level=record.levelname,
-                    component=record.name,
-                    message=record.getMessage(),
-                    function_name=record.funcName,
-                    line_number=record.lineno,
-                    stack_trace=stack_trace,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                db.add(log_entry)
-                db.commit()
-            except Exception:
-                # Don't log this to avoid infinite loop
-                db.rollback()
-            finally:
-                db.close()
-        except Exception:
-            pass
-        finally:
-            _local.in_db_logging = False
-
 def generate_trace_id() -> str:
     """Generate a unique trace ID for tracking request flows"""
     return str(uuid.uuid4())
-
-def log_to_db(
-    component: str,
-    message: str,
-    level: str = "INFO",
-    user_id: Optional[int] = None,
-    trade_id: Optional[str] = None,
-    symbol: Optional[str] = None,
-    latency_ms: Optional[int] = None,
-    additional_data: Optional[Dict[str, Any]] = None
-):
-    """
-    Persist a log entry to the database for UI tracking.
-    """
-    db = SessionLocal()
-    try:
-        # Get function name and line number from stack
-        caller = sys._getframe(1)
-        function_name = caller.f_code.co_name
-        line_number = caller.f_lineno
-        
-        stack_trace = None
-        if level in ["ERROR", "CRITICAL"]:
-            stack_trace = traceback.format_exc()
-            if stack_trace == "NoneType: None\n": # No exception active
-                stack_trace = "".join(traceback.format_stack()[:-1])
-
-        log_entry = TradingSystemLog(
-            log_level=level.upper(),
-            component=component,
-            message=message,
-            user_id=user_id,
-            trade_id=trade_id,
-            symbol=symbol,
-            latency_ms=latency_ms,
-            function_name=function_name,
-            line_number=line_number,
-            stack_trace=stack_trace,
-            additional_data=additional_data,
-            timestamp=datetime.now(timezone.utc)
-        )
-        db.add(log_entry)
-        db.commit()
-    except Exception as e:
-        trading_logger.error(f"Failed to log to database: {e}")
-    finally:
-        db.close()
 
 def log_structured(
     event: str, 

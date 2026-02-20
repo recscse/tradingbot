@@ -20,7 +20,7 @@ from services.trading_execution.strategy_engine import (
     TrailingStopType,
 )
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
-from utils.logging_utils import log_structured, log_to_db
+from utils.logging_utils import log_structured
 from services.notifications.telegram_service import telegram_notifier
 
 logger = logging.getLogger(__name__)
@@ -104,12 +104,6 @@ class RealTimePnLTracker:
         self.is_running = True
         logger.info("🔴 Starting real-time PnL tracking...")
 
-        log_to_db(
-            component="pnl_tracker",
-            message="Real-time PnL tracking STARTED",
-            level="INFO",
-        )
-
         heartbeat_counter = 0
         try:
             while self.is_running:
@@ -132,21 +126,11 @@ class RealTimePnLTracker:
 
         except Exception as e:
             logger.error(f"Error in PnL tracking loop: {e}")
-            log_to_db(
-                component="pnl_tracker",
-                message=f"CRITICAL LOOP ERROR: {str(e)}",
-                level="ERROR",
-            )
             self.is_running = False
 
     def stop_tracking(self):
         """Stop real-time PnL tracking"""
         self.is_running = False
-        log_to_db(
-            component="pnl_tracker",
-            message="Real-time PnL tracking STOPPED",
-            level="INFO",
-        )
         logger.info("⏹️ Stopped real-time PnL tracking")
 
     async def update_all_positions(self, db: Session):
@@ -1099,20 +1083,6 @@ class RealTimePnLTracker:
                     ),
                 },
                 user_id=str(position.user_id),
-            )
-
-            log_to_db(
-                component="pnl_tracker",
-                message=f"POSITION CLOSED: {position.symbol} @ {exit_price} ({exit_reason})",
-                level="INFO",
-                user_id=position.user_id,
-                trade_id=trade_execution.trade_id,
-                symbol=position.symbol,
-                additional_data={
-                    "net_pnl": result["net_pnl"],
-                    "pnl_percent": result["pnl_percent"],
-                    "reason": exit_reason,
-                },
             )
 
             # Broadcast position close event to UI
