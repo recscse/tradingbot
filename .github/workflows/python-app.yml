@@ -40,7 +40,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -76,8 +76,6 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          # Pin pathspec to avoid ModuleNotFoundError: No module named 'pathspec.patterns.gitignore' in black
-          pip install "pathspec==0.10.3"
           pip install --upgrade flake8 black isort
 
           # Install testing framework dependencies first
@@ -165,6 +163,8 @@ jobs:
 
       - name: Code formatting check (Black)
         run: |
+          # Force pathspec version that works with current black install
+          pip install "pathspec<0.11"
           black --check --diff .
 
       - name: Import sorting check (isort)
