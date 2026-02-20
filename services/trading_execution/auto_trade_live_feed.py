@@ -723,6 +723,35 @@ class AutoTradeLiveFeed:
                     )
                     continue
 
+            # NEW: Register all existing ACTIVE POSITIONS for monitoring
+            # This ensures that even if sentiment changes and a stock is deselected,
+            # we keep the price feed alive for the open trade.
+            try:
+                db_session = SessionLocal()
+                active_positions = db_session.query(ActivePosition).filter(ActivePosition.is_active == True).all()
+                
+                for pos in active_positions:
+                    # If this instrument isn't already being tracked (from selection), add it now
+                    if pos.instrument_key not in shared_registry.instruments:
+                        logger.info(f"🛡️ Position Guard: Monitoring existing trade in {pos.symbol} ({pos.instrument_key})")
+                        shared_registry.register_instrument(
+                            stock_symbol=pos.symbol,
+                            spot_key=f"NSE_EQ|{pos.symbol}", 
+                            option_key=pos.instrument_key,
+                            option_type=pos.option_type or ("CE" if "CE" in pos.instrument_key else "PE"),
+                            strike_price=Decimal(str(pos.strike_price or 0)),
+                            expiry_date=pos.expiry_date,
+                            lot_size=pos.lot_size or 1,
+                            target_lots=pos.quantity // (pos.lot_size or 1)
+                        )
+                    
+                    # Ensure the user remains subscribed to this instrument in the shared registry
+                    shared_registry.subscribe_user(pos.user_id, pos.instrument_key)
+                
+                db_session.close()
+            except Exception as e:
+                logger.error(f"Error loading active positions into registry: {e}")
+
         except Exception:
             logger.exception("Error loading instruments and subscriptions")
 
