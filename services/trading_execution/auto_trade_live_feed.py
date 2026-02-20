@@ -723,6 +723,42 @@ class AutoTradeLiveFeed:
                     )
                     continue
 
+            # NEW: Register all existing ACTIVE POSITIONS for monitoring
+            # This ensures that even if sentiment changes and a stock is deselected,
+            # we keep the price feed alive for the open trade.
+            try:
+                db_session = SessionLocal()
+                active_positions = db_session.query(ActivePosition).filter(ActivePosition.is_active == True).all()
+                
+                for pos in active_positions:
+                    # If this instrument isn't already being tracked (from selection), add it now
+                    if pos.instrument_key not in shared_registry.instruments:
+                        logger.info(f"🛡️ Position Guard: Monitoring existing trade in {pos.symbol} ({pos.instrument_key})")
+                        shared_registry.register_instrument(
+                            stock_symbol=pos.symbol,
+                            spot_key=f"NSE_EQ|{pos.symbol}", 
+                            option_key=pos.instrument_key,
+                            option_type=pos.option_type or ("CE" if "CE" in pos.instrument_key else "PE"),
+                            strike_price=Decimal(str(pos.strike_price or 0)),
+                            expiry_date=pos.expiry_date,
+                            lot_size=pos.lot_size or 1,
+                            target_lots=pos.quantity // (pos.lot_size or 1)
+                        )
+                    
+                    # Ensure the user remains subscribed to this instrument in the shared registry
+                    shared_registry.subscribe_user(pos.user_id, pos.instrument_key)
+                
+                db_session.close()
+
+                # Trigger immediate WebSocket update for these guarded positions
+                if self.upstox_client and active_positions:
+                    new_keys = shared_registry.get_all_instrument_keys()
+                    logger.info(f"🔄 Immediate WebSocket update for {len(new_keys)} guarded/selected keys")
+                    asyncio.create_task(self.upstox_client.update_subscriptions(new_keys))
+
+            except Exception as e:
+                logger.error(f"Error loading active positions into registry: {e}")
+
         except Exception:
             logger.exception("Error loading instruments and subscriptions")
 
@@ -986,109 +1022,81 @@ class AutoTradeLiveFeed:
 
     async def _update_shared_option_data(self, instrument_key: str, feed_data: Dict):
         """
-        Update option data in shared registry
+        Update option data in shared registry and trigger broadcasts
 
         Args:
             instrument_key: Instrument key from feed
             feed_data: Feed data
         """
         try:
-            full_feed = feed_data.get("fullFeed", {}) or {}
-            market_ff = full_feed.get("marketFF", {}) or {}
-            ltpc = market_ff.get("ltpc", {}) or {}
+            # TRY MULTIPLE FEED SOURCES (Upstox sends data in different formats)
+            premium = 0
+            
+            # Source 1: Market Full Feed (detailed)
+            market_ff = feed_data.get("fullFeed", {}).get("marketFF", {})
+            if market_ff:
+                premium = market_ff.get("ltpc", {}).get("ltp", 0)
+            
+            # Source 2: Direct LTPC (fast)
+            if not premium or premium <= 0:
+                premium = feed_data.get("ltpc", {}).get("ltp", 0)
+                
+            # Source 3: Direct LTP (fallback)
+            if not premium or premium <= 0:
+                premium = feed_data.get("ltp", 0)
 
-            premium = ltpc.get("ltp", 0)
             if not premium or float(premium) <= 0:
                 return
 
-            # Extract Greeks and market data
-            option_greeks_data = market_ff.get("optionGreeks", {})
-            # CRITICAL FIX: IV is a direct field of marketFF, NOT inside optionGreeks
-            # Confirmed via MarketDataFeed.proto (MarketFullFeed field 8 is iv)
-            implied_vol = market_ff.get("iv")
-            open_int = market_ff.get("oi")
-            vol = market_ff.get("vtt")
-
-            # Extract bid/ask
-            market_level = market_ff.get("marketLevel", {})
-            bid_ask_quotes = market_level.get("bidAskQuote", [])
-            bid_price_val = None
-            ask_price_val = None
-
-            if bid_ask_quotes and len(bid_ask_quotes) > 0:
-                first_quote = bid_ask_quotes[0]
-                bid_price_val = first_quote.get("bidP")
-                ask_price_val = first_quote.get("askP")
-
-            # Prepare Greeks with enhanced validation
-            greeks = None
-            if option_greeks_data and any(option_greeks_data.values()):
-                try:
-                    # CRITICAL FIX: Validate Greeks before using them
-                    delta_val = option_greeks_data.get("delta", 0)
-                    theta_val = option_greeks_data.get("theta", 0)
-                    gamma_val = option_greeks_data.get("gamma", 0)
-                    vega_val = option_greeks_data.get("vega", 0)
-                    rho_val = option_greeks_data.get("rho", 0)
-
-                    # Ensure all values are valid numbers
-                    if delta_val is not None and theta_val is not None:
-                        greeks = {
-                            "delta": float(delta_val),
-                            "theta": float(theta_val),
-                            "gamma": float(gamma_val) if gamma_val is not None else 0.0,
-                            "vega": float(vega_val) if vega_val is not None else 0.0,
-                            "rho": float(rho_val) if rho_val is not None else 0.0,
-                        }
-
-                        # VALIDATION: Delta should be between -1 and 1
-                        if not (-1 <= greeks["delta"] <= 1):
-                            logger.warning(
-                                f"Invalid Delta value {greeks['delta']} for {instrument_key} - discarding Greeks"
-                            )
-                            greeks = None
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Greeks conversion failed for {instrument_key}: {e}"
-                    )
-                    greeks = None
-
-            # Safely convert volume with logging
-            volume_val = None
-            if vol is not None:
-                try:
-                    volume_val = (
-                        float(vol) if isinstance(vol, (int, float)) else float(str(vol))
-                    )
-                except (ValueError, TypeError) as e:
-                    # CRITICAL FIX: Log volume conversion failures for debugging
-                    logger.warning(
-                        f"Volume conversion failed for {instrument_key}: vol={vol}, type={type(vol)}, error={e}"
-                    )
-                    volume_val = None
-
-            # Update shared registry
+            # Prepare update in shared registry
             shared_registry.update_option_data(
                 option_key=instrument_key,
                 premium=Decimal(str(premium)),
-                greeks=greeks,
-                implied_vol=float(implied_vol) if implied_vol else None,
-                open_interest=float(open_int) if open_int else None,
-                volume=volume_val,
-                bid_price=float(bid_price_val) if bid_price_val else None,
-                ask_price=float(ask_price_val) if ask_price_val else None,
+                # Greeks and other data only from market_ff
+                greeks=self._extract_greeks(market_ff) if market_ff else None,
+                implied_vol=float(market_ff.get("iv", 0)) if market_ff and market_ff.get("iv") else None,
+                open_interest=float(market_ff.get("oi", 0)) if market_ff and market_ff.get("oi") else None,
+                volume=float(market_ff.get("vtt", 0)) if market_ff and market_ff.get("vtt") else None,
+                bid_price=self._extract_bid_ask(market_ff, "bid") if market_ff else None,
+                ask_price=self._extract_bid_ask(market_ff, "ask") if market_ff else None
             )
 
-            # Broadcast price update to UI
+            # CRITICAL: Broadcast price update to UI and update PnL
             instrument = shared_registry.get_instrument(instrument_key)
             if instrument:
                 await self._broadcast_price_update(instrument)
-
-                # Update PnL for all users with active positions in this instrument
                 await self._update_positions_pnl(instrument)
 
-        except Exception:
-            logger.exception("Error updating shared option data")
+        except Exception as e:
+            logger.error(f"Error updating shared option data for {instrument_key}: {e}")
+
+    def _extract_greeks(self, market_ff: Dict) -> Optional[Dict]:
+        """Helper to extract and validate greeks from feed"""
+        option_greeks_data = market_ff.get("optionGreeks", {})
+        if not option_greeks_data: return None
+        
+        try:
+            greeks = {
+                "delta": float(option_greeks_data.get("delta", 0)),
+                "theta": float(option_greeks_data.get("theta", 0)),
+                "gamma": float(option_greeks_data.get("gamma", 0) or 0),
+                "vega": float(option_greeks_data.get("vega", 0) or 0),
+                "rho": float(option_greeks_data.get("rho", 0) or 0),
+            }
+            if -1 <= greeks["delta"] <= 1:
+                return greeks
+        except:
+            pass
+        return None
+
+    def _extract_bid_ask(self, market_ff: Dict, type: str) -> Optional[float]:
+        """Helper to extract bid/ask from feed"""
+        quotes = market_ff.get("marketLevel", {}).get("bidAskQuote", [])
+        if not quotes: return None
+        try:
+            return float(quotes[0].get("bidP" if type == "bid" else "askP", 0))
+        except:
+            return None
 
     # ============================================================================
     # STRATEGY EXECUTION (COMMON LAYER - Signal Generation)
@@ -1780,9 +1788,7 @@ class AutoTradeLiveFeed:
                     # Safely extract entry price
                     try:
                         raw_entry = getattr(exec_result, "entry_price", None)
-                        if raw_entry is not None and not isinstance(
-                            raw_entry, MagicMock
-                        ):
+                        if raw_entry is not None:
                             entry_price = Decimal(str(raw_entry))
                         else:
                             entry_price = Decimal(str(instrument.live_option_premium))

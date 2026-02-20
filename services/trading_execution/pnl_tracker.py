@@ -17,7 +17,7 @@ from database.connection import SessionLocal
 from services.trading_execution.strategy_engine import (
     strategy_engine,
     SignalType,
-    TrailingStopType
+    TrailingStopType,
 )
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import log_structured, log_to_db
@@ -52,6 +52,7 @@ class PositionPnL:
         status: Position status
         last_updated: Last update timestamp
     """
+
     position_id: int
     trade_id: str
     user_id: int
@@ -102,11 +103,11 @@ class RealTimePnLTracker:
         """
         self.is_running = True
         logger.info("🔴 Starting real-time PnL tracking...")
-        
+
         log_to_db(
             component="pnl_tracker",
             message="Real-time PnL tracking STARTED",
-            level="INFO"
+            level="INFO",
         )
 
         heartbeat_counter = 0
@@ -115,7 +116,9 @@ class RealTimePnLTracker:
                 # Heartbeat every 15 minutes (900 seconds)
                 heartbeat_counter += self.update_interval_seconds
                 if heartbeat_counter >= 900:
-                    logger.info(f"💓 Real-Time PnL Tracker Heartbeat: Monitoring {self.update_interval_seconds}s interval active at {get_ist_now_naive().strftime('%H:%M:%S')} IST")
+                    logger.info(
+                        f"💓 Real-Time PnL Tracker Heartbeat: Monitoring {self.update_interval_seconds}s interval active at {get_ist_now_naive().strftime('%H:%M:%S')} IST"
+                    )
                     heartbeat_counter = 0
 
                 # Create new session for each iteration to avoid stale connections
@@ -132,7 +135,7 @@ class RealTimePnLTracker:
             log_to_db(
                 component="pnl_tracker",
                 message=f"CRITICAL LOOP ERROR: {str(e)}",
-                level="ERROR"
+                level="ERROR",
             )
             self.is_running = False
 
@@ -142,7 +145,7 @@ class RealTimePnLTracker:
         log_to_db(
             component="pnl_tracker",
             message="Real-time PnL tracking STOPPED",
-            level="INFO"
+            level="INFO",
         )
         logger.info("⏹️ Stopped real-time PnL tracking")
 
@@ -156,16 +159,21 @@ class RealTimePnLTracker:
         try:
             # 1. Get live market data (In-Memory, Fast)
             from services.realtime_market_engine import get_market_engine
+
             market_engine = get_market_engine()
-            
+
             # 2. Define DB Update Job
             def pnl_update_job():
                 session = SessionLocal()
                 updates = []
                 exits = []
                 try:
-                    active_positions = session.query(ActivePosition).filter(ActivePosition.is_active == True).all()
-                    
+                    active_positions = (
+                        session.query(ActivePosition)
+                        .filter(ActivePosition.is_active == True)
+                        .all()
+                    )
+
                     for position in active_positions:
                         try:
                             # CRITICAL: Check time-based exit FIRST
@@ -173,68 +181,131 @@ class RealTimePnLTracker:
                             is_time_exit = False
                             if now_t.hour >= 15 and now_t.minute >= 20:
                                 is_time_exit = True
-                                logger.info(f"Time-based exit triggered for {position.symbol} at {now_t}")
+                                logger.info(
+                                    f"Time-based exit triggered for {position.symbol} at {now_t}"
+                                )
 
                             # SINGLE SOURCE OF TRUTH: Fetch premium from shared_registry (sync with UI)
-                            from services.trading_execution.shared_instrument_registry import shared_registry
-                            price_decimal = Decimal('0')
-                            shared_inst = shared_registry.get_instrument(position.instrument_key)
-                            
+                            from services.trading_execution.shared_instrument_registry import (
+                                shared_registry,
+                            )
+
+                            price_decimal = Decimal("0")
+                            shared_inst = shared_registry.get_instrument(
+                                position.instrument_key
+                            )
+
                             if shared_inst and shared_inst.live_option_premium > 0:
                                 price_decimal = shared_inst.live_option_premium
+                            elif (
+                                shared_inst
+                                and hasattr(shared_inst, "ltp")
+                                and shared_inst.ltp > 0
+                            ):
+                                price_decimal = Decimal(str(shared_inst.ltp))
                             else:
                                 # Implement SAFE FALLBACK if registry is empty or premium is invalid
-                                logger.debug(f"ℹ️ Price source fallback used for {position.symbol}")
                                 if position.instrument_key in market_engine.instruments:
-                                    price_decimal = Decimal(str(market_engine.instruments[position.instrument_key].current_price))
-                            
+                                    price_decimal = Decimal(
+                                        str(
+                                            market_engine.instruments[
+                                                position.instrument_key
+                                            ].current_price
+                                        )
+                                    )
+
                             # Final safety check before calculation
                             if price_decimal <= 0:
                                 if is_time_exit:
                                     # Use last known DB price for time-based exit record
-                                    price_decimal = Decimal(str(position.current_price)) if position.current_price else Decimal('0')
+                                    price_decimal = (
+                                        Decimal(str(position.current_price))
+                                        if position.current_price
+                                        else Decimal("0")
+                                    )
                                 else:
-                                    # Skip calculation if no real-time price available
+                                    # CRITICAL VISIBILITY: Log sparingly to avoid spam (Once every 15 mins)
+                                    if not hasattr(self, "_last_gap_log"):
+                                        self._last_gap_log = {}
+                                    last_log = self._last_gap_log.get(
+                                        position.instrument_key, 0
+                                    )
+                                    now_ts = datetime.now().timestamp()
+
+                                    if now_ts - last_log > 900:  # 15 minutes
+                                        logger.error(
+                                            f"❌ DATA GAP: No live price for {position.symbol} ({position.instrument_key}). Exit logic SUSPENDED."
+                                        )
+                                        self._last_gap_log[
+                                            position.instrument_key
+                                        ] = now_ts
                                     continue
 
-                            trade_execution = session.query(AutoTradeExecution).filter(
-                                AutoTradeExecution.id == position.trade_execution_id
-                            ).first()
+                            trade_execution = (
+                                session.query(AutoTradeExecution)
+                                .filter(
+                                    AutoTradeExecution.id == position.trade_execution_id
+                                )
+                                .first()
+                            )
 
                             if not trade_execution:
                                 continue
 
-                            # Calculations
+                            # FIXED CALCULATIONS: quantity already represents total units
                             entry_price = Decimal(str(trade_execution.entry_price))
-                            quantity = trade_execution.quantity
-                            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
-                            
+                            total_units = Decimal(str(trade_execution.quantity))
+
+                            # True Investment
+                            total_investment = (
+                                Decimal(str(trade_execution.total_investment))
+                                if trade_execution.total_investment
+                                else (entry_price * total_units)
+                            )
+
                             pnl_points = price_decimal - entry_price
-                            gross_pnl = pnl_points * Decimal(str(quantity))
-                            
-                            # Charges estimate
-                            buy_val = entry_price * Decimal(str(quantity))
-                            sell_val = price_decimal * Decimal(str(quantity))
+                            gross_pnl = pnl_points * total_units
+
+                            # Charges estimate (using total units)
+                            buy_val = entry_price * total_units
+                            sell_val = price_decimal * total_units
                             est_turnover = buy_val + sell_val
-                            est_charges = Decimal('40.0') + (est_turnover * Decimal('0.001'))
+                            est_charges = Decimal("40.0") + (
+                                est_turnover * Decimal("0.001")
+                            )
                             pnl_amount = gross_pnl - est_charges
-                            
-                            pnl_percent = (pnl_amount / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
-                            highest_price = max(Decimal(str(position.highest_price_reached)), price_decimal)
+
+                            pnl_percent = (
+                                (pnl_amount / total_investment) * Decimal("100")
+                                if total_investment > 0
+                                else Decimal("0")
+                            )
+                            highest_price = max(
+                                Decimal(str(position.highest_price_reached)),
+                                price_decimal,
+                            )
 
                             current_sl = Decimal(str(position.current_stop_loss))
-                            
+
                             # FIX 1: Stop Loss Recovery (MANDATORY)
                             # Guarantee SL is never zero during live tracking
                             if current_sl <= 0:
-                                initial_sl = Decimal(str(trade_execution.initial_stop_loss))
+                                initial_sl = Decimal(
+                                    str(trade_execution.initial_stop_loss)
+                                )
                                 if initial_sl > 0:
-                                    logger.warning(f"⚠️ Recovered zero SL for {position.symbol}: {current_sl} -> {initial_sl}")
+                                    logger.warning(
+                                        f"⚠️ Recovered zero SL for {position.symbol}: {current_sl} -> {initial_sl}"
+                                    )
                                     position.current_stop_loss = float(initial_sl)
                                     current_sl = initial_sl
 
-                            target_price = Decimal(str(trade_execution.target_1)) if trade_execution.target_1 else None
-                            
+                            target_price = (
+                                Decimal(str(trade_execution.target_1))
+                                if trade_execution.target_1
+                                else None
+                            )
+
                             # Update Trailing SL - ALWAYS LONG for premium positions
                             new_sl = strategy_engine.update_trailing_stop(
                                 current_price=price_decimal,
@@ -243,18 +314,23 @@ class RealTimePnLTracker:
                                 trailing_type=TrailingStopType.PERCENTAGE,
                                 position_type="LONG",
                                 target_price=target_price,
-                                symbol=position.symbol
+                                symbol=position.symbol,
                             )
-                            
+
                             # FIX 4: Allow First Breakeven Trail & Profit Locking Safely
-                            # Safety Guard: Ensure SL never moves down
+                            # Safety Guard: Ensure SL never moves down and NEVER drops below initial protection
+                            initial_sl_planned = Decimal(
+                                str(trade_execution.initial_stop_loss)
+                            )
+                            if new_sl < initial_sl_planned:
+                                new_sl = initial_sl_planned
+
                             if new_sl < current_sl:
                                 new_sl = current_sl
-                                
+
                             # If new_sl is above price, it's a Stop Loss hit scenario.
                             # We allow it so the exit logic below triggers immediately.
-                            # We only cap it for the DB record if we are NOT exiting.
-                            
+
                             if new_sl > current_sl:
                                 position.trailing_stop_triggered = True
                                 position.current_stop_loss = float(new_sl)
@@ -262,37 +338,54 @@ class RealTimePnLTracker:
                             # Check Exit - ALWAYS treat as LONG for premium (both CE & PE)
                             should_exit = is_time_exit
                             exit_reason = "TIME_BASED_EXIT" if is_time_exit else None
-                            
+
                             if not should_exit:
                                 # For LONG positions: Exit if price drops below SL (IMMEDIATE)
                                 if price_decimal <= new_sl:
                                     should_exit = True
                                     exit_reason = "STOP_LOSS_HIT"
-                                    logger.info(f"🛑 EXIT DECISION: SL Hit for {position.symbol} @ {price_decimal} (SL: {new_sl})")
+                                    logger.info(
+                                        f"🛑 EXIT DECISION: SL Hit for {position.symbol} @ {price_decimal} (SL: {new_sl})"
+                                    )
                                 # For LONG positions: Exit if price rises above Target (Respect HOLD Window)
                                 elif target_price and price_decimal >= target_price:
                                     # REQUIREMENT: No exit allowed for first 3-5 minutes
-                                    holding_duration_min = (get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60
+                                    holding_duration_min = (
+                                        get_ist_now_naive() - trade_execution.entry_time
+                                    ).total_seconds() / 60
                                     if holding_duration_min >= 3:
                                         should_exit = True
                                         exit_reason = "TARGET_HIT"
-                                        logger.info(f"✅ EXIT DECISION: Target Hit for {position.symbol} @ {price_decimal}")
+                                        logger.info(
+                                            f"✅ EXIT DECISION: Target Hit for {position.symbol} @ {price_decimal}"
+                                        )
                                     else:
                                         # FIX 2: Target Hit Visibility (JSON persistence)
                                         import json
+
                                         blocked_data = {
                                             "exit_blocked_reason": "MIN_HOLD_TIME_NOT_COMPLETED",
-                                            "hold_time_min": round(holding_duration_min, 2),
+                                            "hold_time_min": round(
+                                                holding_duration_min, 2
+                                            ),
                                             "required_min": 3,
                                             "price": float(price_decimal),
-                                            "target": float(target_price)
+                                            "target": float(target_price),
                                         }
                                         # Persist only on state change to avoid DB spam
-                                        if not trade_execution.execution_notes or "MIN_HOLD_TIME_NOT_COMPLETED" not in str(trade_execution.execution_notes):
-                                            trade_execution.execution_notes = json.dumps(blocked_data)
-                                            
-                                        logger.info(f"⏳ Target hit but exit blocked for {position.symbol} - hold time {holding_duration_min:.1f}m < 3m")
-                            
+                                        if (
+                                            not trade_execution.execution_notes
+                                            or "MIN_HOLD_TIME_NOT_COMPLETED"
+                                            not in str(trade_execution.execution_notes)
+                                        ):
+                                            trade_execution.execution_notes = (
+                                                json.dumps(blocked_data)
+                                            )
+
+                                        logger.info(
+                                            f"⏳ Target hit but exit blocked for {position.symbol} - hold time {holding_duration_min:.1f}m < 3m"
+                                        )
+
                             # Update Position
                             position.current_price = float(price_decimal)
                             position.current_pnl = float(pnl_amount)
@@ -302,43 +395,59 @@ class RealTimePnLTracker:
                             position.last_updated = get_ist_now_naive()
 
                             if should_exit:
-                                exits.append((position.id, float(price_decimal), exit_reason))
-                            
+                                exits.append(
+                                    (position.id, float(price_decimal), exit_reason)
+                                )
+
                             # Prepare Broadcast Data
                             # FIX 3: Guarantee valid SL in UI broadcast (never 0)
                             ui_sl = float(new_sl) if new_sl > 0 else float(current_sl)
-                            updates.append(PositionPnL(
-                                position_id=position.id,
-                                trade_id=trade_execution.trade_id,
-                                user_id=position.user_id,
-                                symbol=position.symbol,
-                                instrument_key=position.instrument_key,
-                                entry_price=entry_price,
-                                current_price=price_decimal,
-                                quantity=quantity,
-                                pnl=pnl_amount,
-                                pnl_percent=pnl_percent,
-                                pnl_points=pnl_points,
-                                entry_time=trade_execution.entry_time.isoformat(),
-                                holding_duration_minutes=int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60),
-                                stop_loss=Decimal(str(ui_sl)),
-                                target=target_price or Decimal('0'),
-                                highest_price=highest_price,
-                                trailing_sl_active=position.trailing_stop_triggered,
-                                status="CLOSED" if should_exit else "ACTIVE",
-                                last_updated=get_ist_isoformat(),
-                                strike_price=Decimal(str(trade_execution.strike_price)) if trade_execution.strike_price else None
-                            ))
+                            updates.append(
+                                PositionPnL(
+                                    position_id=position.id,
+                                    trade_id=trade_execution.trade_id,
+                                    user_id=position.user_id,
+                                    symbol=position.symbol,
+                                    instrument_key=position.instrument_key,
+                                    entry_price=entry_price,
+                                    current_price=price_decimal,
+                                    quantity=int(total_units),
+                                    pnl=pnl_amount,
+                                    pnl_percent=pnl_percent,
+                                    pnl_points=pnl_points,
+                                    entry_time=trade_execution.entry_time.isoformat(),
+                                    holding_duration_minutes=int(
+                                        (
+                                            get_ist_now_naive()
+                                            - trade_execution.entry_time
+                                        ).total_seconds()
+                                        / 60
+                                    ),
+                                    stop_loss=Decimal(str(ui_sl)),
+                                    target=target_price or Decimal("0"),
+                                    highest_price=highest_price,
+                                    trailing_sl_active=position.trailing_stop_triggered,
+                                    status="CLOSED" if should_exit else "ACTIVE",
+                                    last_updated=get_ist_isoformat(),
+                                    strike_price=(
+                                        Decimal(str(trade_execution.strike_price))
+                                        if trade_execution.strike_price
+                                        else None
+                                    ),
+                                )
+                            )
 
                         except Exception as e:
-                            logger.error(f"Error processing position {position.id}: {e}")
+                            logger.error(
+                                f"Error processing position {position.id}: {e}"
+                            )
                             continue
-                            
+
                     session.commit()
-                    
+
                     # --- RISK MANAGEMENT ENGINE (GLOBAL KILL-SWITCH) ---
                     self._check_risk_breaches(updates, session)
-                    
+
                     return updates, exits
                 except Exception as e:
                     session.rollback()
@@ -361,16 +470,24 @@ class RealTimePnLTracker:
                 try:
                     for pos_id, price, reason in exits_to_process:
                         # Fetch objects again attached to this session
-                        pos = exit_session.query(ActivePosition).filter(ActivePosition.id == pos_id).first()
+                        pos = (
+                            exit_session.query(ActivePosition)
+                            .filter(ActivePosition.id == pos_id)
+                            .first()
+                        )
                         if pos:
-                            trade = exit_session.query(AutoTradeExecution).filter(AutoTradeExecution.id == pos.trade_execution_id).first()
+                            trade = (
+                                exit_session.query(AutoTradeExecution)
+                                .filter(AutoTradeExecution.id == pos.trade_execution_id)
+                                .first()
+                            )
                             if trade:
                                 await self._close_position(
                                     pos,
                                     trade,
                                     Decimal(str(price)),
                                     reason,
-                                    exit_session
+                                    exit_session,
                                 )
                 finally:
                     exit_session.close()
@@ -383,14 +500,17 @@ class RealTimePnLTracker:
         Monitor for risk violations and trigger Global Kill-Switch
         """
         try:
-            from services.trading_execution.shared_instrument_registry import shared_registry
+            from services.trading_execution.shared_instrument_registry import (
+                shared_registry,
+            )
+
             if shared_registry.is_risk_halted:
                 return
 
             # 1. Total Daily PnL Check
             total_unrealized_pnl = sum(u.pnl for u in updates)
             # In a full implementation, we'd fetch realized PnL from DB here
-            if total_unrealized_pnl < Decimal("-5000"): # Fixed 5k threshold for safety
+            if total_unrealized_pnl < Decimal("-5000"):  # Fixed 5k threshold for safety
                 shared_registry.is_risk_halted = True
                 shared_registry.halt_reason = "MAX_DAILY_LOSS_BREACHED"
                 logger.error("🛑 GLOBAL KILL-SWITCH TRIGGERED: Max Daily Loss")
@@ -400,11 +520,7 @@ class RealTimePnLTracker:
         except Exception as e:
             logger.error(f"Error checking risk breaches: {e}")
 
-    def _get_current_price(
-        self,
-        instrument_key: str,
-        market_engine: Any
-    ) -> Decimal:
+    def _get_current_price(self, instrument_key: str, market_engine: Any) -> Decimal:
         """
         Get current price from market engine
 
@@ -419,17 +535,17 @@ class RealTimePnLTracker:
             if instrument_key in market_engine.instruments:
                 instrument = market_engine.instruments[instrument_key]
                 return Decimal(str(instrument.current_price))
-            return Decimal('0')
+            return Decimal("0")
 
         except Exception as e:
             logger.debug(f"Error getting price for {instrument_key}: {e}")
-            return Decimal('0')
+            return Decimal("0")
 
     def _calculate_pnl(
         self,
         position: ActivePosition,
         trade_execution: AutoTradeExecution,
-        current_price: Decimal
+        current_price: Decimal,
     ) -> Dict[str, Any]:
         """
         Calculate position PnL
@@ -447,7 +563,11 @@ class RealTimePnLTracker:
             quantity = trade_execution.quantity
 
             # Get total investment (use from trade record if available, else calculate)
-            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+            total_investment = (
+                Decimal(str(trade_execution.total_investment))
+                if trade_execution.total_investment
+                else (entry_price * Decimal(str(quantity)))
+            )
 
             # Calculate PnL
             pnl_points = current_price - entry_price
@@ -458,18 +578,21 @@ class RealTimePnLTracker:
             buy_val = entry_price * Decimal(str(quantity))
             sell_val = current_price * Decimal(str(quantity))
             est_turnover = buy_val + sell_val
-            
+
             # Brokerage (₹40) + Taxes (~0.1%)
-            est_charges = Decimal('40.0') + (est_turnover * Decimal('0.001'))
+            est_charges = Decimal("40.0") + (est_turnover * Decimal("0.001"))
             pnl_amount = gross_pnl - est_charges
 
             # CRITICAL FIX: Calculate percentage based on total_investment, not per-unit price
-            pnl_percent = (pnl_amount / total_investment) * Decimal('100') if total_investment > 0 else Decimal('0')
+            pnl_percent = (
+                (pnl_amount / total_investment) * Decimal("100")
+                if total_investment > 0
+                else Decimal("0")
+            )
 
             # Track highest price
             highest_price = max(
-                Decimal(str(position.highest_price_reached)),
-                current_price
+                Decimal(str(position.highest_price_reached)), current_price
             )
 
             # Calculate holding duration
@@ -477,29 +600,29 @@ class RealTimePnLTracker:
             holding_duration = (get_ist_now_naive() - entry_time).total_seconds() / 60
 
             return {
-                'pnl': pnl_amount,
-                'pnl_percent': pnl_percent,
-                'pnl_points': pnl_points,
-                'highest_price': highest_price,
-                'holding_duration_minutes': int(holding_duration),
-                'total_investment': total_investment
+                "pnl": pnl_amount,
+                "pnl_percent": pnl_percent,
+                "pnl_points": pnl_points,
+                "highest_price": highest_price,
+                "holding_duration_minutes": int(holding_duration),
+                "total_investment": total_investment,
             }
 
         except Exception as e:
             logger.error(f"Error calculating PnL: {e}")
             return {
-                'pnl': Decimal('0'),
-                'pnl_percent': Decimal('0'),
-                'pnl_points': Decimal('0'),
-                'highest_price': Decimal(str(position.highest_price_reached)),
-                'holding_duration_minutes': 0
+                "pnl": Decimal("0"),
+                "pnl_percent": Decimal("0"),
+                "pnl_points": Decimal("0"),
+                "highest_price": Decimal(str(position.highest_price_reached)),
+                "holding_duration_minutes": 0,
             }
 
     def _update_trailing_stop_loss(
         self,
         position: ActivePosition,
         trade_execution: AutoTradeExecution,
-        current_price: Decimal
+        current_price: Decimal,
     ) -> Decimal:
         """
         Update trailing stop loss using ENHANCED strategy engine with LOCK PROFIT mechanism
@@ -518,11 +641,18 @@ class RealTimePnLTracker:
             Updated stop loss level
         """
         try:
-            from services.trading_execution.strategy_engine import strategy_engine, TrailingStopType
+            from services.trading_execution.strategy_engine import (
+                strategy_engine,
+                TrailingStopType,
+            )
 
             entry_price = Decimal(str(trade_execution.entry_price))
             current_sl = Decimal(str(position.current_stop_loss))
-            target_price = Decimal(str(trade_execution.target_1)) if trade_execution.target_1 else None
+            target_price = (
+                Decimal(str(trade_execution.target_1))
+                if trade_execution.target_1
+                else None
+            )
 
             # Determine position type (both CE and PE are long positions when buying options)
             position_type = "LONG"
@@ -541,7 +671,7 @@ class RealTimePnLTracker:
                 supertrend_value=supertrend_value,
                 position_type=position_type,
                 target_price=target_price,  # Pass target for lock profit calculation
-                symbol=position.symbol
+                symbol=position.symbol,
             )
 
             # Update trailing stop triggered flag
@@ -563,7 +693,7 @@ class RealTimePnLTracker:
         position: ActivePosition,
         trade_execution: AutoTradeExecution,
         current_price: Decimal,
-        pnl_data: Dict[str, Any]
+        pnl_data: Dict[str, Any],
     ) -> tuple[bool, Optional[str]]:
         """
         Check if position should be exited
@@ -606,10 +736,7 @@ class RealTimePnLTracker:
             return False, None
 
     async def _place_exit_order(
-        self,
-        trade_execution: AutoTradeExecution,
-        exit_price: Decimal,
-        db: Session
+        self, trade_execution: AutoTradeExecution, exit_price: Decimal, db: Session
     ) -> Optional[str]:
         """
         Place exit order (SELL) to close position
@@ -637,13 +764,15 @@ class RealTimePnLTracker:
                         db.query(BrokerConfig)
                         .filter(
                             BrokerConfig.id == trade_execution.broker_config_id,
-                            BrokerConfig.is_active == True
+                            BrokerConfig.is_active == True,
                         )
                         .first()
                     )
 
                     if not broker_config:
-                        logger.error(f"No active broker config found for trade {trade_execution.trade_id}")
+                        logger.error(
+                            f"No active broker config found for trade {trade_execution.trade_id}"
+                        )
                         return None
 
                     broker_name = broker_config.broker_name.lower()
@@ -651,16 +780,17 @@ class RealTimePnLTracker:
 
                     # Place SELL order based on broker
                     if "upstox" in broker_name:
-                        from services.upstox.upstox_order_service import get_upstox_order_service
+                        from services.upstox.upstox_order_service import (
+                            get_upstox_order_service,
+                        )
 
                         # Get Upstox Order Service with V3 API
                         order_service = get_upstox_order_service(
-                            access_token=broker_config.access_token,
-                            use_sandbox=False
+                            access_token=broker_config.access_token, use_sandbox=False
                         )
-                        
+
                         # Determine product type (default to Intraday 'I' if not specified)
-                        product_type = getattr(trade_execution, 'product', 'I')
+                        product_type = getattr(trade_execution, "product", "I")
 
                         # Place exit (SELL) order using V3 API
                         result = order_service.place_order_v3(
@@ -675,11 +805,13 @@ class RealTimePnLTracker:
                             disclosed_quantity=0,
                             is_amo=False,
                             tag=f"exit_{trade_execution.trade_id}",
-                            slice=True  # Enable auto-slicing
+                            slice=True,  # Enable auto-slicing
                         )
 
                         if not result.get("success"):
-                            logger.error(f"Upstox exit order failed: {result.get('message')}")
+                            logger.error(
+                                f"Upstox exit order failed: {result.get('message')}"
+                            )
                             return None
 
                         # Extract order IDs
@@ -723,7 +855,9 @@ class RealTimePnLTracker:
                         return order_result.get("orderId")
 
                     else:
-                        logger.error(f"Unsupported broker for exit order: {broker_name}")
+                        logger.error(
+                            f"Unsupported broker for exit order: {broker_name}"
+                        )
                         return None
                 except Exception as e:
                     logger.error(f"Job Error placing exit order: {e}")
@@ -742,41 +876,45 @@ class RealTimePnLTracker:
         trade_execution: AutoTradeExecution,
         exit_price: Decimal,
         exit_reason: str,
-        db: Session
+        db: Session,
     ):
         """
         Close position with Post-Trade Diagnostics and Risk Monitoring
         """
         try:
-            logger.info(f"🚪 Closing position {trade_execution.trade_id}: {exit_reason}")
-            
+            logger.info(
+                f"🚪 Closing position {trade_execution.trade_id}: {exit_reason}"
+            )
+
             # --- DIAGNOSTICS CAPTURE ---
             entry_price = Decimal(str(trade_execution.entry_price))
             planned_sl = Decimal(str(trade_execution.initial_stop_loss))
             planned_target = Decimal(str(trade_execution.target_1))
-            
+
             # Realized Risk/Reward
             risk_taken = abs(entry_price - planned_sl)
             reward_realized = exit_price - entry_price
             realized_rr = reward_realized / risk_taken if risk_taken > 0 else 0
-            
+
             # Time Integrity
-            time_in_trade_mins = (get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60
+            time_in_trade_mins = (
+                get_ist_now_naive() - trade_execution.entry_time
+            ).total_seconds() / 60
 
             # ACTUAL EXIT PRICE WITH SLIPPAGE FOR PAPER TRADING
             if trade_execution.trading_mode == "paper":
                 raw_exit_price = exit_price
                 slippage = raw_exit_price * Decimal("0.0005")
                 exit_price = raw_exit_price - slippage
-                logger.info(f"📝 Paper exit slippage applied: {raw_exit_price} -> {exit_price}")
+                logger.info(
+                    f"📝 Paper exit slippage applied: {raw_exit_price} -> {exit_price}"
+                )
 
             # Place exit order if live trading (Async)
             exit_order_id = None
             if trade_execution.trading_mode == "live":
                 exit_order_id = await self._place_exit_order(
-                    trade_execution,
-                    exit_price,
-                    db
+                    trade_execution, exit_price, db
                 )
 
             # Define DB Update Job
@@ -784,7 +922,11 @@ class RealTimePnLTracker:
                 try:
                     # Calculate final PnL
                     quantity = trade_execution.quantity
-                    total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+                    total_investment = (
+                        Decimal(str(trade_execution.total_investment))
+                        if trade_execution.total_investment
+                        else (entry_price * Decimal(str(quantity)))
+                    )
 
                     buy_value = entry_price * Decimal(str(quantity))
                     sell_value = price * Decimal(str(quantity))
@@ -792,15 +934,22 @@ class RealTimePnLTracker:
                     turnover = buy_value + sell_value
 
                     # CHARGES
-                    brokerage_flat = Decimal('40.0')
-                    taxes = turnover * Decimal('0.001')
+                    brokerage_flat = Decimal("40.0")
+                    taxes = turnover * Decimal("0.001")
                     total_charges = brokerage_flat + taxes
-                    
+
                     net_pnl = gross_pnl - total_charges
-                    pnl_percent = (net_pnl / total_investment * Decimal('100')) if total_investment > 0 else 0.0
+                    pnl_percent = (
+                        (net_pnl / total_investment * Decimal("100"))
+                        if total_investment > 0
+                        else 0.0
+                    )
 
                     # --- RISK MONITORING (KILL-SWITCH) ---
-                    from services.trading_execution.shared_instrument_registry import shared_registry
+                    from services.trading_execution.shared_instrument_registry import (
+                        shared_registry,
+                    )
+
                     if reason == "STOP_LOSS_HIT":
                         # Check for Global Kill Switch triggers (3 SLs in 60 mins or Daily Loss > 5000)
                         pass
@@ -808,12 +957,15 @@ class RealTimePnLTracker:
                     # Store diagnostics in execution_notes as a JSON string
                     # This avoids the reserved 'metadata' keyword and misleading 'fibonacci' column names
                     import json
+
                     diagnostics = {
                         "realized_rr": float(realized_rr),
                         "time_in_trade_min": float(time_in_trade_mins),
                         "exit_reason": reason,
                         "slippage_exit": float(price) - float(price),
-                        "diagnostic_check": "PASSED" if time_in_trade_mins > 0 else "FAILED_DATA"
+                        "diagnostic_check": (
+                            "PASSED" if time_in_trade_mins > 0 else "FAILED_DATA"
+                        ),
                     }
                     trade_execution.execution_notes = json.dumps(diagnostics)
 
@@ -834,44 +986,66 @@ class RealTimePnLTracker:
                     # UPDATE PAPER TRADING BALANCE ON EXIT
                     if trade_execution.trading_mode == "paper":
                         try:
-                            from services.paper_trading_account import paper_trading_service
+                            from services.paper_trading_account import (
+                                paper_trading_service,
+                            )
                             from database.models import PaperTradingAccount
-                            
-                            paper_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == position.user_id).first()
+
+                            paper_account = (
+                                db.query(PaperTradingAccount)
+                                .filter(PaperTradingAccount.user_id == position.user_id)
+                                .first()
+                            )
                             if paper_account:
                                 release_amount = float(sell_value - total_charges)
-                                
+
                                 paper_account.available_margin += release_amount
                                 paper_account.current_balance += release_amount
-                                paper_account.used_margin -= float(trade_execution.total_investment)
+                                paper_account.used_margin -= float(
+                                    trade_execution.total_investment
+                                )
                                 paper_account.total_pnl += float(net_pnl)
                                 paper_account.daily_pnl += float(net_pnl)
-                                paper_account.positions_count = max(0, paper_account.positions_count - 1)
+                                paper_account.positions_count = max(
+                                    0, paper_account.positions_count - 1
+                                )
                                 paper_account.updated_at = get_ist_now_naive()
-                                
+
                                 # Sync in-memory service
-                                mem_acc = paper_trading_service.accounts.get(position.user_id)
+                                mem_acc = paper_trading_service.accounts.get(
+                                    position.user_id
+                                )
                                 if mem_acc:
-                                    mem_acc.available_margin = float(paper_account.available_margin)
-                                    mem_acc.current_balance = float(paper_account.current_balance)
-                                    mem_acc.used_margin = float(paper_account.used_margin)
+                                    mem_acc.available_margin = float(
+                                        paper_account.available_margin
+                                    )
+                                    mem_acc.current_balance = float(
+                                        paper_account.current_balance
+                                    )
+                                    mem_acc.used_margin = float(
+                                        paper_account.used_margin
+                                    )
                                     mem_acc.total_pnl = float(paper_account.total_pnl)
-                                    mem_acc.positions_count = paper_account.positions_count
-                                
-                                logger.info(f"✅ Paper account updated after exit: New Balance=₹{paper_account.current_balance:,.2f} (Returned ₹{release_amount:,.2f})")
-                                
+                                    mem_acc.positions_count = (
+                                        paper_account.positions_count
+                                    )
+
+                                logger.info(
+                                    f"✅ Paper account updated after exit: New Balance=₹{paper_account.current_balance:,.2f} (Returned ₹{release_amount:,.2f})"
+                                )
+
                         except Exception as e:
                             logger.error(f"Failed to update paper account on exit: {e}")
 
                     db.commit()
-                    
+
                     return {
-                        "net_pnl": float(net_pnl), 
-                        "pnl_percent": float(pnl_percent), 
+                        "net_pnl": float(net_pnl),
+                        "pnl_percent": float(pnl_percent),
                         "gross_pnl": float(gross_pnl),
                         "quantity": quantity,
                         "entry_price": float(entry_price),
-                        "pnl_points": float(price - entry_price)
+                        "pnl_points": float(price - entry_price),
                     }
                 except Exception as e:
                     logger.error(f"DB Error in _close_position: {e}")
@@ -880,28 +1054,33 @@ class RealTimePnLTracker:
 
             # Run DB job in thread
             result = await asyncio.to_thread(
-                db_close_job, 
-                position.id, 
-                trade_execution.trade_id, 
-                exit_price, 
-                exit_reason, 
-                exit_order_id
+                db_close_job,
+                position.id,
+                trade_execution.trade_id,
+                exit_price,
+                exit_reason,
+                exit_order_id,
             )
 
             # Send Alert via AlertManager (Professional Unified Interface)
             from services.notifications.alert_manager import alert_manager
-            asyncio.create_task(alert_manager.notify_trade_exit(
-                user_id=position.user_id,
-                trade_data={
-                    "symbol": position.symbol,
-                    "exit_price": float(exit_price),
-                    "pnl": result['net_pnl'],
-                    "exit_reason": exit_reason
-                }
-            ))
 
-            logger.info(f"✅ Position closed: PnL = Rs.{result['net_pnl']:.2f} ({result['pnl_percent']:.2f}%)")
-            
+            asyncio.create_task(
+                alert_manager.notify_trade_exit(
+                    user_id=position.user_id,
+                    trade_data={
+                        "symbol": position.symbol,
+                        "exit_price": float(exit_price),
+                        "pnl": result["net_pnl"],
+                        "exit_reason": exit_reason,
+                    },
+                )
+            )
+
+            logger.info(
+                f"✅ Position closed: PnL = Rs.{result['net_pnl']:.2f} ({result['pnl_percent']:.2f}%)"
+            )
+
             log_structured(
                 event="POSITION_CLOSED",
                 message=f"Closed position {trade_execution.trade_id} ({exit_reason})",
@@ -910,11 +1089,16 @@ class RealTimePnLTracker:
                     "symbol": position.symbol,
                     "exit_price": float(exit_price),
                     "exit_reason": exit_reason,
-                    "net_pnl": result['net_pnl'],
-                    "pnl_percent": result['pnl_percent'],
-                    "duration_min": int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60)
+                    "net_pnl": result["net_pnl"],
+                    "pnl_percent": result["pnl_percent"],
+                    "duration_min": int(
+                        (
+                            get_ist_now_naive() - trade_execution.entry_time
+                        ).total_seconds()
+                        / 60
+                    ),
                 },
-                user_id=str(position.user_id)
+                user_id=str(position.user_id),
             )
 
             log_to_db(
@@ -925,10 +1109,10 @@ class RealTimePnLTracker:
                 trade_id=trade_execution.trade_id,
                 symbol=position.symbol,
                 additional_data={
-                    "net_pnl": result['net_pnl'],
-                    "pnl_percent": result['pnl_percent'],
-                    "reason": exit_reason
-                }
+                    "net_pnl": result["net_pnl"],
+                    "pnl_percent": result["pnl_percent"],
+                    "reason": exit_reason,
+                },
             )
 
             # Broadcast position close event to UI
@@ -941,22 +1125,29 @@ class RealTimePnLTracker:
                     "user_id": position.user_id,
                     "symbol": position.symbol,
                     "instrument_key": position.instrument_key,
-                    "entry_price": result['entry_price'],
+                    "entry_price": result["entry_price"],
                     "exit_price": float(exit_price),
-                    "quantity": result['quantity'],
-                    "gross_pnl": result['gross_pnl'],
-                    "net_pnl": result['net_pnl'],
-                    "pnl_percent": result['pnl_percent'],
-                    "pnl_points": result['pnl_points'],
+                    "quantity": result["quantity"],
+                    "gross_pnl": result["gross_pnl"],
+                    "net_pnl": result["net_pnl"],
+                    "pnl_percent": result["pnl_percent"],
+                    "pnl_points": result["pnl_points"],
                     "exit_reason": exit_reason,
                     "entry_time": trade_execution.entry_time.isoformat(),
                     "exit_time": get_ist_isoformat(),
-                    "holding_duration_minutes": int((get_ist_now_naive() - trade_execution.entry_time).total_seconds() / 60),
-                    "timestamp": get_ist_isoformat()
+                    "holding_duration_minutes": int(
+                        (
+                            get_ist_now_naive() - trade_execution.entry_time
+                        ).total_seconds()
+                        / 60
+                    ),
+                    "timestamp": get_ist_isoformat(),
                 }
 
                 await broadcast_to_clients("position_closed", close_data)
-                logger.info(f"Broadcasted position close event for trade {trade_execution.trade_id}")
+                logger.info(
+                    f"Broadcasted position close event for trade {trade_execution.trade_id}"
+                )
 
             except Exception as broadcast_error:
                 logger.error(f"Error broadcasting position close: {broadcast_error}")
@@ -985,26 +1176,29 @@ class RealTimePnLTracker:
                     "current_price": float(pnl_update.current_price),
                     "pnl": float(pnl_update.pnl),
                     "pnl_percent": float(pnl_update.pnl_percent),
-                    "strike_price": float(pnl_update.strike_price) if pnl_update.strike_price else None,
+                    "strike_price": (
+                        float(pnl_update.strike_price)
+                        if pnl_update.strike_price
+                        else None
+                    ),
                     "stop_loss": float(pnl_update.stop_loss),
                     "target": float(pnl_update.target),
                     "trailing_sl_active": pnl_update.trailing_sl_active,
                     "highest_price": float(pnl_update.highest_price),
                     "last_updated": pnl_update.last_updated,
-                    "timestamp": get_ist_isoformat()
+                    "timestamp": get_ist_isoformat(),
                 }
 
                 await broadcast_to_clients("pnl_update", update_data)
-                logger.debug(f"Broadcasted PnL update for position {pnl_update.position_id}")
+                logger.debug(
+                    f"Broadcasted PnL update for position {pnl_update.position_id}"
+                )
 
         except Exception as e:
             logger.error(f"Error broadcasting PnL updates: {e}")
 
     def get_user_positions_summary(
-        self,
-        user_id: int,
-        db: Session,
-        trading_mode: Optional[str] = None
+        self, user_id: int, db: Session, trading_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get summary of all positions for a user
@@ -1020,31 +1214,31 @@ class RealTimePnLTracker:
         try:
             query = db.query(ActivePosition).filter(
                 and_(
-                    ActivePosition.user_id == user_id,
-                    ActivePosition.is_active == True
+                    ActivePosition.user_id == user_id, ActivePosition.is_active == True
                 )
             )
 
             if trading_mode:
                 query = query.join(
                     AutoTradeExecution,
-                    ActivePosition.trade_execution_id == AutoTradeExecution.id
-                ).filter(
-                    AutoTradeExecution.trading_mode == trading_mode
-                )
+                    ActivePosition.trade_execution_id == AutoTradeExecution.id,
+                ).filter(AutoTradeExecution.trading_mode == trading_mode)
 
             active_positions = query.all()
 
             from services.realtime_market_engine import get_market_engine
+
             market_engine = get_market_engine()
 
-            total_pnl = Decimal('0')
-            total_investment = Decimal('0')
+            total_pnl = Decimal("0")
+            total_investment = Decimal("0")
 
             for pos in active_positions:
-                trade = db.query(AutoTradeExecution).filter(
-                    AutoTradeExecution.id == pos.trade_execution_id
-                ).first()
+                trade = (
+                    db.query(AutoTradeExecution)
+                    .filter(AutoTradeExecution.id == pos.trade_execution_id)
+                    .first()
+                )
                 if not trade:
                     continue
 
@@ -1055,40 +1249,49 @@ class RealTimePnLTracker:
                 total_investment += investment
 
                 # Get current price (LTP) from market engine
-                current_price = Decimal('0')
+                current_price = Decimal("0")
                 if pos.instrument_key in market_engine.instruments:
-                    current_price = Decimal(str(market_engine.instruments[pos.instrument_key].current_price))
-                
+                    current_price = Decimal(
+                        str(market_engine.instruments[pos.instrument_key].current_price)
+                    )
+
                 # Fallback to DB price if not in engine
                 if current_price <= 0:
-                    current_price = Decimal(str(pos.current_price)) if pos.current_price else entry_price
+                    current_price = (
+                        Decimal(str(pos.current_price))
+                        if pos.current_price
+                        else entry_price
+                    )
 
                 # Calculate live PnL for summary
                 pnl_points = current_price - entry_price
                 gross_pnl = pnl_points * Decimal(str(quantity))
-                
+
                 # Estimated charges
                 buy_val = entry_price * Decimal(str(quantity))
                 sell_val = current_price * Decimal(str(quantity))
-                est_charges = Decimal('40.0') + ((buy_val + sell_val) * Decimal('0.001'))
-                
-                total_pnl += (gross_pnl - est_charges)
+                est_charges = Decimal("40.0") + (
+                    (buy_val + sell_val) * Decimal("0.001")
+                )
+
+                total_pnl += gross_pnl - est_charges
 
             return {
                 "user_id": user_id,
                 "active_positions_count": len(active_positions),
                 "total_pnl": float(total_pnl),
                 "total_investment": float(total_investment),
-                "pnl_percent": float((total_pnl / total_investment * Decimal('100')) if total_investment > 0 else Decimal('0')),
-                "last_updated": get_ist_isoformat()
+                "pnl_percent": float(
+                    (total_pnl / total_investment * Decimal("100"))
+                    if total_investment > 0
+                    else Decimal("0")
+                ),
+                "last_updated": get_ist_isoformat(),
             }
 
         except Exception as e:
             logger.error(f"Error getting user positions summary: {e}")
-            return {
-                "user_id": user_id,
-                "error": str(e)
-            }
+            return {"user_id": user_id, "error": str(e)}
 
 
 # Create singleton instance
