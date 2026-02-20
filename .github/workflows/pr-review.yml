@@ -37,9 +37,10 @@ jobs:
         fetch-depth: 0
         
     - name: PR Validation (Title & Description)
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
       run: |
-        PR_TITLE="${{ github.event.pull_request.title }}"
-        PR_BODY="${{ github.event.pull_request.body }}"
         echo "PR Title: $PR_TITLE"
         
         # Validate Title

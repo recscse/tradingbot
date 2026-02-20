@@ -1,0 +1,14 @@
+tests/
+node_modules/
+venv/
+.git/
+__pycache__/
+*.json
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.md

@@ -56,13 +56,15 @@ jobs:
         
     - name: Pre-deployment validation
       id: checks
+      env:
+        COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
       run: |
         echo "🔍 Running pre-deployment checks..."
         
         SHOULD_DEPLOY="true"
         
         # Check if this is a hotfix or regular deployment
-        if [[ "${{ github.event.head_commit.message }}" == *"[HOTFIX]"* ]]; then
+        if [[ "$COMMIT_MESSAGE" == *"[HOTFIX]"* ]]; then
           echo "🚨 Hotfix deployment detected"
         fi
         
