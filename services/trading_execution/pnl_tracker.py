@@ -194,7 +194,8 @@ class RealTimePnLTracker:
                                     # Use last known DB price for time-based exit record
                                     price_decimal = Decimal(str(position.current_price)) if position.current_price else Decimal('0')
                                 else:
-                                    # Skip calculation if no real-time price available
+                                    # CRITICAL VISIBILITY: Log if we are holding a position but have no price feed
+                                    logger.error(f"❌ DATA GAP: No live price for {position.symbol} ({position.instrument_key}). Exit logic SUSPENDED.")
                                     continue
 
                             trade_execution = session.query(AutoTradeExecution).filter(
@@ -204,17 +205,21 @@ class RealTimePnLTracker:
                             if not trade_execution:
                                 continue
 
-                            # Calculations
+                            # FIXED CALCULATIONS: Always use Total Units (Lots * LotSize)
                             entry_price = Decimal(str(trade_execution.entry_price))
-                            quantity = trade_execution.quantity
-                            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * Decimal(str(quantity)))
+                            lots = trade_execution.quantity # Quantity field stores number of lots
+                            lot_size = trade_execution.lot_size or 1
+                            total_units = Decimal(str(lots * lot_size))
+                            
+                            # True Investment
+                            total_investment = Decimal(str(trade_execution.total_investment)) if trade_execution.total_investment else (entry_price * total_units)
                             
                             pnl_points = price_decimal - entry_price
-                            gross_pnl = pnl_points * Decimal(str(quantity))
+                            gross_pnl = pnl_points * total_units
                             
-                            # Charges estimate
-                            buy_val = entry_price * Decimal(str(quantity))
-                            sell_val = price_decimal * Decimal(str(quantity))
+                            # Charges estimate (using total units)
+                            buy_val = entry_price * total_units
+                            sell_val = price_decimal * total_units
                             est_turnover = buy_val + sell_val
                             est_charges = Decimal('40.0') + (est_turnover * Decimal('0.001'))
                             pnl_amount = gross_pnl - est_charges
@@ -247,13 +252,16 @@ class RealTimePnLTracker:
                             )
                             
                             # FIX 4: Allow First Breakeven Trail & Profit Locking Safely
-                            # Safety Guard: Ensure SL never moves down
+                            # Safety Guard: Ensure SL never moves down and NEVER drops below initial protection
+                            initial_sl_planned = Decimal(str(trade_execution.initial_stop_loss))
+                            if new_sl < initial_sl_planned:
+                                new_sl = initial_sl_planned
+
                             if new_sl < current_sl:
                                 new_sl = current_sl
                                 
                             # If new_sl is above price, it's a Stop Loss hit scenario.
                             # We allow it so the exit logic below triggers immediately.
-                            # We only cap it for the DB record if we are NOT exiting.
                             
                             if new_sl > current_sl:
                                 position.trailing_stop_triggered = True
