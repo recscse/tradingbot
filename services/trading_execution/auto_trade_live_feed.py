@@ -1022,7 +1022,7 @@ class AutoTradeLiveFeed:
 
     async def _update_shared_option_data(self, instrument_key: str, feed_data: Dict):
         """
-        Update option data in shared registry
+        Update option data in shared registry and trigger broadcasts
 
         Args:
             instrument_key: Instrument key from feed
@@ -1061,6 +1061,12 @@ class AutoTradeLiveFeed:
                 ask_price=self._extract_bid_ask(market_ff, "ask") if market_ff else None
             )
 
+            # CRITICAL: Broadcast price update to UI and update PnL
+            instrument = shared_registry.get_instrument(instrument_key)
+            if instrument:
+                await self._broadcast_price_update(instrument)
+                await self._update_positions_pnl(instrument)
+
         except Exception as e:
             logger.error(f"Error updating shared option data for {instrument_key}: {e}")
 
@@ -1091,33 +1097,6 @@ class AutoTradeLiveFeed:
             return float(quotes[0].get("bidP" if type == "bid" else "askP", 0))
         except:
             return None
-                    logger.warning(
-                        f"Volume conversion failed for {instrument_key}: vol={vol}, type={type(vol)}, error={e}"
-                    )
-                    volume_val = None
-
-            # Update shared registry
-            shared_registry.update_option_data(
-                option_key=instrument_key,
-                premium=Decimal(str(premium)),
-                greeks=greeks,
-                implied_vol=float(implied_vol) if implied_vol else None,
-                open_interest=float(open_int) if open_int else None,
-                volume=volume_val,
-                bid_price=float(bid_price_val) if bid_price_val else None,
-                ask_price=float(ask_price_val) if ask_price_val else None,
-            )
-
-            # Broadcast price update to UI
-            instrument = shared_registry.get_instrument(instrument_key)
-            if instrument:
-                await self._broadcast_price_update(instrument)
-
-                # Update PnL for all users with active positions in this instrument
-                await self._update_positions_pnl(instrument)
-
-        except Exception:
-            logger.exception("Error updating shared option data")
 
     # ============================================================================
     # STRATEGY EXECUTION (COMMON LAYER - Signal Generation)
