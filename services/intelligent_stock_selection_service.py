@@ -141,6 +141,7 @@ class IntelligentStockSelectionService:
         
         # Error tracking
         self.last_error: Optional[str] = None
+        self.service_start_time = time.time()  # Track startup time to reduce log noise
 
         # Synchronization flag to prevent WebSocket start during selection
         self.selection_in_progress: bool = False
@@ -308,9 +309,13 @@ class IntelligentStockSelectionService:
             )
 
             if total_stocks == 0:
-                logger.warning(
-                    "⚠️ Market engine initialized but no data available yet - waiting for WebSocket feed"
-                )
+                # Reduce noise during startup (first 60 seconds)
+                if time.time() - self.service_start_time < 60:
+                    logger.info("ℹ️ Market engine initialized - waiting for WebSocket data feed")
+                else:
+                    logger.warning(
+                        "⚠️ Market engine initialized but no data available yet - waiting for WebSocket feed"
+                    )
             else:
                 logger.info(f"✅ Market engine has data for {total_stocks} stocks")
 
@@ -353,9 +358,13 @@ class IntelligentStockSelectionService:
             # Check if market data is available
             total_stocks = sentiment_data.get("metrics", {}).get("total_stocks", 0)
             if total_stocks == 0:
-                logger.warning(
-                    "⚠️ No market data available yet - waiting for WebSocket feed to populate data"
-                )
+                # Reduce noise during startup (first 60 seconds)
+                if time.time() - self.service_start_time < 60:
+                    logger.info("ℹ️ No market data available yet - waiting for WebSocket data to populate")
+                else:
+                    logger.warning(
+                        "⚠️ No market data available yet - waiting for WebSocket feed to populate data"
+                    )
                 return MarketSentiment.NEUTRAL, {
                     **sentiment_data,
                     "warning": "No market data available - service waiting for live feed",
@@ -909,6 +918,16 @@ class IntelligentStockSelectionService:
             # Select stocks
             selected_stocks = await self.select_stocks_by_value(top_sectors)
 
+            # SAFETY FIX: If no stocks found, abort process to avoid clearing DB
+            if not selected_stocks:
+                logger.warning("⚠️ run_premarket_selection: No stocks met criteria. Aborting selection process to preserve existing DB records.")
+                return {
+                    "success": False,
+                    "message": "No stocks met selection criteria at this time.",
+                    "phase": "premarket",
+                    "timestamp": datetime.now().isoformat()
+                }
+
             # Store premarket selections
             self.premarket_selections = selected_stocks
             self.current_phase = TradingPhase.PREMARKET
@@ -1347,13 +1366,13 @@ class IntelligentStockSelectionService:
     ) -> bool:
         """
         Save selected stocks to database with complete market sentiment and advance/decline data.
-
-        Stores:
-        - Stock selection details (symbol, score, sector)
-        - Market sentiment at time of selection (bullish/bearish/neutral)
-        - Advance/decline ratio and market breadth
-        - Options trading direction (CE for bullish, PE for bearish)
         """
+        # SAFETY FIX: If selections are empty, DO NOT clear the database.
+        # This prevents a failed selection (e.g. on restart) from deleting good morning data.
+        if not selections:
+            logger.warning(f"⚠️ save_selections_to_database: Received empty list for {selection_type}. Aborting save to preserve existing data.")
+            return False
+
         try:
             db = SessionLocal()
             today = get_ist_now_naive().date()

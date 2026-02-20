@@ -87,13 +87,13 @@ class StrategyEngine:
         self.min_confidence_threshold = Decimal('0.60')  # Minimum 60% confidence
 
         # Exit Protection - Prevent premature exits
-        self.min_profit_before_exit_percent = Decimal('0.10')  # 10% minimum profit before allowing exit
-        self.min_hold_time_minutes = 5  # Minimum 5 minutes hold time
+        self.min_profit_before_exit_percent = Decimal('0.05')  # 5% minimum profit before allowing exit (was 10%)
+        self.min_hold_time_minutes = 3  # Minimum 3 minutes hold time (was 5)
 
         # Lock Profit Configuration - Make position risk-free
-        self.breakeven_profit_threshold = Decimal('0.75')  # Trail to breakeven at 75% of target (was 50%)
-        self.min_roi_for_breakeven = Decimal('0.05')       # Minimum 5% ROI required to move to breakeven
-        self.lock_profit_threshold = Decimal('1.00')  # Lock 80% profit when target hit
+        self.breakeven_profit_threshold = Decimal('0.35')  # Start trailing to breakeven at 35% of target (was 75%)
+        self.min_roi_for_breakeven = Decimal('0.02')       # Minimum 2% ROI required to move to breakeven (was 5%)
+        self.lock_profit_threshold = Decimal('1.00')  # Lock profit when target hit
         self.lock_profit_percent = Decimal('0.80')  # Lock 80% of profit
 
         # Stop Loss Buffer - Prevent tight stops
@@ -264,47 +264,11 @@ class StrategyEngine:
         current_pnl_percent: Optional[Decimal] = None
     ) -> Tuple[bool, str]:
         """
-        Check if exit signal should be allowed based on profit and hold time
-
-        This prevents premature exits that book unnecessary losses.
-
-        Args:
-            current_price: Current market price
-            entry_price: Entry price of position
-            entry_time: Entry timestamp (if available)
-            current_pnl_percent: Current PnL percentage (if available)
-
-        Returns:
-            Tuple of (allow_exit, reason)
+        Check if exit signal should be allowed - NEUTRALIZED
+        Authority moved to pnl_tracker.py
         """
-        # Calculate PnL if not provided
-        if current_pnl_percent is None:
-            current_pnl_percent = ((current_price - entry_price) / entry_price) * Decimal('100')
-
-        # Check minimum profit requirement
-        if current_pnl_percent < self.min_profit_before_exit_percent * Decimal('100'):
-            reason = (
-                f"Exit blocked: Current PnL {current_pnl_percent:.2f}% < "
-                f"minimum {self.min_profit_before_exit_percent * Decimal('100'):.0f}% required"
-            )
-            logger.debug(reason)
-            return False, reason
-
-        # Check minimum hold time requirement
-        if entry_time:
-            hold_duration = datetime.now() - entry_time
-            hold_minutes = hold_duration.total_seconds() / 60
-
-            if hold_minutes < self.min_hold_time_minutes:
-                reason = (
-                    f"Exit blocked: Hold time {hold_minutes:.1f}min < "
-                    f"minimum {self.min_hold_time_minutes}min required"
-                )
-                logger.debug(reason)
-                return False, reason
-
-        # Exit allowed
-        return True, f"Exit allowed: PnL={current_pnl_percent:.2f}%, sufficient hold time"
+        # Always allow exit signals. Control/blocking logic is managed by pnl_tracker.py.
+        return True, "Exit allowed: Control managed by pnl_tracker"
 
     def generate_signal(
         self,
@@ -355,8 +319,9 @@ class StrategyEngine:
             current_trend_1x = int(trend_1x[-1])
             current_trend_2x = int(trend_2x[-1])
 
-            # Previous values
+            # Previous values (for 2-candle confirmation)
             prev_trend_1x = int(trend_1x[-2]) if len(trend_1x) > 1 else current_trend_1x
+            prev_prev_trend_1x = int(trend_1x[-3]) if len(trend_1x) > 2 else prev_trend_1x
 
             # Determine signal type
             signal_type = SignalType.HOLD
@@ -367,7 +332,8 @@ class StrategyEngine:
             logger.info(
                 f"DEBUG [{option_type}]: Price: {current_price:.2f} | EMA: {current_ema:.2f} | "
                 f"ST_1x: {current_supertrend_1x:.2f} ({'UP' if current_trend_1x == 1 else 'DOWN'}) | "
-                f"Prev_ST: {'UP' if prev_trend_1x == 1 else 'DOWN'}"
+                f"Prev_ST: {'UP' if prev_trend_1x == 1 else 'DOWN'} | "
+                f"PPrev_ST: {'UP' if prev_prev_trend_1x == 1 else 'DOWN'}"
             )
 
             # LONG ENTRY LOGIC (for CE options)
@@ -376,40 +342,41 @@ class StrategyEngine:
                 price_above_ema = current_price > current_ema
                 price_above_supertrend = current_price > current_supertrend_1x
                 trend_bullish = current_trend_1x == 1
-                trend_reversal_up = prev_trend_1x == -1 and current_trend_1x == 1
+                
+                # REQUIRMENT: 2 consecutive candles confirming trend
+                # We want the NEW trend to be established for 2 candles (current and previous)
+                # This prevents entering on the very first candle which might be a fakeout
+                new_trend_established = current_trend_1x == 1 and prev_trend_1x == 1 and prev_prev_trend_1x == -1
+                existing_strong_trend = current_trend_1x == 1 and prev_trend_1x == 1 and price_above_ema and price_above_supertrend
 
                 # ENTRY CONDITIONS (open new position)
-                if trend_reversal_up and price_above_ema:
+                if new_trend_established and price_above_ema:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.85')
-                    reason = "SuperTrend reversal to uptrend + Price above EMA"
-                elif price_above_supertrend and price_above_ema and trend_bullish:
+                    reason = "SuperTrend reversal to uptrend (2-candle confirmation) + Price above EMA"
+                elif existing_strong_trend:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
-                    reason = "Strong uptrend: Price above SuperTrend and EMA"
+                    reason = "Strong confirmed uptrend: Price above SuperTrend and EMA (2-candle confirmation)"
+                
                 # EXIT CONDITIONS - ENHANCED: Require STRONG confirmation before exit
                 # This prevents premature exits on minor pullbacks
                 elif not trend_bullish and not price_above_supertrend and not price_above_ema:
                     # ALL THREE must be bearish: Trend reversed, price below SuperTrend AND EMA
-                    # This ensures we don't exit on temporary weakness
                     signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
                     reason = "Exit: Strong bearish reversal - trend, price below SuperTrend & EMA"
-                elif trend_reversal_up == False and prev_trend_1x == 1 and current_trend_1x == -1:
-                    # Explicit trend reversal from bullish to bearish
-                    # Only if price also confirms by breaking both levels
+                elif current_trend_1x == -1 and prev_trend_1x == -1:
+                    # Explicit trend reversal from bullish to bearish (2 candles)
                     if not price_above_supertrend and not price_above_ema:
                         signal_type = SignalType.EXIT_LONG
                         confidence = Decimal('0.85')
-                        reason = "Exit: Confirmed trend reversal with price breakdown"
+                        reason = "Exit: Confirmed trend reversal (2 candles) with price breakdown"
                     else:
-                        # Trend reversed but price holding - HOLD and let trailing SL protect
                         signal_type = SignalType.HOLD
                         confidence = Decimal('0.50')
                         reason = "Trend reversal but price holding - trailing SL active"
                 else:
-                    # Neutral zone or minor pullback - HOLD
-                    # Let trailing stop loss protect the position
                     signal_type = SignalType.HOLD
                     confidence = Decimal('0.50')
                     reason = "Waiting for clear signal - no strong reversal"
@@ -420,63 +387,59 @@ class StrategyEngine:
                 price_below_ema = current_price < current_ema
                 price_below_supertrend = current_price < current_supertrend_1x
                 trend_bearish = current_trend_1x == -1
-                trend_reversal_down = prev_trend_1x == 1 and current_trend_1x == -1
+                
+                # REQUIRMENT: 2 consecutive candles confirming trend
+                new_trend_established = current_trend_1x == -1 and prev_trend_1x == -1 and prev_prev_trend_1x == 1
+                existing_strong_trend = current_trend_1x == -1 and prev_trend_1x == -1 and price_below_ema and price_below_supertrend
 
-                # ENTRY CONDITIONS (BUY put option when bearish - not SELL!)
-                # We are BUYING put options, not selling them
-                if trend_reversal_down and price_below_ema:
+                # ENTRY CONDITIONS (BUY put option when bearish)
+                if new_trend_established and price_below_ema:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.85')
-                    reason = "SuperTrend reversal to downtrend + Price below EMA (Buy Put)"
-                elif price_below_supertrend and price_below_ema and trend_bearish:
+                    reason = "SuperTrend reversal to downtrend (2-candle confirmation) + Price below EMA (Buy Put)"
+                elif existing_strong_trend:
                     signal_type = SignalType.BUY
                     confidence = Decimal('0.75')
-                    reason = "Strong downtrend: Price below SuperTrend and EMA (Buy Put)"
+                    reason = "Strong confirmed downtrend: Price below SuperTrend and EMA (2-candle confirmation)"
+                
                 # EXIT CONDITIONS - ENHANCED: Require STRONG confirmation before exit
-                # This prevents premature exits on minor bounces
                 elif not trend_bearish and not price_below_supertrend and not price_below_ema:
                     # ALL THREE must be bullish: Trend reversed, price above SuperTrend AND EMA
-                    # This ensures we don't exit on temporary strength
                     signal_type = SignalType.EXIT_LONG
                     confidence = Decimal('0.80')
                     reason = "Exit: Strong bullish reversal - trend, price above SuperTrend & EMA (Exit Put)"
-                elif trend_reversal_down == False and prev_trend_1x == -1 and current_trend_1x == 1:
-                    # Explicit trend reversal from bearish to bullish
-                    # Only if price also confirms by breaking both levels
+                elif current_trend_1x == 1 and prev_trend_1x == 1:
+                    # Explicit trend reversal from bearish to bullish (2 candles)
                     if not price_below_supertrend and not price_below_ema:
                         signal_type = SignalType.EXIT_LONG
                         confidence = Decimal('0.85')
-                        reason = "Exit: Confirmed trend reversal with price breakout (Exit Put)"
+                        reason = "Exit: Confirmed trend reversal (2 candles) with price breakout (Exit Put)"
                     else:
-                        # Trend reversed but price holding - HOLD and let trailing SL protect
                         signal_type = SignalType.HOLD
                         confidence = Decimal('0.50')
                         reason = "Trend reversal but price holding - trailing SL active (Put)"
                 else:
-                    # Neutral zone or minor bounce - HOLD
-                    # Let trailing stop loss protect the position
                     signal_type = SignalType.HOLD
                     confidence = Decimal('0.50')
                     reason = "Waiting for clear signal - no strong reversal"
 
             # Calculate entry, stop loss, and target IN SPOT TERMS
-            # These will be converted to premium terms later using convert_spot_signal_to_premium()
+            # These will be converted to premium terms later
             entry_price = current_price
-
-            # For both CE and PE: Use SuperTrend as stop loss (spot-based)
-            # ENHANCED: Add buffer to prevent stop loss from being too tight
-            # This prevents premature SL hits on minor price movements
             sl_buffer = entry_price * self.sl_buffer_percent
 
             if option_type == "CE":
                 # For CE: SL below SuperTrend with buffer
                 stop_loss = current_supertrend_1x - sl_buffer
+                risk = abs(entry_price - stop_loss)
+                target_price = entry_price + (risk * self.default_risk_reward_ratio)
             else:
                 # For PE: SL above SuperTrend with buffer
+                # Note: For buying PE, price drop is target, price rise is SL
                 stop_loss = current_supertrend_1x + sl_buffer
-
-            risk = abs(entry_price - stop_loss)
-            target_price = entry_price + (risk * self.default_risk_reward_ratio) if option_type == "CE" else entry_price - (risk * self.default_risk_reward_ratio)
+                risk = abs(entry_price - stop_loss)
+                # PE target is BELOW spot entry price
+                target_price = entry_price - (risk * self.default_risk_reward_ratio)
 
             logger.debug(
                 f"{option_type} Signal (SPOT-BASED): Entry={entry_price:.2f}, "
@@ -599,12 +562,14 @@ class StrategyEngine:
             premium_risk_percent = spot_risk_percent * Decimal(str(abs(option_delta)))
 
             # Apply min/max bounds (3% to 8% risk)
-            premium_risk_percent = max(Decimal('0.03'), min(premium_risk_percent, Decimal('0.08')))
+            # REQUIREMENT: SL distance = max(2% of premium, calculated risk)
+            premium_risk_percent = max(self.sl_buffer_percent, min(premium_risk_percent, Decimal('0.10')))
 
             # Calculate premium-based SL and Target
             premium_sl = option_premium * (Decimal('1') - premium_risk_percent)
             premium_risk_amount = option_premium - premium_sl
             risk_reward_ratio = Decimal(str(signal.trailing_stop_config.get('risk_reward_ratio', 2.0)))
+            # Target is ALWAYS above entry for LONG premium trades
             premium_target = option_premium + (premium_risk_amount * risk_reward_ratio)
 
             logger.info(
@@ -697,6 +662,10 @@ class StrategyEngine:
         Raises:
             ValueError: If parameters are invalid
         """
+        # CRITICAL: Both CE and PE are LONG premium positions for option buying
+        # We always want the trailing SL to move UP as premium increases
+        position_type = "LONG"
+        
         if current_price <= 0 or entry_price <= 0:
             raise ValueError("Prices must be positive")
 

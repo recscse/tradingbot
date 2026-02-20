@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
 from typing import List, Dict, Optional, Any
 import pytz
 import json
@@ -34,6 +34,7 @@ class MarketScheduleService:
 
         # Initialize the optimized service
         self.selected_stocks = {}
+        self.selected_stocks_date: Optional[date] = None
         self.is_running = False
         self.cache = {}  # In-memory cache fallback
 
@@ -53,6 +54,10 @@ class MarketScheduleService:
         
         # Error tracking for tasks
         self.task_errors: Dict[str, str] = {}
+
+        # Track pre-open selection task state to avoid duplicate launches and premature warnings
+        self.preopen_selection_in_progress = False
+        self.preopen_selection_task: Optional[asyncio.Task] = None
 
         # Initialize Redis client with proper error handling
         self.redis_enabled = os.getenv("REDIS_ENABLED", "true").lower() == "true"
@@ -223,8 +228,16 @@ class MarketScheduleService:
                     and self.daily_tasks_completed["preopen_stock_selection"]
                     != current_date
                 ):
-                    await self._run_preopen_stock_selection()
-                    self.daily_tasks_completed["preopen_stock_selection"] = current_date
+                    # If selection already produced stocks, mark complete.
+                    # Otherwise, launch or continue background selection without premature failure logs.
+                    if self.selected_stocks and self.selected_stocks_date == current_date:
+                        self.daily_tasks_completed["preopen_stock_selection"] = current_date
+                        logger.info(f"Pre-open selection marked COMPLETED for today ({len(self.selected_stocks)} stocks)")
+                    elif self.preopen_selection_in_progress:
+                        logger.info("Pre-open selection is in progress - waiting for background completion")
+                    else:
+                        await self._run_preopen_stock_selection()
+                        logger.info("Pre-open selection started - waiting for background completion")
 
                 # Waiting period (9:00-9:15 AM) - After pre-open selection, just wait
                 elif (
@@ -391,17 +404,29 @@ class MarketScheduleService:
             "📊 Starting pre-open stock selection in BACKGROUND (9:00-9:15 AM)..."
         )
 
+        # Prevent duplicate concurrent runs
+        if self.preopen_selection_in_progress:
+            logger.info("Pre-open stock selection already in progress")
+            if wait_for_completion and self.preopen_selection_task:
+                await self.preopen_selection_task
+            return
+
+        self.preopen_selection_in_progress = True
+
         if wait_for_completion:
             # Explicitly wait for completion (used by market-open fallback path)
-            await self._background_preopen_selection()
-            logger.info(
-                "✅ Pre-open stock selection completed (waited for completion)"
-            )
+            try:
+                await self._background_preopen_selection()
+                logger.info(
+                    "Pre-open stock selection completed (waited for completion)"
+                )
+            finally:
+                self.preopen_selection_task = None
         else:
             # Run as background task - DON'T WAIT FOR IT!
-            asyncio.create_task(self._background_preopen_selection())
+            self.preopen_selection_task = asyncio.create_task(self._background_preopen_selection())
             logger.info(
-                "✅ Pre-open stock selection started in background - application remains responsive"
+                "Pre-open stock selection started in background - application remains responsive"
             )
 
     async def _background_preopen_selection(self):
@@ -461,6 +486,16 @@ class MarketScheduleService:
                 selected_stocks_data = preopen_result.get("selected_stocks", [])
                 sentiment_analysis = preopen_result.get("sentiment_analysis", {})
 
+                if not selected_stocks_data:
+                    logger.warning("⚠️ Background: Pre-open selection produced 0 stocks - will retry in 60 seconds")
+                    self.task_errors["preopen_selection"] = (
+                        preopen_result.get("message")
+                        or "Pre-open selection returned 0 stocks"
+                    )
+                    self.selected_stocks = {}
+                    self.selected_stocks_date = None
+                    return
+
                 logger.info(
                     f"✅ Background: Pre-open stock selection complete: {len(selected_stocks_data)} stocks selected using LIVE data"
                 )
@@ -479,6 +514,16 @@ class MarketScheduleService:
                             "sector": stock_dict.get("sector"),
                             "option_type": stock_dict.get("options_direction"),
                         }
+
+                # Mark task complete only when selection actually has stocks
+                from utils.timezone_utils import get_ist_now_naive
+
+                self.daily_tasks_completed["preopen_stock_selection"] = get_ist_now_naive().date()
+                self.selected_stocks_date = get_ist_now_naive().date()
+                self.task_errors.pop("preopen_selection", None)
+                logger.info(
+                    f"✅ Background: Pre-open selection marked COMPLETED for today ({len(self.selected_stocks)} stocks)"
+                )
 
                 logger.info(
                     "✅ Background: Pre-open stock selection complete - will validate at market open (9:15 AM)"
@@ -518,6 +563,7 @@ class MarketScheduleService:
                 )
                 self.task_errors["preopen_selection"] = error_msg
                 self.selected_stocks = {}
+                self.selected_stocks_date = None
 
         except Exception as e:
             logger.error(f"❌ Background: Pre-open stock selection failed: {e}")
@@ -534,6 +580,11 @@ class MarketScheduleService:
 
             traceback.print_exc()
             self.selected_stocks = {}
+            self.selected_stocks_date = None
+
+        finally:
+            self.preopen_selection_in_progress = False
+            self.preopen_selection_task = None
 
     async def _validate_market_open_selection(self):
         """
@@ -555,8 +606,11 @@ class MarketScheduleService:
                 intelligent_stock_selector,
             )
 
+            from utils.timezone_utils import get_ist_now_naive
+            current_date = get_ist_now_naive().date()
+
             # Check if pre-open selections exist
-            if not self.selected_stocks:
+            if not self.selected_stocks or self.selected_stocks_date != current_date:
                 logger.warning(
                     "⚠️ No pre-open selections found - pre-open selection may have failed"
                 )
@@ -567,7 +621,7 @@ class MarketScheduleService:
                 await self._run_preopen_stock_selection(wait_for_completion=True)
 
                 # If still no selections, log error
-                if not self.selected_stocks:
+                if not self.selected_stocks or self.selected_stocks_date != current_date:
                     logger.error(
                         "❌ No stocks selected - cannot proceed with trading session"
                     )
@@ -617,6 +671,7 @@ class MarketScheduleService:
                                 "final_score": stock_dict.get("final_score"),
                                 "selection_finalized": True,
                             }
+                    self.selected_stocks_date = current_date
 
                     logger.info(
                         f"✅ Final selections confirmed: {len(self.selected_stocks)} stocks ready for auto-trading"
@@ -722,6 +777,9 @@ class MarketScheduleService:
             # Prepare for next trading day
             await self._prepare_next_trading_day()
 
+            # Clear in-memory selections to avoid stale carryover
+            self.selected_stocks = {}
+            self.selected_stocks_date = None
             logger.info("✅ Post-market cleanup complete")
 
         except Exception as e:
@@ -923,6 +981,9 @@ class MarketScheduleService:
                         "market_open_validation": None,
                         "post_market_cleanup": None,
                     }
+                    self.selected_stocks = {}
+                    self.selected_stocks_date = None
+                    self.task_errors = {}
                     logger.info(
                         f"🔄 Daily tasks reset for new trading day: {current_date}"
                     )
@@ -1117,3 +1178,4 @@ def get_market_scheduler():
     if _market_scheduler_instance is None:
         _market_scheduler_instance = MarketScheduleService()
     return _market_scheduler_instance
+

@@ -112,7 +112,8 @@ class UpstoxWebSocketClient:
                     ssl=ssl_context,
                     ping_interval=30,
                     ping_timeout=90,
-                    close_timeout=10,
+                    close_timeout=15,
+                    open_timeout=60,
                     max_size=None,
                 ) as conn:
                     self.websocket = conn
@@ -212,9 +213,9 @@ class UpstoxWebSocketClient:
                                 is_snapshot = not self.got_snapshot
                                 if is_snapshot:
                                     self.got_snapshot = True
-                                lifecycle_log(
-                                    f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
-                                )
+                                    lifecycle_log(
+                                        f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
+                                    )
 
                                 # Log exchange breakdown
                                 self._log_exchange_summary(feeds)
@@ -247,9 +248,9 @@ class UpstoxWebSocketClient:
                                 is_snapshot = not self.got_snapshot
                                 if is_snapshot:
                                     self.got_snapshot = True
-                                lifecycle_log(
-                                    f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
-                                )
+                                    lifecycle_log(
+                                        f"📸 {self.connection_type}: Received initial market data snapshot with {len(feeds)} instruments"
+                                    )
 
                                 # Log exchange breakdown
                                 self._log_exchange_summary(feeds)
@@ -345,8 +346,12 @@ class UpstoxWebSocketClient:
                         await self.on_auth_error()
                         self.auth_error_sent = True
 
-                    # For 403 errors, wait longer before retry
-                    await asyncio.sleep(5)
+                    # For 403 errors, wait significantly longer before retry
+                    # 403 often means previous connection still lingering
+                    import random
+                    retry_wait = 10 + random.uniform(1, 5) # 10-15 seconds
+                    logger.warning(f"🛡️ 403 Forbidden detected. Waiting {retry_wait:.1f}s before retry...")
+                    await asyncio.sleep(retry_wait)
 
                 # Increment retry counter
                 self.retry_count += 1
@@ -507,7 +512,7 @@ class UpstoxWebSocketClient:
 
     async def _send_unsubscription(self, keys: list):
         """Send unsubscription request"""
-        if not self.websocket or self.websocket.closed:
+        if not self.websocket or not self.websocket.open:
             return
             
         payload = {
@@ -602,7 +607,7 @@ class UpstoxWebSocketClient:
 
     def is_connected(self):
         """Check if WebSocket is currently connected"""
-        return self.websocket is not None and not self.websocket.closed and self.should_run
+        return self.websocket is not None and self.websocket.open and self.should_run
 
     def get_status(self):
         """Get current connection status"""

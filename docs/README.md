@@ -65,6 +65,10 @@ This documentation is designed for **everyone** involved with the HFT trading sy
 2. **Standards**: [Development Standards](standards/IMPLEMENTATION_MICRO_STANDARDS.md)
 3. **API docs**: [API Reference](intelligent_stock_selection/07_api_endpoints.md)
 
+### **Data & Logic**
+1. **Data Models**: [Database Schemas](data-models/README.md)
+2. **Calculations**: [Formulas & Logic](calculations/README.md)
+
 ### **Need to Test?**
 1. **QA procedures**: [Quality Control](standards/CODING_CHECKLIST.md)
 2. **Test plans**: [Testing Strategy](standards/CODE_REVIEW_CRITERIA.md)

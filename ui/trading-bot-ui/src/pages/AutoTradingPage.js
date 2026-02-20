@@ -399,6 +399,8 @@ const AutoTradingPage = () => {
           if (message.type === "selected_stock_price_update") {
             const data = message.data;
             const key = data.option_instrument_key || data.symbol;
+            
+            // Update Selected Stocks buffer
             updatesBuffer.current.selectedStocks[key] = {
               live_price: data.live_option_premium,
               live_spot_price: data.live_spot_price,
@@ -409,6 +411,42 @@ const AutoTradingPage = () => {
               state: data.state,
               last_updated: data.timestamp,
             };
+
+            // HIGH FREQUENCY FIX: Also update Active Positions using the same high-speed price data
+            // This bypasses the 1s PnL loop for the LTP (current_price) display
+            setActivePositions(prev => {
+              let hasAnyMatch = false;
+              const newPositions = prev.map(pos => {
+                if (pos.instrument_key === data.option_instrument_key) {
+                  hasAnyMatch = true;
+                  // Calculate local PnL for ultra-fast UI updates
+                  const entryPrice = parseFloat(pos.entry_price);
+                  const currentPrice = parseFloat(data.live_option_premium);
+                  const qty = parseInt(pos.quantity);
+                  
+                  // Rough estimate including charges (standard ₹40 + 0.1% turnover)
+                  const buyVal = entryPrice * qty;
+                  const sellVal = currentPrice * qty;
+                  const turnover = buyVal + sellVal;
+                  const estCharges = 40.0 + (turnover * 0.001);
+                  const grossPnl = (currentPrice - entryPrice) * qty;
+                  const netPnl = grossPnl - estCharges;
+                  const totalInvestment = pos.total_investment || (entryPrice * qty);
+                  const pnlPercent = (netPnl / totalInvestment) * 100;
+
+                  return {
+                    ...pos,
+                    current_price: currentPrice,
+                    current_pnl: netPnl,
+                    current_pnl_percentage: pnlPercent,
+                    last_updated: data.timestamp
+                  };
+                }
+                return pos;
+              });
+              return hasAnyMatch ? newPositions : prev;
+            });
+
             updatesBuffer.current.hasUpdates = true;
           }
         } catch (parseError) {
@@ -842,14 +880,26 @@ const AutoTradingPage = () => {
           {activeTab === 0 && (
             <div>
               {activePositions.length > 0 ? (
-                <div className="tw-grid tw-grid-cols-1 lg:tw-grid-cols-2 tw-gap-4">
-                  {activePositions.map((position) => (
-                    <ActivePositionCard 
-                      key={position.position_id} 
-                      position={position} 
-                      onClose={handleClosePosition} 
-                    />
-                  ))}
+                <div className="tw-flex tw-flex-col tw-gap-2">
+                  {/* Table Header for Desktop */}
+                  <div className="tw-hidden lg:tw-grid tw-grid-cols-12 tw-gap-4 tw-px-6 tw-py-2 tw-text-[10px] tw-font-black tw-text-slate-500 tw-uppercase tw-tracking-widest">
+                    <div className="tw-col-span-3">Instrument & Time</div>
+                    <div className="tw-col-span-2">Position / Qty</div>
+                    <div className="tw-col-span-2">Entry / SL / Tgt</div>
+                    <div className="tw-col-span-2">LTP & Market</div>
+                    <div className="tw-col-span-2 tw-text-right">PnL & %</div>
+                    <div className="tw-col-span-1 tw-text-right">Action</div>
+                  </div>
+                  
+                  <div className="tw-space-y-2">
+                    {activePositions.map((position) => (
+                      <ActivePositionCard 
+                        key={position.position_id} 
+                        position={position} 
+                        onClose={handleClosePosition} 
+                      />
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className="tw-text-center tw-py-16">

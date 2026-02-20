@@ -4,6 +4,10 @@
 * [System Overview](overview/SYSTEM_OVERVIEW.md)
 * [Non-Technical Overview](overview/NON_TECHNICAL_OVERVIEW.md)
 
+## 📊 Data Formats & Logic
+* [Data Models](data-models/README.md)
+* [Calculations & Logic](calculations/README.md)
+
 ## 🏗️ Architecture
 * [General Architecture](architecture/TRADING_SYSTEM_ARCHITECTURE.md)
 * [HFT Architecture](HFT_ARCHITECTURE.md)
