@@ -174,15 +174,17 @@ class TradingLogger:
     
     def __init__(self, app_name: str = "TradingBot", log_level: str = "INFO"):
         self.app_name = app_name
+        # Enhanced production detection
         self._is_production = (
-            os.getenv('ENVIRONMENT') == 'production' or os.getenv('RAILWAY_ENVIRONMENT')
+            os.getenv('ENVIRONMENT') == 'production' or 
+            os.getenv('RAILWAY_ENVIRONMENT') is not None or
+            os.getenv('RAILWAY_STATIC_URL') is not None
         )
         self.log_dir = Path("logs")
+        
+        # Only create directories if NOT in production
         if not self._is_production:
             self.log_dir.mkdir(exist_ok=True)
-        
-        # Create subdirectories for different log types
-        if not self._is_production:
             (self.log_dir / "application").mkdir(exist_ok=True)
             (self.log_dir / "trading").mkdir(exist_ok=True)
             (self.log_dir / "errors").mkdir(exist_ok=True)

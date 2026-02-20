@@ -29,13 +29,15 @@ except ImportError:
 
 # Configure logging for service
 log_dir = project_root / "logs"
-log_dir.mkdir(exist_ok=True)
+if os.getenv('ENVIRONMENT') != 'production':
+    log_dir.mkdir(exist_ok=True)
 
+# Using a simpler config here to avoid infinite growth
+# Standard RotatingFileHandler should be used if files are needed
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / "upstox_service.log"),
         logging.StreamHandler(),
     ],
 )

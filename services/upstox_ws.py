@@ -6,8 +6,8 @@ import logging
 from core.config import ACCESS_TOKEN, WS_URL
 
 # Configure logging
-logging.basicConfig(filename="logs/websocket.log", level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+# logging.basicConfig(filename="logs/websocket.log", level=logging.INFO,
+#                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 class UpstoxWebSocket:
     def __init__(self):

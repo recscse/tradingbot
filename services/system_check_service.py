@@ -2,6 +2,7 @@ import logging
 import os
 import psutil
 import redis
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
@@ -39,14 +40,27 @@ class SystemCheckService:
     def _save_to_cache(self, key: str, data: Any):
         self._cache[key] = (data, datetime.now())
 
-    def check_database(self, db: Session) -> Dict[str, Any]:
+    def check_database(self, db: Session = None) -> Dict[str, Any]:
         """Check database connectivity and latency"""
         cached = self._get_from_cache("database")
         if cached: return cached
         
+        # Use provided session or create a temporary one for the health check
+        session = db
+        temp_session = False
+        
+        if session is None:
+            try:
+                from database.connection import SessionLocal
+                session = SessionLocal()
+                temp_session = True
+            except Exception as e:
+                logger.error(f"Failed to create temp session for health check: {e}")
+                return {"status": "error", "error": f"Session creation failed: {e}"}
+        
         try:
             start_time = datetime.now()
-            db.execute(text("SELECT 1"))
+            session.execute(text("SELECT 1"))
             latency = (datetime.now() - start_time).total_seconds() * 1000
             result = {"status": "connected", "latency_ms": round(latency, 2)}
             self._save_to_cache("database", result)
@@ -57,6 +71,9 @@ class SystemCheckService:
             result = {"status": "error", "error": str(e)}
             self._save_to_cache("database", result)
             return result
+        finally:
+            if temp_session and session:
+                session.close()
 
     def check_redis(self) -> Dict[str, Any]:
         """Check Redis connectivity and latency"""
@@ -483,12 +500,6 @@ class SystemCheckService:
                     }
                 }
             }
-            
-            self._save_to_cache("daily_tasks", result)
-            return result
-        except Exception as e:
-            logger.error(f"Daily tasks check failed: {e}")
-            return {"status": "error", "error": str(e)}
             
             self._save_to_cache("daily_tasks", result)
             return result
