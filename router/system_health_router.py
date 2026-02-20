@@ -41,7 +41,7 @@ async def get_system_status(db: Session = Depends(get_db)) -> Dict[str, Any]:
             analytics_status,
             option_status
         ) = await asyncio.gather(
-            asyncio.to_thread(system_check_service.check_database, db),
+            asyncio.to_thread(system_check_service.check_database), # Don't pass shared 'db' session
             asyncio.to_thread(system_check_service.check_redis),
             asyncio.to_thread(system_check_service.check_system_resources),
             system_check_service.check_stock_selection_status(),
