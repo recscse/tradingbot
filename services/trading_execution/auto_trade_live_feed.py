@@ -1050,12 +1050,12 @@ class AutoTradeLiveFeed:
 
             # Prepare update in shared registry
             shared_registry.update_option_data(
-                instrument_key=instrument_key,
+                option_key=instrument_key,
                 premium=Decimal(str(premium)),
                 # Greeks and other data only from market_ff
                 greeks=self._extract_greeks(market_ff) if market_ff else None,
-                iv=float(market_ff.get("iv", 0)) if market_ff and market_ff.get("iv") else None,
-                oi=float(market_ff.get("oi", 0)) if market_ff and market_ff.get("oi") else None,
+                implied_vol=float(market_ff.get("iv", 0)) if market_ff and market_ff.get("iv") else None,
+                open_interest=float(market_ff.get("oi", 0)) if market_ff and market_ff.get("oi") else None,
                 volume=float(market_ff.get("vtt", 0)) if market_ff and market_ff.get("vtt") else None,
                 bid_price=self._extract_bid_ask(market_ff, "bid") if market_ff else None,
                 ask_price=self._extract_bid_ask(market_ff, "ask") if market_ff else None
@@ -1788,9 +1788,7 @@ class AutoTradeLiveFeed:
                     # Safely extract entry price
                     try:
                         raw_entry = getattr(exec_result, "entry_price", None)
-                        if raw_entry is not None and not isinstance(
-                            raw_entry, MagicMock
-                        ):
+                        if raw_entry is not None:
                             entry_price = Decimal(str(raw_entry))
                         else:
                             entry_price = Decimal(str(instrument.live_option_premium))
