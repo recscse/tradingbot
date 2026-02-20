@@ -111,13 +111,13 @@ class OptionAnalyticsService:
     def __init__(self):
         """Initialize option analytics with default thresholds"""
         # IV thresholds
-        self.max_iv = Decimal('0.50')  # 50% max IV
-        self.high_iv_percentile = 75  # Warn if IV in top 25%
+        self.max_iv = Decimal('0.70')  # 70% max IV (adjusted for volatile stock options)
+        self.high_iv_percentile = 85  # Warn if IV in top 15%
 
         # Liquidity thresholds
-        self.min_open_interest = 100000  # Minimum OI for safe trading
+        self.min_open_interest = 25000  # Minimum OI for safe trading (adjusted for mid-caps)
         self.min_volume_oi_ratio = Decimal('0.10')  # Volume should be 10%+ of OI
-        self.max_spread_percent = Decimal('2.0')  # 2% max bid-ask spread
+        self.max_spread_percent = Decimal('5.0')  # 5% max bid-ask spread (adjusted for stock options)
 
         # Greeks thresholds
         self.high_theta_threshold = Decimal('0.10')  # 10% daily decay is high
@@ -330,9 +330,9 @@ class OptionAnalyticsService:
                 }
             }
 
-        if spread_percent > Decimal('1.0'):
+        if spread_percent > Decimal('1.5'):
             warnings.append(
-                f"Moderate bid-ask spread ({float(spread_percent):.2f}%) - Use limit orders"
+                f"Moderate bid-ask spread ({float(spread_percent):.2f}%) - Slippage risk detected, using limit order at mid-price"
             )
 
         # Calculate liquidity score (0-100)

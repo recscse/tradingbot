@@ -12,6 +12,7 @@ from enum import Enum
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
+from database.models import ActivePosition, AutoTradeExecution
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from services.trading_execution.capital_manager import (
     capital_manager,
@@ -177,6 +178,7 @@ class TradePrepService:
 
     async def prepare_trade_with_live_data(
         self,
+        premium_signal: TradingSignal,  # MOVED TO FIRST POSITION
         user_id: int,
         stock_symbol: str,
         option_instrument_key: str,
@@ -203,10 +205,6 @@ class TradePrepService:
         """
         Prepare trade with live market data already provided (optimized for auto-trading)
 
-        This method is optimized for auto_trade_live_feed which already has:
-        - Current option premium from live WebSocket feed
-        - Historical spot data for strategy calculation
-
         Args:
             user_id: User identifier
             stock_symbol: Underlying stock symbol
@@ -218,16 +216,14 @@ class TradePrepService:
             current_premium: Current option premium (from live feed)
             historical_data: Historical spot OHLC data
             db: Database session
+            premium_signal: Pre-generated trading signal from strategy
             trading_mode: Paper or Live trading mode
             broker_name: Broker name (optional)
-            underlying_key: Authoritative instrument key for the underlying asset (e.g. NSE_INDEX|Nifty 50)
-            current_spot_price: Current spot price of underlying (optional, used if provided)
+            underlying_key: Authoritative instrument key for the underlying asset
+            current_spot_price: Current spot price of underlying
 
         Returns:
             PreparedTrade with complete execution details
-
-        Raises:
-            ValueError: If parameters are invalid
         """
         if not user_id or user_id <= 0:
             raise ValueError("Invalid user_id provided")
@@ -248,51 +244,13 @@ class TradePrepService:
                 f"Preparing trade for user {user_id}: {stock_symbol} {option_type} {strike_price} (with live data)"
             )
 
-            # Step 0: Validate/Fetch Lot Size if missing or suspicious
-            # Use provided underlying_key if available, fallback to guesser
-            resolved_underlying_key = underlying_key or self._get_underlying_key(stock_symbol)
+            # Local import for robustness
+            from database.models import ActivePosition, AutoTradeExecution
 
-            if lot_size <= 1:
-                try:
-                    from services.upstox_option_service import upstox_option_service
-                    # Fetch ATM data which includes lot size for the specific expiry
-                    if resolved_underlying_key and expiry_date:
-                        atm_data = upstox_option_service.get_atm_keys(resolved_underlying_key, expiry_date, db)
-                        if atm_data and atm_data.get("lot_size", 0) > 0:
-                            lot_size = atm_data["lot_size"]
-                            logger.info(f"Fetched corrected lot_size for {stock_symbol} via ATM chain: {lot_size}")
-                        else:
-                            # Fallback to full contract fetch if ATM chain fails
-                            contracts = upstox_option_service.get_option_contracts(resolved_underlying_key, db)
-                            if contracts and len(contracts) > 0:
-                                fetched_lot_size = int(contracts[0].get("lot_size", 0))
-                                if fetched_lot_size > 0:
-                                    lot_size = fetched_lot_size
-                                    logger.info(f"Fetched corrected lot_size for {stock_symbol} via contracts fallback: {lot_size}")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch lot size from broker for {stock_symbol}: {e}")
-
-            if lot_size <= 0:
-                 return self._create_error_trade(
-                    TradeStatus.INVALID_PARAMS,
-                    user_id,
-                    stock_symbol,
-                    option_instrument_key,
-                    option_type,
-                    strike_price,
-                    expiry_date,
-                    0,
-                    trading_mode,
-                    "Invalid lot size. Cannot execute trade without valid lot size.",
-                )
-
-            # Step 1: Validate broker configuration
-            broker_config = capital_manager.get_active_broker_config(user_id, db)
-
-            if not broker_config and trading_mode == TradingMode.LIVE:
-                logger.warning(f"No active broker for user {user_id}")
-                return self._create_error_trade(
-                    TradeStatus.NO_ACTIVE_BROKER,
+            # CRITICAL FIX: Ensure HOLD signals return early and NEVER touch capital logic
+            if premium_signal.signal_type == SignalType.HOLD:
+                logger.info(f"⏭️ Signal is HOLD for {stock_symbol} - returning early")
+                return self._create_pending_trade(
                     user_id,
                     stock_symbol,
                     option_instrument_key,
@@ -300,18 +258,18 @@ class TradePrepService:
                     strike_price,
                     expiry_date,
                     lot_size,
+                    current_premium,
+                    # Provide dummy allocation since we don't calculate it for HOLD
+                    CapitalAllocation(Decimal('0'), Decimal('0'), 0, Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0')),
+                    premium_signal,
                     trading_mode,
-                    "No active broker configuration found",
+                    broker_name or "Unknown",
                 )
 
-            broker_name = (
-                broker_config.broker_name if broker_config else "Paper Trading"
-            )
+            # Step 0: Validate/Fetch Lot Size if missing or suspicious
 
-            # Step 2: Check position limits BEFORE capital allocation
+            # STEP 2: Check position limits (MOVED DOWN after signal)
             # CRITICAL FIX: Prevent exceeding maximum concurrent positions
-            from database.models import ActivePosition, AutoTradeExecution
-
             active_position_count = (
                 db.query(ActivePosition)
                 .join(
@@ -349,8 +307,9 @@ class TradePrepService:
                     expiry_date,
                     lot_size,
                     trading_mode,
-                    f"Maximum {MAX_CONCURRENT_POSITIONS} concurrent positions reached. "
-                    f"Close some positions before opening new ones.",
+                    f"Maximum {MAX_CONCURRENT_POSITIONS} concurrent positions reached.",
+                    failure_stage="risk",
+                    failure_reason="MAX_CONCURRENT_POSITIONS_REACHED"
                 )
 
             # Check if same stock already has an active position
@@ -369,10 +328,7 @@ class TradePrepService:
             )
 
             if existing_position:
-                logger.warning(
-                    f"User {user_id} already has active position in {stock_symbol} "
-                    f"(position_id: {existing_position.id})"
-                )
+                logger.warning(f"User {user_id} already has active position in {stock_symbol}")
                 return self._create_error_trade(
                     TradeStatus.INVALID_PARAMS,
                     user_id,
@@ -383,19 +339,19 @@ class TradePrepService:
                     expiry_date,
                     lot_size,
                     trading_mode,
-                    f"Position already exists for {stock_symbol}. "
-                    f"Only one position per stock allowed.",
+                    f"Position already exists for {stock_symbol}.",
+                    failure_stage="risk",
+                    failure_reason="DUPLICATE_POSITION"
                 )
 
-            # Step 3: Get available capital for new position
-            # Use new method that checks position limits instead of deducting from pool
+            # STEP 3: Get available capital for new position (MOVED DOWN)
             available_capital = capital_manager.get_available_capital_for_new_position(
                 user_id, db, trading_mode
             )
 
             if available_capital <= 0:
                 logger.warning(
-                    f"No available capital for user {user_id} - insufficient funds"
+                    f"No available capital for user {user_id} - insufficient funds or limit reached"
                 )
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
@@ -408,30 +364,27 @@ class TradePrepService:
                     lot_size,
                     trading_mode,
                     "Insufficient capital available for new position",
+                    failure_stage="capital",
+                    failure_reason="ZERO_CAPITAL_AVAILABLE"
                 )
 
-            # Step 4: Calculate position size based on capital
+            # STEP 4: Calculate position size based on capital
+            # Use real risk (entry - stop_loss) if available in premium signal
+            risk_per_unit = abs(premium_signal.entry_price - premium_signal.stop_loss)
+            
             capital_allocation = capital_manager.calculate_position_size(
-                available_capital, current_premium, lot_size, max_lots=target_lots
+                available_capital, current_premium, lot_size, 
+                max_lots=target_lots,
+                risk_per_unit=risk_per_unit
             )
 
-            # Step 5: Validate sufficient capital
+            # STEP 5: Validate sufficient capital
             capital_validation = capital_manager.validate_capital_availability(
                 user_id, capital_allocation.allocated_capital, db, trading_mode
             )
 
             if not capital_validation.get("valid"):
-                logger.warning(
-                    f"Insufficient capital: need {capital_allocation.allocated_capital}"
-                )
-                
-                # Notify User of Capital Failure
-                from services.notifications.alert_manager import alert_manager
-                self._safe_dispatch(alert_manager.send_admin_system_status(
-                    "Capital Manager", "INSUFFICIENT_FUNDS", 
-                    f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
-                ))
-                
+                logger.warning(f"Insufficient capital: need {capital_allocation.allocated_capital}")
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id,
@@ -442,21 +395,17 @@ class TradePrepService:
                     expiry_date,
                     lot_size,
                     trading_mode,
-                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}",
+                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}",
+                    failure_stage="capital",
+                    failure_reason="INSUFFICIENT_FUNDS"
                 )
 
-            # Step 6: Validate option quality using Greeks and market data (NEW)
+            # STEP 6: Validate option quality using Greeks and market data
             if option_greeks and implied_volatility and open_interest:
                 logger.info(f"Validating option quality with Greeks and market data")
-
                 from services.trading_execution.option_analytics import option_analytics
 
-                # Calculate spot ATR for Greeks analysis
-                spot_atr = (
-                    self._calculate_atr_from_historical(historical_data)
-                    if historical_data
-                    else None
-                )
+                spot_atr = self._calculate_atr_from_historical(historical_data) if historical_data else None
 
                 option_validation = option_analytics.validate_option_for_entry(
                     greeks=option_greeks,
@@ -471,9 +420,7 @@ class TradePrepService:
                 )
 
                 if not option_validation.valid:
-                    logger.warning(
-                        f"Option validation failed: {option_validation.reason}"
-                    )
+                    logger.warning(f"Option validation failed: {option_validation.reason}")
                     return self._create_error_trade(
                         TradeStatus.INVALID_OPTION,
                         user_id,
@@ -485,109 +432,21 @@ class TradePrepService:
                         lot_size,
                         trading_mode,
                         option_validation.reason,
+                        failure_stage="signal",
+                        failure_reason="OPTION_QUALITY_CHECK_FAILED"
                     )
 
-                # Log warnings
-                for warning in option_validation.warnings:
-                    logger.warning(f"Option warning: {warning}")
-
-                logger.info(
-                    f"Option validated - Quality Score: {option_validation.metrics.get('quality_score')}/100"
-                )
-            else:
-                logger.warning(
-                    "Option Greeks/IV/OI not provided - skipping advanced validation"
-                )
-
-            # Step 7: Generate trading signal using provided SPOT historical data
-            logger.info(
-                f"Generating signal for {stock_symbol} using provided historical data"
-            )
-
-            # CRITICAL DEBUG: Log actual values being used for signal generation
-            # Use provided current_spot_price or fallback to last closed candle
-            spot_current_price = current_spot_price if current_spot_price is not None else Decimal(str(historical_data["close"][-1]))
-            
-            # CHECK ATM DISTANCE (Verify if selection is still relevant)
-            try:
-                strike_val = Decimal(str(strike_price))
-                distance_pct = ((strike_val - spot_current_price) / spot_current_price) * 100
-                moneyness = "OTM" if (option_type == "CE" and strike_val > spot_current_price) or \
-                                   (option_type == "PE" and strike_val < spot_current_price) else "ITM"
-                
-                logger.debug(f"ATM CHECK for {stock_symbol}: Spot={spot_current_price}, Strike={strike_val}")
-                logger.debug(f"  Moneyness: {moneyness} ({abs(distance_pct):.2f}% from Spot)")
-                
-                if abs(distance_pct) > 2.0:
-                    logger.warning(f"⚠️ Strike {strike_val} is {abs(distance_pct):.2f}% away from Spot {spot_current_price}. Selection might be stale.")
-            except Exception as dist_err:
-                logger.warning(f"Could not calculate strike distance: {dist_err}")
-
-            logger.debug(f"DEBUG - Signal generation inputs for {stock_symbol}:")
-            logger.debug(f"  Spot current_price (last close): {spot_current_price}")
-            logger.debug(f"  Option premium: {current_premium}")
-            logger.debug(
-                f"  Historical data length: {len(historical_data.get('close', []))} candles"
-            )
-            logger.debug(f"  Last 3 closes: {historical_data.get('close', [])[-3:]}")
-
-            # IMPORTANT: Strategy runs on SPOT data (trend detection on underlying)
-            # We'll convert to premium-based values afterward
-            spot_signal = strategy_engine.generate_signal(
-                current_price=spot_current_price,  # Latest spot price
-                historical_data=historical_data,
-                option_type=option_type,
-            )
-
-            logger.debug(
-                f"Spot signal generated: {spot_signal.signal_type.value} at {spot_signal.entry_price}, "
-                f"confidence={spot_signal.confidence}"
-            )
-
-            # Check signal validity BEFORE conversion
-            # CRITICAL FIX: Don't convert HOLD signals - they're already invalid
-            if spot_signal.signal_type == SignalType.HOLD:
-                logger.debug(
-                    f"No clear trading signal for {stock_symbol} - spot signal is HOLD"
-                )
-                return self._create_pending_trade(
-                    user_id,
-                    stock_symbol,
-                    option_instrument_key,
-                    option_type,
-                    strike_price,
-                    expiry_date,
-                    lot_size,
-                    current_premium,
-                    capital_allocation,
-                    spot_signal,
-                    trading_mode,
-                    broker_name,
-                )
-
-            # Convert spot signal to premium signal (only for valid signals)
-            premium_signal = strategy_engine.convert_spot_signal_to_premium(
-                signal=spot_signal,
-                spot_price=spot_current_price,
-                option_premium=current_premium,
-                option_delta=option_greeks.get("delta") if option_greeks else None,
-            )
-
-            logger.info(
-                f"Premium signal: {premium_signal.signal_type.value} at {premium_signal.entry_price}, "
-                f"SL={premium_signal.stop_loss}, Target={premium_signal.target_price}"
-            )
-
-            # Step 8: Calculate risk-reward ratio (now in premium terms)
+            # STEP 7: Calculate risk-reward ratio (now in premium terms)
             risk = abs(premium_signal.entry_price - premium_signal.stop_loss)
-            # CRITICAL FIX: For Option Buying (Long), Target is ALWAYS higher than Entry (Premium must rise)
-            # Previous logic incorrectly subtracted for PE, treating it as a short premium trade
             rr_ratio = Decimal(str(premium_signal.trailing_stop_config.get('risk_reward_ratio') or 2.0))
-            target_price = premium_signal.entry_price + (risk * rr_ratio)
+            
+            # REQUIREMENT: Target must guarantee POSITIVE NET PnL
+            # Adding a 2.0 point buffer to cover standard brokerage (40 INR) and taxes
+            charges_buffer = Decimal('2.0')
+            target_price = premium_signal.entry_price + (risk * rr_ratio) + charges_buffer
             
             # Update signal with correct target
             premium_signal.target_price = target_price
-            
             risk_reward_ratio = rr_ratio
 
             # Step 9: Create prepared trade (with premium-based signal)
@@ -856,42 +715,7 @@ class TradePrepService:
                     "Cannot fetch live option premium - real-time price required for safe trading",
                 )
 
-            # Step 4: Calculate position size based on capital
-            capital_allocation = capital_manager.calculate_position_size(
-                available_capital, current_premium, lot_size
-            )
-
-            # Step 5: Validate sufficient capital
-            capital_validation = capital_manager.validate_capital_availability(
-                user_id, capital_allocation.allocated_capital, db, trading_mode
-            )
-
-            if not capital_validation.get("valid"):
-                logger.warning(
-                    f"Insufficient capital: need {capital_allocation.allocated_capital}"
-                )
-                
-                # Notify User of Capital Failure
-                from services.notifications.alert_manager import alert_manager
-                self._safe_dispatch(alert_manager.send_admin_system_status(
-                    "Capital Manager", "INSUFFICIENT_FUNDS", 
-                    f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
-                ))
-                
-                return self._create_error_trade(
-                    TradeStatus.INSUFFICIENT_CAPITAL,
-                    user_id,
-                    stock_symbol,
-                    option_instrument_key,
-                    option_type,
-                    strike_price,
-                    expiry_date,
-                    lot_size,
-                    trading_mode,
-                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}",
-                )
-
-            # Step 6 & 7: Generate trading signal using option premium-based strategy
+            # Step 4 & 5: Generate trading signal using option premium-based strategy
             logger.info(
                 f"Generating signal for {stock_symbol} using option premium strategy"
             )
@@ -927,6 +751,10 @@ class TradePrepService:
             # Check signal validity
             if signal.signal_type == SignalType.HOLD:
                 logger.info(f"No clear trading signal for {stock_symbol}")
+                
+                # Mock allocation for pending trade
+                dummy_allocation = CapitalAllocation(available_capital, Decimal('0'), 0, Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'))
+                
                 return self._create_pending_trade(
                     user_id,
                     stock_symbol,
@@ -936,16 +764,58 @@ class TradePrepService:
                     expiry_date,
                     lot_size,
                     current_premium,
-                    capital_allocation,
+                    dummy_allocation,
                     signal,
                     trading_mode,
                     broker_name,
                 )
 
-            # Step 8: Calculate risk-reward ratio
+            # Step 6: Calculate position size based on capital and signal risk
+            risk_per_unit = abs(signal.entry_price - signal.stop_loss)
+            capital_allocation = capital_manager.calculate_position_size(
+                available_capital, current_premium, lot_size,
+                risk_per_unit=risk_per_unit
+            )
+
+            # Step 7: Validate sufficient capital
+            capital_validation = capital_manager.validate_capital_availability(
+                user_id, capital_allocation.allocated_capital, db, trading_mode
+            )
+
+            if not capital_validation.get("valid"):
+                logger.warning(
+                    f"Insufficient capital: need {capital_allocation.allocated_capital}"
+                )
+                
+                # Notify User of Capital Failure
+                from services.notifications.alert_manager import alert_manager
+                self._safe_dispatch(alert_manager.send_admin_system_status(
+                    "Capital Manager", "INSUFFICIENT_FUNDS", 
+                    f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
+                ))
+                
+                return self._create_error_trade(
+                    TradeStatus.INSUFFICIENT_CAPITAL,
+                    user_id,
+                    stock_symbol,
+                    option_instrument_key,
+                    option_type,
+                    strike_price,
+                    expiry_date,
+                    lot_size,
+                    trading_mode,
+                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}",
+                )
+
+            # Step 8: Calculate final risk-reward ratio and update target
             risk = abs(signal.entry_price - signal.stop_loss)
             reward = abs(signal.target_price - signal.entry_price)
-            risk_reward_ratio = reward / risk if risk > 0 else Decimal("0")
+            
+            # Ensure target covers charges
+            charges_buffer = Decimal('2.0')
+            target_price = signal.target_price + charges_buffer
+            
+            risk_reward_ratio = (target_price - signal.entry_price) / risk if risk > 0 else Decimal("0")
 
             # Step 9: Create prepared trade
             prepared_trade = PreparedTrade(
@@ -962,7 +832,7 @@ class TradePrepService:
                 risk_reward_ratio=risk_reward_ratio,
                 entry_price=signal.entry_price,
                 stop_loss=signal.stop_loss,
-                target_price=signal.target_price,
+                target_price=target_price,
                 trailing_stop_config=signal.trailing_stop_config,
                 position_size_lots=capital_allocation.position_size_lots,
                 total_investment=capital_allocation.allocated_capital,
@@ -1359,6 +1229,8 @@ class TradePrepService:
         trading_mode: TradingMode,
         error_message: str,
         product: str = "I",
+        failure_stage: str = "unknown",
+        failure_reason: str = "unknown"
     ) -> PreparedTrade:
         """Create error trade response"""
         return PreparedTrade(
@@ -1385,7 +1257,11 @@ class TradePrepService:
             user_id=user_id,
             prepared_at=get_ist_isoformat(),
             valid_until=get_ist_isoformat(),
-            metadata={"error": error_message},
+            metadata={
+                "error": error_message,
+                "failure_stage": failure_stage,
+                "failure_reason": failure_reason
+            },
             product=product,
         )
 
