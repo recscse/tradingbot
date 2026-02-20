@@ -1,40 +1,38 @@
 # Trading Execution System - Complete Modular Architecture
 
 ## Overview
-This document describes the complete modular trading execution system built for algorithmic options trading with real-time PnL tracking, strategy-based entries, and support for both paper and live trading.
+This document describes the complete modular trading execution system built for algorithmic options trading. The system is designed for deterministic execution, single-point risk authority, and support for both paper and live trading with full parity.
 
 ---
 
-## System Flow
+## System Flow (Stabilized February 2026)
 
 ```
 1. STOCK SELECTION (intelligent_stock_selection_service.py)
    ↓
 2. OPTIONS ENHANCEMENT (enhanced_intelligent_options_selection.py)
-   - Fetches option chain
-   - Selects ATM/best strike
-   - Stores option instrument key
    ↓
-3. TRADE PREPARATION (trading_execution/trade_prep.py)
-   - Validates capital
-   - Checks active broker
-   - Fetches live premium
-   - Generates trading signal (SuperTrend + EMA)
-   - Calculates position size
+3. MARKET DATA FEED (AutoTradeLiveFeed)
+   - Candle-Gating (last_processed_candle_count)
+   - Triggers Strategy ONLY on NEW completed candle
    ↓
-4. TRADE EXECUTION (paper vs live)
-   - Paper: Virtual execution with mock orders
-   - Live: Real execution via broker API
+4. STRATEGY SIGNAL (StrategyEngine)
+   - Generates Spot-based signal
+   - 2-candle trend confirmation
    ↓
-5. REAL-TIME MONITORING
-   - Live PnL tracking
-   - Trailing stop loss updates
-   - WebSocket updates to UI
+5. TRADE PREPARATION (TradePrepService)
+   - Receives signal
+   - Validates position limits
+   - Calculates charges-aware target (Net Profit guaranteed)
    ↓
-6. POSITION MANAGEMENT
-   - Exit signals
-   - Target/SL hit detection
-   - Auto position squaring
+6. TRADE ENTRY (AutoTradeLiveFeed + execution_handler)
+   - Paper: Mock with 0.05% entry slippage
+   - Live: Upstox V3 API
+   ↓
+7. REAL-TIME MONITORING (pnl_tracker.py)
+   - SINGLE EXIT AUTHORITY
+   - Manages SL, Target, Trailing, and Time-based exits
+   - Captures Post-Trade Diagnostics
 ```
 
 ---
@@ -43,199 +41,65 @@ This document describes the complete modular trading execution system built for 
 
 ### 1. Capital Manager (`capital_manager.py`)
 
-**Purpose:** Manages trading capital and validates fund availability
+**Purpose:** Manages trading capital and validates fund availability.
 
 **Key Features:**
-- ✅ Validates demat account with active access token
-- ✅ Fetches available capital from broker API (Upstox, Angel One, Dhan)
-- ✅ Supports paper trading with virtual capital (₹10 Lakhs)
-- ✅ Calculates position sizes based on risk management (2% risk per trade)
-- ✅ Prevents over-allocation (max 20% capital per trade)
-- ✅ Maintains 10% capital buffer
-
-**Key Methods:**
-```python
-# Get active broker with valid token
-broker_config = capital_manager.get_active_broker_config(user_id, db)
-
-# Get available capital (paper or live)
-capital = capital_manager.get_available_capital(user_id, db, TradingMode.LIVE)
-
-# Calculate position size
-allocation = capital_manager.calculate_position_size(
-    available_capital=100000,
-    option_premium=50.0,
-    lot_size=25
-)
-
-# Validate capital availability
-validation = capital_manager.validate_capital_availability(
-    user_id=1,
-    required_capital=25000,
-    db=db,
-    trading_mode=TradingMode.LIVE
-)
-```
-
-**Output:**
-```python
-CapitalAllocation(
-    total_capital=100000,
-    allocated_capital=25000,
-    position_size_lots=20,
-    position_value=25000,
-    max_loss=25000,  # 100% premium loss
-    margin_required=25000,
-    capital_utilization_percent=25.0,
-    risk_per_trade_percent=2.0
-)
-```
+- ✅ Validates demat account with active access token (using IST consistency)
+- ✅ Derives allocation strictly from `ActivePosition.is_active` status.
+- ✅ Position Size Floor: Rejects trades if calculated lots <= 0 (Risk Protection).
+- ✅ Maintains 10% capital buffer.
 
 ---
 
 ### 2. Strategy Engine (`strategy_engine.py`)
 
-**Purpose:** Generates entry/exit signals using SuperTrend + EMA strategy
+**Purpose:** Pure signal generator using SuperTrend + EMA.
 
-**Strategy Logic:**
-
-**Entry Signals:**
-- **LONG (CE)**: Price crosses above SuperTrend AND price > EMA
-- **SHORT (PE)**: Price crosses below SuperTrend AND price < EMA
-
-**Exit Signals:**
-- SuperTrend reversal (trend changes)
-- Price crosses EMA (opposite direction)
-
-**Indicators:**
-- **EMA**: 20-period Exponential Moving Average
-- **SuperTrend**: ATR period 10, Multiplier 3.0 (1x) or 6.0 (2x)
-
-**Trailing Stop Options:**
-1. **SuperTrend 1x**: Uses 3.0 multiplier SuperTrend as trailing SL
-2. **SuperTrend 2x**: Uses 6.0 multiplier SuperTrend as trailing SL (more conservative)
-3. **Percentage**: Fixed 2% trailing stop below/above current price
-
-**Key Methods:**
-```python
-# Generate trading signal
-signal = strategy_engine.generate_signal(
-    current_price=50.0,
-    historical_data={
-        'open': [...],
-        'high': [...],
-        'low': [...],
-        'close': [...],
-        'volume': [...]
-    },
-    option_type="CE"  # or "PE"
-)
-
-# Update trailing stop
-new_sl = strategy_engine.update_trailing_stop(
-    current_price=55.0,
-    entry_price=50.0,
-    current_stop_loss=48.0,
-    trailing_type=TrailingStopType.SUPERTREND_1X,
-    supertrend_value=52.0,
-    position_type="LONG"
-)
-```
-
-**Output:**
-```python
-TradingSignal(
-    signal_type=SignalType.BUY,
-    price=50.0,
-    confidence=0.85,
-    reason="SuperTrend reversal to uptrend + Price above EMA",
-    indicators={
-        "ema": 49.5,
-        "supertrend_1x": 48.0,
-        "supertrend_2x": 46.0,
-        "trend_1x": 1,
-        "trend_2x": 1
-    },
-    entry_price=50.0,
-    stop_loss=48.0,  # SuperTrend 1x level
-    target_price=54.0,  # 1:2 Risk-Reward
-    trailing_stop_config={
-        "type": "supertrend_1x",
-        "supertrend_1x_value": 48.0,
-        "supertrend_2x_value": 46.0,
-        "multiplier_1x": 3.0,
-        "multiplier_2x": 6.0
-    },
-    timestamp="2025-01-08T10:30:00"
-)
-```
+**Key Features:**
+- ✅ **Deterministic Signals**: Requires 2-candle trend confirmation.
+- ✅ **Pure Long Bias**: Both CE and PE are handled as long premium trades.
+- ✅ **Neutralized Exits**: Does NOT block exits; authority is delegated to PnL Tracker.
 
 ---
 
-### 3. Trade Preparation (`trade_prep.py`)
+### 3. PnL Tracker (`pnl_tracker.py`)
 
-**Purpose:** Orchestrates complete trade preparation with validation
+**Purpose:** Sole authority for position lifecycle and risk control.
 
-**Process:**
-1. ✅ Validate user's active broker configuration
-2. ✅ Check available capital (paper or live)
-3. ✅ Fetch current option premium from live market data
-4. ✅ Calculate position size based on capital and risk
-5. ✅ Validate sufficient capital available
-6. ✅ Fetch historical candle data for strategy
-7. ✅ Generate trading signal using strategy engine
-8. ✅ Calculate risk-reward ratio
-9. ✅ Prepare complete trade execution details
+**Key Features:**
+- ✅ **Single Exit Authority**: Manages SL hits, Target hits, and 3:20 PM Square-off.
+- ✅ **Global Kill-Switch**: Monitors daily loss thresholds and halts new entries.
+- ✅ **Post-Trade Diagnostics**: Every trade captures `realized_rr`, `time_in_trade`, and `exit_truth`.
+- ✅ **Soft Guards**: Prevents loop crashes by correcting logic errors (e.g., target <= entry) with logging.
 
-**Key Methods:**
-```python
-prepared_trade = trade_prep_service.prepare_trade(
-    user_id=1,
-    stock_symbol="RELIANCE",
-    option_instrument_key="NSE_FO|12345",
-    option_type="CE",
-    strike_price=2500,
-    expiry_date="2025-01-16",
-    lot_size=250,
-    db=db,
-    trading_mode=TradingMode.LIVE
-)
-```
+---
 
-**Output:**
-```python
-PreparedTrade(
-    status=TradeStatus.READY,  # or PENDING_SIGNAL, INSUFFICIENT_CAPITAL, NO_ACTIVE_BROKER
-    stock_symbol="RELIANCE",
-    option_instrument_key="NSE_FO|12345",
-    option_type="CE",
-    strike_price=2500,
-    expiry_date="2025-01-16",
-    current_premium=50.25,
-    lot_size=250,
-    signal={...},  # TradingSignal details
-    capital_allocation={...},  # CapitalAllocation details
-    risk_reward_ratio=2.0,
-    entry_price=50.25,
-    stop_loss=48.00,
-    target_price=54.50,
-    trailing_stop_config={...},
-    position_size_lots=20,
-    total_investment=251250,  # 50.25 * 250 * 20
-    max_loss_amount=251250,
-    trading_mode="live",
-    broker_name="Upstox",
-    user_id=1,
-    prepared_at="2025-01-08T10:30:00",
-    valid_until="2025-01-08T10:45:00",  # 15 min validity
-    metadata={
-        "signal_confidence": 0.85,
-        "signal_reason": "SuperTrend reversal to uptrend + Price above EMA",
-        "capital_utilization_percent": 25.0,
-        "risk_per_trade_percent": 2.0
-    }
-)
-```
+### 4. Auto-Trading Live Feed (`auto_trade_live_feed.py`)
+
+**Purpose:** High-speed data ingestion and deterministic entry execution.
+
+**Key Features:**
+- ✅ **Candle-Gating**: Prevents over-trading by ensuring strategy runs only once per completed candle.
+- ✅ **Restart Safety**: Initializes candle tracking on startup to prevent historical data bursts.
+- ✅ **Entry-Only**: Zero exit authority. Handled purely via UI broadcasts for active positions.
+
+---
+
+## Post-Trade Diagnostics
+
+Every closed trade stores mandatory metadata:
+- `realized_rr`: Actual risk-reward ratio.
+- `time_in_trade_min`: Duration from entry to exit.
+- `exit_truth`: The raw reason for closure (e.g., STOP_LOSS_HIT).
+- `diagnostic_check`: Health status of the trade data.
+
+---
+
+## Paper & Live Parity
+
+The system ensures that paper trading results are conservative and realistic indicators of live performance.
+- **Symmetry**: Identical risk rules and logic paths.
+- **Slippage**: 0.05% applied to both Entry and Exit in Paper mode.
 
 ---
 

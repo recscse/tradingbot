@@ -267,7 +267,7 @@ async def get_daily_report(db: Session = Depends(get_db)):
             "total_trades": len(today_trades),
             "successful_predictions": sum(1 for t in today_trades if t.pnl > 0),
             "total_pnl": sum(t.pnl for t in today_trades),
-            "average_confidence": np.mean([t.metadata.get('confidence', 0) 
+            "average_confidence": np.mean([(t.technical_indicators or {}).get('confidence', 0) 
                                          for t in today_trades])
         }
     except Exception as e:
@@ -285,7 +285,7 @@ async def get_advanced_predictions(
         # Store predictions in database
         prediction_record = Trade(
             trade_type="AI_PREDICTION",
-            metadata=predictions,
+            technical_indicators=predictions,
             created_at=datetime.now()
         )
         db.add(prediction_record)

@@ -891,6 +891,7 @@ async def debug_complete_trading_flow():
             logger.info("\n[STEP 6] TRADE PREPARATION - Preparing trade with capital allocation")
 
             prepared_trade = await trade_prep_service.prepare_trade_with_live_data(
+                signal,  # PASS AS FIRST ARGUMENT
                 user_id=user_id,
                 stock_symbol=first_stock.symbol,
                 option_instrument_key=option_key,

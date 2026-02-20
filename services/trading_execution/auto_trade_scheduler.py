@@ -18,6 +18,7 @@ Features:
 import asyncio
 import logging
 from datetime import datetime, time as dt_time, date
+from typing import Optional
 
 from database.connection import SessionLocal
 from database.models import SelectedStock, ActivePosition, BrokerConfig
@@ -57,7 +58,7 @@ class AutoTradeScheduler:
             {}
         )  # Track which users have auto-started today: {user_id: True/False}
         self.default_trading_mode: TradingMode = TradingMode.PAPER
-        
+
         # Error tracking
         self.last_error: Optional[str] = None
 
@@ -77,7 +78,7 @@ class AutoTradeScheduler:
             log_to_db(
                 component="auto_trade_scheduler",
                 message=f"Auto-trade scheduler STARTED (Mode: {trading_mode.value})",
-                level="INFO"
+                level="INFO",
             )
 
             logger.info(
@@ -106,14 +107,19 @@ class AutoTradeScheduler:
                         )
 
                     # Heartbeat every 15 minutes
-                    if now_ist.minute % 15 == 0 and now_ist.second < self.check_interval:
-                        logger.info(f"💓 Auto-Trade Scheduler Heartbeat: Active at {current_time.strftime('%H:%M:%S')} IST")
+                    if (
+                        now_ist.minute % 15 == 0
+                        and now_ist.second < self.check_interval
+                    ):
+                        logger.info(
+                            f"💓 Auto-Trade Scheduler Heartbeat: Active at {current_time.strftime('%H:%M:%S')} IST"
+                        )
                         # Also log to DB occasionally to show system health in UI
                         if now_ist.minute % 30 == 0:
-                             log_to_db(
+                            log_to_db(
                                 component="auto_trade_scheduler",
                                 message=f"Heartbeat: Scheduler active (IST: {current_time.strftime('%H:%M')})",
-                                level="DEBUG"
+                                level="DEBUG",
                             )
 
                     # Check if market is open
@@ -199,7 +205,7 @@ class AutoTradeScheduler:
                         )
                         .all()
                     )
-                    
+
                     return stock_count, active_broker_configs
                 finally:
                     db.close()
@@ -254,17 +260,21 @@ class AutoTradeScheduler:
 
                 # Send Alert
                 from services.notifications.alert_manager import alert_manager
-                asyncio.create_task(alert_manager.send_admin_system_status(
-                    "AutoTradeScheduler", "AUTO_START", 
-                    f"Market conditions met. Starting auto-trading for User {user_id}."
-                ))
+
+                asyncio.create_task(
+                    alert_manager.send_admin_system_status(
+                        "AutoTradeScheduler",
+                        "AUTO_START",
+                        f"Market conditions met. Starting auto-trading for User {user_id}.",
+                    )
+                )
 
                 log_to_db(
                     component="auto_trade_scheduler",
                     message=f"AUTO-START: User {user_id} started trading",
                     level="INFO",
                     user_id=user_id,
-                    additional_data={"trading_mode": self.default_trading_mode.value}
+                    additional_data={"trading_mode": self.default_trading_mode.value},
                 )
 
                 # Mark as auto-started for today
@@ -277,7 +287,7 @@ class AutoTradeScheduler:
                 # Note: Currently supports single user at a time due to singleton auto_trade_live_feed
                 # For multi-user support, would need separate feed instances per user
                 break
-        
+
             self.last_error = None  # Clear error on success
 
         except Exception as e:
@@ -285,7 +295,7 @@ class AutoTradeScheduler:
             log_to_db(
                 component="auto_trade_scheduler",
                 message=f"AUTO-START ERROR: {str(e)}",
-                level="ERROR"
+                level="ERROR",
             )
             self.last_error = f"Auto-start check error: {str(e)}"
             import traceback
@@ -305,7 +315,11 @@ class AutoTradeScheduler:
                 db = SessionLocal()
                 try:
                     # Check if any positions are still open for ANY user
-                    return db.query(ActivePosition).filter(ActivePosition.is_active == True).count()
+                    return (
+                        db.query(ActivePosition)
+                        .filter(ActivePosition.is_active == True)
+                        .count()
+                    )
                 finally:
                     db.close()
 
@@ -329,9 +343,7 @@ class AutoTradeScheduler:
                 and monitoring_state_count == 0
                 and monitored_count > 0
             ):
-                logger.info(
-                    "AUTO-STOPPING: All positions closed, no stocks monitoring"
-                )
+                logger.info("AUTO-STOPPING: All positions closed, no stocks monitoring")
                 await auto_trade_live_feed.stop()
                 logger.info(
                     f"Auto-trading stopped at {datetime.now().strftime('%H:%M:%S')}"

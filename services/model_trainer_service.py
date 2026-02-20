@@ -35,7 +35,7 @@ class ModelTrainerService:
             return None
             
         predictions_correct = sum(1 for trade in recent_trades 
-                                if trade.pnl > 0 and trade.metadata.get('confidence', 0) > 0.7)
+                                if trade.pnl > 0 and (trade.technical_indicators or {}).get('confidence', 0) > 0.7)
         accuracy = predictions_correct / len(recent_trades)
         
         metrics = {
@@ -44,7 +44,7 @@ class ModelTrainerService:
             'total_trades': len(recent_trades),
             'profitable_trades': sum(1 for t in recent_trades if t.pnl > 0),
             'total_pnl': sum(t.pnl for t in recent_trades),
-            'average_confidence': np.mean([t.metadata.get('confidence', 0) for t in recent_trades])
+            'average_confidence': np.mean([(t.technical_indicators or {}).get('confidence', 0) for t in recent_trades])
         }
         
         self._save_metrics(metrics)

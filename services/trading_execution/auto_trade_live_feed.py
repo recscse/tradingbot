@@ -83,7 +83,7 @@ class AutoTradeLiveFeed:
             "errors": 0,
             "last_signal_time": None,
             "last_trade_time": None,
-            "last_error_time": None
+            "last_error_time": None,
         }
 
         # Detailed Error Tracking
@@ -91,12 +91,12 @@ class AutoTradeLiveFeed:
             "websocket": None,
             "strategy": None,
             "execution": None,
-            "registry": None
+            "registry": None,
         }
 
         # WebSocket client
         self.upstox_client: Optional[UpstoxWebSocketClient] = None
-        
+
         # Data flow tracking
         self.tick_counter = 0
         self.last_tick_time: Optional[datetime] = None
@@ -116,7 +116,7 @@ class AutoTradeLiveFeed:
         """Set component-specific error and update global stats"""
         self.service_errors[component] = {
             "error": error,
-            "timestamp": get_ist_isoformat()
+            "timestamp": get_ist_isoformat(),
         }
         self.stats["errors"] += 1
         self.stats["last_error_time"] = get_ist_isoformat()
@@ -153,7 +153,7 @@ class AutoTradeLiveFeed:
             self.is_running = True
             self.default_trading_mode = trading_mode
             self.last_error = None
-            self.service_errors = {k: None for k in self.service_errors} # Reset errors
+            self.service_errors = {k: None for k in self.service_errors}  # Reset errors
 
             # Load admin access token (common for all users)
             self.access_token = await self.load_upstox_access_token()
@@ -173,7 +173,7 @@ class AutoTradeLiveFeed:
                 log_to_db(
                     component="auto_trade_live_feed",
                     message="Startup FAILED: No instruments to monitor",
-                    level="ERROR"
+                    level="ERROR",
                 )
                 return
 
@@ -193,8 +193,8 @@ class AutoTradeLiveFeed:
                 additional_data={
                     "instruments": len(shared_registry.instruments),
                     "users": len(shared_registry.user_subscriptions),
-                    "trading_mode": trading_mode.value
-                }
+                    "trading_mode": trading_mode.value,
+                },
             )
 
             # Create WebSocket client
@@ -236,31 +236,35 @@ class AutoTradeLiveFeed:
             logger.info(f"Synced active positions from database into memory")
 
             logger.info(f"Auto-trading started in {trading_mode.value} mode")
-            
+
             # Send Telegram Alert
-            asyncio.create_task(telegram_notifier.send_system_alert(
-                "AutoTradeLiveFeed", 
-                f"Auto-trading STARTED in {trading_mode.value} mode with {len(shared_registry.instruments)} instruments",
-                level="INFO"
-            ))
+            asyncio.create_task(
+                telegram_notifier.send_system_alert(
+                    "AutoTradeLiveFeed",
+                    f"Auto-trading STARTED in {trading_mode.value} mode with {len(shared_registry.instruments)} instruments",
+                    level="INFO",
+                )
+            )
         except Exception as e:
             self.is_running = False
             self._set_service_error("execution", str(e))
             logger.error(f"Error starting auto-trading: {e}")
-            
+
             # Send Telegram Error
-            asyncio.create_task(telegram_notifier.send_system_alert(
-                "AutoTradeLiveFeed", 
-                f"CRITICAL STARTUP ERROR: {str(e)}",
-                level="ERROR"
-            ))
-            
+            asyncio.create_task(
+                telegram_notifier.send_system_alert(
+                    "AutoTradeLiveFeed",
+                    f"CRITICAL STARTUP ERROR: {str(e)}",
+                    level="ERROR",
+                )
+            )
+
             log_to_db(
                 component="auto_trade_live_feed",
                 message=f"CRITICAL STARTUP ERROR: {str(e)}",
-                level="ERROR"
+                level="ERROR",
             )
-            
+
             import traceback
 
             logger.error(traceback.format_exc())
@@ -313,7 +317,7 @@ class AutoTradeLiveFeed:
             component="auto_trade_live_feed",
             message="Live feed STOPPED",
             level="INFO",
-            additional_data=self.stats
+            additional_data=self.stats,
         )
 
         logger.info("Auto-trading stopped")
@@ -335,11 +339,11 @@ class AutoTradeLiveFeed:
 
                 # Run update every 5 minutes
                 await asyncio.sleep(300)
-                
+
                 if self.is_running:
                     logger.info("🔄 Running dynamic ATM strike update check...")
                     await self._update_atm_instruments()
-                    
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -349,114 +353,170 @@ class AutoTradeLiveFeed:
     async def _update_atm_instruments(self):
         """Find new ATM strikes for monitored stocks and update subscriptions"""
         from services.upstox_option_service import upstox_option_service
-        
+
         # 1. Group currently monitored instruments by stock
-        stock_instruments = {} # symbol -> { 'CE': inst, 'PE': inst }
+        stock_instruments = {}  # symbol -> { 'CE': inst, 'PE': inst }
         for inst in shared_registry.instruments.values():
             if inst.stock_symbol not in stock_instruments:
                 stock_instruments[inst.stock_symbol] = {}
             stock_instruments[inst.stock_symbol][inst.option_type] = inst
-            
+
         for symbol, options in stock_instruments.items():
             try:
                 # Get any option to find underlying data
                 any_opt = next(iter(options.values()))
                 spot_price = float(any_opt.live_spot_price)
-                
+
                 if spot_price <= 0:
-                    logger.debug(f"Skipping strike update for {symbol} - no spot price yet")
+                    logger.debug(
+                        f"Skipping strike update for {symbol} - no spot price yet"
+                    )
                     continue
-                    
+
                 # 2. Check if current strike is still ATM (within 0.5% of spot)
                 current_strike = float(any_opt.strike_price)
                 deviation = abs(spot_price - current_strike) / current_strike
-                
+
                 # If spot moved > 0.5%, re-select ATM
                 if deviation < 0.005:
-                    logger.debug(f"Strike {current_strike} still ATM for {symbol} (spot: {spot_price})")
+                    logger.debug(
+                        f"Strike {current_strike} still ATM for {symbol} (spot: {spot_price})"
+                    )
                     continue
-                    
-                logger.info(f"📍 Spot moved for {symbol} ({spot_price} vs strike {current_strike}). Refreshing ATM...")
-                
+
+                logger.info(
+                    f"📍 Spot moved for {symbol} ({spot_price} vs strike {current_strike}). Refreshing ATM..."
+                )
+
                 # 3. Fetch NEW ATM CE and PE using optimized get_atm_keys
                 db_session = SessionLocal()
-                atm_data = upstox_option_service.get_atm_keys(any_opt.spot_instrument_key, any_opt.expiry_date, db_session)
+                atm_data = upstox_option_service.get_atm_keys(
+                    any_opt.spot_instrument_key, any_opt.expiry_date, db_session
+                )
                 db_session.close()
-                
-                if not atm_data or not atm_data.get("ce_key") or not atm_data.get("pe_key"):
+
+                if (
+                    not atm_data
+                    or not atm_data.get("ce_key")
+                    or not atm_data.get("pe_key")
+                ):
                     continue
-                    
+
                 new_atm_strike = float(atm_data["atm_strike"])
-                
+
                 if new_atm_strike == current_strike:
-                    logger.debug(f"ATM strike for {symbol} hasn't changed from {current_strike}")
+                    logger.debug(
+                        f"ATM strike for {symbol} hasn't changed from {current_strike}"
+                    )
                     continue
-                    
-                logger.info(f"🚀 Updating ATM for {symbol}: {current_strike} -> {new_atm_strike}")
-                
+
+                logger.info(
+                    f"🚀 Updating ATM for {symbol}: {current_strike} -> {new_atm_strike}"
+                )
+
                 new_ce_key = atm_data["ce_key"]
                 new_pe_key = atm_data["pe_key"]
                 lot_size = atm_data["lot_size"]
-                
+
                 # 4. SWAP INSTRUMENTS IN REGISTRY
                 # Get current subscribers
                 ce_inst = options.get("CE")
                 pe_inst = options.get("PE")
-                
+
                 if ce_inst and pe_inst:
                     old_ce_key = ce_inst.option_instrument_key
                     old_pe_key = pe_inst.option_instrument_key
-                    
+
                     # Migration: Register NEW, Subscribe users, then DELETE old
                     subscribers = shared_registry.get_instrument_subscribers(old_ce_key)
-                    
+
                     # Register New
                     shared_registry.register_instrument(
-                        symbol, any_opt.spot_instrument_key, new_ce_key, "CE", 
-                        Decimal(str(new_atm_strike)), any_opt.expiry_date, lot_size, any_opt.target_lots
+                        symbol,
+                        any_opt.spot_instrument_key,
+                        new_ce_key,
+                        "CE",
+                        Decimal(str(new_atm_strike)),
+                        any_opt.expiry_date,
+                        lot_size,
+                        any_opt.target_lots,
                     )
                     shared_registry.register_instrument(
-                        symbol, any_opt.spot_instrument_key, new_pe_key, "PE", 
-                        Decimal(str(new_atm_strike)), any_opt.expiry_date, lot_size, any_opt.target_lots
+                        symbol,
+                        any_opt.spot_instrument_key,
+                        new_pe_key,
+                        "PE",
+                        Decimal(str(new_atm_strike)),
+                        any_opt.expiry_date,
+                        lot_size,
+                        any_opt.target_lots,
                     )
-                    
+
                     # Subscribe existing users to new keys
                     for uid in list(subscribers):
                         meta = shared_registry.get_user_metadata(uid)
-                        shared_registry.subscribe_user(uid, new_ce_key, meta.get("broker_name"), meta.get("broker_config_id"))
-                        shared_registry.subscribe_user(uid, new_pe_key, meta.get("broker_name"), meta.get("broker_config_id"))
-                        
+                        shared_registry.subscribe_user(
+                            uid,
+                            new_ce_key,
+                            meta.get("broker_name"),
+                            meta.get("broker_config_id"),
+                        )
+                        shared_registry.subscribe_user(
+                            uid,
+                            new_pe_key,
+                            meta.get("broker_name"),
+                            meta.get("broker_config_id"),
+                        )
+
                         # CRITICAL FIX: Only unsubscribe if user DOES NOT have an active position in this specific old key
-                        user_has_pos_ce = uid in self.active_user_positions and old_ce_key in self.active_user_positions[uid]
-                        user_has_pos_pe = uid in self.active_user_positions and old_pe_key in self.active_user_positions[uid]
+                        user_has_pos_ce = (
+                            uid in self.active_user_positions
+                            and old_ce_key in self.active_user_positions[uid]
+                        )
+                        user_has_pos_pe = (
+                            uid in self.active_user_positions
+                            and old_pe_key in self.active_user_positions[uid]
+                        )
 
                         if not user_has_pos_ce:
                             shared_registry.unsubscribe_user(uid, old_ce_key)
-                            logger.debug(f"Unsubscribed user {uid} from old strike {old_ce_key} (No active position)")
+                            logger.debug(
+                                f"Unsubscribed user {uid} from old strike {old_ce_key} (No active position)"
+                            )
                         else:
-                            logger.info(f"KEEPING subscription for user {uid} to old strike {old_ce_key} (ACTIVE POSITION)")
+                            logger.info(
+                                f"KEEPING subscription for user {uid} to old strike {old_ce_key} (ACTIVE POSITION)"
+                            )
 
                         if not user_has_pos_pe:
                             shared_registry.unsubscribe_user(uid, old_pe_key)
-                            logger.debug(f"Unsubscribed user {uid} from old strike {old_pe_key} (No active position)")
+                            logger.debug(
+                                f"Unsubscribed user {uid} from old strike {old_pe_key} (No active position)"
+                            )
                         else:
-                            logger.info(f"KEEPING subscription for user {uid} to old strike {old_pe_key} (ACTIVE POSITION)")
-                    
+                            logger.info(
+                                f"KEEPING subscription for user {uid} to old strike {old_pe_key} (ACTIVE POSITION)"
+                            )
+
                     # Only remove old instruments from registry mapping if NO ONE is subscribed anymore
                     if not shared_registry.get_instrument_subscribers(old_ce_key):
                         if old_ce_key in shared_registry.instruments:
                             del shared_registry.instruments[old_ce_key]
-                    
+
                     if not shared_registry.get_instrument_subscribers(old_pe_key):
                         if old_pe_key in shared_registry.instruments:
                             del shared_registry.instruments[old_pe_key]
-                        
-                    logger.info(f"✅ Successfully updated monitoring for {symbol}. Active strikes preserved.")
-                    
+
+                    logger.info(
+                        f"✅ Successfully updated monitoring for {symbol}. Active strikes preserved."
+                    )
+
                     # 5. Trigger WebSocket Update
                     if self.upstox_client:
                         new_keys = shared_registry.get_all_instrument_keys()
-                        logger.info(f"🔄 Updating WebSocket subscriptions: {len(new_keys)} keys")
+                        logger.info(
+                            f"🔄 Updating WebSocket subscriptions: {len(new_keys)} keys"
+                        )
                         await self.upstox_client.update_subscriptions(new_keys)
 
             except Exception as e:
@@ -486,7 +546,9 @@ class AutoTradeLiveFeed:
             "active_users": len(self.active_user_positions),
             "instruments_tracked": len(shared_registry.instruments),
             "last_error": getattr(self, "last_error", None),
-            "last_tick_time": self.last_tick_time.isoformat() if self.last_tick_time else None,
+            "last_tick_time": (
+                self.last_tick_time.isoformat() if self.last_tick_time else None
+            ),
             "tick_counter": self.tick_counter,
             "timestamp": get_ist_isoformat(),
         }
@@ -555,33 +617,41 @@ class AutoTradeLiveFeed:
                     user_broker_map[bc.user_id] = bc
 
             logger.info(f"Found {len(user_broker_map)} users with active brokers")
-            
+
             log_to_db(
                 component="auto_trade_live_feed",
                 message=f"Loading instruments: Found {len(stocks)} stocks and {len(user_broker_map)} active users",
-                level="DEBUG"
+                level="DEBUG",
             )
 
             # Process each stock - register BOTH CE and PE at ATM levels
             from services.upstox_option_service import upstox_option_service
-            
+
             for stock in stocks:
                 spot_key = stock.instrument_key or f"NSE_EQ|{stock.symbol}"
                 spot_price = float(stock.price_at_selection or 100.0)
-                
+
                 # Use current day's expiry (or nearest)
                 expiry = stock.option_expiry_date
-                
+
                 # Fetch BOTH CE and PE at ATM using optimized get_atm_keys
                 try:
                     db_session = SessionLocal()
-                    atm_data = upstox_option_service.get_atm_keys(spot_key, expiry, db_session)
+                    atm_data = upstox_option_service.get_atm_keys(
+                        spot_key, expiry, db_session
+                    )
                     db_session.close()
-                    
-                    if not atm_data or not atm_data.get("ce_key") or not atm_data.get("pe_key"):
-                        logger.warning(f"Could not determine ATM strikes for {stock.symbol} using optimized fetch")
+
+                    if (
+                        not atm_data
+                        or not atm_data.get("ce_key")
+                        or not atm_data.get("pe_key")
+                    ):
+                        logger.warning(
+                            f"Could not determine ATM strikes for {stock.symbol} using optimized fetch"
+                        )
                         continue
-                        
+
                     atm_strike = atm_data["atm_strike"]
                     atm_ce_key = atm_data["ce_key"]
                     atm_pe_key = atm_data["pe_key"]
@@ -596,6 +666,7 @@ class AutoTradeLiveFeed:
                                     metadata = json.loads(stock.score_breakdown)
                                 except Exception:
                                     import ast
+
                                     metadata = ast.literal_eval(stock.score_breakdown)
                             else:
                                 metadata = stock.score_breakdown
@@ -612,7 +683,7 @@ class AutoTradeLiveFeed:
                         strike_price=Decimal(str(atm_strike)),
                         expiry_date=expiry,
                         lot_size=lot_size,
-                        target_lots=target_lots
+                        target_lots=target_lots,
                     )
 
                     # REGISTER PE INSTRUMENT
@@ -624,18 +695,32 @@ class AutoTradeLiveFeed:
                         strike_price=Decimal(str(atm_strike)),
                         expiry_date=expiry,
                         lot_size=lot_size,
-                        target_lots=target_lots
+                        target_lots=target_lots,
                     )
 
                     # SUBSCRIBE ALL USERS to BOTH
                     for user_id, broker_config in user_broker_map.items():
-                        shared_registry.subscribe_user(user_id, atm_ce_key, broker_config.broker_name, broker_config.id)
-                        shared_registry.subscribe_user(user_id, atm_pe_key, broker_config.broker_name, broker_config.id)
+                        shared_registry.subscribe_user(
+                            user_id,
+                            atm_ce_key,
+                            broker_config.broker_name,
+                            broker_config.id,
+                        )
+                        shared_registry.subscribe_user(
+                            user_id,
+                            atm_pe_key,
+                            broker_config.broker_name,
+                            broker_config.id,
+                        )
 
-                    logger.info(f"Registered ATM CE/PE for {stock.symbol} at strike {atm_strike}")
+                    logger.info(
+                        f"Registered ATM CE/PE for {stock.symbol} at strike {atm_strike}"
+                    )
 
                 except Exception as e:
-                    logger.error(f"Error determining ATM strikes for {stock.symbol}: {e}")
+                    logger.error(
+                        f"Error determining ATM strikes for {stock.symbol}: {e}"
+                    )
                     continue
 
         except Exception:
@@ -658,8 +743,10 @@ class AutoTradeLiveFeed:
             try:
                 # Heartbeat every 15 minutes
                 heartbeat_counter += 1
-                if heartbeat_counter >= 180: # 180 * 5s = 900s = 15m
-                    logger.debug(f"💓 Auto-Trade Live Feed Heartbeat: Monitoring loop active at {get_ist_now_naive().strftime('%H:%M:%S')} IST")
+                if heartbeat_counter >= 180:  # 180 * 5s = 900s = 15m
+                    logger.debug(
+                        f"💓 Auto-Trade Live Feed Heartbeat: Monitoring loop active at {get_ist_now_naive().strftime('%H:%M:%S')} IST"
+                    )
                     heartbeat_counter = 0
 
                 # CRITICAL: Check if market is open
@@ -776,9 +863,19 @@ class AutoTradeLiveFeed:
                 monitored_keys = shared_registry.get_all_instrument_keys()
                 found_monitored = [k for k in feeds if k in monitored_keys]
                 if found_monitored:
-                    logger.info(
-                        f"🎯 Received data for {len(found_monitored)} monitored instruments: {found_monitored[:3]}"
-                    )
+                    # Log only once every 60 seconds to reduce noise but show connection is alive
+                    now = datetime.now()
+                    should_log = False
+                    if not self.last_tick_time:
+                        should_log = True
+                    elif (now - self.last_tick_time).total_seconds() >= 60:
+                        should_log = True
+
+                    if should_log:
+                        logger.info(
+                            f"🎯 Received data for {len(found_monitored)} monitored instruments: {found_monitored[:3]} (Throttled 1m)"
+                        )
+                        self.last_tick_time = now
 
             await self._handle_market_data(normalized)
 
@@ -812,14 +909,16 @@ class AutoTradeLiveFeed:
             feeds = data.get("feeds", {})
             if not feeds:
                 return
-            
+
             # Increment tick counter for heartbeat
             self.tick_counter += 1
             self.last_tick_time = get_ist_now_naive()
-            
+
             # Periodically log heartbeat (every 500 ticks)
             if self.tick_counter % 500 == 0:
-                logger.info(f"💓 Live Data Heartbeat: Received {self.tick_counter} ticks so far. Last tick at {self.last_tick_time.strftime('%H:%M:%S')}")
+                logger.info(
+                    f"💓 Live Data Heartbeat: Received {self.tick_counter} ticks so far. Last tick at {self.last_tick_time.strftime('%H:%M:%S')}"
+                )
 
             for instrument_key, feed_data in feeds.items():
                 # Update spot data (if applicable)
@@ -857,12 +956,30 @@ class AutoTradeLiveFeed:
                 spot_key=instrument_key, price=Decimal(str(ltp)), ohlc_data=ohlc_data
             )
 
-            # Run strategy for instruments with sufficient historical data
-            # Strategy requires: max(EMA period, SuperTrend period) + 10 = max(20, 10) + 10 = 30 candles
+            # Run strategy for instruments ONLY when a new completed candle is detected
+            # Strategy requires: max(EMA period, SuperTrend period) + 10 = 30 candles
             for instrument in shared_registry.instruments.values():
                 if instrument.spot_instrument_key == instrument_key:
-                    if len(instrument.historical_spot_data["close"]) >= 30:
-                        await self._run_strategy_and_broadcast(instrument)
+                    current_candle_count = len(instrument.historical_spot_data["close"])
+
+                    # FIX 4: Prevent startup trade burst
+                    # If this is the first time we see this instrument (count was 0),
+                    # initialize it to current history length so we only trigger on NEXT candle.
+                    if (
+                        instrument.last_processed_candle_count == 0
+                        and current_candle_count > 0
+                    ):
+                        instrument.last_processed_candle_count = current_candle_count
+                        logger.info(
+                            f"Initialized candle count for {instrument.stock_symbol} to {current_candle_count}"
+                        )
+                        continue
+
+                    # Check if we have a new completed candle since last run
+                    if current_candle_count > instrument.last_processed_candle_count:
+                        instrument.last_processed_candle_count = current_candle_count
+                        if current_candle_count >= 30:
+                            await self._run_strategy_and_broadcast(instrument)
 
         except Exception:
             logger.exception("Error updating shared spot data")
@@ -1016,6 +1133,11 @@ class AutoTradeLiveFeed:
             instrument.last_signal = premium_signal
             self.stats["signals_generated"] += 1
 
+            # CRITICAL FIX: Ensure HOLD signal returns IMMEDIATELY
+            # No capital calculation, no eligibility checks, no notifications
+            if premium_signal.signal_type == SignalType.HOLD:
+                return
+
             trace_id = generate_trace_id()
 
             log_signal_generation(
@@ -1079,11 +1201,14 @@ class AutoTradeLiveFeed:
 
             # Notify Admin of Signal
             from services.notifications.alert_manager import alert_manager
-            asyncio.create_task(alert_manager.send_admin_system_status(
-                "Strategy Engine", 
-                "SIGNAL", 
-                f"{premium_signal.signal_type.value.upper()} signal for {instrument.stock_symbol} @ {premium_signal.price:.2f} (Conf: {premium_signal.confidence:.2f})"
-            ))
+
+            asyncio.create_task(
+                alert_manager.send_admin_system_status(
+                    "Strategy Engine",
+                    "SIGNAL",
+                    f"{premium_signal.signal_type.value.upper()} signal for {instrument.stock_symbol} @ {premium_signal.price:.2f} (Conf: {premium_signal.confidence:.2f})",
+                )
+            )
 
             # Get all users subscribed to this instrument
             subscribed_users = shared_registry.get_instrument_subscribers(
@@ -1109,7 +1234,7 @@ class AutoTradeLiveFeed:
                     and instrument.option_instrument_key
                     in self.active_user_positions[user_id]
                 )
-                
+
                 # Check if user has ANY position for this STOCK SYMBOL (symbol-aware check)
                 # We always check DB for full accuracy on symbol to handle service restarts
                 has_symbol_position = False
@@ -1117,11 +1242,14 @@ class AutoTradeLiveFeed:
                 try:
                     db_symbol_pos = (
                         db.query(ActivePosition)
-                        .join(AutoTradeExecution, ActivePosition.trade_execution_id == AutoTradeExecution.id)
+                        .join(
+                            AutoTradeExecution,
+                            ActivePosition.trade_execution_id == AutoTradeExecution.id,
+                        )
                         .filter(
                             AutoTradeExecution.user_id == user_id,
                             AutoTradeExecution.symbol == instrument.stock_symbol,
-                            ActivePosition.is_active == True
+                            ActivePosition.is_active == True,
                         )
                         .first()
                     )
@@ -1291,15 +1419,21 @@ class AutoTradeLiveFeed:
             user_id: User ID to execute trade for
         """
         import asyncio
+
         logger.info(f"Executing trade for user {user_id}: {instrument.stock_symbol}")
 
         # ADDED: Cooldown check to prevent spamming attempts for the same instrument
         # CRITICAL: Do NOT apply cooldown to EXIT signals, only to ENTRY signals
-        is_exit_signal = signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT)
-        
+        is_exit_signal = signal.signal_type in (
+            SignalType.EXIT_LONG,
+            SignalType.EXIT_SHORT,
+        )
+
         now = datetime.now()
         if not is_exit_signal and user_id in self.user_last_attempt_times:
-            last_attempt = self.user_last_attempt_times[user_id].get(instrument.option_instrument_key)
+            last_attempt = self.user_last_attempt_times[user_id].get(
+                instrument.option_instrument_key
+            )
             if last_attempt and (now - last_attempt).total_seconds() < 3:
                 logger.debug(
                     f"⏭️ Skipping entry attempt for user {user_id}, {instrument.stock_symbol} - "
@@ -1309,9 +1443,18 @@ class AutoTradeLiveFeed:
 
         # Initialize or update last attempt time (only for entries)
         if not is_exit_signal:
+            # GLOBAL KILL-SWITCH CHECK
+            if shared_registry.is_risk_halted:
+                logger.warning(
+                    f"🛑 Entry blocked for {instrument.stock_symbol}: Risk Halted ({shared_registry.halt_reason})"
+                )
+                return
+
             if user_id not in self.user_last_attempt_times:
                 self.user_last_attempt_times[user_id] = {}
-            self.user_last_attempt_times[user_id][instrument.option_instrument_key] = now
+            self.user_last_attempt_times[user_id][
+                instrument.option_instrument_key
+            ] = now
 
         # CRITICAL: Check if market is open before executing trades
         if not is_market_open():
@@ -1402,119 +1545,10 @@ class AutoTradeLiveFeed:
 
             # CRITICAL: Handle ENTRY vs EXIT signals differently
             if signal.signal_type in (SignalType.EXIT_LONG, SignalType.EXIT_SHORT):
-                # EXIT signal: Only process if position exists
-                if not has_position:
-                    logger.debug(
-                        f"⏭️ EXIT signal for {instrument.stock_symbol} but no active position for user {user_id} - skipping"
-                    )
-                    # Broadcast to UI that exit signal was generated but no position exists
-                    await broadcast_to_clients(
-                        "signal_skipped",
-                        {
-                            "symbol": instrument.stock_symbol,
-                            "signal_type": signal.signal_type.value,
-                            "reason": "No active position to exit",
-                            "user_id": user_id,
-                            "timestamp": get_ist_isoformat(),
-                        },
-                    )
-                    return
-                else:
-                    # ENHANCED EXIT VALIDATION: Check profit AND hold time to prevent premature exits
-                    # This prevents booking unnecessary losses
-
-                    if db_position:
-                        trade_entry = (
-                            db.query(AutoTradeExecution)
-                            .filter(
-                                AutoTradeExecution.id == db_position.trade_execution_id
-                            )
-                            .first()
-                        )
-
-                        if trade_entry:
-                            from services.trading_execution.strategy_engine import (
-                                strategy_engine,
-                            )
-
-                            # Validate if exit should be allowed
-                            current_price = instrument.live_option_premium
-                            entry_price = Decimal(str(trade_entry.entry_price))
-                            entry_time = trade_entry.entry_time
-
-                            # Calculate current PnL percentage
-                            current_pnl_percent = (
-                                (current_price - entry_price) / entry_price
-                            ) * Decimal("100")
-
-                            # Use strategy engine's exit validation
-                            allow_exit, exit_reason = (
-                                strategy_engine.should_allow_exit_signal(
-                                    current_price=current_price,
-                                    entry_price=entry_price,
-                                    entry_time=entry_time,
-                                    current_pnl_percent=current_pnl_percent,
-                                )
-                            )
-
-                            if not allow_exit:
-                                logger.info(
-                                    f"🚫 EXIT signal BLOCKED for {instrument.stock_symbol}: {exit_reason}"
-                                )
-                                # Broadcast exit blocked message to UI
-                                await broadcast_to_clients(
-                                    "exit_signal_blocked",
-                                    {
-                                        "symbol": instrument.stock_symbol,
-                                        "signal_type": signal.signal_type.value,
-                                        "reason": exit_reason,
-                                        "user_id": user_id,
-                                        "current_pnl_percent": float(
-                                            current_pnl_percent
-                                        ),
-                                        "timestamp": get_ist_isoformat(),
-                                    },
-                                )
-                                return
-
-                    logger.info(
-                        f"🔄 Processing EXIT signal for {instrument.stock_symbol} - closing position for user {user_id}"
-                    )
-
-                    # FIXED: Actually close the position with confirmation
-                    exit_price = instrument.live_option_premium
-                    exit_reason = f"SIGNAL_{signal.signal_type.value}"
-
-                    closure_result = await self._close_position_for_user(
-                        user_id=user_id,
-                        instrument=instrument,
-                        exit_price=exit_price,
-                        exit_reason=exit_reason,
-                        db=db,
-                    )
-
-                    if not closure_result.get("success"):
-                        logger.error(
-                            f"❌ Failed to close position for user {user_id}: {closure_result.get('error')}"
-                        )
-                        # Broadcast failure to UI
-                        await broadcast_to_clients(
-                            "position_close_failed",
-                            {
-                                "symbol": instrument.stock_symbol,
-                                "signal_type": signal.signal_type.value,
-                                "user_id": user_id,
-                                "error": closure_result.get("error"),
-                                "timestamp": get_ist_isoformat(),
-                            },
-                        )
-                        return
-
-                    logger.info(
-                        f"✅ Position closed for user {user_id}: {instrument.stock_symbol} @ {exit_price}, "
-                        f"PnL: ₹{closure_result.get('pnl', 0):.2f}"
-                    )
-                    return
+                logger.debug(
+                    f"Ignoring EXIT signal for {instrument.stock_symbol} - exits handled by pnl_tracker"
+                )
+                return
             else:
                 # ENTRY signal (BUY/SELL): Only process if no position exists
                 # SYMBOL-AWARE CHECK: Verify if user has ANY position for this stock
@@ -1531,7 +1565,7 @@ class AutoTradeLiveFeed:
                     )
                     .first()
                 )
-                
+
                 if has_position or db_symbol_position:
                     logger.info(
                         f"⏭️ User {user_id} already has position in {instrument.stock_symbol} - skipping entry signal"
@@ -1563,18 +1597,19 @@ class AutoTradeLiveFeed:
             current_candles = len(instrument.historical_spot_data.get("close", []))
 
             if instrument.live_option_premium <= 0:
-                logger.error(
-                    f"No premium data for {instrument.stock_symbol} "
-                    f"(premium: {instrument.live_option_premium})"
+                logger.warning(
+                    f"⌛ Waiting for premium data for {instrument.stock_symbol} "
+                    f"(Key: {instrument.option_instrument_key}). Current premium is 0. "
+                    "Skipping this execution attempt until price update arrives."
                 )
                 self.stats["errors"] += 1
                 await broadcast_to_clients(
-                    "trade_error",
+                    "trade_status",
                     {
                         "symbol": instrument.stock_symbol,
-                        "error": "No premium data available",
+                        "status": "waiting_for_price",
+                        "message": "Waiting for option premium data from feed...",
                         "user_id": user_id,
-                        "premium": float(instrument.live_option_premium),
                         "timestamp": get_ist_isoformat(),
                     },
                 )
@@ -1613,6 +1648,7 @@ class AutoTradeLiveFeed:
 
             # Prepare trade with user-specific capital
             prepared_trade = await trade_prep_service.prepare_trade_with_live_data(
+                signal,  # PASS AS FIRST ARGUMENT
                 user_id=user_id,
                 stock_symbol=instrument.stock_symbol,
                 option_instrument_key=instrument.option_instrument_key,
@@ -1670,8 +1706,11 @@ class AutoTradeLiveFeed:
                         investment,
                     )
                 except NameError as ne:
-                    logger.error(f"❌ Critical NameError in execution for user {user_id}: {ne}")
+                    logger.error(
+                        f"❌ Critical NameError in execution for user {user_id}: {ne}"
+                    )
                     import asyncio as _asyncio
+
                     exec_result = await _asyncio.to_thread(
                         execution_handler.execute_trade,
                         prepared_trade,
@@ -1682,7 +1721,9 @@ class AutoTradeLiveFeed:
                         investment,
                     )
                 except Exception as e:
-                    logger.exception(f"❌ Async execution failed for user {user_id}: {e}")
+                    logger.exception(
+                        f"❌ Async execution failed for user {user_id}: {e}"
+                    )
                     raise
 
                 if getattr(exec_result, "success", False):
@@ -1736,19 +1777,23 @@ class AutoTradeLiveFeed:
                     if user_id not in self.active_user_positions:
                         self.active_user_positions[user_id] = {}
 
+                    # Safely extract entry price
+                    try:
+                        raw_entry = getattr(exec_result, "entry_price", None)
+                        if raw_entry is not None and not isinstance(
+                            raw_entry, MagicMock
+                        ):
+                            entry_price = Decimal(str(raw_entry))
+                        else:
+                            entry_price = Decimal(str(instrument.live_option_premium))
+                    except Exception:
+                        entry_price = Decimal(str(instrument.live_option_premium))
+
                     self.active_user_positions[user_id][
                         instrument.option_instrument_key
                     ] = {
                         "position_id": getattr(exec_result, "active_position_id", None),
-                        "entry_price": Decimal(
-                            str(
-                                getattr(
-                                    exec_result,
-                                    "entry_price",
-                                    instrument.live_option_premium,
-                                )
-                            )
-                        ),
+                        "entry_price": entry_price,
                         "quantity": getattr(exec_result, "quantity", 0),
                         "stop_loss": getattr(signal, "stop_loss", Decimal("0")),
                         "target": getattr(signal, "target_price", Decimal("0")),
@@ -1835,17 +1880,23 @@ class AutoTradeLiveFeed:
             else:
                 # Trade preparation failed or not ready
                 metadata = getattr(prepared_trade, "metadata", {})
-                error_reason = metadata.get("error", metadata.get("reason", "Unknown reason"))
-                
+                error_reason = metadata.get(
+                    "error", metadata.get("reason", "Unknown reason")
+                )
+
                 # Use INFO for pending signals to avoid log spam, WARNING for actual errors
-                log_level = logging.INFO if prepared_status_value == "pending_signal" else logging.WARNING
-                
+                log_level = (
+                    logging.INFO
+                    if prepared_status_value == "pending_signal"
+                    else logging.WARNING
+                )
+
                 logger.log(
                     log_level,
                     f"Trade not ready for user {user_id}: "
                     f"status={prepared_status_value}, "
                     f"symbol={instrument.stock_symbol}, "
-                    f"reason={error_reason}"
+                    f"reason={error_reason}",
                 )
                 await broadcast_to_clients(
                     "trade_preparation_failed",
@@ -1857,13 +1908,13 @@ class AutoTradeLiveFeed:
                         "timestamp": get_ist_isoformat(),
                     },
                 )
-                
+
                 log_to_db(
                     component="auto_trade_live_feed",
                     message=f"Trade Prep FAILED for {instrument.stock_symbol}: {error_reason}",
                     level="WARNING",
                     user_id=user_id,
-                    symbol=instrument.stock_symbol
+                    symbol=instrument.stock_symbol,
                 )
 
         except Exception:
@@ -1898,7 +1949,6 @@ class AutoTradeLiveFeed:
             # 2. Perform DB updates in a thread to avoid blocking event loop
             def update_pnl_db_job(user_ids, price):
                 db = SessionLocal()
-                exits_to_process = []
                 try:
                     for uid in user_ids:
                         position_data = self.active_user_positions[uid].get(
@@ -1951,40 +2001,36 @@ class AutoTradeLiveFeed:
                         position.current_pnl_percentage = float(pnl_percent)
                         position.last_updated = get_ist_now_naive()
 
-                        # Check exit conditions
-                        should_exit, reason = self._check_exit_conditions_for_user(
-                            uid, instrument, price, position_data
-                        )
-
-                        if should_exit:
-                            exits_to_process.append((uid, reason))
-
                     db.commit()
-                    return exits_to_process
                 except Exception as e:
                     db.rollback()
                     logger.error(f"DB Error in _update_positions_pnl: {e}")
-                    return []
                 finally:
                     db.close()
 
             # Run DB update in thread
-            exits_needed = await asyncio.to_thread(
-                update_pnl_db_job, users_to_update, current_price
-            )
+            await asyncio.to_thread(update_pnl_db_job, users_to_update, current_price)
 
             # 3. BROADCAST UPDATES TO UI (CRITICAL for live price/pnl updates)
             for uid in users_to_update:
-                position_data = self.active_user_positions[uid].get(instrument.option_instrument_key)
+                position_data = self.active_user_positions[uid].get(
+                    instrument.option_instrument_key
+                )
                 if not position_data:
                     continue
-                
-                # Calculate live PnL for broadcast using exact quantity from memory
+
+                # Calculate live PnL for broadcast
                 entry_price = position_data["entry_price"]
-                quantity = position_data.get("quantity", instrument.lot_size * instrument.target_lots)
+                quantity = position_data.get(
+                    "quantity", instrument.lot_size * instrument.target_lots
+                )
                 pnl = (current_price - entry_price) * Decimal(str(quantity))
-                pnl_percent = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-                
+                pnl_percent = (
+                    ((current_price - entry_price) / entry_price * 100)
+                    if entry_price > 0
+                    else 0
+                )
+
                 await broadcast_to_clients(
                     "pnl_update",
                     {
@@ -1994,32 +2040,12 @@ class AutoTradeLiveFeed:
                         "current_price": float(current_price),
                         "pnl": float(pnl),
                         "pnl_percent": float(pnl_percent),
-                        "strike_price": float(instrument.strike_price),
-                        "stop_loss": float(position_data.get("stop_loss", 0)),
-                        "target": float(position_data.get("target", 0)),
-                        "user_id": uid,
                         "timestamp": get_ist_isoformat(),
                     },
                 )
 
-            # 4. Process exits (if any) - these involve more DB ops but are infrequent
-            if exits_needed:
-                db_session = SessionLocal()
-                try:
-                    for uid, reason in exits_needed:
-                        await self._close_position_for_user(
-                            user_id=uid,
-                            instrument=instrument,
-                            exit_price=current_price,
-                            exit_reason=reason,
-                            db=db_session,
-                        )
-                    db_session.commit()
-                finally:
-                    db_session.close()
-
         except Exception:
-            logger.exception("Error updating positions PnL")
+            logger.exception("Error updating positions UI data")
 
     def _check_exit_conditions_for_user(
         self,
@@ -2029,98 +2055,11 @@ class AutoTradeLiveFeed:
         position_data: Dict[str, Any],
     ) -> tuple[bool, Optional[str]]:
         """
-        Check exit conditions for user position
-
-        Args:
-            user_id: User ID
-            instrument: Shared instrument
-            current_price: Current price
-            position_data: Position data
-
-        Returns:
-            Tuple of (should_exit, exit_reason)
+        Check exit conditions for user position - NEUTRALIZED
+        Authority moved to pnl_tracker.py
         """
-        try:
-            stop_loss = position_data.get("stop_loss", Decimal("0"))
-            target = position_data.get("target", Decimal("0"))
-
-            # Check stop loss
-            if instrument.option_type == "CE":
-                if current_price <= stop_loss:
-                    return True, "STOP_LOSS_HIT"
-            else:
-                if current_price >= stop_loss:
-                    return True, "STOP_LOSS_HIT"
-
-            # Check target
-            if instrument.option_type == "CE":
-                if target and current_price >= target:
-                    return True, "TARGET_HIT"
-            else:
-                if target and current_price <= target:
-                    return True, "TARGET_HIT"
-
-            # SMART TIME-BASED EXIT with expiry day handling
-            from utils.timezone_utils import get_ist_now
-
-            now_ist = get_ist_now()
-            now_t = now_ist.time()
-            now_date = now_ist.date()
-            entry_price_decimal = position_data.get("entry_price", Decimal("0"))
-
-            # Parse expiry date
-            try:
-                if hasattr(instrument, "expiry_date") and instrument.expiry_date:
-                    if isinstance(instrument.expiry_date, str):
-                        from datetime import datetime as dt
-
-                        expiry_date = dt.strptime(
-                            instrument.expiry_date, "%Y-%m-%d"
-                        ).date()
-                    else:
-                        expiry_date = instrument.expiry_date
-                    is_expiry_day = expiry_date == now_date
-                else:
-                    is_expiry_day = False
-            except Exception as e:
-                logger.warning(f"Could not parse expiry date: {e}")
-                is_expiry_day = False
-
-            # EXPIRY DAY EXIT: Close earlier (3:00 PM)
-            if is_expiry_day:
-                if (now_t.hour, now_t.minute) >= (15, 0):
-                    logger.info(
-                        f"Expiry day exit triggered for {instrument.stock_symbol} at {now_t}"
-                    )
-                    return True, "EXPIRY_DAY_EXIT_3PM"
-
-            # NORMAL DAY EXIT: Standard 3:20 PM exit
-            if (now_t.hour, now_t.minute) >= (15, 20):
-                logger.info(
-                    f"Standard market close exit for {instrument.stock_symbol} at {now_t}"
-                )
-                return True, "TIME_BASED_EXIT_3_20PM"
-
-            # EMERGENCY LOSS EXIT: After 3:10 PM, exit if down more than 10%
-            if (now_t.hour, now_t.minute) >= (15, 10):
-                if entry_price_decimal > 0 and current_price > 0:
-                    pnl_percent = (
-                        (current_price - entry_price_decimal)
-                        / entry_price_decimal
-                        * 100
-                    )
-                    if pnl_percent < -10:
-                        logger.warning(
-                            f"Emergency loss exit for {instrument.stock_symbol}: "
-                            f"PnL {pnl_percent:.2f}% at {now_t}"
-                        )
-                        return True, "EMERGENCY_LOSS_EXIT_3_10PM"
-
-            return False, None
-
-        except Exception:
-            logger.exception("Error checking exit conditions")
-            return False, None
+        # Always return False. pnl_tracker.py is now the single authority for exits.
+        return False, None
 
     async def _close_position_for_user(
         self,
@@ -2131,18 +2070,11 @@ class AutoTradeLiveFeed:
         db: Session,
     ) -> Dict[str, Any]:
         """
-        Close position for specific user
-
-        Args:
-            user_id: User ID
-            instrument: Shared instrument
-            exit_price: Exit price
-            exit_reason: Exit reason
-            db: Database session
-
-        Returns:
-            Dict with success status, pnl, and other details
+        Close position for specific user - DISABLED
         """
+        raise RuntimeError(
+            "_close_position_for_user must never be called. Exit logic is owned by pnl_tracker.py"
+        )
         try:
             # 1. Get position data from memory (Main Thread)
             if (
@@ -2401,6 +2333,7 @@ class AutoTradeLiveFeed:
 
             def db_job():
                 from database.connection import SessionLocal
+
                 db = SessionLocal()
                 try:
                     admin_broker = (

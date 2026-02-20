@@ -86,6 +86,7 @@ class SharedInstrument:
     # Signal tracking
     last_signal: Optional[Any] = None
     last_update_time: datetime = field(default_factory=datetime.now)
+    last_processed_candle_count: int = 0
 
 
 class SharedInstrumentRegistry:
@@ -113,6 +114,10 @@ class SharedInstrumentRegistry:
 
         # Instrument to users mapping (option_key -> Set[user_ids])
         self.instrument_subscribers: Dict[str, Set[int]] = {}
+
+        # Global Kill-Switch State
+        self.is_risk_halted: bool = False
+        self.halt_reason: Optional[str] = None
 
         logger.info("Shared Instrument Registry initialized")
 
