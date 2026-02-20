@@ -749,6 +749,13 @@ class AutoTradeLiveFeed:
                     shared_registry.subscribe_user(pos.user_id, pos.instrument_key)
                 
                 db_session.close()
+
+                # Trigger immediate WebSocket update for these guarded positions
+                if self.upstox_client and active_positions:
+                    new_keys = shared_registry.get_all_instrument_keys()
+                    logger.info(f"🔄 Immediate WebSocket update for {len(new_keys)} guarded/selected keys")
+                    asyncio.create_task(self.upstox_client.update_subscriptions(new_keys))
+
             except Exception as e:
                 logger.error(f"Error loading active positions into registry: {e}")
 
@@ -1022,75 +1029,68 @@ class AutoTradeLiveFeed:
             feed_data: Feed data
         """
         try:
-            full_feed = feed_data.get("fullFeed", {}) or {}
-            market_ff = full_feed.get("marketFF", {}) or {}
-            ltpc = market_ff.get("ltpc", {}) or {}
+            # TRY MULTIPLE FEED SOURCES (Upstox sends data in different formats)
+            premium = 0
+            
+            # Source 1: Market Full Feed (detailed)
+            market_ff = feed_data.get("fullFeed", {}).get("marketFF", {})
+            if market_ff:
+                premium = market_ff.get("ltpc", {}).get("ltp", 0)
+            
+            # Source 2: Direct LTPC (fast)
+            if not premium or premium <= 0:
+                premium = feed_data.get("ltpc", {}).get("ltp", 0)
+                
+            # Source 3: Direct LTP (fallback)
+            if not premium or premium <= 0:
+                premium = feed_data.get("ltp", 0)
 
-            premium = ltpc.get("ltp", 0)
             if not premium or float(premium) <= 0:
                 return
 
-            # Extract Greeks and market data
-            option_greeks_data = market_ff.get("optionGreeks", {})
-            # CRITICAL FIX: IV is a direct field of marketFF, NOT inside optionGreeks
-            # Confirmed via MarketDataFeed.proto (MarketFullFeed field 8 is iv)
-            implied_vol = market_ff.get("iv")
-            open_int = market_ff.get("oi")
-            vol = market_ff.get("vtt")
+            # Prepare update in shared registry
+            shared_registry.update_option_data(
+                instrument_key=instrument_key,
+                premium=Decimal(str(premium)),
+                # Greeks and other data only from market_ff
+                greeks=self._extract_greeks(market_ff) if market_ff else None,
+                iv=float(market_ff.get("iv", 0)) if market_ff and market_ff.get("iv") else None,
+                oi=float(market_ff.get("oi", 0)) if market_ff and market_ff.get("oi") else None,
+                volume=float(market_ff.get("vtt", 0)) if market_ff and market_ff.get("vtt") else None,
+                bid_price=self._extract_bid_ask(market_ff, "bid") if market_ff else None,
+                ask_price=self._extract_bid_ask(market_ff, "ask") if market_ff else None
+            )
 
-            # Extract bid/ask
-            market_level = market_ff.get("marketLevel", {})
-            bid_ask_quotes = market_level.get("bidAskQuote", [])
-            bid_price_val = None
-            ask_price_val = None
+        except Exception as e:
+            logger.error(f"Error updating shared option data for {instrument_key}: {e}")
 
-            if bid_ask_quotes and len(bid_ask_quotes) > 0:
-                first_quote = bid_ask_quotes[0]
-                bid_price_val = first_quote.get("bidP")
-                ask_price_val = first_quote.get("askP")
+    def _extract_greeks(self, market_ff: Dict) -> Optional[Dict]:
+        """Helper to extract and validate greeks from feed"""
+        option_greeks_data = market_ff.get("optionGreeks", {})
+        if not option_greeks_data: return None
+        
+        try:
+            greeks = {
+                "delta": float(option_greeks_data.get("delta", 0)),
+                "theta": float(option_greeks_data.get("theta", 0)),
+                "gamma": float(option_greeks_data.get("gamma", 0) or 0),
+                "vega": float(option_greeks_data.get("vega", 0) or 0),
+                "rho": float(option_greeks_data.get("rho", 0) or 0),
+            }
+            if -1 <= greeks["delta"] <= 1:
+                return greeks
+        except:
+            pass
+        return None
 
-            # Prepare Greeks with enhanced validation
-            greeks = None
-            if option_greeks_data and any(option_greeks_data.values()):
-                try:
-                    # CRITICAL FIX: Validate Greeks before using them
-                    delta_val = option_greeks_data.get("delta", 0)
-                    theta_val = option_greeks_data.get("theta", 0)
-                    gamma_val = option_greeks_data.get("gamma", 0)
-                    vega_val = option_greeks_data.get("vega", 0)
-                    rho_val = option_greeks_data.get("rho", 0)
-
-                    # Ensure all values are valid numbers
-                    if delta_val is not None and theta_val is not None:
-                        greeks = {
-                            "delta": float(delta_val),
-                            "theta": float(theta_val),
-                            "gamma": float(gamma_val) if gamma_val is not None else 0.0,
-                            "vega": float(vega_val) if vega_val is not None else 0.0,
-                            "rho": float(rho_val) if rho_val is not None else 0.0,
-                        }
-
-                        # VALIDATION: Delta should be between -1 and 1
-                        if not (-1 <= greeks["delta"] <= 1):
-                            logger.warning(
-                                f"Invalid Delta value {greeks['delta']} for {instrument_key} - discarding Greeks"
-                            )
-                            greeks = None
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Greeks conversion failed for {instrument_key}: {e}"
-                    )
-                    greeks = None
-
-            # Safely convert volume with logging
-            volume_val = None
-            if vol is not None:
-                try:
-                    volume_val = (
-                        float(vol) if isinstance(vol, (int, float)) else float(str(vol))
-                    )
-                except (ValueError, TypeError) as e:
-                    # CRITICAL FIX: Log volume conversion failures for debugging
+    def _extract_bid_ask(self, market_ff: Dict, type: str) -> Optional[float]:
+        """Helper to extract bid/ask from feed"""
+        quotes = market_ff.get("marketLevel", {}).get("bidAskQuote", [])
+        if not quotes: return None
+        try:
+            return float(quotes[0].get("bidP" if type == "bid" else "askP", 0))
+        except:
+            return None
                     logger.warning(
                         f"Volume conversion failed for {instrument_key}: vol={vol}, type={type(vol)}, error={e}"
                     )

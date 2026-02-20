@@ -197,11 +197,14 @@ class RealTimePnLTracker:
 
                             if shared_inst and shared_inst.live_option_premium > 0:
                                 price_decimal = shared_inst.live_option_premium
+                            elif (
+                                shared_inst
+                                and hasattr(shared_inst, "ltp")
+                                and shared_inst.ltp > 0
+                            ):
+                                price_decimal = Decimal(str(shared_inst.ltp))
                             else:
                                 # Implement SAFE FALLBACK if registry is empty or premium is invalid
-                                logger.debug(
-                                    f"ℹ️ Price source fallback used for {position.symbol}"
-                                )
                                 if position.instrument_key in market_engine.instruments:
                                     price_decimal = Decimal(
                                         str(
@@ -221,10 +224,21 @@ class RealTimePnLTracker:
                                         else Decimal("0")
                                     )
                                 else:
-                                    # CRITICAL VISIBILITY: Log if we are holding a position but have no price feed
-                                    logger.error(
-                                        f"❌ DATA GAP: No live price for {position.symbol} ({position.instrument_key}). Exit logic SUSPENDED."
+                                    # CRITICAL VISIBILITY: Log sparingly to avoid spam (Once every 15 mins)
+                                    if not hasattr(self, "_last_gap_log"):
+                                        self._last_gap_log = {}
+                                    last_log = self._last_gap_log.get(
+                                        position.instrument_key, 0
                                     )
+                                    now_ts = datetime.now().timestamp()
+
+                                    if now_ts - last_log > 900:  # 15 minutes
+                                        logger.error(
+                                            f"❌ DATA GAP: No live price for {position.symbol} ({position.instrument_key}). Exit logic SUSPENDED."
+                                        )
+                                        self._last_gap_log[
+                                            position.instrument_key
+                                        ] = now_ts
                                     continue
 
                             trade_execution = (
