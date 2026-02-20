@@ -366,6 +366,116 @@ class SystemCheckService:
             logger.error(f"Option service check failed: {e}")
             return {"status": "error", "error": str(e)}
 
+    async def check_daily_tasks(self, db: Session) -> Dict[str, Any]:
+        """Check status of daily system tasks (Stock Selection, Options, Automation)"""
+        cached = self._get_from_cache("daily_tasks")
+        if cached: return cached
+
+        from database.models import SelectedStock, AutoTradeExecution
+        from utils.timezone_utils import get_ist_now_naive
+        from sqlalchemy import func
+        
+        today = get_ist_now_naive().date()
+        
+        try:
+            # 1. Stock Selection Check
+            selection_count = db.query(SelectedStock).filter(
+                SelectedStock.selection_date == today,
+                SelectedStock.is_active == True
+            ).count()
+            
+            # 2. Options Enhancement Check
+            options_count = db.query(SelectedStock).filter(
+                SelectedStock.selection_date == today,
+                SelectedStock.is_active == True,
+                SelectedStock.option_contract.isnot(None)
+            ).count()
+            
+            # 3. Trade Execution Check
+            trades = db.query(AutoTradeExecution).filter(
+                func.date(AutoTradeExecution.entry_time) == today
+            ).all()
+            trade_count = len(trades)
+            
+            # Verify field correctness for today's trades
+            malformed_trades = []
+            for t in trades:
+                missing_fields = []
+                if not t.instrument_key: missing_fields.append("instrument_key")
+                if not t.entry_price: missing_fields.append("entry_price")
+                if not t.quantity: missing_fields.append("quantity")
+                if not t.trading_mode: missing_fields.append("trading_mode")
+                if missing_fields:
+                    malformed_trades.append({"id": t.id, "symbol": t.symbol, "missing": missing_fields})
+
+            # 4. Automation & Token Refresh Check
+            from database.models import User, BrokerConfig
+            import json
+            
+            admin_broker = db.query(BrokerConfig).join(User).filter(
+                User.role == "admin",
+                BrokerConfig.broker_name.ilike("upstox")
+            ).first()
+            
+            token_refresh_status = "pending"
+            last_refresh_time = None
+            if admin_broker:
+                # Check if token is currently valid
+                from services.upstox_automation_service import UpstoxAutomationService
+                automation_service = UpstoxAutomationService()
+                is_valid = automation_service._test_token_validity(admin_broker.access_token)
+                
+                # Check config for last automated run
+                config_data = admin_broker.config or {}
+                if isinstance(config_data, str):
+                    try: config_data = json.loads(config_data)
+                    except: config_data = {}
+                
+                last_refresh_str = config_data.get("last_automated_refresh")
+                if last_refresh_str:
+                    last_refresh_time = datetime.fromisoformat(last_refresh_str)
+                    if last_refresh_time.date() == today:
+                        token_refresh_status = "success" if is_valid else "failed"
+                elif is_valid and admin_broker.access_token_expiry and admin_broker.access_token_expiry.date() >= today:
+                    token_refresh_status = "success" # Assumed success if valid today
+            
+            automation = self.check_automation_status()
+            
+            result = {
+                "timestamp": datetime.now().isoformat(),
+                "tasks": {
+                    "stock_selection": {
+                        "status": "complete" if selection_count > 0 else "pending",
+                        "count": selection_count,
+                        "message": f"{selection_count} stocks selected today" if selection_count > 0 else "Waiting for selection"
+                    },
+                    "options_enhancement": {
+                        "status": "complete" if options_count > 0 and options_count >= selection_count else "pending" if selection_count > 0 else "waiting",
+                        "count": options_count,
+                        "message": f"{options_count}/{selection_count} stocks enhanced with options" if selection_count > 0 else "Waiting for stock selection"
+                    },
+                    "auto_trading": {
+                        "status": "running" if auto_trade_scheduler.is_running else "stopped",
+                        "trades_today": trade_count,
+                        "malformed_count": len(malformed_trades),
+                        "malformed_details": malformed_trades[:5], # Show first 5
+                        "message": f"System active, {trade_count} trades executed ({len(malformed_trades)} malformed)" if auto_trade_scheduler.is_running else "Scheduler not active"
+                    },
+                    "token_refresh": {
+                        "status": token_refresh_status,
+                        "last_run": last_refresh_time.isoformat() if last_refresh_time else None,
+                        "error": automation.get("error") if token_refresh_status == "failed" else None,
+                        "message": f"Last refresh: {last_refresh_time.strftime('%H:%M')} IST" if last_refresh_time else "No refresh recorded for today"
+                    }
+                }
+            }
+            
+            self._save_to_cache("daily_tasks", result)
+            return result
+        except Exception as e:
+            logger.error(f"Daily tasks check failed: {e}")
+            return {"status": "error", "error": str(e)}
+
     def check_strategy_status(self) -> Dict[str, Any]:
         """Check strategy execution status via Scheduler"""
         cached = self._get_from_cache("strategy_status")
