@@ -4,7 +4,7 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 
 [![Netlify Status](https://api.netlify.com/api/v1/badges/c269af19-e741-48b2-84e2-236f5a75a251/deploy-status)](https://app.netlify.com/sites/resplendent-shortbread-e830d3/deploys)
 [![Backend Deploy](https://img.shields.io/badge/Backend-Render-46E3B7.svg)](https://render.com)
-[![Documentation](https://img.shields.io/badge/Docs-MkDocs-blue.svg)](https://tradingbot-ttys.onrender.com/docs)
+[![Documentation](https://img.shields.io/badge/Docs-MkDocs-blue.svg)](https://tradingbot-ttys.onrender.com/documentation)
 [![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/growthquantix/tradingbot/releases)
 [![Security](https://img.shields.io/badge/Security-Hardened-green.svg)](./SECURITY_FIXES.md)
 
@@ -17,7 +17,7 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 - [🔧 Configuration](#-configuration)
 - [🚀 Deployment](#-deployment)
 - [📊 Monitoring](#-monitoring)
-- [📚 Documentation](#-documentation)
+- [📖 Documentation](#-documentation)
 - [🤝 Contributing](#-contributing)
 
 ## 🎯 Features
@@ -42,7 +42,7 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 - **🧠 Automated Releases**: Push-to-Tag triggers for GitHub Releases & Changelogs
 - **🔒 Security Scanning**: Automatic secret, dependency, and code analysis
 - **📊 Performance Monitoring**: Integrated system resource tracking
-- **📖 Auto-Built Docs**: MkDocs Material site automatically deployed to `/docs`
+- **📖 Auto-Built Docs**: MkDocs Material site automatically deployed to `/documentation`
 
 ## 🤖 Solo-Developer Workflow
 
@@ -72,14 +72,14 @@ This platform is optimized for a solo developer to manage high-stakes trading wi
 ### Frontend
 - **Framework**: React 19 with TypeScript
 - **UI Library**: Material-UI v6 + Tailwind CSS
-- **Documentation**: MkDocs Material (hosted at `/docs`)
+- **Documentation**: MkDocs Material (hosted at `/documentation`)
 - **Charts**: Recharts & Lightweight Charts
 
 ## ⚡ Quick Start
 
 ### 1. Access Application (Production)
 - **Live App**: [https://tradingbot-ttys.onrender.com](https://tradingbot-ttys.onrender.com)
-- **Full Documentation**: [https://tradingbot-ttys.onrender.com/docs](https://tradingbot-ttys.onrender.com/docs)
+- **Full Documentation**: [https://tradingbot-ttys.onrender.com/documentation](https://tradingbot-ttys.onrender.com/documentation)
 - **API Reference**: [/docs](https://tradingbot-ttys.onrender.com/docs) (Swagger)
 
 ### 2. Local Setup
@@ -110,7 +110,7 @@ Configure these in your `.env` or cloud dashboard (Render/Railway):
 - **Backend**: Python FastAPI hosted on **Render**
 - **Database**: PostgreSQL hosted on **Render** (Managed)
 - **Frontend**: React SPA hosted on **Netlify**
-- **Documentation**: Static MkDocs site hosted on **Netlify** under `/docs`
+- **Documentation**: Static MkDocs site hosted on **Netlify** under `/documentation`
 
 ## 📊 Monitoring
 
