@@ -1,9 +1,14 @@
 [build]
   base = "ui/trading-bot-ui"
   publish = "build"
-  # Use 'npm ci' for faster, reliable builds. 
-  # CI=false prevents build failure on warnings.
-  command = "CI=false DISABLE_ESLINT_PLUGIN=true ESLINT_NO_DEV_ERRORS=true npm ci && npm run build"
+  # Automate: Build React App THEN build MkDocs into the /docs folder
+  command = "CI=false DISABLE_ESLINT_PLUGIN=true ESLINT_NO_DEV_ERRORS=true npm ci && npm run build && pip install mkdocs-material && mkdocs build -f ../../mkdocs.yml -d build/docs"
+
+[[redirects]]
+  # Documentation path (Ensure it doesn't get caught by the SPA redirect)
+  from = "/docs/*"
+  to = "/docs/:splat"
+  status = 200
 
 [[redirects]]
   from = "/*"
