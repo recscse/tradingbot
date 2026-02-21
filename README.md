@@ -4,6 +4,8 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 
 [![Netlify Status](https://api.netlify.com/api/v1/badges/c269af19-e741-48b2-84e2-236f5a75a251/deploy-status)](https://app.netlify.com/sites/resplendent-shortbread-e830d3/deploys)
 [![Backend Deploy](https://img.shields.io/badge/Backend-Render-46E3B7.svg)](https://render.com)
+[![Documentation](https://img.shields.io/badge/Docs-MkDocs-blue.svg)](https://tradingbot-ttys.onrender.com/docs)
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/growthquantix/tradingbot/releases)
 [![Security](https://img.shields.io/badge/Security-Hardened-green.svg)](./SECURITY_FIXES.md)
 
 ## 📋 Table of Contents
@@ -11,12 +13,10 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 - [🎯 Features](#-features)
 - [🛠️ Tech Stack](#️-tech-stack)
 - [⚡ Quick Start](#-quick-start)
-- [📦 Installation](#-installation)
+- [🤖 Solo-Developer Workflow](#-solo-developer-workflow)
 - [🔧 Configuration](#-configuration)
 - [🚀 Deployment](#-deployment)
-- [🤖 CI/CD & Automation](#-cicd--automation)
 - [📊 Monitoring](#-monitoring)
-- [🔒 Security](#-security)
 - [📚 Documentation](#-documentation)
 - [🤝 Contributing](#-contributing)
 
@@ -25,26 +25,40 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 ### Core Trading Features
 - **Multi-Broker Support**: Angel One, Dhan, Upstox, Zerodha, Fyers
 - **Real-Time Market Data**: Live prices, indices, and market analytics
-- **AI-Powered Strategies**: Fibonacci retracements, LSTM predictions, sentiment analysis
+- **AI-Powered Strategies**: Fibonacci retracements, SuperTrend + EMA, sentiment analysis
 - **Advanced Order Management**: Stop-loss, target orders, position sizing
-- **Options Trading**: Comprehensive options strategies and analytics
+- **Options Trading**: Comprehensive options strategies and ATM selection
 - **Risk Management**: Portfolio tracking, P&L analysis, drawdown monitoring
 
 ### Platform Features
 - **User Authentication**: Google OAuth, JWT tokens, role-based access
-- **WebSocket Architecture**: Dual real-time system for optimal performance
+- **WebSocket Architecture**: Centralized high-speed admin feed for multiple users
 - **Responsive UI**: Material-UI v6 with dark theme, mobile-optimized
-- **Real-Time Analytics**: Market sentiment, top movers, volume analysis
+- **System Health**: Parallelized real-time telemetry and operational integrity checks
 - **Backtesting Engine**: Strategy validation with historical data
-- **Admin Dashboard**: System monitoring, user management, trading controls
 
 ### Automation & DevOps
-- **🤖 Automated PR Creation**: Creates PRs when pushing to feature branches
-- **⚡ Auto-Merge System**: Merges PRs automatically when conditions are met
-- **🧠 Claude Code Agent Integration**: AI-powered code review and analysis
-- **🔒 Security Scanning**: CodeQL, dependency checks, vulnerability monitoring
-- **📊 Performance Monitoring**: Prometheus + Grafana stack
-- **☁️ Cloud Deployment**: Render (backend) + Netlify (frontend)
+- **⚡ Zero-Downtime Deployment**: Automated rolling updates via Railway and Render
+- **🧠 Automated Releases**: Push-to-Tag triggers for GitHub Releases & Changelogs
+- **🔒 Security Scanning**: Automatic secret, dependency, and code analysis
+- **📊 Performance Monitoring**: Integrated system resource tracking
+- **📖 Auto-Built Docs**: MkDocs Material site automatically deployed to `/docs`
+
+## 🤖 Solo-Developer Workflow
+
+This platform is optimized for a solo developer to manage high-stakes trading with zero manual maintenance.
+
+### Daily Release Cycle
+1.  **Develop**: Commit changes using prefixes like `feat:`, `fix:`, or `perf:`.
+2.  **Tag**: At the end of the day, create a version tag:
+    ```bash
+    git tag v1.0.1
+    ```
+3.  **Push**: Push the tag to trigger the automated release and deployment:
+    ```bash
+    git push origin v1.0.1
+    ```
+4.  **Result**: Your bot is deployed, health checks run, and a formal GitHub Release with an auto-generated changelog is created.
 
 ## 🛠️ Tech Stack
 
@@ -52,322 +66,69 @@ A comprehensive full-stack algorithmic trading platform with advanced AI strateg
 - **Framework**: Python 3.10+ with FastAPI
 - **Database**: PostgreSQL with SQLAlchemy ORM
 - **Real-Time**: WebSocket + Socket.IO for live data
-- **Caching**: Redis with graceful fallback
-- **AI/ML**: TensorFlow, scikit-learn for trading algorithms
-- **APIs**: RESTful APIs with comprehensive documentation
+- **Caching**: Redis with connection failure caching
+- **AI/ML**: Technical indicators and sentiment analysis engine
 
 ### Frontend
-- **Framework**: React 18 with TypeScript
-- **UI Library**: Material-UI v6 with custom theming
-- **State Management**: React Context + Custom hooks
-- **Charts**: Recharts for trading visualizations
-- **Real-Time**: Socket.IO client for live updates
-
-### DevOps & Infrastructure
-- **CI/CD**: GitHub Actions with automated workflows
-- **Monitoring**: Prometheus + Grafana + AlertManager
-- **Security**: CodeQL, Bandit, Safety scanning
-- **Deployment**: Docker, Render, Netlify
-- **Documentation**: Auto-generated API docs
+- **Framework**: React 19 with TypeScript
+- **UI Library**: Material-UI v6 + Tailwind CSS
+- **Documentation**: MkDocs Material (hosted at `/docs`)
+- **Charts**: Recharts & Lightweight Charts
 
 ## ⚡ Quick Start
 
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
-- PostgreSQL 13+
-- Git
+### 1. Access Application (Production)
+- **Live App**: [https://tradingbot-ttys.onrender.com](https://tradingbot-ttys.onrender.com)
+- **Full Documentation**: [https://tradingbot-ttys.onrender.com/docs](https://tradingbot-ttys.onrender.com/docs)
+- **API Reference**: [/docs](https://tradingbot-ttys.onrender.com/docs) (Swagger)
 
-### 1. Clone & Setup Environment
+### 2. Local Setup
 ```bash
+# Clone repository
 git clone https://github.com/growthquantix/tradingbot.git
 cd tradingbot
 
-# Copy environment template and configure
-cp .env.template .env
-# Edit .env with your API credentials
-```
-
-### 2. Backend Setup
-```bash
-# Install dependencies
+# Install requirements
 pip install -r requirements.txt
 
-# Run database migrations
-alembic upgrade head
-
-# Start backend server
+# Start backend
 python app.py
-```
-
-### 3. Frontend Setup
-```bash
-cd ui/trading-bot-ui
-npm install
-npm start
-```
-
-### 4. Access Application
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
-
-## 📦 Installation
-
-### Development Environment
-```bash
-# 1. Clone repository
-git clone https://github.com/growthquantix/tradingbot.git
-cd tradingbot
-
-# 2. Setup Python environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# 3. Setup database
-createdb tradingapp  # PostgreSQL
-alembic upgrade head
-
-# 4. Setup frontend
-cd ui/trading-bot-ui
-npm install
-
-# 5. Start development servers
-# Terminal 1 (Backend)
-python app.py
-
-# Terminal 2 (Frontend)
-cd ui/trading-bot-ui && npm start
-```
-
-### Docker Deployment (Optional)
-```bash
-# Start monitoring stack
-docker-compose -f docker-compose.monitoring.yml up -d
-
-# Access Grafana at http://localhost:3001
 ```
 
 ## 🔧 Configuration
 
 ### Environment Variables
-
-#### Required Configuration
-```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/tradingapp
-
-# JWT Security (Generate strong random values)
-JWT_SECRET=your-strong-32-character-secret-key
-REFRESH_SECRET=your-strong-refresh-secret-key
-
-# Broker API Credentials
-UPSTOX_API_KEY=your_upstox_api_key
-UPSTOX_API_SECRET=your_upstox_api_secret
-ZERODHA_API_KEY=your_zerodha_api_key
-ZERODHA_API_SECRET=your_zerodha_api_secret
-```
-
-#### Optional Configuration
-```bash
-# Redis (optional - graceful fallback available)
-REDIS_ENABLED=true
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# Monitoring
-GRAFANA_PASSWORD=secure_password
-PROMETHEUS_ENABLED=true
-```
-
-See [`.env.template`](.env.template) for complete configuration options.
-
-### Broker Setup
-1. **Register** with supported brokers (Upstox, Zerodha, etc.)
-2. **Generate API credentials** from broker developer portals
-3. **Configure** in `.env` file
-4. **Test connection** via admin dashboard
+Configure these in your `.env` or cloud dashboard (Render/Railway):
+- `DATABASE_URL`: Your PostgreSQL connection string
+- `JWT_SECRET`: 32+ character random string
+- `UPSTOX_API_KEY`: For broker connectivity
+- `ENVIRONMENT`: Set to `production` for cloud deployment
 
 ## 🚀 Deployment
 
-### Production Deployment
-
-#### Backend (Render)
-1. Connect GitHub repository to Render
-2. Set environment variables in Render dashboard
-3. Deploy automatically on main branch push
-
-#### Frontend (Netlify)
-1. Connect GitHub repository to Netlify
-2. Set build command: `cd ui/trading-bot-ui && npm run build`
-3. Set publish directory: `ui/trading-bot-ui/build`
-4. Deploy automatically on main branch push
-
-#### Database
-- Use managed PostgreSQL (Render, AWS RDS, etc.)
-- Run migrations: `alembic upgrade head`
-- Ensure proper security groups and access controls
-
-## 🤖 CI/CD & Automation
-
-### Automated Workflows
-
-#### Pull Request Automation
-- **Auto PR Creation**: Creates PRs when pushing to feature branches
-- **Auto Merge**: Merges when all conditions are met
-- **Smart Labeling**: Automatic labels based on file changes
-- **Reviewer Assignment**: Auto-assigns based on code changes
-
-#### Claude Code Agent Integration 🧠
-- **Intelligent Code Review**: AI-powered analysis of every PR
-- **Trading-Specific Validation**: Extra scrutiny for trading system changes
-- **Security Analysis**: Automated detection of security-sensitive changes
-- **Bug Investigation**: AI-assisted bug analysis and resolution guidance
-- **Performance Optimization**: Automated suggestions for code improvements
-
-#### Quality Gates
-- **Security Scanning**: CodeQL, Bandit, Safety checks
-- **Code Quality**: Linting, formatting, complexity analysis
-- **Testing**: Unit tests, integration tests, coverage reports
-- **Performance**: Load testing, dependency analysis
-
-#### Branch Management
-- **Naming Validation**: Enforces branch naming conventions
-- **Stale Cleanup**: Automatic cleanup of old branches
-- **Protection Rules**: Prevents direct commits to main
-
-### Workflow Commands
-```bash
-# Skip auto PR creation
-git commit -m "feat: new feature [skip-pr]"
-
-# Prevent auto-merge (add label to PR)
-gh pr create --label "no-auto-merge"
-```
-
-See [PR_AUTOMATION_GUIDE.md](PR_AUTOMATION_GUIDE.md) for detailed automation documentation.
+### Production Infrastructure
+- **Backend**: Python FastAPI hosted on **Render**
+- **Database**: PostgreSQL hosted on **Render** (Managed)
+- **Frontend**: React SPA hosted on **Netlify**
+- **Documentation**: Static MkDocs site hosted on **Netlify** under `/docs`
 
 ## 📊 Monitoring
 
-### Production Monitoring Stack
-- **Metrics**: Prometheus for time-series data
-- **Visualization**: Grafana dashboards
-- **Alerting**: AlertManager for notifications
-- **Logs**: Structured JSON logging with audit trails
-- **Health Checks**: Comprehensive system monitoring
-
-### Key Metrics Monitored
-- Trading performance and P&L
-- WebSocket connection health
-- Database query performance
-- API response times
-- Broker connection status
-- User activity and errors
-
-### Access Monitoring
-```bash
-# Start monitoring stack
-docker-compose -f docker-compose.monitoring.yml up -d
-
-# Access dashboards
-# Grafana: http://localhost:3001
-# Prometheus: http://localhost:9090
-```
+### System Health Dashboard
+Access the **System Health** page in the UI to monitor:
+- **Operational Integrity**: Real-time status of Token Refresh, Stock Selection, and Options Enhancement.
+- **Resource Usage**: CPU, RAM, and Disk telemetry.
+- **Latency**: Database, Redis, and API response times.
 
 ## 🔒 Security
 
-### Security Features Implemented
-- ✅ **Credential Management**: All secrets in environment variables
-- ✅ **JWT Authentication**: Secure token-based auth with refresh
-- ✅ **Rate Limiting**: API protection against abuse
-- ✅ **Input Validation**: Comprehensive request validation
-- ✅ **SQL Injection Protection**: Parameterized queries
-- ✅ **HTTPS Enforcement**: Secure transport layer
-- ✅ **CORS Configuration**: Proper origin restrictions
-
-### Security Scanning
-- **CodeQL**: Automated code analysis
-- **Dependency Scanning**: Vulnerability detection
-- **Secret Scanning**: Prevents credential leaks
-- **SEBI Compliance**: Indian market regulation adherence
-
-### Security Best Practices
-1. Use strong, unique JWT secrets (32+ characters)
-2. Rotate API keys regularly
-3. Never commit credentials to version control
-4. Use HTTPS in production
-5. Monitor for suspicious activities
-
-See [SECURITY_FIXES.md](SECURITY_FIXES.md) for detailed security documentation.
-
-## 📚 Documentation
-
-### Available Documentation
-- **[CLAUDE.md](CLAUDE.md)**: Comprehensive development guide
-- **[PR_AUTOMATION_GUIDE.md](PR_AUTOMATION_GUIDE.md)**: Automation workflows
-- **[CLAUDE_CODE_INTEGRATION.md](.github/CLAUDE_CODE_INTEGRATION.md)**: AI-powered development assistance
-- **[SECURITY_FIXES.md](SECURITY_FIXES.md)**: Security guidelines
-- **API Docs**: Available at `/docs` endpoint
-- **OpenAPI Spec**: Available at `/openapi.json`
-
-### Architecture Overview
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   React SPA     │    │  FastAPI Backend│    │   PostgreSQL    │
-│  (Netlify)      │◄──►│    (Render)     │◄──►│   Database      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                        │                        │
-         ▼                        ▼                        ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   WebSocket     │    │   Redis Cache   │    │   Monitoring    │
-│   Real-time     │    │   (Optional)    │    │   Stack         │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-## 🤝 Contributing
-
-### Development Workflow
-1. **Fork** the repository
-2. **Create** feature branch: `git checkout -b feature/amazing-feature`
-3. **Commit** changes: `git commit -m 'feat: add amazing feature'`
-4. **Push** to branch: `git push origin feature/amazing-feature`
-5. **Open** Pull Request (auto-created by workflow)
-
-### Automated Contribution Process
-- 🤖 **Auto PR Creation**: PRs created automatically on feature branch push
-- 🔍 **Automated Review**: Code quality, security, and style checks
-- ✅ **Auto Merge**: PRs merged when all conditions are met
-- 🧹 **Branch Cleanup**: Automatic cleanup after merge
-
-### Code Standards
-- **Python**: Black formatting, PEP 8 compliance
-- **JavaScript**: ESLint, Prettier formatting
-- **Commits**: Conventional commit format
-- **Testing**: Minimum 30% coverage requirement
-
-### Getting Help
-- 📖 Check [CLAUDE.md](CLAUDE.md) for development guidelines
-- 🐛 Report bugs via GitHub Issues
-- 💡 Feature requests welcome
-- 📧 Contact: admin@growthquantix.com
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🌟 Acknowledgments
-
-- **Indian Stock Exchanges**: NSE, BSE for market data
-- **Broker Partners**: Upstox, Zerodha, Angel One, Dhan, Fyers
-- **Technology Stack**: FastAPI, React, Material-UI teams
-- **Open Source Community**: For excellent libraries and tools
+### Hardened Architecture
+- ✅ **Secret Protection**: Automatic secret scanning in CI/CD.
+- ✅ **SQL Injection Prevention**: Using SQLAlchemy ORM.
+- ✅ **Production Logging**: Console-only logging in production to prevent disk bloat.
+- ✅ **Secure Auth**: JWT with refresh tokens and Google OAuth.
 
 ---
 
 **Built with ❤️ for Indian Stock Market Traders**
-
 *Empowering retail traders with institutional-grade technology*
