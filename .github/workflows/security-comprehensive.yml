@@ -278,49 +278,44 @@ jobs:
 
   infrastructure-security:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event.inputs.scan_type == 'all'
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.scan_type == 'all' }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       
     - name: Check GitHub repository security settings
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       with:
         script: |
           console.log('🔍 Checking repository security settings...');
           
-          const { data: repo } = await github.rest.repos.get({
-            owner: context.repo.owner,
-            repo: context.repo.repo
-          });
-          
-          // Check security settings
-          const securityChecks = {
-            'Default branch protection': repo.default_branch,
-            'Private repository': repo.private,
-            'Delete branch on merge': repo.delete_branch_on_merge,
-            'Squash merge allowed': repo.allow_squash_merge,
-            'Auto merge allowed': repo.allow_auto_merge
-          };
-          
-          console.log('Security settings:');
-          Object.entries(securityChecks).forEach(([key, value]) => {
-            console.log(`  ${key}: ${value}`);
-          });
-          
-          // Check branch protection
           try {
-            const { data: protection } = await github.rest.repos.getBranchProtection({
+            const { data: repo } = await github.rest.repos.get({
               owner: context.repo.owner,
-              repo: context.repo.repo,
-              branch: repo.default_branch
+              repo: context.repo.repo
             });
             
-            console.log('✅ Branch protection is enabled');
-            console.log(`  Required status checks: ${protection.required_status_checks?.strict || false}`);
-            console.log(`  Required reviews: ${protection.required_pull_request_reviews?.required_approving_review_count || 0}`);
+            console.log('Security settings:');
+            console.log(`  Default branch protection: ${repo.default_branch}`);
+            console.log(`  Private repository: ${repo.private}`);
+            console.log(`  Delete branch on merge: ${repo.delete_branch_on_merge}`);
+            
+            // Check branch protection
+            try {
+              const { data: protection } = await github.rest.repos.getBranchProtection({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: repo.default_branch
+              });
+              
+              console.log('✅ Branch protection is enabled');
+              const strict = protection.required_status_checks ? protection.required_status_checks.strict : false;
+              console.log(`  Required status checks: ${strict}`);
+            } catch (error) {
+              console.log('⚠️ Branch protection may not be configured');
+            }
           } catch (error) {
-            console.log('⚠️ Branch protection may not be configured');
+            console.error(`Error checking repo settings: ${error.message}`);
           }
           
     - name: Check secrets and environment variables
