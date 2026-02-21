@@ -507,38 +507,28 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             
             try {
+              // Create release with AUTOMATIC changelog generation
               await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: tagName,
                 name: `Release ${tagName}`,
-                body: |
-                  ## Production Deployment ${tagName}
+                generate_release_notes: true, // This is the key for automatic changelogs
+                body: `
+                  ## 🚀 Deployment Summary
+                  **Platform:** Render & Netlify
+                  **Health Status:** ${success ? '✅ All Tests Passed' : '❌ Tests Failed'}
+                  **Version:** ${tagName}
                   
-                  **Deployed at:** ${new Date().toISOString()}
-                  **Commit:** ${context.sha}
-                  **Actor:** ${{ github.actor }}
-                  
-                  ### Health Checks
-                  - API Health Check: Passed
-                  - Database Connectivity: Passed  
-                  - WebSocket Connectivity: Passed
-                  
-                  ### Links
-                  - [Backend API (Render)](${{ needs.backend-deployment.outputs.url }})
-                  - [Frontend App (Netlify)](https://${{ secrets.NETLIFY_SITE_ID }}.netlify.app)
-                  - [Monitoring Dashboard](${{ secrets.GRAFANA_URL }})
-                  
-                  ### Architecture
-                  - **Backend**: FastAPI on Render
-                  - **Frontend**: React SPA on Netlify
-                  - **Database**: PostgreSQL
-                  - **Monitoring**: Prometheus + Grafana,
+                  ### 🔗 Quick Links
+                  - [Backend API](${{ needs.backend-deployment.outputs.url }})
+                  - [Frontend UI](https://${{ secrets.NETLIFY_SITE_ID }}.netlify.app)
+                `,
                 draft: false,
                 prerelease: false
               });
               
-              console.log(`Created release: ${tagName}`);
+              console.log(`Created release with automatic notes: ${tagName}`);
             } catch (error) {
               console.log('Could not create release:', error);
             }

@@ -57,6 +57,7 @@
 * [Breakout Implementation](breakout/BREAKOUT_COMPLETE_FLOW.md)
 
 ## 🛠️ Guides & Operations
+* [Changelog](CHANGELOG.md)
 * [Deployment Guide](guides/DEPLOYMENT_GUIDE.md)
 * [Security](guides/SECURITY.md)
 * [Broker Funds](guides/BROKER_FUNDS_IMPLEMENTATION.md)
