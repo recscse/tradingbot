@@ -1,7 +1,7 @@
 site_name: Trading Bot Platform
 site_description: AI-Powered High-Frequency Trading Platform Documentation
 site_author: GrowthQuantix
-site_url: https://your-app-domain.netlify.app/docs/
+site_url: https://your-app-domain.netlify.app/documentation/
 
 theme:
   name: material
