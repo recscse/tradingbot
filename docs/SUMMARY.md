@@ -10,6 +10,7 @@
 
 ## 🏗️ Architecture
 * [General Architecture](architecture/TRADING_SYSTEM_ARCHITECTURE.md)
+* [Rust HFT Blueprint](RUST_HFT_ARCHITECTURE.md)
 * [HFT Architecture](HFT_ARCHITECTURE.md)
 * [Real-time Data Flow](architecture/REALTIME_DATA_FLOW_ANALYSIS.md)
 * [Persistent WebSocket](architecture/PERSISTENT_WEBSOCKET_SOLUTION.md)
