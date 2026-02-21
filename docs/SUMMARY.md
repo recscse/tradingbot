@@ -58,6 +58,7 @@
 
 ## 🛠️ Guides & Operations
 * [Changelog](CHANGELOG.md)
+* [Versioning & Release Guide](VERSIONING_GUIDE.md)
 * [Deployment Guide](guides/DEPLOYMENT_GUIDE.md)
 * [Security](guides/SECURITY.md)
 * [Broker Funds](guides/BROKER_FUNDS_IMPLEMENTATION.md)
