@@ -1,22 +1,19 @@
 @echo off
-echo Building HFT Trading System Documentation
-echo =========================================
+echo Building HFT Trading System Documentation (MkDocs Material)
+echo ==========================================================
 
-REM Check if GitBook CLI is installed
-gitbook --version >nul 2>&1
+REM Check if MkDocs is installed
+mkdocs --version >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo GitBook CLI not found. Installing...
-    npm install -g gitbook-cli
+    echo MkDocs not found. Installing mkdocs-material...
+    pip install mkdocs-material
 )
 
-echo Installing GitBook plugins...
-gitbook install
-
 echo Building documentation...
-gitbook build
+mkdocs build
 
 echo Serving documentation locally...
-echo Documentation will be available at: http://localhost:4000
-gitbook serve
+echo Documentation will be available at: http://localhost:8000
+mkdocs serve
 
 pause

@@ -1,0 +1,62 @@
+site_name: Trading Bot Platform
+site_description: AI-Powered High-Frequency Trading Platform Documentation
+site_author: GrowthQuantix
+site_url: https://your-app-domain.netlify.app/docs/
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light/dark mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Introduction: README.md
+  - System Overview: 
+      - Technical Overview: overview/SYSTEM_OVERVIEW.md
+      - Non-Technical Overview: overview/NON_TECHNICAL_OVERVIEW.md
+  - 🏗️ Architecture:
+      - General Architecture: architecture/TRADING_SYSTEM_ARCHITECTURE.md
+      - HFT Architecture: HFT_ARCHITECTURE.md
+      - Real-time Data Flow: architecture/REALTIME_DATA_FLOW_ANALYSIS.md
+  - 🤖 Auto Trading:
+      - Overview: auto_trading/README.md
+      - Complete Guide: auto_trading/guides/COMPLETE_TRADING_SYSTEM_GUIDE.md
+      - Trade Execution: auto_trading/architecture/TRADE_EXECUTION_FLOW.md
+  - 🧠 Intelligent Selection:
+      - Quick Start: intelligent_stock_selection/00_QUICK_START.md
+      - Market Sentiment: intelligent_stock_selection/04_market_sentiment_analysis.md
+  - 🛠️ Guides & Operations:
+      - Changelog: CHANGELOG.md
+      - Versioning & Release: VERSIONING_GUIDE.md
+      - Deployment: guides/DEPLOYMENT_GUIDE.md

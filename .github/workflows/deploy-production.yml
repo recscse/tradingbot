@@ -7,6 +7,15 @@ on:
     tags: [ "v*" ]
   workflow_dispatch:
     inputs:
+      deploy_target:
+        description: 'Target Platform'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - railway
+        - render
       environment:
         description: 'Deployment environment'
         required: true
@@ -21,14 +30,20 @@ on:
         default: false
         type: boolean
 
+# Prevent concurrent deployments to avoid database migration conflicts
+concurrency:
+  group: deployment-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: read
+  contents: write
   deployments: write
   actions: write
 
 env:
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '20.x'
+  DEPLOY_TARGET: ${{ github.event.inputs.deploy_target || 'all' }}
 
 jobs:
   pre-deployment-checks:
@@ -97,7 +112,11 @@ jobs:
   railway-deployment:
     runs-on: ubuntu-latest
     needs: pre-deployment-checks
-    if: needs.pre-deployment-checks.outputs.should_deploy == 'true'
+    if: |
+      needs.pre-deployment-checks.outputs.should_deploy == 'true' && 
+      (env.DEPLOY_TARGET == 'all' || env.DEPLOY_TARGET == 'railway')
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
     environment:
       name: railway-production
       url: ${{ steps.deploy.outputs.url }}
@@ -124,12 +143,22 @@ jobs:
           # Deploy and wait for success
           railway up --detach
           
-          echo "url=https://railway.app/project" >> $GITHUB_OUTPUT
+          # Try to get the domain from railway
+          DOMAIN=$(railway domain | head -n 1 || echo "")
+          if [ -n "$DOMAIN" ]; then
+            echo "url=https://$DOMAIN" >> $GITHUB_OUTPUT
+          else
+            echo "url=https://railway.app/project" >> $GITHUB_OUTPUT
+          fi
 
   backend-deployment:
     runs-on: ubuntu-latest
     needs: pre-deployment-checks
-    if: needs.pre-deployment-checks.outputs.should_deploy == 'true'
+    if: |
+      needs.pre-deployment-checks.outputs.should_deploy == 'true' && 
+      (env.DEPLOY_TARGET == 'all' || env.DEPLOY_TARGET == 'render')
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
     environment: 
       name: ${{ github.event.inputs.environment || 'production' }}
       url: ${{ steps.deploy.outputs.url }}
@@ -181,7 +210,11 @@ jobs:
         
         if [ -z "$RENDER_API_KEY" ] || [ -z "$RENDER_SERVICE_ID" ]; then
           echo "⚠️ Render secrets missing, skipping deployment trigger"
-          echo "url=https://render.com" >> $GITHUB_OUTPUT
+          if [ -n "${{ secrets.BACKEND_URL }}" ]; then
+            echo "url=${{ secrets.BACKEND_URL }}" >> $GITHUB_OUTPUT
+          else
+            echo "url=https://render.com" >> $GITHUB_OUTPUT
+          fi
           exit 0
         fi
         
@@ -193,7 +226,13 @@ jobs:
           -d '{"clearCache": false}')
         
         echo "Deploy response: $DEPLOY_RESPONSE"
-        echo "url=https://dashboard.render.com/web/$RENDER_SERVICE_ID" >> $GITHUB_OUTPUT
+        
+        # Try to use configured BACKEND_URL secret if available as the primary URL
+        if [ -n "${{ secrets.BACKEND_URL }}" ]; then
+          echo "url=${{ secrets.BACKEND_URL }}" >> $GITHUB_OUTPUT
+        else
+          echo "url=https://dashboard.render.com/web/$RENDER_SERVICE_ID" >> $GITHUB_OUTPUT
+        fi
 
   frontend-deployment:
     runs-on: ubuntu-latest
@@ -225,8 +264,8 @@ jobs:
       
     - name: Build frontend
       env:
-        # Connect frontend to the Render backend URL
-        REACT_APP_API_URL: ${{ needs.backend-deployment.outputs.url || secrets.REACT_APP_API_URL || 'https://your-backend.onrender.com' }}
+        # Connect frontend to the backend URL (favoring Render, then Railway, then secrets)
+        REACT_APP_API_URL: ${{ needs.backend-deployment.outputs.url || needs.railway-deployment.outputs.url || secrets.REACT_APP_API_URL || 'https://your-backend.onrender.com' }}
         REACT_APP_WS_URL: ${{ secrets.REACT_APP_WS_URL || 'wss://your-backend.onrender.com' }}
         REACT_APP_VERSION: ${{ needs.pre-deployment-checks.outputs.deployment_tag }}
         GENERATE_SOURCEMAP: false
@@ -284,7 +323,7 @@ jobs:
 
   post-deployment-tests:
     runs-on: ubuntu-latest
-    needs: [pre-deployment-checks, backend-deployment, frontend-deployment]
+    needs: [pre-deployment-checks, backend-deployment, railway-deployment, frontend-deployment]
     if: needs.pre-deployment-checks.outputs.should_deploy == 'true'
     
     steps:
@@ -302,7 +341,7 @@ jobs:
         
     - name: Health check tests
       env:
-        API_URL: ${{ needs.backend-deployment.outputs.url || secrets.BACKEND_URL }}
+        API_URL: ${{ needs.backend-deployment.outputs.url || needs.railway-deployment.outputs.url || secrets.BACKEND_URL }}
       run: |
         echo "🏥 Running post-deployment health checks..."
         
@@ -310,9 +349,18 @@ jobs:
         python -c "
         import requests
         import sys
+        import os
+        
+        api_url = os.environ.get('API_URL')
+        if not api_url:
+            print('❌ Error: API_URL is not set')
+            sys.exit(1)
+            
+        health_url = f'{api_url.rstrip(\"/\")}/health'
+        print(f'Testing health at: {health_url}')
         
         try:
-            response = requests.get('$API_URL/health', timeout=30)
+            response = requests.get(health_url, timeout=30)
             if response.status_code == 200:
                 print('✅ Health check passed')
                 health_data = response.json()
@@ -327,16 +375,24 @@ jobs:
         
     - name: Database connectivity test
       env:
-        API_URL: ${{ needs.backend-deployment.outputs.url || secrets.BACKEND_URL }}
+        API_URL: ${{ needs.backend-deployment.outputs.url || needs.railway-deployment.outputs.url || secrets.BACKEND_URL }}
       run: |
         echo "🗄️ Testing database connectivity..."
         
         python -c "
         import requests
         import sys
+        import os
+        
+        api_url = os.environ.get('API_URL')
+        if not api_url:
+            print('❌ Error: API_URL is not set')
+            sys.exit(1)
+            
+        health_url = f'{api_url.rstrip(\"/\")}/health'
         
         try:
-            response = requests.get('$API_URL/health', timeout=30)
+            response = requests.get(health_url, timeout=30)
             if response.status_code == 200:
                 health_data = response.json()
                 if health_data.get('database') == 'healthy':
@@ -345,7 +401,7 @@ jobs:
                     print('❌ Database connectivity failed')
                     sys.exit(1)
             else:
-                print('❌ Cannot check database status')
+                print(f'❌ Cannot check database status: {response.status_code}')
                 sys.exit(1)
         except Exception as e:
             print(f'❌ Database check error: {e}')
@@ -367,7 +423,13 @@ jobs:
         import threading
         import time
         import sys
+        import os
         
+        ws_url = os.environ.get('WS_URL')
+        if not ws_url:
+            print('⚠️ Skipping WebSocket test: WS_URL is not set')
+            sys.exit(0)
+            
         def on_message(ws, message):
             print('✅ WebSocket message received')
             ws.close()
@@ -384,7 +446,7 @@ jobs:
             ws.send(json.dumps({'type': 'ping'}))
         
         try:
-            ws = websocket.WebSocketApp('$WS_URL',
+            ws = websocket.WebSocketApp(ws_url,
                                       on_open=on_open,
                                       on_message=on_message,
                                       on_error=on_error,
@@ -445,38 +507,28 @@ jobs:
             const tagName = context.ref.replace('refs/tags/', '');
             
             try {
+              // Create release with AUTOMATIC changelog generation
               await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: tagName,
                 name: `Release ${tagName}`,
-                body: |
-                  ## Production Deployment ${tagName}
+                generate_release_notes: true, // This is the key for automatic changelogs
+                body: `
+                  ## 🚀 Deployment Summary
+                  **Platform:** Render & Netlify
+                  **Health Status:** ${success ? '✅ All Tests Passed' : '❌ Tests Failed'}
+                  **Version:** ${tagName}
                   
-                  **Deployed at:** ${new Date().toISOString()}
-                  **Commit:** ${context.sha}
-                  **Actor:** ${{ github.actor }}
-                  
-                  ### Health Checks
-                  - API Health Check: Passed
-                  - Database Connectivity: Passed  
-                  - WebSocket Connectivity: Passed
-                  
-                  ### Links
-                  - [Backend API (Render)](${{ needs.backend-deployment.outputs.url }})
-                  - [Frontend App (Netlify)](https://${{ secrets.NETLIFY_SITE_ID }}.netlify.app)
-                  - [Monitoring Dashboard](${{ secrets.GRAFANA_URL }})
-                  
-                  ### Architecture
-                  - **Backend**: FastAPI on Render
-                  - **Frontend**: React SPA on Netlify
-                  - **Database**: PostgreSQL
-                  - **Monitoring**: Prometheus + Grafana,
+                  ### 🔗 Quick Links
+                  - [Backend API](${{ needs.backend-deployment.outputs.url }})
+                  - [Frontend UI](https://${{ secrets.NETLIFY_SITE_ID }}.netlify.app)
+                `,
                 draft: false,
                 prerelease: false
               });
               
-              console.log(`Created release: ${tagName}`);
+              console.log(`Created release with automatic notes: ${tagName}`);
             } catch (error) {
               console.log('Could not create release:', error);
             }
