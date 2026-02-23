@@ -5,7 +5,7 @@ Manages capital allocation, validates available funds, and calculates position s
 
 import logging
 from decimal import Decimal
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 # FIX 6: Cleaned imports, removed unused User import
@@ -167,9 +167,12 @@ class TradingCapitalManager:
                     self._update_function_health("available_capital", "error", "No active broker config")
                     return Decimal('0')
 
-                total_capital = self._fetch_funds_from_broker(broker_config)
+                available_margin, used_margin = self._fetch_funds_from_broker(broker_config)
+                # For Live trading, available_margin already accounts for used margin
+                # We return it directly as the 'available' cash
+                return max(Decimal('0'), available_margin)
 
-            # FIX 2: JOIN check to ensure only truly active positions consume capital
+            # For Paper Trading only: JOIN check to ensure only truly active positions consume capital
             allocated_capital = self._get_allocated_capital_for_active_positions(user_id, db)
             available_capital = total_capital - allocated_capital
 
@@ -226,7 +229,9 @@ class TradingCapitalManager:
                 broker_config = self.get_active_broker_config(user_id, db)
                 if not broker_config:
                     return Decimal('0')
-                total_capital = self._fetch_funds_from_broker(broker_config)
+                available_margin, used_margin = self._fetch_funds_from_broker(broker_config)
+                # For Live, the broker API gives us free cash directly as available_margin
+                total_capital = available_margin
 
             # Check concurrent position limit
             active_positions_count = db.query(ActivePosition).filter(
@@ -239,11 +244,37 @@ class TradingCapitalManager:
 
             # FIX 5: Health tracking
             self._update_function_health("available_capital", "success")
-            # Return total_capital, calculate_position_size will apply max_capital_per_trade_percent (60%)
+            # Return available margin (free cash)
             return total_capital
 
         except Exception as e:
             self._update_function_health("available_capital", "error", str(e))
+            return Decimal('0')
+
+    def get_total_account_size(
+        self,
+        user_id: int,
+        db: Session,
+        trading_mode: TradingMode = TradingMode.PAPER
+    ) -> Decimal:
+        """
+        Get the total base capital of the account (Available + Used)
+        Used for risk-per-trade percentage calculations
+        """
+        try:
+            if trading_mode == TradingMode.PAPER:
+                from services.paper_trading_account import paper_trading_service
+                account = paper_trading_service.accounts.get(user_id)
+                if account:
+                    return Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
+                return self.paper_trading_capital
+            else:
+                broker_config = self.get_active_broker_config(user_id, db)
+                if not broker_config:
+                    return Decimal('0')
+                available, used = self._fetch_funds_from_broker(broker_config)
+                return available + used
+        except Exception:
             return Decimal('0')
 
     def _get_allocated_capital_for_active_positions(
@@ -277,44 +308,52 @@ class TradingCapitalManager:
             logger.error(f"Error calculating allocated capital: {e}")
             return Decimal('0')
 
-    def _fetch_funds_from_broker(self, broker_config: BrokerConfig) -> Decimal:
+    def _fetch_funds_from_broker(self, broker_config: BrokerConfig) -> Tuple[Decimal, Decimal]:
         """
         Fetch available funds from broker API
+        Returns: (available_margin, used_margin)
         """
         try:
             broker_name = broker_config.broker_name.lower()
-            funds = Decimal('0')
+            available = Decimal('0')
+            used = Decimal('0')
 
             if 'upstox' in broker_name:
                 from brokers.upstox_broker import UpstoxBroker
                 broker = UpstoxBroker(broker_config)
                 funds_data = broker.get_funds()
                 if funds_data and 'equity' in funds_data:
-                    funds = Decimal(str(funds_data['equity'].get('available_margin', 0)))
+                    equity = funds_data['equity']
+                    available = Decimal(str(equity.get('available_margin', 0)))
+                    used = Decimal(str(equity.get('used_margin', 0)))
 
             elif 'angel' in broker_name:
                 from brokers.angel_one_broker import AngelOneBroker
                 broker = AngelOneBroker(broker_config)
                 funds_data = broker.get_funds()
                 if funds_data and 'availablecash' in funds_data:
-                    funds = Decimal(str(funds_data['availablecash']))
+                    available = Decimal(str(funds_data['availablecash']))
+                    # Angel doesn't easily expose 'used' in this simple call, 
+                    # but we can assume total = available if used not found
+                    used = Decimal('0')
 
             elif 'dhan' in broker_name:
                 from brokers.dhan_broker import DhanBroker
                 broker = DhanBroker(broker_config)
                 funds_data = broker.get_funds()
                 if funds_data and 'availableBalance' in funds_data:
-                    funds = Decimal(str(funds_data['availableBalance']))
+                    available = Decimal(str(funds_data['availableBalance']))
+                    used = Decimal('0')
 
             # FIX 5: Health tracking
             self._update_function_health("fetch_funds", "success")
-            return funds
+            return available, used
 
         except Exception as e:
             # FIX 5: Health tracking
             self._update_function_health("fetch_funds", "error", str(e))
             logger.error(f"Error fetching funds from broker: {e}")
-            return Decimal('0')
+            return Decimal('0'), Decimal('0')
 
     def calculate_position_size(
         self,
@@ -323,7 +362,8 @@ class TradingCapitalManager:
         lot_size: int,
         max_loss_percent: Optional[Decimal] = None,
         max_lots: Optional[int] = None,
-        risk_per_unit: Optional[Decimal] = None
+        risk_per_unit: Optional[Decimal] = None,
+        total_account_size: Optional[Decimal] = None
     ) -> CapitalAllocation:
         """
         Calculate optimal position size based on capital and risk management
@@ -339,8 +379,12 @@ class TradingCapitalManager:
             if not max_loss_percent:
                 max_loss_percent = self.max_risk_per_trade_percent
 
+            # IMPORTANT: Use total_account_size for the risk amount calculation if provided
+            # Risk is 2% of the TOTAL account, not just what's left.
+            risk_base = total_account_size if total_account_size is not None else available_capital
+            
             max_allocable_capital = available_capital * self.max_capital_per_trade_percent
-            max_loss_amount = available_capital * max_loss_percent
+            max_loss_amount = risk_base * max_loss_percent
             position_value_per_lot = option_premium * Decimal(str(lot_size))
 
             # Use provided risk per unit (e.g., entry - SL) or default to 100% of premium
@@ -440,7 +484,11 @@ class TradingCapitalManager:
                     total_capital = self.paper_trading_capital
             else:
                 broker_config = self.get_active_broker_config(user_id, db)
-                total_capital = self._fetch_funds_from_broker(broker_config) if broker_config else Decimal('0')
+                if broker_config:
+                    available, used = self._fetch_funds_from_broker(broker_config)
+                    total_capital = available + used
+                else:
+                    total_capital = Decimal('0')
 
             allocated_capital = self._get_allocated_capital_for_active_positions(user_id, db)
             available_capital = total_capital - allocated_capital

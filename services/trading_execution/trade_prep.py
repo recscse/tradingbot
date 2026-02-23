@@ -348,6 +348,9 @@ class TradePrepService:
             available_capital = capital_manager.get_available_capital_for_new_position(
                 user_id, db, trading_mode
             )
+            
+            # GET TOTAL ACCOUNT SIZE for risk calculation (2% of account)
+            total_account_size = capital_manager.get_total_account_size(user_id, db, trading_mode)
 
             if available_capital <= 0:
                 logger.warning(
@@ -375,7 +378,8 @@ class TradePrepService:
             capital_allocation = capital_manager.calculate_position_size(
                 available_capital, current_premium, lot_size, 
                 max_lots=target_lots,
-                risk_per_unit=risk_per_unit
+                risk_per_unit=risk_per_unit,
+                total_account_size=total_account_size
             )
 
             # STEP 5: Validate sufficient capital
@@ -654,6 +658,9 @@ class TradePrepService:
             available_capital = capital_manager.get_available_capital_for_new_position(
                 user_id, db, trading_mode
             )
+            
+            # GET TOTAL ACCOUNT SIZE for risk calculation (2% of account)
+            total_account_size = capital_manager.get_total_account_size(user_id, db, trading_mode)
 
             if available_capital <= 0:
                 logger.warning(
@@ -754,7 +761,8 @@ class TradePrepService:
             risk_per_unit = abs(signal.entry_price - signal.stop_loss)
             capital_allocation = capital_manager.calculate_position_size(
                 available_capital, current_premium, lot_size,
-                risk_per_unit=risk_per_unit
+                risk_per_unit=risk_per_unit,
+                total_account_size=total_account_size
             )
 
             # Step 7: Validate sufficient capital
