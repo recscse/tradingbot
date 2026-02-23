@@ -592,6 +592,9 @@ class TradeExecutionHandler:
                     except Exception as e:
                         logger.error(f"Error closing paper position {position.id}: {e}")
                 
+                # CRITICAL: Commit changes to database
+                db.commit()
+                
                 return {
                     "success": True, 
                     "message": f"Closed {count} paper positions", 

@@ -657,16 +657,9 @@ async def lifespan(app: FastAPI):
                     "✅ Centralized WebSocket background task started - continuing with other services"
                 )
 
-                # 🚀 CRITICAL: Initialize ZERO-DELAY real-time streaming
-                try:
-                    from services.realtime_data_streamer import realtime_streamer
-
-                    realtime_streamer.start_streaming()
-                    logger.info("🚀 ZERO-DELAY real-time streaming ACTIVATED")
-                except ImportError as e:
-                    logger.warning(f"⚠️ ZERO-DELAY streaming not available: {e}")
-                except Exception as e:
-                    logger.error(f"❌ Error initializing real-time trading system: {e}")
+                # 🚀 ZERO-DELAY real-time streaming will be activated on-demand
+                # when a client connects to the /api/v1/realtime/stream WebSocket
+                logger.info("🚀 ZERO-DELAY real-time streaming available (on-demand)")
 
                 # Log initial status (don't await health check to avoid blocking)
                 logger.info(

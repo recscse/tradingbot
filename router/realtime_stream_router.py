@@ -50,10 +50,15 @@ async def realtime_market_data_stream(websocket: WebSocket):
         }))
         
         # Keep connection alive and handle any incoming messages
-        while websocket.application_state == WebSocketState.CONNECTED:
+        while True:
             try:
+                # Check application state before receiving
+                if websocket.application_state != WebSocketState.CONNECTED:
+                    break
+                    
                 # Wait for any client messages (heartbeat, subscription changes, etc.)
-                message = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # Reduced timeout to be more responsive to state changes
+                message = await asyncio.wait_for(websocket.receive_text(), timeout=20.0)
                 
                 try:
                     data = json.loads(message)
@@ -97,22 +102,46 @@ async def realtime_market_data_stream(websocket: WebSocket):
             except asyncio.TimeoutError:
                 # Send periodic heartbeat to keep connection alive
                 if websocket.application_state == WebSocketState.CONNECTED:
-                    await websocket.send_text(json.dumps({
-                        "type": "heartbeat",
-                        "active_connections": len(realtime_streamer._ui_connections),
-                        "streaming_active": realtime_streamer._streaming_active,
-                        "timestamp": datetime.now().isoformat()
-                    }))
-                    
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "heartbeat",
+                            "active_connections": len(realtime_streamer._ui_connections),
+                            "streaming_active": realtime_streamer._streaming_active,
+                            "timestamp": datetime.now().isoformat()
+                        }))
+                    except Exception:
+                        break
+                else:
+                    break
+            
+            except WebSocketDisconnect:
+                # Normal disconnection handled by outer try-except
+                raise
+                
             except Exception as e:
-                logger.error(f"Error handling message from {client_id}: {e}")
+                # 🛠️ IMPROVED: Handle abnormal closures (1006) without noisy error logs
+                error_str = str(e)
+                if "1006" in error_str or "ABNORMAL_CLOSURE" in error_str:
+                    logger.debug(f"🔗 Client {client_id} connection closed abnormally (1006)")
+                elif "1005" in error_str:
+                    logger.debug(f"🔗 Client {client_id} connection closed (1005)")
+                else:
+                    # Log other unexpected errors
+                    logger.error(f"Error handling message from {client_id}: {e}")
                 break
                 
     except WebSocketDisconnect:
         logger.info(f"🔗 Client {client_id} disconnected")
         
     except Exception as e:
-        logger.error(f"❌ Error in real-time streaming for {client_id}: {e}")
+        # Handle abnormal closures (1006) without noisy error logs at top level
+        error_str = str(e)
+        if "1006" in error_str or "ABNORMAL_CLOSURE" in error_str:
+            logger.debug(f"🔗 Client {client_id} connection closed abnormally (1006)")
+        elif "1005" in error_str:
+            logger.debug(f"🔗 Client {client_id} connection closed (1005)")
+        else:
+            logger.error(f"❌ Error in real-time streaming for {client_id}: {e}")
         
     finally:
         # Clean up connection
