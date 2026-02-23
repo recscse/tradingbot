@@ -166,6 +166,7 @@ const scheduleBatchPush = () => {
 // ---------- hook ----------
 export const useZeroDelayMarketData = (options = {}) => {
   const {
+    enabled = false, // 🚀 NEW: Default to false to prevent unnecessary background connections
     autoReconnect = true,
     maxReconnectAttempts = 5,
     reconnectInterval = 3000,
@@ -464,12 +465,14 @@ export const useZeroDelayMarketData = (options = {}) => {
     return sendMessage({ type: "ping", timestamp: new Date().toISOString() });
   }, [sendMessage]);
 
-  // Auto-connect on mount
+  // Auto-connect on mount (if enabled)
   useEffect(() => {
-    connect();
+    if (enabled) {
+      connect();
+    }
     return () => disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [enabled, connect, disconnect]);
 
   // Periodic stats requests
   useEffect(() => {

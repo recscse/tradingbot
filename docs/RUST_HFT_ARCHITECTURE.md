@@ -4,87 +4,94 @@ This document serves as the master guide for rebuilding the trading core in Rust
 
 ---
 
-## 1. System Architecture
+## 1. Deep-Dive: High-Speed Data Ingestion (WebSocket)
 
-The system is designed as a **Hybrid Engine**:
-*   **The Muscle (Rust):** Handles data ingestion, strategy execution, and risk management.
-*   **The Brain (AI/ONNX):** Trained models running inside the Rust process for decision making.
-*   **The Face (React/Python):** Your existing UI monitors the Rust core via a local WebSocket.
+To achieve ultra-low latency, the Rust Ingestor must avoid the "JSON Dictionary" trap used in Python.
 
-```mermaid
-[Market Data (Upstox WS)] 
-       ⬇ (Binary/JSON Stream)
-[RUST CORE ENGINE]
-   ├── 1. Data Ingestor (Tokio): Zero-copy parsing
-   ├── 2. Feature Builder: Real-time indicators (RSI, OrderFlow)
-   ├── 3. Global State (DashMap): Thread-safe market snapshot
-   ├── 4. Strategy Factory: Runs multiple strategies in "Shadow Mode"
-   ├── 5. AI Inference (ORT): ONNX Runtime for probability
-   └── 6. Execution Actor: Spawns independent tasks for active trades
-       ⬇ (HTTP/Socket)
-[Broker API (Order Placement)]
-```
+### Implementation Logic:
+*   **Zero-Allocation Parsing:** Use `serde-json` with `#[derive(Deserialize)]` on strictly typed Structs. This parses the WebSocket string directly into stack-allocated memory.
+*   **The Ingestion Pipeline:**
+    1.  **Thread A (IO):** Uses `tokio-tungstenite`. Its only job is to read raw bytes from the socket and push them into a `flume::bounded` channel.
+    2.  **Thread B (Parser):** Pops bytes, deserializes into a `Tick` struct, and calculates the "Price Delta" from the previous tick.
+*   **Upstox Protocol:** Implement both JSON and **Protobuf** (if available) decoding. Protobuf is significantly faster for HFT.
 
 ---
 
-## 2. Technology Stack (Rust Crates)
+## 2. Dynamic Instrument & Option Key Management
 
-| Component | Crate (Library) | Purpose |
+Instead of searching large JSON files, Rust will **calculate** keys mathematically.
+
+### Spot to Option Mapping:
+1.  **Registry:** Maintain a `DashMap<String, InstrumentData>` where the key is the trading symbol (e.g., "RELIANCE").
+2.  **Mathematical Key Generation:** When a Spot signal is detected, the engine constructs the Option Key string instantly:
+    *   Format: `{SYMBOL}{YY}{MMM}{STRIKE}{TYPE}`
+    *   Logic: `let key = format!("{}{}{}{}{}", symbol, year, month, atm_strike, "CE");`
+3.  **Token Lookup:** Rust performs a `O(1)` hash lookup to find the numeric `instrument_token` required by the Upstox API. This takes ~100 nanoseconds.
+
+---
+
+## 3. Real-Time Feature Engine (The Rule Engine)
+
+Before the AI makes a decision, the **Rule Engine** filters the data. These are your "HFT Guards."
+
+### The Multi-Step Decision Matrix:
+| Level | Rule Name | Logic |
 | :--- | :--- | :--- |
-| **Async Runtime** | `tokio` | The foundation for high-performance I/O. |
-| **WebSockets** | `tokio-tungstenite` | Ultra-fast, non-blocking WebSocket client. |
-| **Serialization** | `serde`, `serde_json` | Parsing market data into Structs (Zero-copy). |
-| **Shared State** | `dashmap` | High-concurrency HashMap for the "Market Registry". |
-| **Parallelism** | `rayon` | Running math calculations across all CPU cores. |
-| **AI/ML** | `ort` (ONNX Runtime) | Running trained AI models at native speed. |
-| **Dataframes** | `polars` | Fast data manipulation for strategy backtesting. |
-| **Technical Analysis** | `ta` | Standard indicators (RSI, EMA, MACD). |
-| **Logging** | `tracing`, `tracing-appender` | High-speed, async logging to files/console. |
+| **Level 1** | **Market Regime** | Is `NIFTY_LTP` > `NIFTY_EMA_200`? (Avoid trading against the macro trend). |
+| **Level 2** | **Sector Sync** | If buying `HDFC`, is the `BANKING_SECTOR` atomic counter positive? |
+| **Level 3** | **Volatility Filter** | Check `ATR` (Average True Range). If too low, skip (not enough movement to cover brokerage). |
+| **Level 4** | **AI Inference** | Pass the `CircularBuffer` of the last 50 ticks to the ONNX model. |
 
 ---
 
-## 3. Implementation Roadmap (Step-by-Step)
+## 4. AI Model Integration & Training
 
-### Phase 1: The Data Highway (Latency < 500µs)
-**Goal:** Receive, parse, and store market data without GC pauses.
+### The Feature Vector (Inputs):
+The model is trained on a 1D array of floats:
+`[LTP_Change, Volume_Imbalance, Bid_Ask_Spread, Sector_Momentum, Time_To_Expiry]`
 
-1.  **Define Structs:** Create rigorous Rust structs for `Tick`, `OrderBook`, and `OptionChain`.
-2.  **WebSocket Client:** Implement a `tokio-tungstenite` client that auto-reconnects.
-3.  **Broadcaster:** Use `tokio::sync::broadcast` to send ticks to the Strategy Engine.
-4.  **Market Registry:** Use `DashMap` to store the *latest* price of every instrument (Spot + Options). This allows O(1) lookups.
+### Inference Workflow:
+1.  **Input Preparation:** Rust pulls the last $N$ values from the `CircularBuffer`.
+2.  **Normalization:** Scale values to be between 0 and 1 (must match Python training logic).
+3.  **Execution:** `let output = session.run(vec![input_tensor])?;`
+4.  **Thresholding:**
+    *   `output > 0.90`: Execute Market Order (Pinpoint Accuracy).
+    *   `0.70 < output < 0.90`: Place Limit Order at `Best Bid`.
+    *   `output < 0.70`: Do nothing.
 
-### Phase 2: The Analytics Engine (Real-Time)
-**Goal:** Know the "State of the Market" instantly.
+---
 
-1.  **Sector Tracking:** Use `AtomicF64` counters to track Sector Performance (e.g., BANKING +0.5%) in real-time.
-2.  **Option Chain Manager:**
-    *   Implement Black-Scholes in pure Rust functions.
-    *   Calculate Greeks (Delta, Gamma) for 100+ strikes in parallel using `Rayon`.
-3.  **Feature Buffer:** Maintain a Ring Buffer of the last 100 ticks for every stock to feed the AI.
+## 5. Automated Execution & Profit Booking
 
-### Phase 3: The AI & Strategy Factory
-**Goal:** "Pinpoint Accuracy" using Ensemble Models.
+Once a trade is active, Rust spawns a **Position Actor** (a dedicated async task).
 
-1.  **Data Logger:** Create a Rust module that dumps raw ticks to **Parquet** files for training.
-2.  **Training (Python Side):**
-    *   Train **XGBoost** (Direction) and **LSTM** (Volatility) models on the captured data.
-    *   Export models to `.onnx` format.
-3.  **Inference (Rust Side):**
-    *   Load `.onnx` models using `ort`.
-    *   On every significant tick, pass the Feature Buffer to the model.
-    *   **Filter Logic:** `If Probability > 0.85 THEN Execute`.
+### Execution Rules:
+*   **The Sniper Entry:** Use "IOC" (Immediate or Cancel) orders. If the price slips even 0.05% during transmission, the order cancels, preventing bad entries.
+*   **Shadow Trailing SL:**
+    *   Rust monitors every tick. If `LTP` drops below `Shadow_SL`, fire a Market Exit.
+    *   **Logic:** `if ltp < entry_price + (max_profit * 0.8) { exit_now(); }` (Locks in 80% of peak profit).
+*   **Target Updating:**
+    *   If the AI model's "Confidence" increases while in a trade, the Position Actor **increases the Target Price** automatically to capture the full run.
 
-### Phase 4: Execution & Risk Management
-**Goal:** Safety first.
+---
 
-1.  **Risk Gate:** Before *any* order is sent, check:
-    *   `DailyLoss < Limit`
-    *   `MarginAvailable > Required`
-2.  **Shadow Mode:** Run strategies without sending orders. Log "Virtual PnL" to verify accuracy.
-3.  **Execution Actor:**
-    *   Spawn a unique Task for every active trade.
-    *   It manages the **"Shadow Stop Loss"** (internal SL, not on broker).
-    *   It handles **Dynamic Trailing** based on AI volatility prediction.
+## 6. Detailed Implementation Step-by-Step
+
+### Step 1: `src/types.rs`
+Define your data models. Use `FixedPoint` math instead of `Floats` for price to avoid rounding errors.
+
+### Step 2: `src/rx_socket.rs`
+Implement the WebSocket client. Use **TLS with native-certs** for the fastest handshake.
+
+### Step 3: `src/engine/analytics.rs`
+Implement the `SectorAccumulator`. Use `std::sync::atomic::AtomicU64` to store prices (shifted by 100 to handle decimals).
+
+### Step 4: `src/strategy/ai_bridge.rs`
+The wrapper for the `ort` crate. Handle model loading and tensor transformation here.
+
+### Step 5: `src/tx_broker.rs`
+The Order Execution module. Implement a **Rate Limiter** to ensure you don't exceed the broker's API limits (e.g., 10 orders/sec).
+
 
 ---
 
