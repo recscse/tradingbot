@@ -71,51 +71,84 @@ class UpstoxOptionService:
     def _make_upstox_request(
         self, endpoint: str, params: Dict = None, db: Session = None
     ) -> Optional[Any]:
-        """Make authenticated request to Upstox API and return `data` on success"""
+        """Make authenticated request to Upstox API with retry logic and return `data` on success"""
         self.api_calls_count += 1
-        try:
-            token = self._get_admin_token(db)
-            if not token:
-                error_msg = "No valid Upstox token available"
-                self.last_error = error_msg
-                logger.error(error_msg)
-                return None
-
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json",
-            }
-
-            url = f"{self.base_url}{endpoint}"
-            logger.info(f"Upstox API call: {endpoint} params={params!r}")
-
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-
-            if response.status_code == 200:
-                payload = response.json()
-                if payload.get("status") == "success":
-                    self.last_error = None
-                    return payload.get("data", {})
-                else:
-                    error_msg = f"Upstox API error payload: {payload}"
+        
+        # Retry configuration
+        max_retries = 3
+        retry_delay = 1  # starting delay in seconds
+        
+        for attempt in range(max_retries + 1):
+            try:
+                token = self._get_admin_token(db)
+                if not token:
+                    error_msg = "No valid Upstox token available"
                     self.last_error = error_msg
                     logger.error(error_msg)
                     return None
-            elif response.status_code == 401:
-                error_msg = "Upstox token expired or invalid (401)"
-                self.last_error = error_msg
-                logger.error(error_msg)
-                return None
-            else:
-                error_msg = f"Upstox API error {response.status_code}: {response.text}"
-                self.last_error = error_msg
-                logger.error(error_msg)
-                return None
 
-        except Exception as e:
-            self.last_error = str(e)
-            logger.error(f"Error making Upstox request: {e}")
-            return None
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                }
+
+                url = f"{self.base_url}{endpoint}"
+                logger.info(f"Upstox API call (attempt {attempt+1}): {endpoint} params={params!r}")
+
+                response = requests.get(url, headers=headers, params=params, timeout=15)
+
+                if response.status_code == 200:
+                    payload = response.json()
+                    if payload.get("status") == "success":
+                        self.last_error = None
+                        return payload.get("data", {})
+                    else:
+                        error_msg = f"Upstox API error payload: {payload}"
+                        self.last_error = error_msg
+                        logger.error(error_msg)
+                        return None
+                elif response.status_code == 401:
+                    error_msg = "Upstox token expired or invalid (401)"
+                    self.last_error = error_msg
+                    logger.error(error_msg)
+                    return None
+                elif response.status_code in [500, 502, 503, 504]:
+                    # Server errors - potential candidates for retry
+                    if attempt < max_retries:
+                        import time
+                        logger.warning(f"Upstox server error {response.status_code}. Retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    
+                    error_msg = f"Upstox API server error {response.status_code}: {response.text}"
+                    self.last_error = error_msg
+                    logger.error(error_msg)
+                    return None
+                else:
+                    error_msg = f"Upstox API error {response.status_code}: {response.text}"
+                    self.last_error = error_msg
+                    logger.error(error_msg)
+                    return None
+
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                # Connection errors (including NameResolutionError) and timeouts are retried
+                if attempt < max_retries:
+                    import time
+                    logger.warning(f"Network error on attempt {attempt+1}: {e}. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                
+                self.last_error = str(e)
+                logger.error(f"Error making Upstox request after {max_retries+1} attempts: {e}")
+                return None
+            except Exception as e:
+                self.last_error = str(e)
+                logger.error(f"Unexpected error making Upstox request: {e}")
+                return None
+        
+        return None
 
     def get_fast_option_selection_data(
         self, instrument_key: str, db: Session

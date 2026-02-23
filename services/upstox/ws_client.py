@@ -512,7 +512,7 @@ class UpstoxWebSocketClient:
 
     async def _send_unsubscription(self, keys: list):
         """Send unsubscription request"""
-        if not self.websocket or not self.websocket.open:
+        if not self.is_connected():
             return
             
         payload = {
@@ -607,7 +607,20 @@ class UpstoxWebSocketClient:
 
     def is_connected(self):
         """Check if WebSocket is currently connected"""
-        return self.websocket is not None and self.websocket.open and self.should_run
+        if self.websocket is None or not self.should_run:
+            return False
+            
+        # websockets 14.x+ (New asyncio API) uses .state attribute
+        if hasattr(self.websocket, "state"):
+            try:
+                from websockets import State
+                return self.websocket.state is State.OPEN
+            except (ImportError, AttributeError):
+                pass
+                
+        # websockets < 14.0 or Legacy API uses .open property
+        # Use getattr to safely handle cases where .open might be missing
+        return getattr(self.websocket, "open", False)
 
     def get_status(self):
         """Get current connection status"""
