@@ -1568,9 +1568,25 @@ class AutoTradeLiveFeed:
             # Validate data availability
             current_candles = len(instrument.historical_spot_data.get("close", []))
 
+            # RETRY LOGIC: Wait for premium data if it's currently 0 (common for new subscriptions)
+            retry_count = 0
+            max_retries = 10  # 10 * 0.5s = 5 seconds total wait
+            
+            while instrument.live_option_premium <= 0 and retry_count < max_retries:
+                if retry_count == 0:
+                    logger.info(f"⌛ Premium data is 0 for {instrument.stock_symbol}, waiting for feed tick (Key: {instrument.option_instrument_key})...")
+                
+                await asyncio.sleep(0.5)
+                retry_count += 1
+                
+                # If premium arrived, log success
+                if instrument.live_option_premium > 0:
+                    logger.info(f"✅ Premium data arrived for {instrument.stock_symbol} after {retry_count * 0.5}s: {instrument.live_option_premium:.2f}")
+                    break
+
             if instrument.live_option_premium <= 0:
                 logger.warning(
-                    f"⌛ Waiting for premium data for {instrument.stock_symbol} "
+                    f"⌛ Timeout waiting for premium data for {instrument.stock_symbol} "
                     f"(Key: {instrument.option_instrument_key}). Current premium is 0. "
                     "Skipping this execution attempt until price update arrives."
                 )

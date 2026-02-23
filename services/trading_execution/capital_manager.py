@@ -228,8 +228,6 @@ class TradingCapitalManager:
                     return Decimal('0')
                 total_capital = self._fetch_funds_from_broker(broker_config)
 
-            max_per_trade = total_capital * self.max_capital_per_trade_percent
-
             # Check concurrent position limit
             active_positions_count = db.query(ActivePosition).filter(
                 ActivePosition.user_id == user_id,
@@ -241,7 +239,8 @@ class TradingCapitalManager:
 
             # FIX 5: Health tracking
             self._update_function_health("available_capital", "success")
-            return max_per_trade
+            # Return total_capital, calculate_position_size will apply max_capital_per_trade_percent (60%)
+            return total_capital
 
         except Exception as e:
             self._update_function_health("available_capital", "error", str(e))
