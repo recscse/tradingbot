@@ -92,12 +92,12 @@ class StrategyEngine:
 
         # Lock Profit Configuration - Make position risk-free
         self.breakeven_profit_threshold = Decimal('0.35')  # Start trailing to breakeven at 35% of target (was 75%)
-        self.min_roi_for_breakeven = Decimal('0.02')       # Minimum 2% ROI required to move to breakeven (was 5%)
+        self.min_roi_for_breakeven = Decimal('0.05')       # Minimum 5% ROI required to move to breakeven (was 2%)
         self.lock_profit_threshold = Decimal('1.00')  # Lock profit when target hit
         self.lock_profit_percent = Decimal('0.80')  # Lock 80% of profit
 
         # Stop Loss Buffer - Prevent tight stops
-        self.sl_buffer_percent = Decimal('0.02')  # 2% buffer below SuperTrend for SL
+        self.sl_buffer_percent = Decimal('0.05')  # 5% buffer below SuperTrend for SL (was 2%)
 
         logger.info("Strategy Engine initialized with SuperTrend + EMA")
         logger.info(f"  EMA Period: {self.ema_period}")
@@ -590,9 +590,9 @@ class StrategyEngine:
     ) -> TradingSignal:
         """
         Fallback method for premium signal conversion when delta not available
-        Uses fixed 5% risk
+        Uses fixed 10% risk (as 5% is now the minimum buffer)
         """
-        premium_risk = option_premium * Decimal('0.05')  # 5% risk
+        premium_risk = option_premium * Decimal('0.10')  # 10% risk
         premium_sl = option_premium - premium_risk
         premium_target = option_premium + (premium_risk * Decimal('2.0'))  # 1:2 R:R
 

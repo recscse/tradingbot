@@ -68,6 +68,9 @@ class Instrument:
     market_cap: int = 0
     lot_size: int = 1
     tick_size: float = 0.05
+    bid_price: float = 0.0
+    ask_price: float = 0.0
+    oi: float = 0.0
     last_update: float = field(default_factory=time.time)
     last_trade_time: Optional[str] = None
     is_52_week_high: bool = False
@@ -90,12 +93,22 @@ class Instrument:
         open_price: Optional[float] = None,
         high_price: Optional[float] = None,
         low_price: Optional[float] = None,
+        bid_price: Optional[float] = None,
+        ask_price: Optional[float] = None,
+        oi: Optional[float] = None,
     ):
         new_price_decimal = float(new_price)
         if close_price and self.close_price == 0:
             self.close_price = float(close_price)
         if open_price:
             self.open_price = float(open_price)
+
+        if bid_price is not None:
+            self.bid_price = float(bid_price)
+        if ask_price is not None:
+            self.ask_price = float(ask_price)
+        if oi is not None:
+            self.oi = float(oi)
 
         if self.current_price == 0:
             self.current_price = new_price_decimal
@@ -367,6 +380,9 @@ class RealtimeMarketEngine:
                     open_price=data.get("open"),
                     high_price=data.get("high"),
                     low_price=data.get("low"),
+                    bid_price=data.get("bid_price"),
+                    ask_price=data.get("ask_price"),
+                    oi=data.get("open_interest") or data.get("oi"),
                 )
                 updated_instruments.append(inst)
             else:
@@ -390,6 +406,9 @@ class RealtimeMarketEngine:
                     open_price=data.get("open"),
                     high_price=data.get("high"),
                     low_price=data.get("low"),
+                    bid_price=data.get("bid_price"),
+                    ask_price=data.get("ask_price"),
+                    oi=data.get("open_interest") or data.get("oi"),
                 )
                 updated_instruments.append(inst)
                 logger.debug(f"Auto-initialized instrument: {key}")
