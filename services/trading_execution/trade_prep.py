@@ -348,6 +348,9 @@ class TradePrepService:
             available_capital = capital_manager.get_available_capital_for_new_position(
                 user_id, db, trading_mode
             )
+            
+            # GET TOTAL ACCOUNT SIZE for risk calculation (2% of account)
+            total_account_size = capital_manager.get_total_account_size(user_id, db, trading_mode)
 
             if available_capital <= 0:
                 logger.warning(
@@ -375,7 +378,8 @@ class TradePrepService:
             capital_allocation = capital_manager.calculate_position_size(
                 available_capital, current_premium, lot_size, 
                 max_lots=target_lots,
-                risk_per_unit=risk_per_unit
+                risk_per_unit=risk_per_unit,
+                total_account_size=total_account_size
             )
 
             # STEP 5: Validate sufficient capital
@@ -401,19 +405,28 @@ class TradePrepService:
                 )
 
             # STEP 6: Validate option quality using Greeks and market data
-            if option_greeks and implied_volatility and open_interest:
+            if option_greeks and implied_volatility:
                 logger.info(f"Validating option quality with Greeks and market data")
                 from services.trading_execution.option_analytics import option_analytics
+                from services.realtime_market_engine import get_market_engine
+                
+                engine = get_market_engine()
+                instrument = engine.instruments.get(option_instrument_key)
+                
+                # Use real bid/ask/oi from engine if not provided in arguments
+                actual_bid = bid_price if (bid_price and bid_price > 0) else (instrument.bid_price if instrument else 0)
+                actual_ask = ask_price if (ask_price and ask_price > 0) else (instrument.ask_price if instrument else 0)
+                actual_oi = open_interest if (open_interest and open_interest > 0) else (instrument.oi if instrument else 0)
 
                 spot_atr = self._calculate_atr_from_historical(historical_data) if historical_data else None
 
                 option_validation = option_analytics.validate_option_for_entry(
                     greeks=option_greeks,
                     iv=implied_volatility,
-                    oi=open_interest,
+                    oi=actual_oi,
                     volume=volume or 0,
-                    bid_price=bid_price or float(current_premium * Decimal("0.995")),
-                    ask_price=ask_price or float(current_premium * Decimal("1.005")),
+                    bid_price=actual_bid or float(current_premium * Decimal("0.995")),
+                    ask_price=actual_ask or float(current_premium * Decimal("1.005")),
                     premium=float(current_premium),
                     quantity=capital_allocation.position_size_lots * lot_size,
                     spot_atr=spot_atr,
@@ -654,6 +667,9 @@ class TradePrepService:
             available_capital = capital_manager.get_available_capital_for_new_position(
                 user_id, db, trading_mode
             )
+            
+            # GET TOTAL ACCOUNT SIZE for risk calculation (2% of account)
+            total_account_size = capital_manager.get_total_account_size(user_id, db, trading_mode)
 
             if available_capital <= 0:
                 logger.warning(
@@ -754,7 +770,8 @@ class TradePrepService:
             risk_per_unit = abs(signal.entry_price - signal.stop_loss)
             capital_allocation = capital_manager.calculate_position_size(
                 available_capital, current_premium, lot_size,
-                risk_per_unit=risk_per_unit
+                risk_per_unit=risk_per_unit,
+                total_account_size=total_account_size
             )
 
             # Step 7: Validate sufficient capital
@@ -786,6 +803,46 @@ class TradePrepService:
                     trading_mode,
                     f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}",
                 )
+
+            # Step 7.5: Validate option quality (Liquidity & Greeks)
+            from services.trading_execution.option_analytics import option_analytics
+            from services.realtime_market_engine import get_market_engine
+            
+            engine = get_market_engine()
+            instrument = engine.instruments.get(option_instrument_key)
+            
+            # Fetch Greeks if available from broker or instrument
+            # For now using defaults if not explicitly available in this flow
+            option_greeks = getattr(instrument, "option_greeks", None) if instrument else None
+            
+            if instrument:
+                option_validation = option_analytics.validate_option_for_entry(
+                    greeks=option_greeks or {"delta": 0.5, "theta": -0.01, "gamma": 0.001, "vega": 0.05, "rho": 0.01},
+                    iv=getattr(instrument, "iv", 0.30),
+                    oi=instrument.oi,
+                    volume=instrument.volume,
+                    bid_price=instrument.bid_price or float(current_premium * Decimal("0.995")),
+                    ask_price=instrument.ask_price or float(current_premium * Decimal("1.005")),
+                    premium=float(current_premium),
+                    quantity=capital_allocation.position_size_lots * lot_size,
+                )
+
+                if not option_validation.valid:
+                    logger.warning(f"Option validation failed: {option_validation.reason}")
+                    return self._create_error_trade(
+                        TradeStatus.INVALID_OPTION,
+                        user_id,
+                        stock_symbol,
+                        option_instrument_key,
+                        option_type,
+                        strike_price,
+                        expiry_date,
+                        lot_size,
+                        trading_mode,
+                        option_validation.reason,
+                        failure_stage="signal",
+                        failure_reason="OPTION_QUALITY_CHECK_FAILED"
+                    )
 
             # Step 8: Calculate final risk-reward ratio and update target
             risk = abs(signal.entry_price - signal.stop_loss)

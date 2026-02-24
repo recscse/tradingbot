@@ -506,13 +506,16 @@ jobs:
           if (success && context.ref.startsWith('refs/tags/')) {
             const tagName = context.ref.replace('refs/tags/', '');
             
+            // Try to read version/release name from repository if possible or use tag
+            const releaseName = `Advanced Trading Release ${tagName}`;
+            
             try {
               // Create release with AUTOMATIC changelog generation
               await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: tagName,
-                name: `Release ${tagName}`,
+                name: releaseName,
                 generate_release_notes: true, // This is the key for automatic changelogs
                 body: `
                   ## 🚀 Deployment Summary

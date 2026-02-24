@@ -1350,11 +1350,23 @@ async def enhanced_health_check():
     except Exception as e:
         centralized_health = {"status": "error", "error": str(e)}
 
+    # Dynamic versioning from VERSION file or environment
+    try:
+        with open("VERSION", "r") as f:
+            project_version = f.read().strip()
+    except Exception:
+        project_version = os.getenv("APP_VERSION", "2.0.0")
+
+    app_tag = os.getenv("APP_TAG", f"v{project_version}")
+    release_name = os.getenv("RELEASE_NAME", "Advanced Trading Release")
+
     # FIXED: Initialize health_status FIRST
     health_status = {
         "status": "ok",
         "timestamp": datetime.now().isoformat(),
-        "version": "3.0.0",
+        "version": project_version,
+        "tag": app_tag,
+        "release": release_name,
         "architecture": "hybrid_optimized_with_NEW_centralized_websocket",
         "services": {
             "database": "ok",

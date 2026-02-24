@@ -410,10 +410,6 @@ const SystemStatusComponent = () => {
                     <strong>Architecture:</strong>
                     <span className="ml-1">{systemHealth.architecture}</span>
                   </div>
-                  <div>
-                    <strong>Version:</strong>
-                    <span className="ml-1">{systemHealth.version}</span>
-                  </div>
                 </div>
               </div>
             </>

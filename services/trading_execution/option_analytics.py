@@ -115,7 +115,7 @@ class OptionAnalyticsService:
         self.high_iv_percentile = 85  # Warn if IV in top 15%
 
         # Liquidity thresholds
-        self.min_open_interest = 25000  # Minimum OI for safe trading (adjusted for mid-caps)
+        self.min_open_interest = 5000  # Minimum OI for safe trading (was 25000, too strict for mid-caps)
         self.min_volume_oi_ratio = Decimal('0.10')  # Volume should be 10%+ of OI
         self.max_spread_percent = Decimal('5.0')  # 5% max bid-ask spread (adjusted for stock options)
 
@@ -318,27 +318,52 @@ class OptionAnalyticsService:
         mid_price = (bid_decimal + ask_decimal) / Decimal('2')
         spread_percent = (spread / mid_price) * Decimal('100') if mid_price > 0 else Decimal('0')
 
-        if spread_percent > self.max_spread_percent:
+        # DYNAMIC SPREAD LIMITS (More flexible for low-priced options)
+        # For a 1.0 premium, 0.05 tick is 5%. Standard 5% limit is too tight for low premiums.
+        max_spread_allowed = self.max_spread_percent
+        if mid_price < Decimal('2.0'):
+            max_spread_allowed = Decimal('25.0')  # 25% for very low premiums
+        elif mid_price < Decimal('5.0'):
+            max_spread_allowed = Decimal('15.0')  # 15% for mid-low premiums
+            
+        # REJECT if bid is 0 (indicates no buyers, 100% loss upon exit)
+        if bid_decimal <= 0:
             return {
                 "valid": False,
-                "reason": f"Wide bid-ask spread ({float(spread_percent):.2f}%) - High slippage risk",
+                "reason": f"No buyers (Bid=0) - Option is extremely illiquid (Ask={float(ask_decimal):.2f})",
+                "metrics": {
+                    "bid": float(bid_decimal),
+                    "ask": float(ask_decimal),
+                    "spread_percent": 100.0
+                }
+            }
+
+        if spread_percent > max_spread_allowed:
+            return {
+                "valid": False,
+                "reason": f"Wide bid-ask spread ({float(spread_percent):.2f}%) - High slippage risk. Bid: {float(bid_decimal):.2f}, Ask: {float(ask_decimal):.2f}",
                 "metrics": {
                     "bid": float(bid_decimal),
                     "ask": float(ask_decimal),
                     "spread": float(spread),
-                    "spread_percent": float(spread_percent)
+                    "spread_percent": float(spread_percent),
+                    "max_allowed": float(max_spread_allowed)
                 }
             }
 
-        if spread_percent > Decimal('1.5'):
+        if spread_percent > Decimal('5.0'):
             warnings.append(
-                f"Moderate bid-ask spread ({float(spread_percent):.2f}%) - Slippage risk detected, using limit order at mid-price"
+                f"Significant bid-ask spread ({float(spread_percent):.2f}%) - Expect slippage upon entry/exit"
+            )
+        elif spread_percent > Decimal('1.5'):
+            warnings.append(
+                f"Moderate bid-ask spread ({float(spread_percent):.2f}%) - Slippage risk detected"
             )
 
         # Calculate liquidity score (0-100)
         oi_score = min(100, int((oi / self.min_open_interest) * 50))
         volume_score = min(50, int(float(volume_oi_ratio) * 250))
-        spread_score = max(0, int((self.max_spread_percent - spread_percent) * 25))
+        spread_score = max(0, int((max_spread_allowed - spread_percent) * 25))
 
         liquidity_score = oi_score + volume_score + spread_score
         liquidity_score = min(100, max(0, liquidity_score))
@@ -346,7 +371,7 @@ class OptionAnalyticsService:
         is_liquid = (
             oi >= self.min_open_interest and
             volume_oi_ratio >= self.min_volume_oi_ratio and
-            spread_percent <= self.max_spread_percent
+            spread_percent <= max_spread_allowed
         )
 
         metrics = LiquidityMetrics(
