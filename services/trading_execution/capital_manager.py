@@ -389,6 +389,14 @@ class TradingCapitalManager:
 
             # Use provided risk per unit (e.g., entry - SL) or default to 100% of premium
             effective_risk_per_unit = risk_per_unit if (risk_per_unit and risk_per_unit > 0) else option_premium
+            
+            # SAFEGUARD: Cap effective risk at 40% of premium for small accounts
+            # If risk is 100%, it's almost impossible to trade on small accounts.
+            max_risk_allowed = option_premium * Decimal('0.40')
+            if effective_risk_per_unit > max_risk_allowed:
+                logger.info(f"Capping risk per unit from {effective_risk_per_unit:.2f} to {max_risk_allowed:.2f} (40% of premium)")
+                effective_risk_per_unit = max_risk_allowed
+
             risk_per_lot = effective_risk_per_unit * Decimal(str(lot_size))
 
             max_lots_by_capital = int(max_allocable_capital / position_value_per_lot)
@@ -397,16 +405,18 @@ class TradingCapitalManager:
             recommended_lots = min(max_lots_by_capital, max_lots_by_risk)
             
             # FIX: Prevent 0-lot rejections for valid signals if risk is acceptable
-            # If recommended is 0 but we have capital, check if 1 lot is within HARD risk limit (2.5%)
+            # If recommended is 0 but we have capital, check if 1 lot is within HARD risk limit (10%)
+            # For small accounts, we allow higher percentage risk to enable at least 1 lot.
             if recommended_lots <= 0 and max_lots_by_capital >= 1:
-                hard_risk_percent = Decimal('0.025')  # 2.5% hard limit
+                # Use 15% hard limit for accounts < 10k, 10% otherwise
+                hard_risk_percent = Decimal('0.15') if risk_base < 10000 else Decimal('0.10')
                 hard_max_loss_amount = risk_base * hard_risk_percent
                 
                 if risk_per_lot <= hard_max_loss_amount:
-                    logger.info(f"Using 1 lot as fallback: risk ₹{risk_per_lot:.2f} is within 2.5% hard limit (₹{hard_max_loss_amount:.2f})")
+                    logger.info(f"Using 1 lot as fallback: risk ₹{risk_per_lot:.2f} is within {float(hard_risk_percent)*100}% hard limit (₹{hard_max_loss_amount:.2f})")
                     recommended_lots = 1
                 else:
-                    logger.warning(f"Rejecting trade: 1 lot risk ₹{risk_per_lot:.2f} exceeds 2.5% hard limit (₹{hard_max_loss_amount:.2f})")
+                    logger.warning(f"Rejecting trade: 1 lot risk ₹{risk_per_lot:.2f} exceeds {float(hard_risk_percent)*100}% hard limit (₹{hard_max_loss_amount:.2f})")
 
             if max_lots is not None and max_lots > 0:
                 recommended_lots = min(recommended_lots, max_lots)
