@@ -404,22 +404,23 @@ class TradingCapitalManager:
 
             recommended_lots = min(max_lots_by_capital, max_lots_by_risk)
             
-            # FIX: Prevent 0-lot rejections for valid signals if risk is acceptable
-            # If recommended is 0 but we have capital, check if 1 lot is within HARD risk limit (10%)
-            # For small accounts, we allow higher percentage risk to enable at least 1 lot.
+            # 1. Apply max_lots constraint if provided
+            if max_lots is not None and max_lots > 0:
+                recommended_lots = min(recommended_lots, max_lots)
+
+            # 2. FORCE 1 LOT RULE for Small Accounts (Consolidated)
+            # If the strict 2% math says 0 lots, but we have capital for 1 lot,
+            # we allow a higher risk threshold (10-15%) to enable the trade.
             if recommended_lots <= 0 and max_lots_by_capital >= 1:
-                # Use 15% hard limit for accounts < 10k, 10% otherwise
+                # Determine hard risk limit based on account size
                 hard_risk_percent = Decimal('0.15') if risk_base < 10000 else Decimal('0.10')
                 hard_max_loss_amount = risk_base * hard_risk_percent
                 
                 if risk_per_lot <= hard_max_loss_amount:
-                    logger.info(f"Using 1 lot as fallback: risk ₹{risk_per_lot:.2f} is within {float(hard_risk_percent)*100}% hard limit (₹{hard_max_loss_amount:.2f})")
+                    logger.info(f"FORCE 1 LOT Fallback: Account ₹{risk_base:.2f}, Risk ₹{risk_per_lot:.2f} is within {float(hard_risk_percent)*100}% limit")
                     recommended_lots = 1
                 else:
-                    logger.warning(f"Rejecting trade: 1 lot risk ₹{risk_per_lot:.2f} exceeds {float(hard_risk_percent)*100}% hard limit (₹{hard_max_loss_amount:.2f})")
-
-            if max_lots is not None and max_lots > 0:
-                recommended_lots = min(recommended_lots, max_lots)
+                    logger.warning(f"Trade Rejected: 1 lot risk ₹{risk_per_lot:.2f} exceeds {float(hard_risk_percent)*100}% hard limit (₹{hard_max_loss_amount:.2f})")
                 
             # FIX 4: Critical Risk Fix - Raise error instead of forcing 1 lot
             if recommended_lots <= 0:

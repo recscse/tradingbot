@@ -134,7 +134,7 @@ class AlertManager:
     async def notify_critical_error(self, user_id: int, component: str, error: str):
         """Alert with specific service tracing"""
         await self.telegram.send_system_alert(component, error, level="ERROR")
-        await self.db_service.create_notification(
+        self.db_service.create_notification(
             user_id=user_id,
             title=f"Tracing ERROR: {component}",
             message=error,
