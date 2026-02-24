@@ -260,14 +260,14 @@ class NotificationService:
             if is_local_db:
                 db.close()
     
-    def create_trading_notification(
+    async def create_trading_notification(
         self,
         user_id: int,
         notification_type: str,
         symbol: str,
         data: Dict,
         db: Optional[Session] = None
-    ) -> Notification:
+    ) -> Dict[str, bool]:
         """
         Create trading-specific notifications with standardized formatting.
         
@@ -341,7 +341,7 @@ class NotificationService:
             logger.warning(f"Template formatting failed for {notification_type}: {e}")
             formatted_message = f"{symbol}: {str(data)}"
         
-        return self.send_multi_channel_notification(
+        return await self.send_multi_channel_notification(
             user_id=user_id,
             title=template["title"],
             message=formatted_message,
@@ -351,7 +351,7 @@ class NotificationService:
             db=db
         )
     
-    def create_token_expiry_notification(
+    async def create_token_expiry_notification(
         self,
         user_id: int,
         broker_name: str,
@@ -369,7 +369,7 @@ class NotificationService:
         """
         if hours_remaining <= 0:
             # Token expired - critical alert
-            return self.send_multi_channel_notification(
+            return await self.send_multi_channel_notification(
                 user_id=user_id,
                 title=f"🔴 {broker_name} Token Expired",
                 message=(
@@ -384,7 +384,7 @@ class NotificationService:
             )
         elif hours_remaining <= 2:
             # Critical - expires very soon
-            return self.send_multi_channel_notification(
+            return await self.send_multi_channel_notification(
                 user_id=user_id,
                 title=f"🚨 {broker_name} Token Expiring Soon",
                 message=(
@@ -399,7 +399,7 @@ class NotificationService:
             )
         elif hours_remaining <= 12:
             # High priority warning
-            return self.send_multi_channel_notification(
+            return await self.send_multi_channel_notification(
                 user_id=user_id,
                 title=f"🟡 {broker_name} Token Expiring",
                 message=(
@@ -414,7 +414,7 @@ class NotificationService:
             )
         else:
             # Normal reminder
-            return self.send_multi_channel_notification(
+            return await self.send_multi_channel_notification(
                 user_id=user_id,
                 title=f"ℹ️ {broker_name} Token Reminder",
                 message=(
