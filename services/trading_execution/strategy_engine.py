@@ -546,9 +546,10 @@ class StrategyEngine:
             # So premium_risk = spot_risk * delta
             premium_risk_percent = spot_risk_percent * Decimal(str(abs(option_delta)))
 
-            # Apply min/max bounds (3% to 8% risk)
-            # REQUIREMENT: SL distance = max(2% of premium, calculated risk)
-            premium_risk_percent = max(self.sl_buffer_percent, min(premium_risk_percent, Decimal('0.10')))
+            # Apply min/max bounds (5% to 40% risk)
+            # REQUIREMENT: SL distance = max(5% of premium, calculated risk)
+            # CRITICAL: Prevent 100% risk which leads to 0 lots. Cap at 40%.
+            premium_risk_percent = max(self.sl_buffer_percent, min(premium_risk_percent, Decimal('0.40')))
 
             # Calculate premium-based SL and Target
             premium_sl = option_premium * (Decimal('1') - premium_risk_percent)

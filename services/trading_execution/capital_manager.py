@@ -389,6 +389,14 @@ class TradingCapitalManager:
 
             # Use provided risk per unit (e.g., entry - SL) or default to 100% of premium
             effective_risk_per_unit = risk_per_unit if (risk_per_unit and risk_per_unit > 0) else option_premium
+            
+            # SAFEGUARD: Cap effective risk at 40% of premium for small accounts
+            # If risk is 100%, it's almost impossible to trade on small accounts.
+            max_risk_allowed = option_premium * Decimal('0.40')
+            if effective_risk_per_unit > max_risk_allowed:
+                logger.info(f"Capping risk per unit from {effective_risk_per_unit:.2f} to {max_risk_allowed:.2f} (40% of premium)")
+                effective_risk_per_unit = max_risk_allowed
+
             risk_per_lot = effective_risk_per_unit * Decimal(str(lot_size))
 
             max_lots_by_capital = int(max_allocable_capital / position_value_per_lot)
