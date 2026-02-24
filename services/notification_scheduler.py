@@ -280,8 +280,9 @@ class NotificationScheduler:
             # Check database connectivity
             try:
                 from database.connection import get_db
+                from sqlalchemy import text
                 db = next(get_db())
-                db.execute("SELECT 1")
+                db.execute(text("SELECT 1"))
                 db.close()
             except Exception as e:
                 health_issues.append(f"Database connectivity: {str(e)}")
