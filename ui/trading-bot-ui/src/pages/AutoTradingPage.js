@@ -390,6 +390,12 @@ const AutoTradingPage = () => {
             setError(`Trade error for ${message.data.symbol}: ${message.data.error}`);
           }
           
+          if (message.type === "trade_preparation_failed") {
+            if (message.data.status !== "pending_signal") {
+               setError(`Trade Blocked (${message.data.symbol}): ${message.data.reason}`);
+            }
+          }
+          
           if (message.type === "position_closed") {
             const posData = message.data;
             setSuccess(`Position closed: ${posData.symbol} - PnL: ₹${posData.pnl.toFixed(2)}`);
@@ -970,61 +976,66 @@ const AutoTradingPage = () => {
                   </thead>
                   <tbody className="tw-divide-y tw-divide-slate-800">
                     {tradeHistory.map((trade, idx) => {
+                      const isFailed = trade.status === "FAILED";
                       const grossPnl = trade.gross_pnl || (trade.exit_price - trade.entry_price) * trade.quantity;
                       // Calculate charges if not provided (Gross - Net)
                       const charges = trade.gross_pnl && trade.net_pnl 
                         ? trade.gross_pnl - trade.net_pnl 
                         : Math.abs(grossPnl * 0.005); // Fallback est. 0.5%
                       const netPnl = trade.net_pnl || (grossPnl - charges);
-                      const isProfit = netPnl >= 0;
-
-                      // Format Strike Price
-                      let strikeDisplay = '-';
-                      if (trade.strike_price && trade.strike_price > 0) {
-                        const optionType = trade.signal_type?.includes('CE') ? 'CE' : trade.signal_type?.includes('PE') ? 'PE' : '';
-                        strikeDisplay = `${trade.strike_price} ${optionType}`;
-                      }
+                      const isProfit = !isFailed && netPnl >= 0;
 
                       return (
-                        <tr key={idx} className="tw-hover:bg-slate-800/30 tw-transition-colors">
+                        <tr key={idx} className={`tw-hover:bg-slate-800/30 tw-transition-colors ${isFailed ? 'tw-bg-rose-500/5' : ''}`}>
                           <td className="tw-px-4 tw-py-3 tw-text-slate-400 tw-whitespace-nowrap">
                             <div>{trade.entry_date || 'N/A'}</div>
                             <div className="tw-text-[10px] tw-text-slate-600">{trade.entry_time_str?.split(' ')[0]}</div>
                           </td>
                           <td className="tw-px-4 tw-py-3">
                             <div className="tw-font-bold tw-text-white">{trade.symbol}</div>
-                            {/* <div className="tw-text-[10px] tw-text-slate-500">{trade.trade_id}</div> */}
+                            {isFailed && <div className="tw-text-[9px] tw-text-rose-400 tw-font-bold">BLOCKED</div>}
                           </td>
                           <td className="tw-px-4 tw-py-3">
-                            <div className="tw-text-slate-300 tw-font-mono">{strikeDisplay}</div>
+                            <div className="tw-text-slate-300 tw-font-mono">{trade.strike_price} {trade.signal_type?.includes('CE') ? 'CE' : 'PE'}</div>
                           </td>
                           <td className="tw-px-4 tw-py-3">
                             <div className="tw-text-slate-400 tw-text-[10px]">{trade.expiry_date || '-'}</div>
                           </td>
                           <td className="tw-px-4 tw-py-3">
                             <span className={`tw-px-2 tw-py-0.5 tw-rounded tw-text-[10px] tw-font-bold tw-uppercase ${
+                              isFailed ? 'tw-bg-rose-600/20 tw-text-rose-400' :
                               trade.signal_type?.includes('CE') ? 'tw-bg-emerald-500/10 tw-text-emerald-400' : 
-                              trade.signal_type?.includes('PE') ? 'tw-bg-rose-500/10 tw-text-rose-400' :
-                              'tw-bg-blue-500/10 tw-text-blue-400'
+                              'tw-bg-rose-500/10 tw-text-rose-400'
                             }`}>
-                              {trade.signal_type?.includes('CE') ? 'CALL' : trade.signal_type?.includes('PE') ? 'PUT' : 'EQUITY'}
+                              {isFailed ? 'FAILED' : (trade.signal_type?.includes('CE') ? 'CALL' : 'PUT')}
                             </span>
                           </td>
-                          <td className="tw-px-4 tw-py-3 tw-text-right tw-font-medium tw-text-slate-300">{trade.quantity}</td>
+                          <td className="tw-px-4 tw-py-3 tw-text-right tw-font-medium tw-text-slate-300">{isFailed ? '0' : trade.quantity}</td>
                           <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{formatCurrency(trade.entry_price)}</td>
-                          <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{formatCurrency(trade.exit_price)}</td>
-                          <td className={`tw-px-4 tw-py-3 tw-text-right ${grossPnl >= 0 ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
-                            {formatCurrency(grossPnl)}
-                          </td>
-                          <td className="tw-px-4 tw-py-3 tw-text-right tw-text-rose-300 tw-text-xs">
-                            {formatCurrency(charges)}
-                          </td>
-                          <td className={`tw-px-4 tw-py-3 tw-text-right tw-font-bold ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
-                            {formatCurrency(netPnl)}
-                          </td>
-                          <td className={`tw-px-4 tw-py-3 tw-text-right ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
-                            {formatPercentage(trade.pnl_percentage)}
-                          </td>
+                          <td className="tw-px-4 tw-py-3 tw-text-right tw-text-slate-300">{isFailed ? '-' : formatCurrency(trade.exit_price)}</td>
+                          
+                          {isFailed ? (
+                            <td colSpan="4" className="tw-px-4 tw-py-3 tw-text-right">
+                              <span className="tw-text-[10px] tw-text-rose-400 tw-font-medium italic">
+                                {trade.exit_reason || "Reason: Insufficient capital for 1 lot"}
+                              </span>
+                            </td>
+                          ) : (
+                            <>
+                              <td className={`tw-px-4 tw-py-3 tw-text-right ${grossPnl >= 0 ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                                {formatCurrency(grossPnl)}
+                              </td>
+                              <td className="tw-px-4 tw-py-3 tw-text-right tw-text-rose-300 tw-text-xs">
+                                {formatCurrency(charges)}
+                              </td>
+                              <td className={`tw-px-4 tw-py-3 tw-text-right tw-font-bold ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                                {formatCurrency(netPnl)}
+                              </td>
+                              <td className={`tw-px-4 tw-py-3 tw-text-right ${isProfit ? 'tw-text-emerald-400' : 'tw-text-rose-400'}`}>
+                                {formatPercentage(trade.pnl_percentage)}
+                              </td>
+                            </>
+                          )}
                         </tr>
                       );
                     })}

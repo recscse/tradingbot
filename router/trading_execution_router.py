@@ -548,8 +548,45 @@ def get_active_positions(
                     "trading_mode": trade.trading_mode or "paper",
                     "strategy_name": trade.strategy_name or "fibonacci_ema",
                     "entry_order_id": trade.entry_order_id,
+                    "status": "ACTIVE",
                 }
             )
+
+        # ADDED: Include recently FAILED trades (last 15 minutes) for UI visibility
+        from datetime import timedelta
+        recent_cutoff = get_ist_now_naive() - timedelta(minutes=15)
+        
+        failed_trades = db.query(AutoTradeExecution).filter(
+            AutoTradeExecution.user_id == current_user.id,
+            AutoTradeExecution.status == "FAILED",
+            AutoTradeExecution.entry_time >= recent_cutoff
+        ).order_by(AutoTradeExecution.entry_time.desc()).all()
+
+        for trade in failed_trades:
+            active_positions.append({
+                "position_id": f"FAILED_{trade.id}",
+                "trade_id": trade.trade_id,
+                "symbol": trade.symbol,
+                "signal_type": trade.signal_type,
+                "instrument_key": trade.instrument_key,
+                "entry_price": float(trade.entry_price),
+                "strike_price": float(trade.strike_price) if trade.strike_price else None,
+                "expiry_date": trade.expiry_date,
+                "current_price": float(trade.entry_price),
+                "quantity": trade.quantity,
+                "lot_size": trade.lot_size,
+                "lots_traded": 0,
+                "total_investment": 0,
+                "current_pnl": 0,
+                "current_pnl_percentage": 0,
+                "stop_loss": 0,
+                "target": 0,
+                "entry_time": trade.entry_time.isoformat() if trade.entry_time else None,
+                "status": "FAILED",
+                "error_reason": trade.execution_notes,
+                "broker_name": trade.broker_name or "N/A",
+                "trading_mode": trade.trading_mode or "paper",
+            })
 
         return {
             "success": True,
@@ -1049,7 +1086,7 @@ def get_trade_history(
     try:
         query = db.query(AutoTradeExecution).filter(
             AutoTradeExecution.user_id == current_user.id,
-            AutoTradeExecution.status == "CLOSED",
+            AutoTradeExecution.status.in_(["CLOSED", "FAILED"]),
         )
 
         if trading_mode:
@@ -1064,11 +1101,13 @@ def get_trade_history(
         # If date range is provided, we might want to ignore the limit or increase it
         # But keeping limit is safer for pagination. 
         # For export, the frontend might request a large limit.
-        trades = query.order_by(AutoTradeExecution.exit_time.desc()).limit(limit).all()
+        # Use entry_time for sorting as FAILED trades won't have exit_time
+        trades = query.order_by(AutoTradeExecution.entry_time.desc()).limit(limit).all()
 
         trade_history = []
 
         for trade in trades:
+            is_failed = trade.status == "FAILED"
             # Calculate duration in minutes
             duration_minutes = 0
             if trade.entry_time and trade.exit_time:
@@ -1100,10 +1139,16 @@ def get_trade_history(
             # Determine status tag
             net_pnl = float(trade.net_pnl) if trade.net_pnl else 0
             status_tag = "WIN" if net_pnl > 0 else "LOSS"
+            if is_failed: status_tag = "FAILED"
 
             # Determine exit type (SL Hit / Target Hit / Manual)
             exit_type = "MANUAL"
-            if trade.exit_reason:
+            exit_reason = trade.exit_reason
+            
+            if is_failed:
+                exit_type = "FAILED"
+                exit_reason = trade.execution_notes or "Preparation failed"
+            elif trade.exit_reason:
                 reason = trade.exit_reason.upper()
                 if "STOP_LOSS" in reason or "SL" in reason:
                     exit_type = "SL_HIT"
@@ -1142,7 +1187,7 @@ def get_trade_history(
                     "pnl_percentage": (
                         float(trade.pnl_percentage) if trade.pnl_percentage else 0
                     ),
-                    "exit_reason": trade.exit_reason,
+                    "exit_reason": exit_reason,
                     "exit_type": exit_type,
                     "status_tag": status_tag,
                     "strategy_name": trade.strategy_name,
@@ -1152,6 +1197,7 @@ def get_trade_history(
                     "instrument_key": trade.instrument_key,
                     "entry_order_id": trade.entry_order_id,
                     "exit_order_id": trade.exit_order_id,
+                    "status": trade.status,
                 }
             )
 

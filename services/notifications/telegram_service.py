@@ -22,7 +22,6 @@ class TelegramNotificationService:
     """
     
     _instance = None
-    _client: Optional[httpx.AsyncClient] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -36,11 +35,6 @@ class TelegramNotificationService:
             self.api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
             self.initialized = True
             logger.info("Telegram Notification Service initialized (HTML Mode)")
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=15.0)
-        return self._client
 
     def _clean(self, text: Any) -> str:
         if text is None: return ""
@@ -59,13 +53,14 @@ class TelegramNotificationService:
         }
         
         try:
-            client = await self._get_client()
-            response = await client.post(self.api_url, json=payload)
-            if response.status_code == 429:
-                await asyncio.sleep(response.json().get("parameters", {}).get("retry_after", 5))
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(self.api_url, json=payload)
-            response.raise_for_status()
-            return True
+                if response.status_code == 429:
+                    retry_after = response.json().get("parameters", {}).get("retry_after", 5)
+                    await asyncio.sleep(retry_after)
+                    response = await client.post(self.api_url, json=payload)
+                response.raise_for_status()
+                return True
         except Exception as e:
             logger.error(f"Telegram Alert Failed: {e}")
             return False

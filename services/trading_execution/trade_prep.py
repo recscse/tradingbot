@@ -18,6 +18,7 @@ from services.trading_execution.capital_manager import (
     capital_manager,
     TradingMode,
     CapitalAllocation,
+    InsufficientCapitalError,
 )
 from services.trading_execution.strategy_engine import (
     strategy_engine,
@@ -375,20 +376,24 @@ class TradePrepService:
             # Use real risk (entry - stop_loss) if available in premium signal
             risk_per_unit = abs(premium_signal.entry_price - premium_signal.stop_loss)
             
-            capital_allocation = capital_manager.calculate_position_size(
-                available_capital, current_premium, lot_size, 
-                max_lots=target_lots,
-                risk_per_unit=risk_per_unit,
-                total_account_size=total_account_size
-            )
-
-            # STEP 5: Validate sufficient capital
-            capital_validation = capital_manager.validate_capital_availability(
-                user_id, capital_allocation.allocated_capital, db, trading_mode
-            )
-
-            if not capital_validation.get("valid"):
-                logger.warning(f"Insufficient capital: need {capital_allocation.allocated_capital}")
+            try:
+                capital_allocation = capital_manager.calculate_position_size(
+                    available_capital, current_premium, lot_size, 
+                    max_lots=target_lots,
+                    risk_per_unit=risk_per_unit,
+                    total_account_size=total_account_size
+                )
+            except InsufficientCapitalError as ice:
+                logger.warning(f"Insufficient capital for user {user_id}: {str(ice)}")
+                
+                # Notify User specifically for Low Balance
+                from services.notifications.alert_manager import alert_manager
+                self._safe_dispatch(alert_manager.notify_low_balance(
+                    user_id=user_id,
+                    symbol=stock_symbol,
+                    reason=str(ice)
+                ))
+                
                 return self._create_error_trade(
                     TradeStatus.INSUFFICIENT_CAPITAL,
                     user_id,
@@ -399,7 +404,43 @@ class TradePrepService:
                     expiry_date,
                     lot_size,
                     trading_mode,
-                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}",
+                    str(ice),
+                    failure_stage="capital",
+                    failure_reason="INSUFFICIENT_FUNDS_FOR_LOT"
+                )
+
+            # STEP 5: Validate sufficient capital
+            capital_validation = capital_manager.validate_capital_availability(
+                user_id, capital_allocation.allocated_capital, db, trading_mode
+            )
+
+            if not capital_validation.get("valid"):
+                available = capital_validation.get("available_capital", 0)
+                needed = capital_validation.get("required_capital", 0)
+                shortfall = capital_validation.get("shortfall", 0)
+                
+                error_msg = f"Insufficient capital. Need: ₹{needed:,.2f}, Available: ₹{available:,.2f} (Shortfall: ₹{shortfall:,.2f})"
+                logger.warning(f"User {user_id} blocked: {error_msg}")
+                
+                # Notify User specifically for Low Balance
+                from services.notifications.alert_manager import alert_manager
+                self._safe_dispatch(alert_manager.notify_low_balance(
+                    user_id=user_id,
+                    symbol=stock_symbol,
+                    reason=error_msg
+                ))
+                
+                return self._create_error_trade(
+                    TradeStatus.INSUFFICIENT_CAPITAL,
+                    user_id,
+                    stock_symbol,
+                    option_instrument_key,
+                    option_type,
+                    strike_price,
+                    expiry_date,
+                    lot_size,
+                    trading_mode,
+                    error_msg,
                     failure_stage="capital",
                     failure_reason="INSUFFICIENT_FUNDS"
                 )
@@ -768,11 +809,32 @@ class TradePrepService:
 
             # Step 6: Calculate position size based on capital and signal risk
             risk_per_unit = abs(signal.entry_price - signal.stop_loss)
-            capital_allocation = capital_manager.calculate_position_size(
-                available_capital, current_premium, lot_size,
-                risk_per_unit=risk_per_unit,
-                total_account_size=total_account_size
-            )
+            try:
+                capital_allocation = capital_manager.calculate_position_size(
+                    available_capital, current_premium, lot_size,
+                    risk_per_unit=risk_per_unit,
+                    total_account_size=total_account_size
+                )
+            except InsufficientCapitalError as ice:
+                logger.warning(f"Insufficient capital for user {user_id}: {str(ice)}")
+                from services.notifications.alert_manager import alert_manager
+                self._safe_dispatch(alert_manager.notify_low_balance(
+                    user_id=user_id,
+                    symbol=stock_symbol,
+                    reason=str(ice)
+                ))
+                return self._create_error_trade(
+                    TradeStatus.INSUFFICIENT_CAPITAL,
+                    user_id,
+                    stock_symbol,
+                    option_instrument_key,
+                    option_type,
+                    strike_price,
+                    expiry_date,
+                    lot_size,
+                    trading_mode,
+                    str(ice),
+                )
 
             # Step 7: Validate sufficient capital
             capital_validation = capital_manager.validate_capital_availability(
@@ -780,15 +842,19 @@ class TradePrepService:
             )
 
             if not capital_validation.get("valid"):
-                logger.warning(
-                    f"Insufficient capital: need {capital_allocation.allocated_capital}"
-                )
+                available = capital_validation.get("available_capital", 0)
+                needed = capital_validation.get("required_capital", 0)
+                shortfall = capital_validation.get("shortfall", 0)
                 
-                # Notify User of Capital Failure
+                error_msg = f"Insufficient capital. Need: ₹{needed:,.2f}, Available: ₹{available:,.2f} (Shortfall: ₹{shortfall:,.2f})"
+                logger.warning(f"User {user_id} blocked: {error_msg}")
+                
+                # Notify User specifically for Low Balance
                 from services.notifications.alert_manager import alert_manager
-                self._safe_dispatch(alert_manager.send_admin_system_status(
-                    "Capital Manager", "INSUFFICIENT_FUNDS", 
-                    f"Blocked trade for {stock_symbol}. Need ₹{capital_allocation.allocated_capital:.2f}, but funds are low."
+                self._safe_dispatch(alert_manager.notify_low_balance(
+                    user_id=user_id,
+                    symbol=stock_symbol,
+                    reason=error_msg
                 ))
                 
                 return self._create_error_trade(
@@ -801,7 +867,7 @@ class TradePrepService:
                     expiry_date,
                     lot_size,
                     trading_mode,
-                    f"Insufficient capital. Need: {capital_allocation.allocated_capital}, Available: {available_capital}",
+                    error_msg,
                 )
 
             # Step 7.5: Validate option quality (Liquidity & Greeks)
