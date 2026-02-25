@@ -142,5 +142,25 @@ class AlertManager:
             priority=NotificationPriority.CRITICAL
         )
 
+    async def notify_low_balance(self, user_id: int, symbol: str, reason: str):
+        """Notify user when trade is blocked due to low balance/risk limit"""
+        user_chat_id = await self._get_user_chat_id(user_id)
+        msg = (
+            f"<b>⚠️ TRADE BLOCKED: LOW BALANCE</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Symbol:</b> {symbol}\n"
+            f"<b>Reason:</b> {reason}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"💡 <i>Check your account balance or risk settings.</i>"
+        )
+        await self.telegram.send_message(msg, chat_id=user_chat_id)
+        
+        await self.db_service.create_trading_notification(
+            user_id=user_id,
+            notification_type=NotificationTypes.SYSTEM_STARTUP, # Fallback to system startup for alert color
+            symbol=symbol,
+            data={"status": "LOW_BALANCE", "details": reason}
+        )
+
 # Global singleton
 alert_manager = AlertManager()

@@ -22,6 +22,11 @@ class TradingMode(Enum):
     LIVE = "live"
 
 
+class InsufficientCapitalError(ValueError):
+    """Raised when capital is insufficient to open even 1 lot"""
+    pass
+
+
 @dataclass
 class CapitalAllocation:
     """
@@ -424,7 +429,17 @@ class TradingCapitalManager:
                 
             # FIX 4: Critical Risk Fix - Raise error instead of forcing 1 lot
             if recommended_lots <= 0:
-                raise ValueError(f"Position size calculation resulted in 0 lots for premium {option_premium} (risk per unit: {effective_risk_per_unit:.4f}). Trade rejected to prevent risk violation. Max allocable: ₹{max_allocable_capital:.2f}, Risk limit: ₹{max_loss_amount:.2f}")
+                # Provide a more detailed error message for better user understanding
+                rejection_reason = (
+                    f"Capital constraint: 1 lot (₹{position_value_per_lot:.2f}) exceeds max allocable capital (₹{max_allocable_capital:.2f})"
+                    if max_lots_by_capital <= 0 else
+                    f"Risk constraint: 1 lot risk (₹{risk_per_lot:.2f}) exceeds risk limit (₹{max_loss_amount:.2f})"
+                )
+                
+                raise InsufficientCapitalError(
+                    f"Position size calculation resulted in 0 lots for premium {option_premium} (risk per unit: {effective_risk_per_unit:.4f}). "
+                    f"Trade rejected to prevent risk violation. {rejection_reason}"
+                )
 
             allocated_capital = position_value_per_lot * Decimal(str(recommended_lots))
             capital_utilization = (allocated_capital / available_capital) * Decimal('100')

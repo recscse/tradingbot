@@ -12,6 +12,7 @@ KEY ARCHITECTURAL CHANGES:
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set
@@ -1869,6 +1870,36 @@ class AutoTradeLiveFeed:
                 error_reason = metadata.get(
                     "error", metadata.get("reason", "Unknown reason")
                 )
+
+                # Record failed trade in database if it's due to capital or risk
+                if prepared_status_value in ("insufficient_capital", "invalid_params", "error"):
+                    try:
+                        failed_trade = AutoTradeExecution(
+                            user_id=user_id,
+                            trade_id=f"FAIL_{uuid.uuid4().hex[:12].upper()}",
+                            symbol=instrument.stock_symbol,
+                            instrument_key=instrument.option_instrument_key,
+                            strategy_name="supertrend_ema",
+                            signal_type=f"BUY_{instrument.option_type}",
+                            signal_strength=float(signal.confidence * 100),
+                            strike_price=instrument.strike_price,
+                            expiry_date=instrument.expiry_date,
+                            entry_time=get_ist_now_naive(),
+                            entry_price=float(instrument.live_option_premium),
+                            quantity=0,
+                            lot_size=instrument.lot_size,
+                            lots_traded=0,
+                            status="FAILED",
+                            execution_notes=f"Preparation failed: {error_reason}",
+                            trading_mode=self.default_trading_mode.value,
+                            segment="F&O"
+                        )
+                        db.add(failed_trade)
+                        db.commit()
+                        logger.info(f"Recorded failed trade for {instrument.stock_symbol} in DB (Status: {prepared_status_value})")
+                    except Exception as db_err:
+                        logger.error(f"Failed to record failed trade in DB: {db_err}")
+                        db.rollback()
 
                 # Use INFO for pending signals to avoid log spam, WARNING for actual errors
                 log_level = (
