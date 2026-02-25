@@ -985,10 +985,6 @@ const AutoTradingPage = () => {
                       const netPnl = trade.net_pnl || (grossPnl - charges);
                       const isProfit = !isFailed && netPnl >= 0;
 
-                      // Determine status tag
-                      let finalStatusTag = trade.status_tag;
-                      if (isFailed) finalStatusTag = "FAILED";
-
                       return (
                         <tr key={idx} className={`tw-hover:bg-slate-800/30 tw-transition-colors ${isFailed ? 'tw-bg-rose-500/5' : ''}`}>
                           <td className="tw-px-4 tw-py-3 tw-text-slate-400 tw-whitespace-nowrap">
