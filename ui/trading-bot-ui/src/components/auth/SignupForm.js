@@ -16,7 +16,6 @@ import {
   useTheme,
   useMediaQuery,
   Avatar,
-  Divider,
 } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import EmailIcon from "@mui/icons-material/Email";
@@ -25,7 +24,6 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
-import GoogleIcon from "@mui/icons-material/Google";
 import { signup } from "../../services/authService";
 import { useNavigate } from "react-router-dom";
 
