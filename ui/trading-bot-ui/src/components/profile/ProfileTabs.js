@@ -4,13 +4,12 @@ import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   LineChart,
-  Wallet,
   Coins,
   Briefcase,
   User,
   Shield,
   Bell,
-  ChevronRight
+  ChevronRight,
 } from "lucide-react";
 
 const ProfileTabs = ({
@@ -99,14 +98,20 @@ const ProfileTabs = ({
           transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
         />
       )}
-      
+
       <span className="tw-relative tw-z-10 tw-flex tw-items-center tw-gap-2">
-        <tab.icon className={`tw-w-4 tw-h-4 ${isActive ? "tw-text-white" : tab.color}`} />
+        <tab.icon
+          className={`tw-w-4 tw-h-4 ${isActive ? "tw-text-white" : tab.color}`}
+        />
         {tab.label}
         {tab.count && (
-          <span className={`tw-text-[10px] tw-px-1.5 tw-rounded-full ${
-            isActive ? "tw-bg-white/20 tw-text-white" : "tw-bg-slate-100 tw-dark:bg-slate-700 tw-text-slate-600"
-          }`}>
+          <span
+            className={`tw-text-[10px] tw-px-1.5 tw-rounded-full ${
+              isActive
+                ? "tw-bg-white/20 tw-text-white"
+                : "tw-bg-slate-100 tw-dark:bg-slate-700 tw-text-slate-600"
+            }`}
+          >
             {tab.count}
           </span>
         )}
@@ -132,27 +137,37 @@ const ProfileTabs = ({
         />
       )}
 
-      <div className={`tw-p-2 tw-rounded-lg tw-transition-colors ${
-        isActive 
-          ? "tw-bg-white tw-dark:bg-slate-700 tw-shadow-sm" 
-          : "tw-bg-slate-100 tw-dark:bg-slate-800 tw-text-slate-400 tw-dark:text-slate-500 group-hover:tw-text-slate-600"
-      }`}>
-        <tab.icon className={`tw-w-5 tw-h-5 ${isActive ? tab.color : "tw-text-current"}`} />
+      <div
+        className={`tw-p-2 tw-rounded-lg tw-transition-colors ${
+          isActive
+            ? "tw-bg-white tw-dark:bg-slate-700 tw-shadow-sm"
+            : "tw-bg-slate-100 tw-dark:bg-slate-800 tw-text-slate-400 tw-dark:text-slate-500 group-hover:tw-text-slate-600"
+        }`}
+      >
+        <tab.icon
+          className={`tw-w-5 tw-h-5 ${isActive ? tab.color : "tw-text-current"}`}
+        />
       </div>
 
       <div className="tw-flex-1">
         <div className="tw-flex tw-items-center tw-justify-between">
-          <span className={`tw-text-sm tw-font-semibold ${
-            isActive ? "tw-text-slate-900 tw-dark:text-white" : "tw-text-slate-600 tw-dark:text-slate-400"
-          }`}>
+          <span
+            className={`tw-text-sm tw-font-semibold ${
+              isActive
+                ? "tw-text-slate-900 tw-dark:text-white"
+                : "tw-text-slate-600 tw-dark:text-slate-400"
+            }`}
+          >
             {tab.label}
           </span>
           {tab.count && (
-            <span className={`tw-text-[10px] tw-font-bold tw-px-2 tw-py-0.5 tw-rounded-full ${
-              tab.alert 
-                ? "tw-bg-rose-100 tw-text-rose-600 tw-animate-pulse" 
-                : "tw-bg-slate-200 tw-text-slate-600 tw-dark:bg-slate-700 tw-dark:text-slate-300"
-            }`}>
+            <span
+              className={`tw-text-[10px] tw-font-bold tw-px-2 tw-py-0.5 tw-rounded-full ${
+                tab.alert
+                  ? "tw-bg-rose-100 tw-text-rose-600 tw-animate-pulse"
+                  : "tw-bg-slate-200 tw-text-slate-600 tw-dark:bg-slate-700 tw-dark:text-slate-300"
+              }`}
+            >
               {tab.count}
             </span>
           )}
@@ -174,7 +189,11 @@ const ProfileTabs = ({
       <div className="tw-lg:hidden tw-mb-6">
         <div className="tw-flex tw-overflow-x-auto tw-pb-2 tw-gap-3 tw-no-scrollbar tw-mask-linear-fade">
           {tabs.map((tab) => (
-            <MobileTabItem key={tab.id} tab={tab} isActive={activeTab === tab.id} />
+            <MobileTabItem
+              key={tab.id}
+              tab={tab}
+              isActive={activeTab === tab.id}
+            />
           ))}
         </div>
       </div>
@@ -187,7 +206,11 @@ const ProfileTabs = ({
           </h3>
         </div>
         {tabs.map((tab) => (
-          <DesktopTabItem key={tab.id} tab={tab} isActive={activeTab === tab.id} />
+          <DesktopTabItem
+            key={tab.id}
+            tab={tab}
+            isActive={activeTab === tab.id}
+          />
         ))}
       </div>
     </div>
