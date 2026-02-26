@@ -69,45 +69,15 @@ class MultiDematCapitalService:
             raise
 
     async def _get_paper_trading_capital(self, user_id: int, db: Session) -> Dict[str, Any]:
-        """Get paper trading virtual capital using the singleton service"""
-        from services.paper_trading_account import paper_trading_service
+        """Get paper trading virtual capital using the fund manager service"""
+        from services.trading_execution.fund_manager import fund_manager
         
-        # Get actual paper account state
-        paper_account = await paper_trading_service.get_account(user_id, db)
+        # Get actual paper account state from fund manager
+        balances = fund_manager.get_balances(user_id, db, "paper")
         
-        if paper_account:
-            # Calculate totals based on PaperAccount state
-            # total_available_capital (PaperAccount.current_balance) includes Cash + PnL
-            # total_used_margin (PaperAccount.used_margin) is blocked capital
-            # total_free_margin (PaperAccount.available_margin) is free cash for new trades
-            
-            # Note: In PaperAccount logic:
-            # available_margin = initial - used + pnl
-            # current_balance = initial - used (cash balance) -- Wait, let's verify PaperAccount logic
-            # Logic from execute_trade:
-            # used_margin += invested
-            # available_margin -= invested
-            # current_balance -= invested
-            # Logic from close_position:
-            # available_margin += invested + pnl
-            # current_balance += invested + pnl
-            
-            # So:
-            # available_margin = Free Cash (Available for trading)
-            # current_balance = Free Cash (Same as available_margin in this implementation)
-            # used_margin = Blocked Margin
-            # Total Equity = available_margin + used_margin
-            
-            total_free_margin = Decimal(str(paper_account.available_margin))
-            total_used_margin = Decimal(str(paper_account.used_margin))
-            paper_capital = total_free_margin + total_used_margin
-            
-        else:
-            # Fallback if account doesn't exist yet (create it implicitly)
-            await paper_trading_service.create_paper_account(user_id)
-            paper_capital = Decimal('100000')
-            total_used_margin = Decimal('0')
-            total_free_margin = paper_capital
+        total_free_margin = Decimal(str(balances.get("available_margin", 0)))
+        total_used_margin = Decimal(str(balances.get("used_margin", 0)))
+        paper_capital = Decimal(str(balances.get("current_balance", 0)))
 
         return {
             "user_id": user_id,

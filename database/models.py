@@ -1485,6 +1485,42 @@ class TradingAuditTrail(Base):
     )
 
 
+class FundLedger(Base):
+    """
+    Transaction ledger for tracking all fund movements (Credits/Debits)
+    Behaves like a real bank/brokerage statement.
+    """
+    __tablename__ = "fund_ledger"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    
+    # paper or live
+    trading_mode = Column(String(20), nullable=False, index=True)
+    
+    # CREDIT (Money coming in) or DEBIT (Money going out)
+    transaction_type = Column(String(10), nullable=False)
+    
+    # FUND_ADDED, TRADE_MARGIN_BLOCKED, TRADE_MARGIN_RELEASED, PNL_SETTLEMENT, CHARGES, BROKERAGE
+    category = Column(String(50), nullable=False, index=True)
+    
+    amount = Column(Numeric(15, 2), nullable=False)
+    balance_before = Column(Numeric(15, 2), nullable=False)
+    balance_after = Column(Numeric(15, 2), nullable=False)
+    
+    description = Column(String(255))
+    reference_id = Column(String(100), index=True) # trade_id or transaction_id
+    
+    timestamp = Column(DateTime, default=get_ist_now_naive, index=True)
+    
+    # Relationships
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_ledger_user_mode", "user_id", "trading_mode"),
+    )
+
+
 # =======================
 # PREMARKET CANDLE & GAP DETECTION SYSTEM
 # =======================

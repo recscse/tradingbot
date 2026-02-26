@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from database.models import AutoTradeExecution, ActivePosition, User, BrokerConfig
 from services.trading_execution.capital_manager import TradingMode
 from services.trading_execution.trade_prep import PreparedTrade, TradeStatus
+from services.trading_execution.fund_manager import fund_manager
 from utils.timezone_utils import get_ist_now_naive, get_ist_isoformat
 from utils.logging_utils import log_structured, log_trade_result
 from services.notifications.telegram_service import telegram_notifier
@@ -230,37 +231,17 @@ class TradeExecutionHandler:
                 user_id=str(prepared_trade.user_id)
             )
 
-            # UPDATE PAPER TRADING ACCOUNT BALANCE (Sync with in-memory service and DB)
-            try:
-                from services.paper_trading_account import paper_trading_service
-                
-                trade_data = {
-                    "symbol": prepared_trade.stock_symbol,
-                    "instrument_key": prepared_trade.option_instrument_key,
-                    "option_type": prepared_trade.option_type,
-                    "strike_price": float(prepared_trade.strike_price),
-                    "entry_price": float(entry_price),
-                    "quantity": quantity,
-                    "lot_size": prepared_trade.lot_size,
-                    "invested_amount": float(total_investment),
-                    "stop_loss": float(prepared_trade.stop_loss),
-                    "target": float(prepared_trade.target_price)
-                }
-                
-                # Use synchronous method as we are in a synchronous function
-                paper_trading_service.execute_paper_trade_sync(
-                    user_id=prepared_trade.user_id,
-                    trade_data=trade_data,
-                    db=db
-                )
-                
-                # Fetch updated account for logging (from in-memory)
-                account = paper_trading_service.accounts.get(prepared_trade.user_id)
-                if account:
-                    logger.info(f"✅ Paper account updated: Balance={account.current_balance:,.2f}, Used={account.used_margin:,.2f}")
-
-            except Exception as e:
-                logger.error(f"Failed to update paper trading account balance: {e}")
+            # BLOCK MARGIN & CREATE LEDGER ENTRY (New Fund Management System)
+            margin_blocked = fund_manager.block_margin(
+                user_id=prepared_trade.user_id,
+                amount=float(total_investment),
+                trading_mode="paper",
+                reference_id=trade_id,
+                db=db
+            )
+            
+            if not margin_blocked:
+                raise ValueError("Insufficient funds to block margin for this trade")
 
             # Create trade execution record
             trade_execution = AutoTradeExecution(
@@ -403,7 +384,7 @@ class TradeExecutionHandler:
             trade_id = f"LIVE_{uuid.uuid4().hex[:12].upper()}"
 
             # Place order via broker
-            order_result = self._place_broker_order(broker_config, prepared_trade)
+            order_result = self._place_broker_order(broker_config, prepared_trade, db)
 
             if not order_result.get("success"):
                 raise ValueError(
@@ -695,7 +676,7 @@ class TradeExecutionHandler:
         db.commit()
 
     def _place_broker_order(
-        self, broker_config: BrokerConfig, prepared_trade: PreparedTrade
+        self, broker_config: BrokerConfig, prepared_trade: PreparedTrade, db: Session
     ) -> Dict[str, Any]:
         """
         Place order via broker API
@@ -750,6 +731,20 @@ class TradeExecutionHandler:
                 logger.info(
                     f"Upstox V3 order placed: {len(order_ids)} orders, "
                     f"latency: {latency}ms, IDs: {order_ids}"
+                )
+
+                # Calculate total investment for ledger
+                actual_price = Decimal(str(prepared_trade.entry_price))
+                total_investment = actual_price * Decimal(str(quantity))
+                trade_id = f"LIVE_{primary_order_id}"
+
+                # Record margin blocking in ledger for live trade (informational)
+                fund_manager.block_margin(
+                    user_id=prepared_trade.user_id,
+                    amount=float(total_investment),
+                    trading_mode="live",
+                    reference_id=trade_id,
+                    db=db
                 )
 
                 return {

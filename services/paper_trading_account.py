@@ -116,18 +116,8 @@ class PaperTradingAccountService:
             db_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
             
             if not db_account:
-                # Create default in DB if not exists
-                db_account = PaperTradingAccount(
-                    user_id=user_id,
-                    initial_capital=100000.0,
-                    current_balance=100000.0,
-                    available_margin=100000.0,
-                    used_margin=0.0,
-                    total_pnl=0.0
-                )
-                db.add(db_account)
-                db.commit()
-                db.refresh(db_account)
+                logger.warning(f"No paper account found in DB for user {user_id}. Fund management required.")
+                return None
 
             # Update in-memory
             account = PaperAccount(
@@ -163,16 +153,7 @@ class PaperTradingAccountService:
             db_acc = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
             
             if not db_acc:
-                db_acc = PaperTradingAccount(
-                    user_id=user_id,
-                    initial_capital=100000.0,
-                    current_balance=100000.0,
-                    available_margin=100000.0,
-                    used_margin=0.0,
-                    total_pnl=0.0
-                )
-                db.add(db_acc)
-                db.flush()
+                raise ValueError(f"No paper trading account found for user {user_id}. Please add funds first.")
 
             invested_amount = float(trade_data['invested_amount'])
             entry_charges = 20.0

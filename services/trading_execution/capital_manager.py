@@ -49,7 +49,6 @@ class TradingCapitalManager:
 
     def __init__(self):
         """Initialize capital manager with configuration"""
-        self.paper_trading_capital = Decimal('100000')  # 1 Lakh default for paper trading
         self.max_capital_per_trade_percent = Decimal('0.60')  # 60% max per trade
         self.max_risk_per_trade_percent = Decimal('0.02')  # 2% max risk per trade
         self.min_capital_buffer = Decimal('0.10')  # Keep 10% buffer
@@ -133,53 +132,16 @@ class TradingCapitalManager:
         trading_mode: TradingMode = TradingMode.PAPER
     ) -> Decimal:
         """
-        Get available capital for trading
+        Get available capital for trading using centralized Fund Manager
         """
         if not user_id or user_id <= 0:
             raise ValueError("Invalid user_id provided")
 
         try:
-            if trading_mode == TradingMode.PAPER:
-                # FIX 3: Paper Trading Capital Source handled safely
-                from services.paper_trading_account import paper_trading_service, PaperAccount
-                account = paper_trading_service.accounts.get(user_id)
-                
-                if not account:
-                    # Sync with DB synchronously
-                    from database.models import PaperTradingAccount
-                    db_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
-                    if db_account:
-                        account = PaperAccount(
-                            user_id=db_account.user_id,
-                            initial_capital=float(db_account.initial_capital),
-                            current_balance=float(db_account.current_balance),
-                            used_margin=float(db_account.used_margin),
-                            available_margin=float(db_account.available_margin),
-                            total_pnl=float(db_account.total_pnl),
-                            daily_pnl=float(db_account.daily_pnl),
-                            positions_count=db_account.positions_count
-                        )
-                        paper_trading_service.accounts[user_id] = account
-
-                if account:
-                    total_capital = Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
-                else:
-                    logger.warning(f"Paper account not found for user {user_id}. Falling back to default capital.")
-                    total_capital = self.paper_trading_capital
-            else:
-                broker_config = self.get_active_broker_config(user_id, db)
-                if not broker_config:
-                    self._update_function_health("available_capital", "error", "No active broker config")
-                    return Decimal('0')
-
-                available_margin, used_margin = self._fetch_funds_from_broker(broker_config)
-                # For Live trading, available_margin already accounts for used margin
-                # We return it directly as the 'available' cash
-                return max(Decimal('0'), available_margin)
-
-            # For Paper Trading only: JOIN check to ensure only truly active positions consume capital
-            allocated_capital = self._get_allocated_capital_for_active_positions(user_id, db)
-            available_capital = total_capital - allocated_capital
+            from services.trading_execution.fund_manager import fund_manager
+            balances = fund_manager.get_balances(user_id, db, trading_mode.value)
+            
+            available_capital = Decimal(str(balances.get("available_margin", 0)))
 
             # FIX 5: Health tracking
             self._update_function_health("available_capital", "success")
@@ -197,46 +159,15 @@ class TradingCapitalManager:
         trading_mode: TradingMode = TradingMode.PAPER
     ) -> Decimal:
         """
-        Get capital available for opening a NEW position
+        Get capital available for opening a NEW position using centralized Fund Manager
         """
         if not user_id or user_id <= 0:
             raise ValueError("Invalid user_id provided")
 
         try:
-            if trading_mode == TradingMode.PAPER:
-                # FIX 3: Paper Trading Capital Source handled safely
-                from services.paper_trading_account import paper_trading_service, PaperAccount
-                account = paper_trading_service.accounts.get(user_id)
-                
-                if not account:
-                    # Sync with DB synchronously
-                    from database.models import PaperTradingAccount
-                    db_account = db.query(PaperTradingAccount).filter(PaperTradingAccount.user_id == user_id).first()
-                    if db_account:
-                        account = PaperAccount(
-                            user_id=db_account.user_id,
-                            initial_capital=float(db_account.initial_capital),
-                            current_balance=float(db_account.current_balance),
-                            used_margin=float(db_account.used_margin),
-                            available_margin=float(db_account.available_margin),
-                            total_pnl=float(db_account.total_pnl),
-                            daily_pnl=float(db_account.daily_pnl),
-                            positions_count=db_account.positions_count
-                        )
-                        paper_trading_service.accounts[user_id] = account
-
-                if account:
-                    total_capital = Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
-                else:
-                    logger.warning(f"Paper account not found for user {user_id}. Falling back to default capital.")
-                    total_capital = self.paper_trading_capital
-            else:
-                broker_config = self.get_active_broker_config(user_id, db)
-                if not broker_config:
-                    return Decimal('0')
-                available_margin, used_margin = self._fetch_funds_from_broker(broker_config)
-                # For Live, the broker API gives us free cash directly as available_margin
-                total_capital = available_margin
+            from services.trading_execution.fund_manager import fund_manager
+            balances = fund_manager.get_balances(user_id, db, trading_mode.value)
+            total_capital = Decimal(str(balances.get("available_margin", 0)))
 
             # Check concurrent position limit
             active_positions_count = db.query(ActivePosition).filter(
@@ -263,22 +194,14 @@ class TradingCapitalManager:
         trading_mode: TradingMode = TradingMode.PAPER
     ) -> Decimal:
         """
-        Get the total base capital of the account (Available + Used)
+        Get the total base capital of the account (Available + Used) using centralized Fund Manager
         Used for risk-per-trade percentage calculations
         """
         try:
-            if trading_mode == TradingMode.PAPER:
-                from services.paper_trading_account import paper_trading_service
-                account = paper_trading_service.accounts.get(user_id)
-                if account:
-                    return Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
-                return self.paper_trading_capital
-            else:
-                broker_config = self.get_active_broker_config(user_id, db)
-                if not broker_config:
-                    return Decimal('0')
-                available, used = self._fetch_funds_from_broker(broker_config)
-                return available + used
+            from services.trading_execution.fund_manager import fund_manager
+            balances = fund_manager.get_balances(user_id, db, trading_mode.value)
+            
+            return Decimal(str(balances.get("current_balance", 0)))
         except Exception:
             return Decimal('0')
 
@@ -507,29 +430,18 @@ class TradingCapitalManager:
         trading_mode: TradingMode = TradingMode.PAPER
     ) -> Dict[str, Any]:
         """
-        Get comprehensive capital utilization summary for a user
+        Get comprehensive capital utilization summary for a user using centralized Fund Manager
         """
         if not user_id or user_id <= 0:
             raise ValueError("Invalid user_id provided")
 
         try:
-            if trading_mode == TradingMode.PAPER:
-                from services.paper_trading_account import paper_trading_service
-                account = paper_trading_service.accounts.get(user_id)
-                if account:
-                    total_capital = Decimal(str(account.available_margin)) + Decimal(str(account.used_margin))
-                else:
-                    total_capital = self.paper_trading_capital
-            else:
-                broker_config = self.get_active_broker_config(user_id, db)
-                if broker_config:
-                    available, used = self._fetch_funds_from_broker(broker_config)
-                    total_capital = available + used
-                else:
-                    total_capital = Decimal('0')
-
-            allocated_capital = self._get_allocated_capital_for_active_positions(user_id, db)
-            available_capital = total_capital - allocated_capital
+            from services.trading_execution.fund_manager import fund_manager
+            balances = fund_manager.get_balances(user_id, db, trading_mode.value)
+            
+            total_capital = Decimal(str(balances.get("current_balance", 0)))
+            available_capital = Decimal(str(balances.get("available_margin", 0)))
+            allocated_capital = Decimal(str(balances.get("used_margin", 0)))
 
             active_positions_count = db.query(ActivePosition).filter(
                 ActivePosition.user_id == user_id,
