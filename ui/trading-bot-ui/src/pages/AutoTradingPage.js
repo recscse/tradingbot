@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import api from "../services/api";
+import { Plus } from "lucide-react";
 import ActivePositionCard from "../components/ActivePositionCard";
 import SelectedStockCard from "../components/SelectedStockCard";
+import AddFundsModal from "../components/funds/AddFundsModal";
 
 const AutoTradingPage = () => {
   const [tradingMode, setTradingMode] = useState("paper");
@@ -43,6 +45,7 @@ const AutoTradingPage = () => {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [wsConnected, setWsConnected] = useState(false);
   const [showLiveConfirmation, setShowLiveConfirmation] = useState(false);
+  const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
   
   // WebSocket Throttling Refs
   const updatesBuffer = useRef({
@@ -718,7 +721,18 @@ const AutoTradingPage = () => {
             <p className="tw-text-3xl tw-font-bold tw-text-white">{formatCurrency(pnlSummary.total_investment)}</p>
           </div>
           <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
-            <p className="tw-text-slate-400 tw-text-sm tw-mb-2">Available Capital</p>
+            <div className="tw-flex tw-items-center tw-justify-between tw-mb-2">
+              <p className="tw-text-slate-400 tw-text-xs tw-font-bold tw-uppercase tw-tracking-wider">Available Capital</p>
+              {tradingMode === 'paper' && (
+                <button 
+                  onClick={() => setIsAddFundsOpen(true)}
+                  className="tw-px-3 tw-py-1 tw-bg-indigo-600 hover:tw-bg-indigo-700 tw-text-white tw-text-[10px] tw-font-black tw-uppercase tw-rounded-lg tw-transition-all tw-flex tw-items-center tw-gap-1.5 tw-shadow-lg tw-shadow-indigo-900/20 active:tw-scale-95"
+                >
+                  <Plus className="tw-w-3 tw-h-3" />
+                  Add Funds
+                </button>
+              )}
+            </div>
             <p className="tw-text-3xl tw-font-bold tw-text-cyan-400">{formatCurrency(capitalData.total_free_margin)}</p>
           </div>
         </div>
@@ -848,11 +862,11 @@ const AutoTradingPage = () => {
           </div>
           <div className="tw-p-5 tw-bg-rose-500/10 tw-rounded-xl tw-border tw-border-rose-500/30">
             <p className="tw-text-rose-300 tw-text-sm tw-mb-2">Used Margin</p>
-            <p className="tw-text-3xl tw-font-bold tw-text-rose-400">{formatCurrency(capitalData.total_used_margin || 0)}</p>
-            <p className="tw-text-xs tw-text-slate-400 tw-mt-1">{capitalData.capital_utilization_percent?.toFixed(1) || 0}% utilized</p>
+            <p className="tw-text-3xl tw-font-bold tw-text-rose-400">{formatCurrency(Math.abs(capitalData.total_used_margin || 0))}</p>
+            <p className="tw-text-xs tw-text-slate-400 tw-mt-1">{Math.abs(capitalData.capital_utilization_percent || 0).toFixed(1)}% utilized</p>
           </div>
           <div className="tw-p-5 tw-bg-emerald-500/10 tw-rounded-xl tw-border tw-border-emerald-500/30">
-            <p className="tw-text-emerald-300 tw-text-sm tw-mb-2">Free Margin</p>
+            <p className="tw-text-emerald-300 tw-text-sm tw-mb-2">Available Cash</p>
             <p className="tw-text-3xl tw-font-bold tw-text-emerald-400">{formatCurrency(capitalData.total_free_margin || 0)}</p>
           </div>
           <div className="tw-p-5 tw-bg-slate-800/50 tw-rounded-xl tw-border tw-border-slate-700/50">
@@ -1114,6 +1128,16 @@ const AutoTradingPage = () => {
           </div>
         </div>
       )}
+
+      {/* Modal */}
+      <AddFundsModal 
+        isOpen={isAddFundsOpen} 
+        onClose={() => setIsAddFundsOpen(false)} 
+        onFundAdded={() => {
+          fetchCapitalOverview();
+          handleManualRefresh();
+        }} 
+      />
     </div>
   );
 };

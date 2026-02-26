@@ -35,6 +35,7 @@ from services.enhanced_intelligent_options_selection import enhanced_options_ser
 from services.trading_execution.multi_demat_capital_service import (
     multi_demat_capital_service,
 )
+from services.trading_execution.fund_manager import fund_manager
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -1880,4 +1881,51 @@ async def get_detailed_performance(
 
     except Exception as e:
         logger.error(f"Error getting detailed performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== FUND MANAGEMENT ENDPOINTS ====================
+
+@router.get("/funds/balance")
+async def get_fund_balances(
+    trading_mode: str = Query("paper", description="paper or live"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get available, used and total balance"""
+    try:
+        balances = fund_manager.get_balances(current_user.id, db, trading_mode)
+        return {"success": True, "balances": balances}
+    except Exception as e:
+        logger.error(f"Error fetching balances: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/funds/add-paper-funds")
+async def add_paper_funds(
+    amount: float = Query(..., gt=0, description="Amount to add"),
+    description: str = Query("Manual top-up", description="Transaction description"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add virtual funds to paper trading account"""
+    try:
+        result = fund_manager.add_paper_funds(current_user.id, amount, db, description)
+        return result
+    except Exception as e:
+        logger.error(f"Error adding funds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/funds/statement")
+async def get_fund_statement(
+    trading_mode: str = Query("paper", description="paper or live"),
+    limit: int = Query(50, description="Max entries to return"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get transaction ledger/statement"""
+    try:
+        statement = fund_manager.get_statement(current_user.id, db, trading_mode, limit)
+        return {"success": True, "statement": statement}
+    except Exception as e:
+        logger.error(f"Error fetching statement: {e}")
         raise HTTPException(status_code=500, detail=str(e))

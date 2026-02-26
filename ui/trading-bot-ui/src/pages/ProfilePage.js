@@ -16,6 +16,7 @@ import ProfileSecurity from "../components/profile/ProfileSecurity";
 import ProfileNotifications from "../components/profile/ProfileNotifications";
 import EnhancedBrokerManagement from "../components/profile/EnhancedBrokerManagement";
 import PerformanceTab from "../components/profile/PerformanceTab";
+import FundsTab from "../components/profile/FundsTab";
 import { profileService } from "../services/profileService";
 
 const ProfilePage = () => {
@@ -114,6 +115,12 @@ const ProfilePage = () => {
         return (
           <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
             <PerformanceTab profile={profileData} loading={loading} />
+          </motion.div>
+        );
+      case "funds":
+        return (
+          <motion.div variants={contentVariants} initial="hidden" animate="visible" exit="exit">
+            <FundsTab />
           </motion.div>
         );
       case "brokers":
@@ -256,6 +263,7 @@ const ProfilePage = () => {
               <p className="tw-text-slate-500 tw-dark:text-slate-400">
                 {activeTab === "overview" && "Comprehensive view of your trading performance and account status."}
                 {activeTab === "performance" && "Detailed analytics, P&L reports, and trade history."}
+                {activeTab === "funds" && "Manage your trading capital, add funds, and view transaction logs."}
                 {activeTab === "brokers" && "Manage your connected brokerage accounts and API keys."}
                 {activeTab === "settings" && "Update your personal information and preferences."}
                 {activeTab === "security" && "Manage password, 2FA, and security logs."}

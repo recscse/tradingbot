@@ -967,59 +967,19 @@ class RealTimePnLTracker:
                     position.is_active = False
                     position.last_updated = get_ist_now_naive()
 
-                    # UPDATE PAPER TRADING BALANCE ON EXIT
-                    if trade_execution.trading_mode == "paper":
-                        try:
-                            from services.paper_trading_account import (
-                                paper_trading_service,
-                            )
-                            from database.models import PaperTradingAccount
-
-                            paper_account = (
-                                db.query(PaperTradingAccount)
-                                .filter(PaperTradingAccount.user_id == position.user_id)
-                                .first()
-                            )
-                            if paper_account:
-                                release_amount = float(sell_value - total_charges)
-
-                                paper_account.available_margin += release_amount
-                                paper_account.current_balance += release_amount
-                                paper_account.used_margin -= float(
-                                    trade_execution.total_investment
-                                )
-                                paper_account.total_pnl += float(net_pnl)
-                                paper_account.daily_pnl += float(net_pnl)
-                                paper_account.positions_count = max(
-                                    0, paper_account.positions_count - 1
-                                )
-                                paper_account.updated_at = get_ist_now_naive()
-
-                                # Sync in-memory service
-                                mem_acc = paper_trading_service.accounts.get(
-                                    position.user_id
-                                )
-                                if mem_acc:
-                                    mem_acc.available_margin = float(
-                                        paper_account.available_margin
-                                    )
-                                    mem_acc.current_balance = float(
-                                        paper_account.current_balance
-                                    )
-                                    mem_acc.used_margin = float(
-                                        paper_account.used_margin
-                                    )
-                                    mem_acc.total_pnl = float(paper_account.total_pnl)
-                                    mem_acc.positions_count = (
-                                        paper_account.positions_count
-                                    )
-
-                                logger.info(
-                                    f"✅ Paper account updated after exit: New Balance=₹{paper_account.current_balance:,.2f} (Returned ₹{release_amount:,.2f})"
-                                )
-
-                        except Exception as e:
-                            logger.error(f"Failed to update paper account on exit: {e}")
+                    # SETTLE FUNDS & CREATE LEDGER ENTRIES (New Fund Management System)
+                    from services.trading_execution.fund_manager import fund_manager
+                    
+                    fund_manager.release_margin_and_settle(
+                        user_id=position.user_id,
+                        trading_mode=trade_execution.trading_mode,
+                        reference_id=trade_execution.trade_id,
+                        invested_amount=float(total_investment),
+                        gross_pnl=float(gross_pnl),
+                        brokerage=float(brokerage_flat),
+                        taxes=float(taxes),
+                        db=db
+                    )
 
                     db.commit()
 
