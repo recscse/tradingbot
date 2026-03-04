@@ -25,8 +25,8 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        python scripts/ai_bug_triager.py 
-          --repo "${{ github.repository }}" 
-          --issue "${{ github.event.issue.number }}" 
-          --github-token "$GITHUB_TOKEN" 
+        python scripts/ai_bug_triager.py \
+          --repo "${{ github.repository }}" \
+          --issue "${{ github.event.issue.number }}" \
+          --github-token "$GITHUB_TOKEN" \
           --gemini-api-key "$GEMINI_API_KEY"

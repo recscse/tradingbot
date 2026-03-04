@@ -6,10 +6,10 @@ import argparse
 # --- Risk Configuration ---
 # Regex patterns for dangerous patterns
 RISK_PATTERNS = {
-    "hardcoded_secrets": re.compile(r'(API_KEY|SECRET|PASSWORD|TOKEN|TOKEN_SECRET)\s*=\s*["'][a-zA-Z0-9_\-]{10,}["']', re.IGNORECASE),
-    "unlocalized_time": re.compile(r'datetime\.now\(\)(?!\.astimezone|.*tz=)', re.IGNORECASE),
-    "missing_stop_loss": re.compile(r'place_order\(.*(?!=stop_loss)', re.IGNORECASE),
-    "hardcoded_lots": re.compile(r'quantity\s*=\s*\d+', re.IGNORECASE),
+    "hardcoded_secrets": re.compile(r"(API_KEY|SECRET|PASSWORD|TOKEN|TOKEN_SECRET)\s*=\s*['\"][a-zA-Z0-9_\-]{10,}['\"]", re.IGNORECASE),
+    "unlocalized_time": re.compile(r"datetime\.now\(\)(?!\.astimezone|.*tz=)", re.IGNORECASE),
+    "missing_stop_loss": re.compile(r"place_order\((?!.*stop_loss)", re.IGNORECASE),
+    "hardcoded_lots": re.compile(r"quantity\s*=\s*\d+", re.IGNORECASE),
 }
 
 # Paths to skip
@@ -63,17 +63,19 @@ def main(diff_files):
             all_violations.extend(violations)
             
     if all_violations:
-        print("🚨 TRADING RISK VIOLATIONS DETECTED!")
-        print("-" * 50)
+        print("\n🚨 TRADING RISK VIOLATIONS DETECTED!")
+        print("=" * 60)
         for v in all_violations:
-            print(f"[{v['type'].upper()}] {v['file']}:{v['line']}")
-            print(f"  > {v['content']}")
-            print("-" * 50)
+            print(f"FAILED: {v['file']}:{v['line']}")
+            print(f"TYPE:   {v['type'].upper()}")
+            print(f"CODE:   {v['content']}")
+            print("-" * 60)
         
-        # In a real CI, we might exit 1 to block the PR
-        # sys.exit(1)
+        print(f"\n❌ Total violations: {len(all_violations)}")
+        sys.exit(1)
     else:
         print("✅ No trading risk violations detected.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

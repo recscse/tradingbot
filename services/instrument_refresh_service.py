@@ -546,7 +546,7 @@ class TradingInstrumentService:
             logger.error(f"❌ Failed to save NSE instrument data: {e}")
             raise
 
-    async def _is_already_refreshed_today(self) -> bool:
+    async def is_already_refreshed_today(self) -> bool:
         """Check if instruments were already refreshed today."""
         try:
             mcx_file_path = self.data_dir / "mcx_instruments.json"

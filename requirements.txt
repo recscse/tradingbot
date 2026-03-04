@@ -113,7 +113,7 @@ orjson==3.11.2
 packaging==24.2
 pandas==2.2.3
 passlib==1.7.4
-pathspec==0.12.1
+pathspec>=0.12.1
 peewee==3.17.9
 pillow==11.1.0
 platformdirs==4.3.6
@@ -209,3 +209,6 @@ wsproto==1.2.0
 yarl==1.18.3
 yfinance==0.2.52
 zope.interface==7.2
+pyTelegramBotAPI
+python-telegram-bot
+radon

@@ -32,13 +32,20 @@ class MarketTimingService:
         
         # Stock selection timing
         self.stock_selection_time = time(9, 0)  # 9:00 AM daily
+
+    def get_current_ist_datetime(self) -> datetime:
+        """Return current IST datetime."""
+        return datetime.now(self.ist)
+
+    def get_current_ist_date(self) -> date:
+        """Return current IST date."""
+        return self.get_current_ist_datetime().date()
     
     def get_current_market_status(self) -> MarketStatus:
         """Get current market status based on time"""
-        
-        now = datetime.now(self.ist)
+
+        now = self.get_current_ist_datetime()
         current_time = now.time()
-        current_date = now.date()
         weekday = now.weekday()  # Monday=0, Sunday=6
         
         # Weekend check
@@ -57,10 +64,9 @@ class MarketTimingService:
     
     def get_stock_selection_status(self) -> Dict[str, Any]:
         """Get stock selection status and appropriate message"""
-        
+
         market_status = self.get_current_market_status()
-        now = datetime.now(self.ist)
-        today = now.date()
+        today = self.get_current_ist_date()
         
         # Check if we have stocks selected for today
         from database.connection import SessionLocal
@@ -179,8 +185,8 @@ class MarketTimingService:
     
     def should_run_stock_selection(self) -> bool:
         """Check if stock selection should run now"""
-        
-        now = datetime.now(self.ist)
+
+        now = self.get_current_ist_datetime()
         current_time = now.time()
         weekday = now.weekday()
         
@@ -211,8 +217,8 @@ class MarketTimingService:
     
     def get_market_info_summary(self) -> Dict[str, Any]:
         """Get comprehensive market information"""
-        
-        now = datetime.now(self.ist)
+
+        now = self.get_current_ist_datetime()
         market_status = self.get_current_market_status()
         stock_status = self.get_stock_selection_status()
         
