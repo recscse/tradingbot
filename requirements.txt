@@ -212,3 +212,4 @@ zope.interface==7.2
 pyTelegramBotAPI
 python-telegram-bot
 radon
+ruff
