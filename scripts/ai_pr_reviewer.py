@@ -15,7 +15,7 @@ def review_pr(repo_name, pr_number, github_token, gemini_api_key):
     pr = repo.get_pull(int(pr_number))
     
     genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    model = genai.GenerativeModel('gemini-2.0-flash')
     
     # 2. Get PR Diff
     print(f"🔍 Analyzing PR #{pr_number}: {pr.title}")

@@ -43,10 +43,15 @@ async def run_automated_backtest(repo_name, pr_number, github_token, upstox_toke
     Runs a backtest on changed strategies and posts results to GitHub.
     """
     # 1. Setup Token (Priority: Arg > Env > DB)
-    token = upstox_token or os.getenv("UPSTOX_ACCESS_TOKEN") or get_admin_upstox_token()
+    token = upstox_token or os.getenv("UPSTOX_ACCESS_TOKEN")
     
     if not token:
-        print("❌ Error: No Upstox Access Token found in arguments, environment, or database.")
+        print("🔍 UPSTOX_ACCESS_TOKEN not found in environment. Attempting to fetch from Database...")
+        token = get_admin_upstox_token()
+    
+    if not token:
+        print("⚠️ Warning: No valid Upstox Access Token found. Backtest will be skipped.")
+        # We don't exit(1) because we don't want to block the PR just because the token is expired
         return
 
     # 2. Setup GitHub
