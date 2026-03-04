@@ -16,7 +16,7 @@ def generate_docs_and_changelog(repo_name, pr_number, github_token, gemini_api_k
     pr = repo.get_pull(int(pr_number))
     
     genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    model = genai.GenerativeModel('gemini-2.0-flash')
     
     # 2. Analyze PR Diff for Documentation Needs
     print(f"📄 Analyzing PR #{pr_number} for documentation impact...")
@@ -24,8 +24,7 @@ def generate_docs_and_changelog(repo_name, pr_number, github_token, gemini_api_k
     file_list = [f.filename for f in files]
     
     # Combined diff for better context (limiting size for LLM)
-    combined_diff = "
-".join([f.patch for f in files if f.patch])[:10000]
+    combined_diff = "\n".join([f.patch for f in files if f.patch])[:10000]
     
     prompt = f"""
     You are a Technical Writer and Senior Developer. Review the following Pull Request details and diff.
