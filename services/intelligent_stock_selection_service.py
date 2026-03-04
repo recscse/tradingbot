@@ -125,6 +125,8 @@ class IntelligentStockSelectionService:
         self.final_selections: List[StockSelection] = (
             []
         )  # Final selections for the day - NO MORE CHANGES
+        self.premarket_selection_date: Optional[date] = None
+        self.final_selection_date: Optional[date] = None
 
         # Market state
         self.premarket_sentiment: MarketSentiment = MarketSentiment.NEUTRAL
@@ -324,7 +326,7 @@ class IntelligentStockSelectionService:
 
     def get_current_trading_phase(self) -> TradingPhase:
         """Determine current trading phase based on time"""
-        now = datetime.now().time()
+        now = get_ist_now_naive().time()
 
         if now < dt_time(9, 15):
             return TradingPhase.PREMARKET
@@ -837,8 +839,21 @@ class IntelligentStockSelectionService:
         log_structured(event="PREMARKET_SELECTION_START", message="Starting premarket selection process")
         
         try:
+            today = get_ist_now_naive().date()
+
+            # Auto-reset stale in-memory state from previous trading day
+            if self.premarket_selection_date and self.premarket_selection_date != today:
+                logger.info(
+                    f"🔄 Detected stale premarket cache from {self.premarket_selection_date}; resetting for {today}"
+                )
+                self.reset_for_new_trading_day()
+
             # Check if premarket selection already done today
-            if self.premarket_selections and not force:
+            if (
+                self.premarket_selections
+                and self.premarket_selection_date == today
+                and not force
+            ):
                 logger.info("✅ Premarket selection already completed today - returning existing selections")
                 return {
                     "success": True,
@@ -857,6 +872,8 @@ class IntelligentStockSelectionService:
                 logger.info("🔄 Force flag enabled - clearing existing selections and running fresh selection")
                 self.premarket_selections = []
                 self.final_selections = []
+                self.premarket_selection_date = None
+                self.final_selection_date = None
                 self.final_selection_done = False
 
             logger.info("🌅 Starting premarket stock selection...")
@@ -908,6 +925,7 @@ class IntelligentStockSelectionService:
 
             # Store premarket selections
             self.premarket_selections = selected_stocks
+            self.premarket_selection_date = today
             self.current_phase = TradingPhase.PREMARKET
             self.last_selection_time = datetime.now()
 
@@ -1023,12 +1041,13 @@ class IntelligentStockSelectionService:
         log_structured(event="MARKET_OPEN_VALIDATION_START", message="Starting market open validation")
         
         try:
+            today = get_ist_now_naive().date()
             logger.info(
                 "🔍 Market open validation - Making FINAL stock selection for the day..."
             )
 
             # Check if final selection already done
-            if self.final_selection_done:
+            if self.final_selection_done and self.final_selection_date == today:
                 logger.info(
                     "✅ Final selection already completed - returning existing final selections"
                 )
@@ -1044,9 +1063,19 @@ class IntelligentStockSelectionService:
                     "ready_for_trading": len(self.final_selections) > 0,
                     "timestamp": datetime.now().isoformat(),
                 }
+            elif self.final_selection_done and self.final_selection_date != today:
+                logger.info(
+                    f"🔄 Final selection cache is from {self.final_selection_date}; resetting for {today}"
+                )
+                self.final_selection_done = False
+                self.final_selections = []
+                self.final_selection_date = None
 
             # CRITICAL FIX: Load from database if not in memory
-            if not self.premarket_selections:
+            if (
+                not self.premarket_selections
+                or self.premarket_selection_date != today
+            ):
                 logger.warning("⚠️ No premarket selections in memory - loading from database...")
                 from datetime import date
                 from database.connection import SessionLocal
@@ -1106,6 +1135,7 @@ class IntelligentStockSelectionService:
                         self.premarket_selections.append(selection)
 
                     logger.info(f"✅ Converted {len(self.premarket_selections)} DB stocks to StockSelection format")
+                    self.premarket_selection_date = today
                 finally:
                     db.close()
 
@@ -1147,6 +1177,7 @@ class IntelligentStockSelectionService:
 
             # MARK AS FINAL - NO MORE CHANGES ALLOWED
             self.final_selection_done = True
+            self.final_selection_date = today
             self.current_phase = TradingPhase.MARKET_OPEN
             self.last_selection_time = datetime.now()
 
@@ -1317,6 +1348,8 @@ class IntelligentStockSelectionService:
             "sentiment_changed": self.sentiment_changed,
             "premarket_selections": len(self.premarket_selections),
             "final_selections": len(self.final_selections),
+            "premarket_selection_date": self.premarket_selection_date.isoformat() if self.premarket_selection_date else None,
+            "final_selection_date": self.final_selection_date.isoformat() if self.final_selection_date else None,
             "final_selection_done": self.final_selection_done,
             "last_selection_time": (
                 self.last_selection_time.isoformat()
@@ -1479,6 +1512,8 @@ class IntelligentStockSelectionService:
             # Clear all selections
             self.premarket_selections = []
             self.final_selections = []
+            self.premarket_selection_date = None
+            self.final_selection_date = None
 
             # Reset market state
             self.premarket_sentiment = MarketSentiment.NEUTRAL

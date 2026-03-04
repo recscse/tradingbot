@@ -961,6 +961,17 @@ class MarketScheduleService:
                     self.selected_stocks = {}
                     self.selected_stocks_date = None
                     self.task_errors = {}
+                    # Keep intelligent selector state in sync with scheduler day rollover.
+                    try:
+                        from services.intelligent_stock_selection_service import (
+                            intelligent_stock_selector,
+                        )
+
+                        intelligent_stock_selector.reset_for_new_trading_day()
+                    except Exception as reset_error:
+                        logger.warning(
+                            f"Could not reset intelligent selector for new day: {reset_error}"
+                        )
                     logger.info(
                         f"🔄 Daily tasks reset for new trading day: {current_date}"
                     )
