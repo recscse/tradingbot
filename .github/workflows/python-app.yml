@@ -163,8 +163,6 @@ jobs:
 
       - name: Code formatting check (Black)
         run: |
-          # Force pathspec version that works with current black install
-          pip install "pathspec<0.11"
           black --check --diff .
 
       - name: Import sorting check (isort)

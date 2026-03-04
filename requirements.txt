@@ -113,7 +113,7 @@ orjson==3.11.2
 packaging==24.2
 pandas==2.2.3
 passlib==1.7.4
-pathspec==0.12.1
+pathspec>=0.12.1
 peewee==3.17.9
 pillow==11.1.0
 platformdirs==4.3.6
