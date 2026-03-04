@@ -53,11 +53,11 @@ def generate_docs_and_changelog(repo_name, pr_number, github_token, gemini_api_k
     ai_output = response.text.strip()
     
     # 3. Post to GitHub
-    comment = f"## 🤖 AI Documentation & Changelog Agent
+    comment = f"""## 🤖 AI Documentation & Changelog Agent
 
 {ai_output}
 
-"
+"""
     pr.create_issue_comment(comment)
     print("✅ Documentation & Changelog suggestions posted.")
     
