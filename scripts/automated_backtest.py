@@ -9,33 +9,45 @@ from github import Github
 # Add project root to sys.path for internal imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database.connection import SessionLocal
-from database.models import BrokerConfig, User
+# Import backtester (always needed)
 from services.backtester.runner import BacktestRunner
 
 def get_admin_upstox_token():
-    """Fetch the Upstox access token for the admin user from the database."""
-    db = SessionLocal()
+    """Fetch the Upstox access token for the admin user from the database (Optional)."""
+    # Only attempt to connect to DB if DATABASE_URL is present in environment
+    if not os.getenv("DATABASE_URL"):
+        print("ℹ️ DATABASE_URL not set. Skipping database token fetch.")
+        return None
+
     try:
-        # 1. Find the admin user
-        admin_user = db.query(User).filter(User.role == "admin").first()
-        if not admin_user:
-            # Fallback: check for the first user if no explicit admin role found
-            admin_user = db.query(User).first()
-            
-        if not admin_user:
-            return None
-            
-        # 2. Get the active Upstox config for this user
-        config = db.query(BrokerConfig).filter(
-            BrokerConfig.user_id == admin_user.id,
-            BrokerConfig.broker_name == "Upstox",
-            BrokerConfig.is_active == True
-        ).first()
+        # Import DB dependencies only when needed to avoid crash on missing DATABASE_URL
+        from database.connection import SessionLocal
+        from database.models import BrokerConfig, User
         
-        return config.access_token if config else None
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            # 1. Find the admin user
+            admin_user = db.query(User).filter(User.role == "admin").first()
+            if not admin_user:
+                # Fallback: check for the first user if no explicit admin role found
+                admin_user = db.query(User).first()
+                
+            if not admin_user:
+                return None
+                
+            # 2. Get the active Upstox config for this user
+            config = db.query(BrokerConfig).filter(
+                BrokerConfig.user_id == admin_user.id,
+                BrokerConfig.broker_name == "Upstox",
+                BrokerConfig.is_active == True
+            ).first()
+            
+            return config.access_token if config else None
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"⚠️ Could not fetch token from database: {e}")
+        return None
 
 async def run_automated_backtest(repo_name, pr_number, github_token, upstox_token):
     """
@@ -79,7 +91,7 @@ async def run_automated_backtest(repo_name, pr_number, github_token, upstox_toke
     
     results_summary = []
     
-    async with BacktestRunner(upstox_token, initial_capital=100000) as runner:
+    async with BacktestRunner(token, initial_capital=100000) as runner:
         for strategy_file in strategies_to_test:
             print(f"📊 Running backtest for {strategy_file}...")
             
@@ -110,21 +122,20 @@ async def run_automated_backtest(repo_name, pr_number, github_token, upstox_toke
 
     # 4. Post Results to GitHub
     if results_summary:
-        table_header = "| Strategy | Total Trades | Win Rate | Net PnL | Max Drawdown |
-| :--- | :--- | :--- | :--- | :--- |"
-        table_rows = "
-".join([
+        table_header = """| Strategy | Total Trades | Win Rate | Net PnL | Max Drawdown |
+| :--- | :--- | :--- | :--- | :--- |"""
+        table_rows = "\n".join([
             f"| {r.get('Strategy')} | {r.get('Total Trades')} | {r.get('Win Rate')} | {r.get('Net PnL')} | {r.get('Max Drawdown')} |"
             if "Error" not in r else f"| {r.get('Strategy')} | ERROR | ERROR | {r.get('Error')} | ERROR |"
             for r in results_summary
         ])
         
-        comment = f"## 📈 Automated Backtest Results (Last 30 Days)
+        comment = f"""## 📈 Automated Backtest Results (Last 30 Days)
 
 {table_header}
 {table_rows}
 
-*Note: Backtest performed on NIFTY 50 benchmark.*"
+*Note: Backtest performed on NIFTY 50 benchmark.*"""
         pr.create_issue_comment(comment)
         print("✅ Backtest results posted to GitHub.")
 
@@ -133,7 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", required=True)
     parser.add_argument("--github-token", required=True)
-    parser.add_argument("--upstox-token", required=True)
+    parser.add_argument("--upstox-token", required=False)
     
     args = parser.parse_args()
     

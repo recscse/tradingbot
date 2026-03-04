@@ -169,7 +169,7 @@ jobs:
         
     - name: Install dependencies
       run: |
-        pip install google-generativeai PyGithub pandas upstox-python-sdk
+        pip install google-generativeai PyGithub pandas upstox-python-sdk httpx sqlalchemy psycopg2-binary
         
     - name: Run Automated Backtest
       env:

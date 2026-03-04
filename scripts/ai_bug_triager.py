@@ -15,7 +15,7 @@ def triage_issue(repo_name, issue_number, github_token, gemini_api_key):
     issue = repo.get_issue(int(issue_number))
     
     genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    model = genai.GenerativeModel('gemini-2.0-flash')
     
     # 2. Analyze Issue Content
     print(f"🐞 Triaging Issue #{issue_number}: {issue.title}")
@@ -63,11 +63,11 @@ def triage_issue(repo_name, issue_number, github_token, gemini_api_key):
     ai_output = response.text.strip()
     
     # 3. Post to GitHub
-    comment = f"## 🤖 AI Bug Triager Response
+    comment = f"""## 🤖 AI Bug Triager Response
 
 {ai_output}
 
-*This is an automated response to help speed up resolution.*"
+*This is an automated response to help speed up resolution.*"""
     issue.create_comment(comment)
     
     # 4. Add labels based on priority (if AI suggests)

@@ -8,7 +8,7 @@ import argparse
 RISK_PATTERNS = {
     "hardcoded_secrets": re.compile(r"(API_KEY|SECRET|PASSWORD|TOKEN|TOKEN_SECRET)\s*=\s*['\"][a-zA-Z0-9_\-]{10,}['\"]", re.IGNORECASE),
     "unlocalized_time": re.compile(r"datetime\.now\(\)(?!\.astimezone|.*tz=)", re.IGNORECASE),
-    "missing_stop_loss": re.compile(r"place_order\((?!.*stop_loss)", re.IGNORECASE),
+    "missing_stop_loss": re.compile(r"place_order\((?![^)]*stop_loss)", re.IGNORECASE),
     "hardcoded_lots": re.compile(r"quantity\s*=\s*\d+", re.IGNORECASE),
 }
 
